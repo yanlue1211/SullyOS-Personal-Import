@@ -1,3 +1,4 @@
+import RecordingManager from '../features/personal/chatMedia/RecordingManager';
 import AudioApiTestButton from '../components/settings/AudioApiTestButton';
 import NavigationBallSettings from '../components/settings/NavigationBallSettings';
 import { useSettingsFocus } from '../utils/settingsNavigation';
@@ -490,6 +491,7 @@ const McpServersCard: React.FC<{
 };
 
 const Settings: React.FC = () => {
+  const [recordingManagerOpen, setRecordingManagerOpen] = useState(false);
   const {
       apiConfig, updateApiConfig, closeApp, availableModels, setAvailableModels,
       theme, updateTheme, resetAppearance,
@@ -2552,6 +2554,10 @@ const Settings: React.FC = () => {
             </p>
         </SettingsSection>
 
+        <SettingsSection title="录音存储" icon={<span className="text-xl">🎙</span>}>
+          <button type="button" onClick={() => setRecordingManagerOpen(true)} className="w-full flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-700"><span>管理用户录音</span><span className="text-slate-400">批量清理 ›</span></button>
+        </SettingsSection>
+        {recordingManagerOpen && <RecordingManager onClose={() => setRecordingManagerOpen(false)} onChanged={() => {}} />}
         {/* AI 连接设置区域 */}
         <SettingsSection
             title="API 配置"

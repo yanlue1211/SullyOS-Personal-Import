@@ -1,3 +1,4 @@
+import { RECORDING_TRANSCRIPT_SYSTEM, parseRecordingRecognition, recordingContext, type RecordingRecognition } from '../features/personal/chatMedia/transcript';
 import { Capacitor, CapacitorHttp } from '@capacitor/core';
 import type { AudioApiConfig, AudioApiSongQuality, CharacterProfile, CharMusicReview, Message, UserProfile } from '../types';
 import { DB } from './db';
@@ -236,6 +237,14 @@ export async function describeAudioWithAudioApi(payload: AudioPayload, config: A
   return text.replace(/\s+\n/g, '\n').trim().slice(0, 4000);
 }
 
+export async function recognizeUserRecording(payload: AudioPayload, config: AudioApiConfig): Promise<RecordingRecognition> {
+  const text = await callAudioModel(config, [
+    { role: 'system', content: RECORDING_TRANSCRIPT_SYSTEM },
+    { role: 'user', content: [audioPart(payload)] },
+  ], { purpose: '用户语音原文字幕' }, 3000, 0);
+  return parseRecordingRecognition(text);
+}
+
 /** 设置页「测试」用：生成一段 0.6 秒的 440Hz 正弦波 WAV。 */
 export const buildTestToneWav = (): Blob => {
   const sampleRate = 16000;
@@ -368,7 +377,7 @@ export const readAudioDescription = (message: Message): string => {
   return typeof value === 'string' ? value.trim() : '';
 };
 
-const inFlightAudio = new Map<string, Promise<string>>();
+const inFlightAudio = new Map<string, Promise<RecordingRecognition>>();
 
 /** 聊天里的音频消息先转成文字说明，写回 metadata；同一条只识别一次。 */
 export async function materializeAudioDescriptions(messages: Message[], config?: AudioApiConfig | null): Promise<Message[]> {
@@ -383,13 +392,14 @@ export async function materializeAudioDescriptions(messages: Message[], config?:
       pending = (async () => {
         const blob = await getBlobForRef(ref);
         if (!blob) throw new Error('音频文件已不可用');
-        return describeAudioWithAudioApi(await audioBlobToPayload(blob, message.metadata?.fileName || ''), config);
+        return recognizeUserRecording(await audioBlobToPayload(blob, message.metadata?.fileName || ''), config);
       })();
       inFlightAudio.set(ref, pending);
     }
     try {
-      const description = await pending;
-      const metadata = { ...(message.metadata || {}), [AUDIO_DESCRIPTION_METADATA_KEY]: description, audioRecognizedAt: Date.now(), audioModel: config.model.trim() };
+      const recognition = await pending;
+      const description = recordingContext(recognition);
+      const metadata = { ...(message.metadata || {}), [AUDIO_DESCRIPTION_METADATA_KEY]: description, audioTranscript: recognition.transcript, audioAnalysis: recognition.analysis, audioRecognizedAt: Date.now(), audioModel: config.model.trim() };
       await DB.updateMessageMetadata(message.id, prev => ({ ...(prev || {}), ...metadata }));
       prepared.push({ ...message, metadata });
     } catch (error) {
