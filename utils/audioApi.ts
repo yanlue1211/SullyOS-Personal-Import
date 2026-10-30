@@ -377,6 +377,10 @@ export const readAudioDescription = (message: Message): string => {
   return typeof value === 'string' ? value.trim() : '';
 };
 
+export function registerRecordingRecognition(ref: string, pending: Promise<RecordingRecognition>) {
+  inFlightAudio.set(ref, pending);
+  void pending.catch(() => { if (inFlightAudio.get(ref) === pending) inFlightAudio.delete(ref); });
+}
 const inFlightAudio = new Map<string, Promise<RecordingRecognition>>();
 
 /** 聊天里的音频消息先转成文字说明，写回 metadata；同一条只识别一次。 */

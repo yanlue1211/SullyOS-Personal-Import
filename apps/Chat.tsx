@@ -1,3 +1,4 @@
+import { isAudioApiReady, audioBlobToPayload, recognizeUserRecording, registerRecordingRecognition } from '../utils/audioApi';
 import { isEmotionFeatureOn } from '../utils/scheduleFeature';
 import { recordingToWav } from '../features/personal/chatMedia/recording';
 import PersonalMediaComposer from '../features/personal/chatMedia/Composer';
@@ -148,6 +149,9 @@ const HISTORY_WINDOW_BATCH_SIZE = 30;
 const INSTANT_VOICE_SCAN_WINDOW_MS = 30_000;
 
 export interface HomePhoneChatProps {characterId:string;getContext:()=>string;onBack:()=>void}
+const preparedRecordings = new WeakMap<Blob, Promise<Blob>>();
+function prepareRecording(blob: Blob) { let pending = preparedRecordings.get(blob); if (!pending) { pending = recordingToWav(blob); preparedRecordings.set(blob, pending); } return pending; }
+
 const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
     const { activeApp, characters, activeCharacterId: osActiveCharacterId, setActiveCharacterId, addCharacter, updateCharacter, updateUserProfile, apiConfig, apiPresets, availableModels, addApiPreset, closeApp, openApp, customThemes, addCustomTheme, removeCustomTheme, addWorldbook, updateTheme, saveAppearancePreset, addToast, showError, userProfile, lastMsgTimestamp, groups, characterGroups, clearUnread, unreadMessages, realtimeConfig, memoryPalaceConfig, updateMemoryPalaceConfig, remoteVectorConfig, syncEmotionApiToAllCharacters, theme: baseOsTheme, proactiveComposingChars, openDateWithChar } = useOS();
     const activeCharacterId=homePhone?.characterId??osActiveCharacterId;
@@ -4488,11 +4492,12 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
                 {/* 开关写着「已开启」、这一轮却在本地生成时，把原因说给用户听 */}
                 <InstantChatRouteNotice charId={activeCharacterId} />
 
-                {!selectionMode && personalMediaPanel && <PersonalMediaComposer key={`${char.id}:${personalMediaPanel}`} sheet visualOnly={personalMediaPanel === 'visual'} onClose={() => setPersonalMediaPanel(null)} conversationId={char.id} onSend={async (content, blob, duration, signal) => {
+                {!selectionMode && personalMediaPanel && <PersonalMediaComposer key={`${char.id}:${personalMediaPanel}`} sheet visualOnly={personalMediaPanel === 'visual'} onClose={() => setPersonalMediaPanel(null)} conversationId={char.id} onRecognize={isAudioApiReady(apiConfig.audioApi) ? async blob => recognizeUserRecording(await audioBlobToPayload(await prepareRecording(blob), 'voice.wav'), apiConfig.audioApi!) : undefined} onSend={async (content, blob, duration, signal, recognition) => {
                     if (blob) {
-                        const wav = await recordingToWav(blob);
+                        const wav = await prepareRecording(blob);
                         signal?.throwIfAborted();
                         const ref = await putImageBlob(wav);
+                        if (recognition) registerRecordingRecognition(ref, recognition);
                         await handleSendText(ref, 'audio', { duration, fileName: 'voice.wav' });
                     } else await handleSendText(content, 'text');
                 }} />}

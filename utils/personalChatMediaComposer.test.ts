@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Composer from '../features/personal/chatMedia/Composer';
 let root: Root; let host: HTMLDivElement; let stopTrack = vi.fn();
 let activeRecorder: FakeRecorder | undefined;
-const onSend = vi.fn(async () => {});
+const onSend = vi.fn(async (_content: string, _audio?: Blob, _duration?: number, _signal?: AbortSignal, _recognition?: Promise<any>) => {});
 class FakeRecorder {
   static isTypeSupported() { return true; }
   state = 'inactive'; mimeType = 'audio/webm';
@@ -63,4 +63,29 @@ describe('hold-to-record composer', () => {
     await swipe(20, 120); expect(host.querySelector('textarea')).not.toBeNull();
     await swipe(120, 20); expect(host.querySelector('textarea')).toBeNull();
   });
+});
+
+it('starts recognition on release and sends the same pending task without waiting', async () => {
+  let finish!: (value: any) => void;
+  const onRecognize = vi.fn(() => new Promise<any>(resolve => { finish = resolve; }));
+  await act(async () => root.render(React.createElement(Composer, { conversationId: 'a', onSend, onRecognize })));
+  await press('keydown'); await press('keyup');
+  expect(onRecognize).toHaveBeenCalledTimes(1);
+  expect(host.textContent).toContain('正在识别原文和语气');
+  await act(async () => [...host.querySelectorAll('button')].find(b => b.textContent?.includes('发送'))!.click());
+  expect(onSend).toHaveBeenCalledTimes(1);
+  const task = onSend.mock.calls[0][4];
+  await act(async () => finish({ transcript: '原话', analysis: '平静' }));
+  await expect(task).resolves.toEqual({ transcript: '原话', analysis: '平静' });
+  expect(onRecognize).toHaveBeenCalledTimes(1);
+});
+it('lets the user edit both recognition fields before sending', async () => {
+  const onRecognize = vi.fn(async () => ({ transcript: '旧字幕', analysis: '旧语气' }));
+  await act(async () => root.render(React.createElement(Composer, { conversationId: 'a', onSend, onRecognize })));
+  await press('keydown'); await press('keyup');
+  for (const [label, value] of [['发送前修改原文','新字幕'],['发送前修改语气','新语气']]) {
+    await act(async () => { const input = host.querySelector(`[aria-label="${label}"]`)!; Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })); });
+  }
+  await act(async () => [...host.querySelectorAll('button')].find(b => b.textContent?.includes('发送'))!.click());
+  await expect(onSend.mock.calls[0][4]).resolves.toEqual({ transcript: '新字幕', analysis: '新语气' });
 });
