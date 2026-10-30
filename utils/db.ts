@@ -4065,7 +4065,7 @@ export const DB = {
           data.assets = undefined as any;
       }, data.assets?.length || 0);
       // 独立的个人音迹档案随完整备份恢复。旧备份没有此字段，不清空现有档案。
-      await runSection('音迹歌曲档案', data.songSoundArchive !== undefined && !mediaOnly, async () => {
+      await runSection('音迹歌曲档案', data.songSoundArchive !== undefined && data.assets === undefined && !mediaOnly, async () => {
           const records = data.songSoundArchive || [];
           if (!Array.isArray(records) || records.some(a => !a || typeof a.id !== 'string' || !a.id.startsWith(SOUND_ARCHIVE_PREFIX) || typeof a.data !== 'string')) {
               throw new Error('音迹备份内容不正确');
