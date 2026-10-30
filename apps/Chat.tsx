@@ -1793,7 +1793,7 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
         if ([
             'transfer', 'archive', 'settings', 'chrome-css', 'chrome-sound', 'fine-tune',
             'meetup', 'proactive', 'active-msg-2', 'schedule', 'mcd-request', 'luckin-request',
-            'html-mode-toggle', 'html-mode-settings', 'thinking-settings', 'favorites', 'collaboration',
+            'real-song-listening-toggle', 'html-mode-toggle', 'html-mode-settings', 'thinking-settings', 'favorites', 'collaboration',
             // 独立小功能：点一下就是用了一次，跟「打开某个面板」同一性质。
             // send-emoji / select-category 这些是「挑哪一个」，不进名单。
             'poke', 'emoji-import', 'add-category', 'mcd-end', 'luckin-end',
@@ -1844,6 +1844,13 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
             case 'luckin-end':
                 deactivateLuckin();
                 break;
+            case 'real-song-listening-toggle': {
+                if (!char) break;
+                const next = !((char as any).realSongListeningEnabled);
+                updateCharacter(char.id, { realSongListeningEnabled: next } as any);
+                addToast(next ? '真实听歌已开启：一起听时会调用或复用音频分析' : '真实听歌已关闭：继续使用原版一起听', next ? 'success' : 'info');
+                break;
+            }
             case 'html-mode-toggle': {
                 if (!char) break;
                 const next = !((char as any).htmlModeEnabled);
@@ -4494,6 +4501,7 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
                     luckinConfigured={luckinConfiguredFlag}
                     luckinActivated={luckinActivated}
                     htmlModeEnabled={!!(char as any).htmlModeEnabled}
+                    realSongListeningEnabled={!!(char as any).realSongListeningEnabled}
                     showThinkingChain={!!(char as any).showThinkingChain}
                     inputStyle={osTheme.chatInputStyle}
                     sendButtonStyle={osTheme.chatSendButtonStyle}
