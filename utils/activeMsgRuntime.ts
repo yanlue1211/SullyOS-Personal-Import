@@ -2,6 +2,7 @@ import { createReplyRun, isReplyStopped, withReplyCancellation, type ReplyRun } 
 import { loadCharacterContextMessages } from './chatContextRange';
 import { ActiveMsg2InboxMessage, ActiveMsg2TaskRecord, APIConfig, RealtimeConfig, UserProfile } from '../types';
 import { DB } from './db';
+import { extractInnerVoice } from '../features/personal/innerVoice/protocol';
 import { ChatPrompts } from './chatPrompts';
 import { ActiveMsgStore } from './activeMsgStore';
 import { ActiveMsgClient, type AmsgOutboxEntry, type RemoteTaskStatus } from './activeMsgClient';
@@ -1732,15 +1733,19 @@ const flushInboxToChatImpl = async (trigger: FlushTrigger, charId?: string): Pro
       }
 
       if (!routed) {
+        // 2.0 fallback: even when the rich post-processing pipeline fails, never
+        // persist the raw inner-voice protocol as a public chat bubble.
+        const recoveredVoice = extractInnerVoice(message.body || '');
         try {
           await replyStep(async () => (replyRun?.saveMessage ?? DB.saveMessage)({
             charId: message.charId,
             role: 'assistant',
             type: 'text',
-            content: message.body,
+            content: recoveredVoice.text,
             timestamp: persistTimestamp,
             metadata: {
               source: 'active_msg_2',
+              ...(recoveredVoice.innerVoice ? { innerVoice: recoveredVoice.innerVoice } : {}),
               activeMsg2: {
                 messageId: message.messageId,
                 taskId: message.taskId,
