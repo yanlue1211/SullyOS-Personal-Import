@@ -1057,9 +1057,13 @@ export const normalizeNote = (n: any): {
         coverUrl,
         images,
         type: n.type || card?.type || undefined,
-        videoUrl: [n.videoUrl, n.video_url, n.video?.url, n.video?.media?.stream?.h264?.[0]?.master_url,
-            card?.videoUrl, card?.video_url, card?.video?.url, card?.video?.media?.stream?.h264?.[0]?.master_url]
-            .find((url: unknown) => typeof url === 'string' && /^https?:\/\//i.test(url as string)) as string | undefined,
+        videoUrl: [n, card].filter(Boolean).flatMap(source => {
+            const video = source.video || {};
+            const stream = video.media?.stream || {};
+            return [source.videoUrl, source.video_url, video.url, video.masterUrl, video.master_url,
+                ...['h264', 'h265', 'av1'].flatMap(codec => (Array.isArray(stream[codec]) ? stream[codec] : [])
+                    .flatMap((item: any) => [item.masterUrl, item.master_url, ...(item.backupUrls || item.backup_urls || [])]))];
+        }).find((url: unknown) => typeof url === 'string' && /^https?:\/\//i.test(url as string)) as string | undefined,
     };
 };
 

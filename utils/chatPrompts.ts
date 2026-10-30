@@ -1280,8 +1280,10 @@ ${voiceActingGuide()}`;
                 else if ((m.type as string) === 'xhs_card' || (m.type as string) === 'webpage_card') {
                     const text = `${timeStr} ${normalizeMessageContent(m, char?.name || '你', userProfile?.name || '用户')}`;
                     const images = getShareCardImageUrls(m);
-                    const frames = (m.type as string) === 'webpage_card' && m.metadata?.webpage?.video?.contentType === 'video'
-                        ? (m.metadata.webpage.video.frames || []) : [];
+                    const frames = (m.type as string) === 'xhs_card'
+                        ? ((m.metadata as any)?.xhsNote?.videoFrames || [])
+                        : m.metadata?.webpage?.video?.contentType === 'video'
+                            ? (m.metadata.webpage.video.frames || []) : [];
                     const frameTimes = Array.isArray(frames) ? frames.map((f: any) => Number(f.timeSeconds).toFixed(1) + '秒').join('、') : '';
                     const description = options?.useVisionDescriptions && typeof m.metadata?.visionDescription === 'string'
                         ? m.metadata.visionDescription.trim() : '';
