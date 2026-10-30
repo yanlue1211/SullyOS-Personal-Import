@@ -4094,11 +4094,12 @@ ${sentencePlan}`;
         {callInputMode === 'real' && <PersonalMediaComposer key={`${selectedChar?.id}:${currentSessionId}`} conversationId={selectedChar?.id || ''} dark={!lightTheme} recordingOnly disabled={sendingBusy || isTranscribing}
           onBusyChange={setCallRecordingBusy}
           onRecordingStart={() => { sttSessionRef.current?.stop(); setIsListening(false); pauseAudio(); }}
-          onSend={async (_text, blob, duration, signal) => {
+          onRecognize={isAudioApiReady(apiConfig.audioApi) ? async blob => recognizeUserRecording(await audioBlobToPayload(await recordingToWav(blob), 'voice.wav'), apiConfig.audioApi!) : undefined}
+          onSend={async (_text, blob, duration, signal, pendingRecognition) => {
             if (!blob) return;
             if (!isAudioApiReady(apiConfig.audioApi)) throw new Error('请先配置音迹的音频理解 API，也可以继续打字发送。');
             const wav = await recordingToWav(blob); signal?.throwIfAborted();
-            const recognition = await recognizeUserRecording(await audioBlobToPayload(wav, 'voice.wav'), apiConfig.audioApi); signal?.throwIfAborted();
+            const recognition = await (pendingRecognition || recognizeUserRecording(await audioBlobToPayload(wav, 'voice.wav'), apiConfig.audioApi)); signal?.throwIfAborted();
             const description = recordingContext(recognition);
             const ref = await putImageBlob(wav); signal?.throwIfAborted();
             await handleTurn({ text: `[用户真实录音识别说明] ${description}`, ref, duration: duration || 0, description, ...recognition });
