@@ -1,3 +1,4 @@
+import AudioApiTestButton from '../components/settings/AudioApiTestButton';
 import NavigationBallSettings from '../components/settings/NavigationBallSettings';
 import { useSettingsFocus } from '../utils/settingsNavigation';
 import ApiPresetGroups from '../components/settings/ApiPresetGroups';
@@ -2709,6 +2710,7 @@ const Settings: React.FC = () => {
                         <option value="standard">标准 · 更省流量</option><option value="exhigh">极高 · 推荐</option><option value="lossless">无损 · 可能超出 API 限制</option>
                     </select>
                 </label>
+                <AudioApiTestButton config={apiConfig.audioApi} />
             </div>
         </SettingsSection>
 
