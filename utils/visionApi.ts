@@ -151,7 +151,7 @@ export async function materializeVisionDescriptions(
         }
       }
       if (!descriptions.length) { prepared.push(message); continue; }
-      const metadata = { ...message.metadata, visionDescription: descriptions.join('\\n'), visionRecognizedAt: Date.now(), visionModel: config.model.trim() };
+      const metadata = { ...message.metadata, visionDescription: descriptions.join('\n'), visionRecognizedAt: Date.now(), visionModel: config.model.trim() };
       await DB.updateMessageMetadata(message.id, prev => ({ ...(prev || {}), ...metadata }));
       prepared.push({ ...message, metadata });
       continue;
