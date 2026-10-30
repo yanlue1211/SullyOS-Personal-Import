@@ -1291,8 +1291,8 @@ ${voiceActingGuide()}`;
                     } else {
                         return { role: m.role, content: [
                             { type: 'text', text: text + (frameTimes
-                                ? '\\n以下包含视频实际截取的关键帧（时间点：' + frameTimes + '），以及封面；只根据可见画面判断，不推测未截取部分或声音：'
-                                : '\\n以下为分享卡片的实际配图：') },
+                                ? '\n以下包含视频实际截取的关键帧（时间点：' + frameTimes + '），以及封面；只根据可见画面判断，不推测未截取部分或声音：'
+                                : '\n以下为分享卡片的实际配图：') },
                             ...images.map(url => ({ type: 'image_url', image_url: { url } })),
                         ] };
                     }
