@@ -36,6 +36,7 @@ import { exportAmsg2GlobalConfig, importAmsg2GlobalConfig } from './activeMsgSto
 import { exportWorldHomeLocal, importWorldHomeLocal } from './worldHome/localBackup';
 import { exportDesktopSkinLocal, importDesktopSkinLocal } from './desktopSkinBackup';
 import { editLibrary, VR_LIBRARY_RECORD, type LibraryEdit } from './vrWorld/library';
+import { SOUND_ARCHIVE_PREFIX } from '../features/personal/songArchive/storage';
 
 const DB_NAME = 'AetherOS_Data';
 // v67：两条并行线各自用掉了 v65/v66（A线: blob_assets + 生活记录；B线: room_plates 门牌 + digest_reports 消化日志），
@@ -3700,6 +3701,7 @@ export const DB = {
           vrSignal: exportSignalLocal(),         // 信号坠落处本机记录（句子归属「你·角色」+ 反复用清单，存 localStorage）
           worlds,
           worldEpisodes,
+          songSoundArchive: assets.filter(a => a.id.startsWith(SOUND_ARCHIVE_PREFIX)).map(a => ({ ...a })),
           worldHomeLocal: exportWorldHomeLocal(), // 家园本机配置：全局 API + 文风收藏（存 localStorage）
           luckinLocal: exportLuckinLocal(),       // 瑞幸 token + 启用状态（存 localStorage）
           mcdLocal: exportMcdLocal(),             // 麦当劳 token + 启用状态（存 localStorage）
@@ -3810,6 +3812,7 @@ export const DB = {
           data.savedEmojis !== undefined,
           data.emojiCategories !== undefined,
           data.assets !== undefined,
+          data.songSoundArchive !== undefined,
           data.friendFeed !== undefined && !mediaOnly,
           data.activityTextAssets !== undefined && !mediaOnly,
           data.friendFeedMedia !== undefined,
@@ -4061,6 +4064,19 @@ export const DB = {
           } else await clearAndAdd(STORE_ASSETS, data.assets || [], '系统资源', true);
           data.assets = undefined as any;
       }, data.assets?.length || 0);
+      // 独立的个人音迹档案随完整备份恢复。旧备份没有此字段，不清空现有档案。
+      await runSection('音迹歌曲档案', data.songSoundArchive !== undefined && !mediaOnly, async () => {
+          const records = data.songSoundArchive || [];
+          if (!Array.isArray(records) || records.some(a => !a || typeof a.id !== 'string' || !a.id.startsWith(SOUND_ARCHIVE_PREFIX) || typeof a.data !== 'string')) {
+              throw new Error('音迹备份内容不正确');
+          }
+          const existing = await DB.getAllAssets();
+          for (const asset of existing) {
+              if (asset.id.startsWith(SOUND_ARCHIVE_PREFIX)) await DB.deleteAsset(asset.id);
+          }
+          if (records.length) await DB.saveAssetBatch(records);
+          data.songSoundArchive = undefined;
+      }, data.songSoundArchive?.length || 0);
       await runSection('活动文字记录', data.activityTextAssets !== undefined && !mediaOnly, async () => {
           const records = data.activityTextAssets!;
           if (!Array.isArray(records) || records.some(a => !a || typeof a.id !== 'string'
