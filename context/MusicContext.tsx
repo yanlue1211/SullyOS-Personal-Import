@@ -928,8 +928,13 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       joinListeningTogether: (cid: string) => {
         addListeningPartner(cid);
         if (current) {
-          void import('../utils/songListening').then(({ startSongListen, isSongListeningAvailable }) => {
-            if (isSongListeningAvailable()) void startSongListen(cid, current, 'together');
+          void import('../utils/songListening').then(({ startSongListen, isSongListeningAvailable, publishSongListenStatus }) => {
+            if (isSongListeningAvailable()) {
+              publishSongListenStatus('🎧 已触发一起听，准备获取歌曲：' + current.name);
+              void startSongListen(cid, current, 'together');
+            } else {
+              publishSongListenStatus('⏭️ 已加入一起听，但音频 API 未开启或配置不完整');
+            }
           }).catch(error => console.warn('[audio-listening] 一起听失败', error));
         }
       },
