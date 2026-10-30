@@ -279,6 +279,15 @@ export interface VisionApiConfig {
 /** A complete dialogue endpoint, separate from TTS/vision configuration. */
 export type DialogueApiConfig = Pick<APIConfig, 'baseUrl' | 'apiKey' | 'model' | 'stream' | 'temperature' | 'maxTokens' | 'apiType'>;
 
+export type AudioApiSongQuality = 'standard' | 'exhigh' | 'lossless';
+export interface AudioApiConfig {
+  enabled: boolean;
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  songQuality?: AudioApiSongQuality;
+}
+
 export interface APIConfig {
   apiType?: 'openai' | 'anthropic';
   /** 私聊单次生成上限；未设置沿用 8000，不改变历史范围。 */
@@ -287,6 +296,7 @@ export interface APIConfig {
   apiKey: string;
   // 可选识图中转：给不支持 image_url 的主模型补视觉能力。
   visionApi?: VisionApiConfig;
+  audioApi?: AudioApiConfig;
   minimaxApiKey?: string;
   minimaxGroupId?: string;
   // 'domestic' → https://api.minimaxi.com (国内站)
@@ -3130,6 +3140,7 @@ export interface CharacterProfile {
   // 音乐人格 — 角色自己的网易云式歌单 / 品味 / 正在听
   // 在音乐 App 里以"拜访"形式访问
   musicProfile?: CharMusicProfile;
+  listenSongConfig?: { enabled?: boolean; sources?: string[] };
 
   /**
    * 日程风格：
