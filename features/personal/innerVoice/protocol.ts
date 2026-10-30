@@ -6,6 +6,17 @@ export function extractInnerVoice(raw: string): { text: string; innerVoice?: Inn
     try { const value = JSON.parse(body.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '')); if (typeof value.state === 'string' && typeof value.thoughts === 'string' && (value.undercurrent == null || typeof value.undercurrent === 'string')) innerVoice = { state: value.state.trim(), thoughts: value.thoughts.trim(), undercurrent: (value.undercurrent || '').trim() }; } catch {}
     return '';
   });
+  // Some models echo the private history context instead of the required JSON.
+  // Only recover a clearly marked trailing context block; never strip ordinary
+  // dialogue containing words such as "状态" or "内心".
+  if (!innerVoice) {
+    const marker = /(?:\\n|^)[\\[【]角色当时的心声[，,、\\s]*未说出口[、，,\\s]*用户未必知情[\\]】]\\s*\\n状态[：:]\\s*([^\\n]*)\\n内心[：:]\\s*([^\\n]*)(?:\\n暗流[：:]\\s*([^\\n]*))?\\s*$/;
+    const match = marker.exec(text);
+    if (match) {
+      innerVoice = { state: match[1].trim(), thoughts: match[2].trim(), undercurrent: (match[3] || '').trim() };
+      return { text: text.slice(0, match.index).trimEnd(), innerVoice };
+    }
+  }
   return { text, ...(innerVoice ? { innerVoice } : {}) };
 }
 export function innerVoiceContext(value: unknown): string {
