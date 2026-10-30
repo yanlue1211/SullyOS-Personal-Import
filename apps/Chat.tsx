@@ -1592,9 +1592,16 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
 
                     // Only use an actual video URL supplied by the configured XHS detail provider.
                     // A playable note page or a cover image is not itself a readable video source.
-                    if (/video|视频/i.test(String(note.type || '')) && typeof note.videoUrl === 'string' && (note.videoUrl.startsWith('https://') || note.videoUrl.startsWith('http://'))) {
+                    if (typeof note.videoUrl === 'string' && /^https?:\/\//i.test(note.videoUrl)) {
                         const frames = await extractVideoFrames(note.videoUrl, { count: 4, width: 400, timeoutMs: 8000 });
-                        if (frames.length) note = { ...note, videoFrames: frames };
+                        if (frames.length) {
+                            note = { ...note, videoFrames: frames };
+                            addToast(`小红书已提取 ${frames.length} 张视频画面用于识图`, 'info');
+                        } else {
+                            addToast('小红书已取得视频地址，但未能读取画面（可能是跨域限制、地址失效或读取超时）；本次仅发送封面。', 'info');
+                        }
+                    } else if (/video|视频/i.test(String(note.type || ''))) {
+                        addToast('小红书详情未返回视频直链，本次只能识别封面。', 'info');
                     }
 
                     await DB.saveMessage({
