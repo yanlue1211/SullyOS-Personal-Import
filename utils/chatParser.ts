@@ -409,8 +409,12 @@ export const ChatParser = {
                 const control = loadMusicControl();
                 if (!control) { console.warn('[audio-listening] 播放器尚未初始化'); return; }
                 await control.playSong(picked.song);
-                const result = await listening.startSongListen(charId, picked.song, 'alone');
-                if (result.status === 'failed') console.warn('[audio-listening] 识别失败', result.error);
+                // 角色自主点歌只负责播放；不要自动写个人听歌日记。
+                // 音频分析只由用户开启的真实听歌功能控制。
+                if (listening.isRealSongListeningEnabled(target)) {
+                  try { await listening.getOrAnalyzeSongSound(picked.song); }
+                  catch (error) { console.warn('[audio-listening] 自主点歌分析失败', error); }
+                }
             })().catch(error => console.warn('[audio-listening] 执行失败', error));
         }
 
