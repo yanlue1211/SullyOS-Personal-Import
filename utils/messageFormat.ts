@@ -121,7 +121,7 @@ export function normalizeMessageContent(
         : msg.content || '[分享的帖子内容不可用]';
 
     // 纯视觉类给占位；语音优先使用配套转写，避免把音频资源地址送进上下文。
-    if (type === 'audio') return msg.metadata?.audioDescription ? `[真实语音] ${msg.metadata.audioDescription}` : '[真实语音，尚未识别]';
+    if (type === 'audio') return msg.metadata?.audioDescription ? `[真实语音] ${msg.metadata.audioDescription}` : msg.metadata?.audioCleared ? '[真实语音文件已清理，未保留转写]' : '[真实语音，尚未识别]';
     if (type === 'image') return '[图片]';
     if (type === 'emoji') return '[表情包]';
     if (type === 'voice') {

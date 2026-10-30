@@ -1184,7 +1184,7 @@ ${voiceActingGuide()}`;
                     content = '[' + speaker + '引用了' + whose + '「' + quoted + '」，并回复了 ↓]\n' + content;
                 }
                 
-                if (m.type === 'audio') return { role: m.role, content: `${timeStr} [真实语音：${m.metadata?.audioDescription || '尚未识别，不能推测用户说了什么'}]` };
+                if (m.type === 'audio') return { role: m.role, content: `${timeStr} [真实语音：${m.metadata?.audioDescription || (m.metadata?.audioCleared ? '录音已清理，未保留转写，不能推测原话' : '尚未识别，不能推测用户说了什么')}]` };
 
                 if (m.type === 'image') {
                      const visionDescription = options?.useVisionDescriptions

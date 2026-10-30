@@ -4,12 +4,12 @@ import { useBlobRefUrl } from '../../../utils/blobRef';
 import { parseVirtualMedia } from './format';
 export default function MediaMessage({ message }: { message: Message }) {
   const [open, setOpen] = useState(false);
-  const url = useBlobRefUrl(message.type === 'audio' ? message.content : undefined);
+  const url = useBlobRefUrl(message.type === 'audio' && !message.metadata?.audioCleared ? message.content : undefined);
   const media = parseVirtualMedia(message.content);
   if (message.type === 'audio') return <div className="sully-voice-bar rounded-2xl bg-white/90 border border-slate-200 p-3 max-w-[270px] text-slate-700">
     <div className="text-xs mb-2">🎙 语音 · {Math.ceil(message.metadata?.duration || 0)} 秒</div>
-    {url ? <audio controls preload="metadata" src={url} className="max-w-full w-[240px]" /> : <p className="text-xs">录音文件暂不可用</p>}
-    <details className="text-xs mt-2"><summary>查看语音说明</summary><p className="whitespace-pre-wrap mt-2">{message.metadata?.audioDescription || '尚未识别；回复时将使用音迹中的音频 API。未配置或识别失败时，角色只能知道你发送了语音。'}</p></details>
+    {message.metadata?.audioCleared ? <p className="text-xs">录音文件已清理</p> : url ? <audio controls preload="metadata" src={url} className="max-w-full w-[240px]" /> : <p className="text-xs">录音文件暂不可用</p>}
+    <details className="text-xs mt-2"><summary>查看语音说明</summary><p className="whitespace-pre-wrap mt-2">{message.metadata?.audioDescription || (message.metadata?.audioCleared ? '清理前未识别，声音内容已不可用。' : '尚未识别；回复时将使用音迹中的音频 API。未配置或识别失败时，角色只能知道你发送了语音。')}</p></details>
   </div>;
   if (!media) return null;
   return <div className="sully-virtual-media rounded-2xl border border-slate-200 bg-white/90 text-slate-700 max-w-[270px] overflow-hidden">

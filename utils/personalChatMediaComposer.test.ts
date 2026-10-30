@@ -35,10 +35,10 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
 describe('recording lifecycle', () => {
   it('releases microphone and discards recording on conversation change', async () => {
-    await act(async () => root.render(React.createElement(Composer, { conversationId: 'a', onSend })));
+    await act(async () => root.render(React.createElement(Composer, { conversationId: 'a', onSend, onRecordingsChanged: () => {} })));
     await click('语音 / 虚拟图片 / 视频'); await click('开始录音');
     expect(activeRecorder.state).toBe('recording');
-    await act(async () => root.render(React.createElement(Composer, { conversationId: 'b', onSend })));
+    await act(async () => root.render(React.createElement(Composer, { conversationId: 'b', onSend, onRecordingsChanged: () => {} })));
     expect(stopTrack).toHaveBeenCalled(); expect(activeRecorder.state).toBe('inactive');
     expect(host.querySelector('audio')).toBeNull();
     expect(onSend).not.toHaveBeenCalled();
@@ -46,7 +46,7 @@ describe('recording lifecycle', () => {
   it('releases permission granted after the composer unmounts', async () => {
     let grant!: (stream: any) => void;
     navigator.mediaDevices.getUserMedia = vi.fn(() => new Promise<MediaStream>(resolve => { grant = resolve; }));
-    await act(async () => root.render(React.createElement(Composer, { conversationId: 'a', onSend })));
+    await act(async () => root.render(React.createElement(Composer, { conversationId: 'a', onSend, onRecordingsChanged: () => {} })));
     await click('语音 / 虚拟图片 / 视频'); await click('开始录音');
     await act(async () => root.render(null));
     await act(async () => grant({ getTracks: () => [{ stop: stopTrack }] }));

@@ -1,6 +1,8 @@
+import RecordingManager from './RecordingManager';
 import React, { useEffect, useRef, useState } from 'react';
 import { virtualMedia, type VirtualMediaKind } from './format';
-export default function MediaComposer({ conversationId, onSend }: { conversationId: string; onSend: (content: string, audio?: Blob, duration?: number) => Promise<void> }) {
+export default function MediaComposer({ conversationId, onSend, onRecordingsChanged }: { onRecordingsChanged: () => void | Promise<void>; conversationId: string; onSend: (content: string, audio?: Blob, duration?: number) => Promise<void> }) {
+  const [managerOpen, setManagerOpen] = useState(false);
   const [mode, setMode] = useState<VirtualMediaKind | '录音'>('录音');
   const [visible, setVisible] = useState(false);
   const [text, setText] = useState('');
@@ -52,6 +54,8 @@ export default function MediaComposer({ conversationId, onSend }: { conversation
   };
   return <div className="px-3 py-1 text-xs text-slate-600">
     <button type="button" onClick={() => { if (visible) { cleanup(); setRecording(false); } setVisible(!visible); }} className="rounded-full border px-3 py-1 bg-white/80">语音 / 虚拟图片 / 视频</button>
+    <button type="button" disabled={recording || busy} onClick={() => setManagerOpen(true)} className="ml-2 rounded-full border px-3 py-1 bg-white/80">录音管理</button>
+    {managerOpen && <RecordingManager charId={conversationId} onClose={() => setManagerOpen(false)} onChanged={onRecordingsChanged} />}
     {visible && <div className="mt-2 rounded-2xl bg-white border p-3 space-y-3">
       <div className="flex flex-wrap gap-2">{(['录音', '语音', '图片', '视频'] as const).map(kind => <button type="button" disabled={recording || busy} key={kind} onClick={() => setMode(kind)} className={`px-2 py-1 rounded-lg ${mode === kind ? 'bg-amber-100' : 'bg-slate-100'}`}>{kind === '录音' ? '真实录音' : `虚拟${kind}`}</button>)}</div>
       {mode === '录音' ? <div className="space-y-2"><p>最长 120 秒 · {Math.floor(seconds)} 秒</p><button type="button" disabled={busy} onClick={() => recording ? recorder.current?.stop() : void start()} className="rounded-lg bg-slate-100 px-3 py-2">{recording ? '结束录音' : blob ? '重新录制' : '开始录音'}</button>{blob && <Preview blob={blob} />}</div> : <textarea value={text} maxLength={4000} onChange={e => setText(e.target.value)} placeholder={mode === '语音' ? '输入语音文字' : `描述${mode}里的内容`} className="w-full border rounded-lg p-2 text-sm" />}
