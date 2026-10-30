@@ -1590,6 +1590,13 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
                         }
                     }
 
+                    // Only use an actual video URL supplied by the configured XHS detail provider.
+                    // A playable note page or a cover image is not itself a readable video source.
+                    if (/video|视频/i.test(String(note.type || '')) && typeof note.videoUrl === 'string' && (note.videoUrl.startsWith('https://') || note.videoUrl.startsWith('http://'))) {
+                        const frames = await extractVideoFrames(note.videoUrl, { count: 4, width: 400, timeoutMs: 8000 });
+                        if (frames.length) note = { ...note, videoFrames: frames };
+                    }
+
                     await DB.saveMessage({
                         charId: char.id,
                         role: 'user',

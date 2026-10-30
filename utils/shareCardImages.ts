@@ -19,6 +19,7 @@ export function getShareCardImageUrls(message: Message): string[] {
     [note.images, note.imageList, note.imageUrls, note.image_urls].forEach(list => {
       if (Array.isArray(list)) list.forEach(add);
     });
+    if (Array.isArray(note.videoFrames)) note.videoFrames.forEach((frame: any) => add(frame?.image));
     add(note.coverUrl);
   } else if (message.type === 'webpage_card') {
     if (video.contentType === 'image') {

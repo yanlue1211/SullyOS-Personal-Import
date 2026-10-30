@@ -1016,6 +1016,7 @@ export const normalizeNote = (n: any): {
     coverUrl?: string;
     images?: string[];
     type?: string;
+    videoUrl?: string;
 } => {
     const card = n.noteCard || n.note_card || n.notecard;
     // 封面：cover 对象 / 字符串，或笔记图片列表首图（feed detail 返回 image_list）。
@@ -1056,6 +1057,9 @@ export const normalizeNote = (n: any): {
         coverUrl,
         images,
         type: n.type || card?.type || undefined,
+        videoUrl: [n.videoUrl, n.video_url, n.video?.url, n.video?.media?.stream?.h264?.[0]?.master_url,
+            card?.videoUrl, card?.video_url, card?.video?.url, card?.video?.media?.stream?.h264?.[0]?.master_url]
+            .find((url: unknown) => typeof url === 'string' && /^https?:\/\//i.test(url as string)) as string | undefined,
     };
 };
 
