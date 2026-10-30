@@ -97,7 +97,7 @@ export const INSTALLED_APPS: AppConfig[] = [
   { id: AppID.User, name: '档案', icon: 'User', color: 'blue' },
   { id: AppID.Bank, name: '存钱罐', icon: 'Bank', color: 'lime' }, // Hidden
   { id: AppID.Taobao, name: '淘宝', icon: 'Bank', color: 'orange' },
-  { id: AppID.Meituan, name: '美团外卖', icon: 'Journal', color: 'amber' },
+  { id: AppID.Meituan, name: '美团', icon: 'Journal', color: 'amber' },
   { id: AppID.Journal, name: '交换日记', icon: 'Journal', color: 'amber' },
   // { id: AppID.Handbook, name: '手账', icon: 'Handbook', color: 'fuchsia' }, // Hidden temporarily, pending update
   { id: AppID.Social, name: 'Spark', icon: 'Social', color: 'red' },

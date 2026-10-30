@@ -785,8 +785,8 @@ export async function applyAssistantPostProcessing(
                 ctx.replyRun?.uuid || `reply:${char.id}:${contextMsgs.filter(m=>m.role==='user').at(-1)?.id || spokenAt}`));
         } catch (error: any) {
             rawAiContent = original.replace(/<购物>[\s\S]*?<\/购物>/g, '');
-            hooks.addToast?.(`模拟订单未创建：${error.message}`, 'info');
-            await persistMessage({charId:char.id,role:'system',type:'text',content:`模拟购物未成功：${error.message}。未创建这次订单，不能视为已经购买。`,metadata:{source:'personal-commerce'}});
+            hooks.addToast?.(`订单未创建：${error.message}`, 'info');
+            await persistMessage({charId:char.id,role:'system',type:'text',content:`购物未成功：${error.message}。未创建这次订单，不能视为已经购买。`,metadata:{source:'personal-commerce'}});
         }
     }
 
