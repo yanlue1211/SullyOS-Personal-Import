@@ -1,4 +1,4 @@
-import { buildRecentListenBlock, buildListenSongGuide, collectListenCandidates, isListenSongEnabled, isSongListeningAvailable } from './songListening';
+import { buildListenSongGuide, collectListenCandidates, isListenSongEnabled, isSongListeningAvailable, isRealSongListeningEnabled, getOrAnalyzeSongSound, buildCurrentSongSoundBlock } from './songListening';
 import { getMemoryPalaceHighWaterMarkForContext, selectCharacterContextMessages } from './chatContextRange';
 import { expandHomeContextHistory } from './homeContextSegments';
 import { protectPendingChatTurn } from './storyTheaterTimeline';
@@ -405,8 +405,24 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
 
     const messagesWithWorldbookDepth = parts.history;
 
-    const listenMemory = buildRecentListenBlock(char, userProfile?.name || '用户');
-    if (listenMemory) volatileTail += `\n${listenMemory}`;
+
+    // 用户在聊天功能菜单独立启用；不依赖模型是否生成音乐卡片。
+    // 未分析过时等待客观音频分析完成，命中缓存则直接提供给主模型。
+    if (isRealSongListeningEnabled(char) && isSongListeningAvailable() && isListeningTogether) {
+      const currentSong = input.musicSnapshot?.current;
+      if (currentSong) {
+        try {
+          const record = await getOrAnalyzeSongSound(currentSong);
+          const { DB } = await import('./db');
+          const liveChar = await DB.getCharacter(char.id);
+          if (isRealSongListeningEnabled(liveChar)) {
+            volatileTail += buildCurrentSongSoundBlock(currentSong, record);
+          }
+        } catch (error) {
+          console.warn('[audio-listening] 获取歌曲声音分析失败，保持原版回复', error);
+        }
+      }
+    }
     if (input.recallEntryPoint === 'chat_app' && isSongListeningAvailable() && isListenSongEnabled(char)) {
       try {
         const choices = await collectListenCandidates(char, userProfile?.name || '用户');
