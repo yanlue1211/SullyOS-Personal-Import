@@ -44,6 +44,7 @@ export async function extractVideoFrames(videoUrl: string, options: {
     if (!ctx) return [];
     const frames: VideoFrame[] = [];
     for (let i = 0; i < count; i++) {
+      try {
       const timeSeconds = Math.min(Math.max(0, video.duration - 0.1), (i + 0.5) * video.duration / count);
       const seeked = wait('seeked');
       video.currentTime = timeSeconds;
@@ -51,6 +52,10 @@ export async function extractVideoFrames(videoUrl: string, options: {
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
       // Tainted canvas throws SecurityError; caller should fall back to cover.
       frames.push({ timeSeconds, image: canvas.toDataURL('image/jpeg', 0.62) });
+      } catch (error) {
+        console.warn('[share frames] Frame extraction stopped; keeping earlier frames', error);
+        break;
+      }
     }
     return frames;
   } catch (error) {
