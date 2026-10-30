@@ -1,3 +1,4 @@
+import { INNER_VOICE_SYSTEM, innerVoiceContext } from '../features/personal/innerVoice/protocol';
 import { VIRTUAL_MEDIA_GUIDE, RECORDING_HISTORY_GUIDE } from '../features/personal/chatMedia/format';
 import {secretNoteContext} from './secretNote';
 import { buildCharacterResponsePrinciples } from './characterResponsePrinciples';
@@ -1081,7 +1082,7 @@ ${voiceActingGuide()}`;
             .join(' ');
         console.log(`⏱ [buildSystemPrompt] total=${perfTotal}ms | stable=${baseSystemPrompt.length}ch volatile=${volatileState.length}ch | ${timingStr}`);
 
-        return { stable: baseSystemPrompt + VIRTUAL_MEDIA_GUIDE + RECORDING_HISTORY_GUIDE, volatileState, recencyTail, history: context.history };
+        return { stable: baseSystemPrompt + VIRTUAL_MEDIA_GUIDE + RECORDING_HISTORY_GUIDE + (promptOptions?.appRules ? '' : INNER_VOICE_SYSTEM), volatileState, recencyTail, history: context.history };
     },
 
     // 格式化消息历史
@@ -1435,7 +1436,7 @@ ${voiceActingGuide()}`;
                 }
                 else content = `${timeStr} ${sourceTag} ${content}`;
 
-                return { role: m.role, content: typeof content === 'string' ? content.trimStart() : content };
+                return { role: m.role, content: typeof content === 'string' ? (content + (m.role === 'assistant' ? innerVoiceContext(m.metadata?.innerVoice) : '')).trimStart() : content };
             }),
             historySlice // Return original slice for Quote lookup
         };

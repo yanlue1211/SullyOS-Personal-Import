@@ -1,3 +1,4 @@
+import { extractInnerVoice, type InnerVoice } from '../features/personal/innerVoice/protocol';
 import { withReplyCancellation, type ReplyRun } from './chatReplyCancellation';
 import { dialogueMaxTokens } from './characterApi';
 /**
@@ -83,7 +84,7 @@ export function buildReplySnapshotContent(msg: { type?: string; content: string 
 
 /** 第一遍粗洗 — 剥 <think> / 时间戳 / 历史里漏出的 [聊天]/[通话]/[约会] / 表情包反向 tag */
 const normalizeAiContent = (raw: string): string => {
-    let cleaned = normalizeAssistantActionFormatting(raw || '');
+    let cleaned = normalizeAssistantActionFormatting(extractInnerVoice(raw || '').text);
     // Strip hidden chain-of-thought blocks: <think> / <thinking> / <thought>
     cleaned = cleaned.replace(/<(think|thinking|thought)>[\s\S]*?<\/\1>/gi, '');
     cleaned = cleaned.replace(/<(?:think|thinking|thought)>[\s\S]*$/gi, '');
@@ -643,8 +644,12 @@ export async function applyAssistantPostProcessing(
     // 统一落库入口：ctx.messageTimestamp（若有）盖到每条消息上，保证同一轮拆出的
     // 正文 / 表情 / 卡片 / 系统提示时间戳一致；没传则维持 DB.saveMessage 默认（写库当刻）。
     // 全函数落库一律走这里，别直接调 DB.saveMessage——漏一处就会出现气泡时间戳互相打架。
-    const persistMessage: typeof DB.saveMessage = (msg) =>
-        (ctx.replyRun?.saveMessage ?? DB.saveMessage)(messageTimestamp != null ? { ...msg, timestamp: messageTimestamp } : msg);
+    let pendingInnerVoice: InnerVoice | undefined;
+    const persistMessage: typeof DB.saveMessage = (msg) => {
+        const value = pendingInnerVoice && msg.role === 'assistant' ? { ...msg, metadata: { ...msg.metadata, innerVoice: pendingInnerVoice } } : msg;
+        if (value !== msg) pendingInnerVoice = undefined;
+        return (ctx.replyRun?.saveMessage ?? DB.saveMessage)(messageTimestamp != null ? { ...value, timestamp: messageTimestamp } : value);
+    };
     const {
         setMessages,
         addToast,
@@ -776,7 +781,7 @@ export async function applyAssistantPostProcessing(
     rawAiContent = await replyStep(() => consumeFriendFeedMainReply(char.id, rawAiContent,
         (directives || []).flatMap(d => d.type === 'friend_feed_reply' ? [d.action] : [])));
     let aiContent = replayedTagPrefix ? `${replayedTagPrefix}${rawAiContent}` : rawAiContent;
-    aiContent = normalizeAiContent(aiContent);
+    const heart = extractInnerVoice(aiContent); pendingInnerVoice = heart.innerVoice; aiContent = normalizeAiContent(heart.text);
     // 先于 lead-in / 二轮渲染消费：否则控制标签会作为普通气泡短暂闪给用户看。
     aiContent = await replyStep(async () => consumeScheduleChanges(aiContent, utteranceAt));
     // 在任何 lead-in/二轮渲染之前先剥掉仿卡片文本，防止它被 chunkText 拆成灰色普通气泡。

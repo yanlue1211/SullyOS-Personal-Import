@@ -14,7 +14,7 @@ it('offers two direct first-page actions and keeps occasional settings on page t
   const buttons = [...first.querySelectorAll('button')];
   expect(buttons.map(button => button.textContent).slice(0, 2)).toEqual(['语音', '图片／视频']);
   expect(first.textContent).not.toContain('协同工作'); expect(first.textContent).not.toContain('日程/情绪');
-  expect(second.textContent).toContain('协同工作'); expect(second.textContent).toContain('日程/情绪');
+  expect(second.textContent).toContain('协同工作'); expect(second.textContent).toContain('日程'); expect(second.textContent).toContain('情绪');
   await act(async () => { buttons[0].click(); buttons[1].click(); });
   expect(action.mock.calls.map(call => call[0])).toEqual(['voice-input', 'virtual-media']);
   await act(async () => root.unmount()); host.remove();
