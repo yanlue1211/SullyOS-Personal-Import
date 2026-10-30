@@ -47,6 +47,13 @@ export interface SongListenOutcome {
   error?: string;
 }
 
+export const publishSongListenStatus = (message: string) => {
+  try {
+    localStorage.setItem('sully_audio_listen_status', JSON.stringify({ message, at: Date.now() }));
+    window.dispatchEvent(new CustomEvent('sully-audio-listen-status', { detail: message }));
+  } catch { /* diagnostics must not interrupt listening */ }
+};
+
 const inFlight = new Map<string, Promise<SongListenOutcome>>();
 
 /**
@@ -65,13 +72,13 @@ export function startSongListen(charId: string, song: Song, mode: SongListenMode
 
 async function runSongListen(charId: string, song: Song, mode: SongListenMode): Promise<SongListenOutcome> {
   const config = loadAudioApiConfig();
-  if (!isAudioApiReady(config)) return { status: 'skipped' };
+  if (!isAudioApiReady(config)) { publishSongListenStatus('⏭️ 未调用：音频 API 未开启或配置不完整'); return { status: 'skipped' }; }
   const [char, user] = await Promise.all([DB.getCharacter(charId), DB.getUserProfile()]);
-  if (!char?.musicProfile || !user) return { status: 'skipped' };
+  if (!char?.musicProfile || !user) { publishSongListenStatus('⏭️ 未调用：角色缺少音乐档案或用户资料'); return { status: 'skipped' }; }
 
   const cached = findSongListenReview(char, song.id);
   if (cached) {
-    if (mode === 'together') return { status: 'skipped', review: cached };
+    if (mode === 'together') { publishSongListenStatus('ℹ️ 这首歌已有听歌日记，已跳过重复调用'); return { status: 'skipped', review: cached }; }
     if (Date.now() - cached.createdAt < ALONE_RELISTEN_REUSE_MS) {
       const review = await saveSongListenReview(charId, song, cached.content, 'alone');
       return { status: 'reused', review: review ?? cached };
@@ -79,19 +86,23 @@ async function runSongListen(charId: string, song: Song, mode: SongListenMode): 
   }
 
   try {
+    publishSongListenStatus('⏳ 正在从播放器获取歌曲音频…');
     const cfg = loadMusicCfgStandalone();
     const [audio, lyrics] = await Promise.all([
       fetchSongAudio(song, cfg, config.songQuality || 'exhigh'),
       fetchSongLyrics(song, cfg),
     ]);
+    publishSongListenStatus('⏳ 已获取音频（' + (audio.blob.size / 1048576).toFixed(1) + 'MB），正在调用音频模型…');
     const payload = await audioBlobToPayload(audio.blob, audio.nameHint);
     const content = await listenToSongAsCharacter({
       char, user, song, audio: payload, lyrics, isTrial: audio.isTrial, mode,
     }, config);
     const review = await saveSongListenReview(charId, song, content, mode);
-    if (!review) return { status: 'failed', error: '角色没有音乐档案' };
+    if (!review) { publishSongListenStatus('❌ 听歌分析完成，但保存日记失败：角色没有音乐档案'); return { status: 'failed', error: '角色没有音乐档案' }; }
+    publishSongListenStatus('✅ 已成功调用音频模型并保存听歌日记：' + song.name);
     return { status: 'listened', review, isTrial: audio.isTrial };
   } catch (error: any) {
+    publishSongListenStatus('❌ 听歌失败：' + (error?.message || String(error)));
     console.warn('[songListening] 听歌失败', error);
     return { status: 'failed', error: error?.message || String(error) };
   }
