@@ -392,6 +392,28 @@ export const ChatParser = {
             content = content.replace(MUSIC_TAG_GLOBAL_RE, '').trim();
         }
 
+        // Character-selected music: control actual player and analyze song audio.
+        const listenMatch = /\[\[LISTEN_SONG:\s*([^\]]+?)\s*\]\]/.exec(content);
+        if (listenMatch) {
+            content = content.replace(/\[\[LISTEN_SONG:\s*[^\]]+?\s*\]\]/g, '').trim();
+            const query = listenMatch[1];
+            void (async () => {
+                const listening = await import('./songListening');
+                if (!listening.isSongListeningAvailable()) return;
+                const [target, user] = await Promise.all([DB.getCharacter(charId), DB.getUserProfile()]);
+                if (!target || !listening.isListenSongEnabled(target)) return;
+                const options = await listening.collectListenCandidates(target, user?.name || '用户');
+                const picked = listening.resolveListenCandidate(options, query);
+                if (!picked) { console.warn('[audio-listening] 歌单里找不到歌曲', query); return; }
+                const { loadMusicControl } = await import('../context/MusicContext');
+                const control = loadMusicControl();
+                if (!control) { console.warn('[audio-listening] 播放器尚未初始化'); return; }
+                await control.playSong(picked.song);
+                const result = await listening.startSongListen(charId, picked.song, 'alone');
+                if (result.status === 'failed') console.warn('[audio-listening] 识别失败', result.error);
+            })().catch(error => console.warn('[audio-listening] 执行失败', error));
+        }
+
         // NEWS_CARD — char 主动把某条热点当作新闻卡片分享（来源 + 标题）
         //   [[NEWS_CARD: 来源|标题]]    （来源可省略 → [[NEWS_CARD: 标题]]）
         const NEWS_CARD_RE = /\[\[NEWS_CARD:\s*([^\]]*?)\s*\]\]/;
