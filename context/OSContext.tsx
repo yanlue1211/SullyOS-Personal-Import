@@ -4224,6 +4224,9 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           const backupData: Partial<FullBackupData> = {
               friendFeed: mode === 'text_only' ? stripBackupImages(await readFriendFeed()) : undefined,
               friendFeedMedia: mode === 'media_only' ? collectFriendFeedMedia(await readFriendFeed()) : undefined,
+              songSoundArchive: (mode === 'text_only' || mode === 'full')
+                  ? (await DB.getAllAssets()).filter(a => a.id.startsWith('personal_song_sound_v1_'))
+                  : undefined,
               contentFavoritesIndex: mode === 'text_only'
                   ? stripBackupImages(await DB.getAssetRaw('content_favorites_index_v1')) : undefined,
               timestamp: Date.now(),
