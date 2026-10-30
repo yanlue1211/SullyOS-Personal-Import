@@ -8,6 +8,17 @@ import {
     parseXhsCount,
 } from './xhsMcpClient';
 
+describe('XHS share image gallery normalization', () => {
+    it('keeps every image from image_list and deduplicates them', () => {
+        const result = normalizeNote({ note_id: 'abc', image_list: [
+            { url_default: 'http://cdn.example/1.jpg' },
+            { urlDefault: 'https://cdn.example/2.jpg' },
+            { url: 'https://cdn.example/2.jpg' },
+        ] });
+        expect(result.images).toEqual(['https://cdn.example/1.jpg', 'https://cdn.example/2.jpg']);
+    });
+});
+
 describe('XHS Lite response normalization', () => {
     it('parses compact counters without turning 1.2万 into 1', () => {
         expect(parseXhsCount('1.2万')).toBe(12_000);
