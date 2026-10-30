@@ -14,6 +14,8 @@ export enum AppID {
   Date = 'date',
   User = 'user',
   Journal = 'journal',
+  Taobao = 'taobao',
+  Meituan = 'meituan',
   Schedule = 'schedule',
   Room = 'room',
   CheckPhone = 'check_phone',
@@ -3393,6 +3395,7 @@ export interface DiaryPage {
 }
 
 export interface DiaryEntry {
+    kind?: 'exchange' | 'character';
     id: string;
     charId: string;
     date: string;

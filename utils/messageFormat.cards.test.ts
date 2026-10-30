@@ -42,7 +42,7 @@ describe('normalizeMessageContent · xhs_card', () => {
       'Char', '我',
     );
     expect(out).toContain('《睡不够》');
-    expect(out).toContain('别假装读过');
+    expect(out).toContain('不要推测未获取的正文');
     expect(out).not.toContain('笔记正文');
   });
 

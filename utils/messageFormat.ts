@@ -1,3 +1,4 @@
+import { orderText } from './personalCommerce';
 import { getShareCardImageUrls } from './shareCardImages';
 /**
  * 消息内容规范化：把带特殊 type / metadata 的消息转成可读的单行文本。
@@ -167,10 +168,12 @@ export function normalizeMessageContent(
                 ).join('；') || '';
                 return `[白色情人节默契测验] ${userName}完成了${charName}出的白色情人节测验，答对${card.score}/${card.total}题，${passedStr}。${questionsText}${card.finalDialogue ? `。${charName}最终评价：${card.finalDialogue}` : ''}`;
             }
+            if (card?.type === 'commerce_order' && card.order) return orderText(card.order, card.delivered);
             if (card?.type === 'diary_card') {
                 const uName = card.userName || userName;
                 const userTextPart = (card.userText || '').trim();
                 const charTextPart = (card.charText || '').trim();
+                if (card.diaryKind === 'character') return `[${charName}的个人日记 ${card.date || ''}] ${charTextPart}`;
                 const userBlock = userTextPart ? `${uName}写道：「${userTextPart}」` : `${uName}那页是空的`;
                 const charBlock = charTextPart ? `${charName}回道：「${charTextPart}」` : `${charName}那页是空的`;
                 return `[交换日记 ${card.date || ''}] ${uName}和${charName}今天通过【交换日记】交换了一篇日记。${userBlock} ${charBlock}`;

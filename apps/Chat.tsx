@@ -1259,6 +1259,12 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- clearUnread is stable (useCallback with []), omit to prevent stale-dep lint noise
     }, [lastMsgTimestamp, activeCharacterId, char?.hideSystemLogs, reloadMessages, clearUnread]);
 
+    useEffect(() => {
+        const refresh = () => { if (activeCharIdRef.current) void reloadMessages(visibleCountRef.current); };
+        window.addEventListener('commerce-updated', refresh);
+        return () => window.removeEventListener('commerce-updated', refresh);
+    }, [reloadMessages]);
+
     // 即时对话待收记录的跨标签页补听。同一聊天开两个标签页时，回复推送到达后 SW 把
     // 广播发给所有 client，后台标签页的 flush 可能先抢到并落库——销账的 CustomEvent
     // 只在它自己那边派发，这边收不到，「正在输入…」就会无限常亮、回复也不上屏。

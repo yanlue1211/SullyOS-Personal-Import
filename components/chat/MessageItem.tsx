@@ -1,3 +1,4 @@
+import OrderCard from '../commerce/OrderCard';
 import InnerVoiceChip from '../../features/personal/innerVoice/InnerVoiceChip';
 import ShareGalleryButton from './ShareGalleryButton';
 import { getShareCardImageUrls } from '../../utils/shareCardImages';
@@ -1404,6 +1405,12 @@ const MessageItem = React.memo(({
                     </div>
                 );
             }
+            if (scoreData?.type === 'commerce_order' && scoreData.order) return (
+                <div className={`w-full px-4 my-3 relative ${selectionMode ? 'pl-12' : ''}`} {...interactionProps}>
+                    {selectionMode && <button className="absolute left-2 top-1/2" aria-label="选择订单卡片" onClick={e=>{e.stopPropagation();onToggleSelect(m.id);}}>{isSelected ? '●' : '○'}</button>}
+                    <div className="mx-auto w-72"><OrderCard order={scoreData.order} delivered={scoreData.delivered} /></div>
+                </div>
+            );
             if (scoreData?.type === 'diary_card') {
                 const dateParts = (scoreData.date || '').split('-');
                 const monthDay = dateParts.length === 3 ? `${dateParts[1]}/${dateParts[2]}` : (scoreData.date || '');
@@ -1430,7 +1437,7 @@ const MessageItem = React.memo(({
                                         <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white text-sm font-bold shrink-0" style={{ background: 'linear-gradient(135deg, #d4a55a, #b8843a)' }}>{scoreData.charName?.[0] || '?'}</div>
                                     )}
                                     <div className="flex-1 min-w-0">
-                                        <div className="text-[9px] font-bold tracking-widest uppercase" style={{ color: '#a07840' }}>Exchange Diary · 交换日记</div>
+                                        <div className="text-[9px] font-bold tracking-widest uppercase" style={{ color: '#a07840' }}>{scoreData.diaryKind === 'character' ? 'Personal Diary · TA 的日记' : 'Exchange Diary · 交换日记'}</div>
                                         <div className="text-xs font-bold truncate" style={{ color: '#5c3e1a' }}>与 {scoreData.charName} · {scoreData.date}</div>
                                     </div>
                                     <div className="shrink-0 text-right leading-none">
@@ -1440,7 +1447,7 @@ const MessageItem = React.memo(({
                                 </div>
 
                                 {/* User page */}
-                                <div className="px-4 pt-3 pb-2">
+                                {scoreData.diaryKind !== 'character' && <div className="px-4 pt-3 pb-2">
                                     <div className="flex items-center justify-between mb-1.5">
                                         <span className="text-[9px] font-bold tracking-widest uppercase" style={{ color: '#a07840' }}>● {scoreData.userName || '我'} 写道</span>
                                         {scoreData.userPaperName && <span className="text-[8px] font-mono opacity-50" style={{ color: '#a07840' }}>{scoreData.userPaperName}</span>}
@@ -1450,10 +1457,11 @@ const MessageItem = React.memo(({
                                     </div>
                                 </div>
 
+                                }
                                 {/* Char page */}
                                 <div className="px-4 pb-3 pt-1.5">
                                     <div className="flex items-center justify-between mb-1.5">
-                                        <span className="text-[9px] font-bold tracking-widest uppercase" style={{ color: '#a07840' }}>● {scoreData.charName} 回道</span>
+                                        <span className="text-[9px] font-bold tracking-widest uppercase" style={{ color: '#a07840' }}>● {scoreData.charName} {scoreData.diaryKind === 'character' ? '写道' : '回道'}</span>
                                         {scoreData.charPaperName && <span className="text-[8px] font-mono opacity-50" style={{ color: '#a07840' }}>{scoreData.charPaperName}</span>}
                                     </div>
                                     <div className="rounded-xl px-3 py-2.5 text-[11px] leading-relaxed whitespace-pre-wrap" style={{ background: 'linear-gradient(135deg, rgba(255,245,220,0.85), rgba(255,238,200,0.7))', border: '1px solid rgba(217,180,120,0.3)', color: '#4a3520', fontFamily: 'ui-serif, Georgia, serif' }}>
@@ -1468,7 +1476,7 @@ const MessageItem = React.memo(({
                                             ? `贴了 ${(scoreData.userStickerCount || 0) + (scoreData.charStickerCount || 0)} 张贴纸`
                                             : '今天的纸面很干净'}
                                     </span>
-                                    <span className="text-[9px] font-bold" style={{ color: '#a07840' }}>交换日记 ✿</span>
+                                    <span className="text-[9px] font-bold" style={{ color: '#a07840' }}>{scoreData.diaryKind === 'character' ? '个人日记 ✎' : '交换日记 ✿'}</span>
                                 </div>
                             </div>
                         </div>

@@ -1,3 +1,5 @@
+import { nowInTimeZone, resolveCharTimeZone } from '../utils/timezone';
+import { characterDiaryInstructions } from '../utils/characterDiary';
 import { loadCharacterContextMessages } from '../utils/chatContextRange';
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -165,8 +167,8 @@ const JournalApp: React.FC = () => {
         }).catch(() => { if (isCurrent()) addToast('日记读取失败，请重试', 'error'); });
     });
 
-    const openEntry = (date: string) => {
-        const existing = diaries.find(d => d.date === date);
+    const openEntry = (date: string, kind: 'exchange' | 'character' = 'exchange', entryId?: string) => {
+        const existing = diaries.find(d => entryId ? d.id === entryId : d.date === date && (d.kind || 'exchange') === kind);
         if (existing) {
             setCurrentEntry(existing);
             // Default to char tab if they replied
@@ -174,7 +176,8 @@ const JournalApp: React.FC = () => {
         } else {
             // New Entry — 打 autoSync=true, 后续不在列表里显示手动归档按钮
             setCurrentEntry({
-                id: `diary-${Date.now()}`,
+                id: `diary-${crypto.randomUUID()}`,
+                kind,
                 charId: selectedChar!.id,
                 date: date,
                 userPage: { text: '', paperStyle: 'grid', stickers: [] },
@@ -182,7 +185,7 @@ const JournalApp: React.FC = () => {
                 isArchived: false,
                 autoSync: true,
             });
-            setActiveTab('user');
+            setActiveTab(kind === 'character' ? 'char' : 'user');
         }
         setMode('write');
         setSelectedDate(date);
@@ -268,6 +271,7 @@ const JournalApp: React.FC = () => {
             : '';
         return {
             type: 'diary_card',
+            diaryKind: entry.kind || 'exchange',
             date: entry.date,
             charName: char.name,
             charAvatar: char.avatar || '',
@@ -446,11 +450,13 @@ const JournalApp: React.FC = () => {
             addToast('配置错误或内容为空', 'error');
             return;
         }
-        if (!currentEntry.userPage.text.trim()) {
+        if (currentEntry.kind !== 'character' && !currentEntry.userPage.text.trim()) {
             addToast('请先写下今天的日记', 'info');
             return;
         }
 
+        if (isThinking) return;
+        const independent = currentEntry.kind === 'character';
         const isRewrite = Boolean(currentEntry.charPage);
         setIsThinking(true);
         addToast(isRewrite ? `正在请 ${selectedChar.name} 重新写这篇日记…` : `正在请 ${selectedChar.name} 写交换日记…`, 'info');
@@ -476,13 +482,17 @@ const JournalApp: React.FC = () => {
             // charAvatar 的 base64 data URL + 双方日记全文。重新生成时这张卡已在历史里，
             // 直接 dump 原始 content 会把 base64 头像和 JSON 结构整个灌进 prompt，
             // 造成 token 异常膨胀。normalize 后日记卡会被压成一行摘要，不再泄漏 base64/JSON。
-            const recentContext = recentMsgs.map(m => {
+            const recentContext = recentMsgs.filter(m => {
+                const d = nowInTimeZone(resolveCharTimeZone(selectedChar), new Date(m.timestamp));
+                const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+                return key <= currentEntry.date;
+            }).map(m => {
                 const content = normalizeMessageContent(m, selectedChar.name, userProfile.name);
                 return `[${new Date(m.timestamp).toLocaleTimeString()}] ${m.role === 'user' ? 'User' : 'You'}: ${content}`;
             }).join('\n');
 
             systemPrompt += `### [Exchange Diary Mode Instructions]
-你正在和用户进行【交换日记】互动。
+${independent ? '你正在写自己的个人日记。' : '你正在和用户进行【交换日记】互动。'}
 
 ### 关键：最近发生的互动 (Recent Context)
 这是你们最近在聊天软件或见面时的对话记录。请**务必**阅读这些记录，并在日记中提及今天发生的具体事情（例如聊过的话题、去过的地方、用户发过的图片）。
@@ -492,12 +502,8 @@ ${recentContext}
 [RECENT LOGS END]
 
 ### 任务
-1. 阅读用户今天的日记 (${currentEntry.date})。
-2. 以你的角色口吻写一篇**回复日记**。
-   - 首先结合上文的聊天记录，回应用户的内容。
-   - 最重要的是分享你的生活，此条为必须项**务必说至少一件用户不知道的，你今天做的事情，尽量与用户无关！用户希望看到角色完全独立的一面**。
-   - 语言风格在符合设定的基础上，应该更加书面化和诗意，不过一切以角色性格优先。
-3. 选择适合你心情的信纸和贴纸。
+${characterDiaryInstructions(independent, currentEntry.date)}
+选择适合你心情的信纸和贴纸。
 
 ### 关于贴纸 (Stickers)
 你可以使用默认的 Emoji，也可以使用【Custom Stickers】。
@@ -521,7 +527,7 @@ Structure:
                     model: apiConfig.model,
                     messages: (await ContextBuilder.buildCharacterRequest(characterContextInput, [
                         { role: 'system', content: systemPrompt },
-                        { role: 'user', content: `Users Diary:\n${currentEntry.userPage.text}` }
+                        { role: 'user', content: independent ? `请写你自己的 ${currentEntry.date} 日记。` : `Users Diary:\n${currentEntry.userPage.text}` }
                     ])),
                     temperature: 0.85
                 })
@@ -809,7 +815,7 @@ ${charPart}
             <div className="opacity-20 animate-pulse"><img src={twemojiUrl('1f48c')} alt="letter" className="w-12 h-12" /></div>
             {isThinking ? (
                 <div className="space-y-2">
-                    <p className="text-sm font-medium text-amber-500">对方正在阅读你的日记...</p>
+                    <p className="text-sm font-medium text-amber-500">{currentEntry?.kind === 'character' ? 'TA 正在写自己的日记…' : '对方正在阅读你的日记…'}</p>
                     <div className="flex justify-center gap-1">
                         <div className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-bounce"></div>
                         <div className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-bounce delay-100"></div>
@@ -818,12 +824,12 @@ ${charPart}
                 </div>
             ) : (
                 <>
-                    <p className="text-sm">写完日记后，点击下方按钮<br/>邀请 {selectedChar?.name} 交换日记。</p>
+                    <p className="text-sm">{currentEntry?.kind === 'character' ? `让 ${selectedChar?.name} 写下自己的这一天。` : <>写完日记后，点击下方按钮<br/>邀请 {selectedChar?.name} 交换日记。</>}</p>
                     <button
-                        onClick={handleExchange}
+                        onClick={() => void handleExchange()}
                         className="px-6 py-3 bg-amber-500 hover:bg-amber-400 text-white text-sm font-bold rounded-full shadow-[0_0_20px_rgba(245,158,11,0.3)] active:scale-95 transition-all mt-2"
                     >
-                        查看 TA 的今日
+                        {currentEntry?.kind === 'character' ? '让 TA 写日记' : '查看 TA 的今日'}
                     </button>
                 </>
             )}
@@ -1025,24 +1031,25 @@ ${charPart}
                 </div>
 
                 <div className="sully-journal-calendar-list flex-1 overflow-y-auto p-5 pb-20 no-scrollbar">
+                    <button onClick={() => openEntry((()=>{const d=nowInTimeZone(resolveCharTimeZone(selectedChar));return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;})(), 'character')} className="w-full py-4 mb-3 rounded-2xl bg-amber-100 text-amber-900 font-bold">✎ TA 的独立日记 · 不用我先写</button>
                     <button onClick={() => openEntry(getLocalDateStr())} className="sully-journal-new-entry w-full py-5 mb-8 border-2 border-dashed border-amber-200 rounded-2xl text-amber-500 font-bold flex items-center justify-center gap-2 hover:bg-amber-50 active:scale-95 transition-all">
                         <span className="text-xl">+</span> 写今天的日记
                     </button>
                     
                     <div className="space-y-4">
                         {diaries.map(d => (
-                            <div key={d.id} onClick={() => openEntry(d.date)} className="sully-journal-entry flex items-center gap-4 p-4 rounded-2xl bg-white border border-slate-100 shadow-sm active:scale-95 transition-all hover:shadow-md cursor-pointer relative overflow-hidden group">
+                            <div key={d.id} onClick={() => openEntry(d.date, d.kind || 'exchange', d.id)} className="sully-journal-entry flex items-center gap-4 p-4 rounded-2xl bg-white border border-slate-100 shadow-sm active:scale-95 transition-all hover:shadow-md cursor-pointer relative overflow-hidden group">
                                 <div className="sully-journal-entry-accent absolute left-0 top-0 bottom-0 w-1 bg-amber-400"></div>
                                 <div className="sully-journal-entry-date w-14 h-14 bg-amber-50 rounded-xl flex flex-col items-center justify-center text-amber-800 shrink-0 border border-amber-100">
                                     <span className="text-[10px] font-bold opacity-60">{d.date.split('-')[1]}月</span>
                                     <span className="text-xl font-bold leading-none">{d.date.split('-')[2]}</span>
                                 </div>
                                 <div className="flex-1 min-w-0">
-                                    <p className="sully-journal-entry-text text-sm text-slate-700 truncate font-medium">{d.userPage.text || '(空)'}</p>
+                                    <p className="sully-journal-entry-text text-sm text-slate-700 truncate font-medium">{(d.kind === 'character' ? d.charPage?.text : d.userPage.text) || '(空)'}</p>
                                     <div className="flex justify-between items-center mt-1">
                                         <p className="sully-journal-entry-year text-xs text-slate-400 font-mono">{d.date.split('-')[0]}</p>
                                         <div className="sully-journal-entry-badges flex gap-2">
-                                            {d.charPage && <span className="px-2 py-0.5 bg-green-100 text-green-600 rounded-full text-[9px] font-bold">已回复</span>}
+                                            {d.charPage && <span className="px-2 py-0.5 bg-green-100 text-green-600 rounded-full text-[9px] font-bold">{d.kind === 'character' ? '个人日记' : '已回复'}</span>}
                                             {d.chatCardMessageId && <span className="px-2 py-0.5 bg-emerald-50 text-emerald-500 rounded-full text-[9px] font-bold">同步聊天</span>}
                                             {d.isArchived && <span className="px-2 py-0.5 bg-amber-100 text-amber-600 rounded-full text-[9px] font-bold">已归档</span>}
                                         </div>
@@ -1220,7 +1227,7 @@ ${charPart}
                     <div className="flex gap-3">
                         {activeTab === 'char' && currentEntry?.charPage && !isThinking && (
                             <button
-                                onClick={handleExchange}
+                                onClick={() => void handleExchange()}
                                 className="w-11 h-11 bg-white/10 text-white rounded-full flex items-center justify-center active:scale-90 transition-transform border border-white/5"
                                 title="重新写角色日记"
                                 aria-label="重新写角色日记"

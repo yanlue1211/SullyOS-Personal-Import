@@ -37,6 +37,8 @@ const Appearance = lazyApp(() => import('../apps/Appearance'));
 const Gallery = lazyApp(() => import('../apps/Gallery'));
 const DateApp = lazyApp(() => import('../apps/DateApp'));
 const UserApp = lazyApp(() => import('../apps/UserApp'));
+const TaobaoApp = lazyApp(() => import('../apps/CommerceApp'));
+const MeituanApp = lazyApp(() => import('../apps/MeituanApp'));
 const JournalApp = lazyApp(() => import('../apps/JournalApp'));
 const ScheduleApp = lazyApp(() => import('../apps/ScheduleApp'));
 const RoomApp = lazyApp(() => import('../apps/RoomApp'));
@@ -90,7 +92,7 @@ const APP_BY_ID: Partial<Record<AppID, PreloadableLazy>> = {
   [AppID.Settings]: Settings, [AppID.Character]: Character, [AppID.Chat]: Chat,
   [AppID.GroupChat]: GroupChat, [AppID.ThemeMaker]: ThemeMaker, [AppID.Appearance]: Appearance,
   [AppID.Gallery]: Gallery, [AppID.Date]: DateApp, [AppID.User]: UserApp,
-  [AppID.Journal]: JournalApp, [AppID.Schedule]: ScheduleApp, [AppID.Room]: RoomApp,
+  [AppID.Taobao]: TaobaoApp, [AppID.Meituan]: MeituanApp, [AppID.Journal]: JournalApp, [AppID.Schedule]: ScheduleApp, [AppID.Room]: RoomApp,
   [AppID.CheckPhone]: CheckPhone, [AppID.Social]: SocialApp, [AppID.Study]: StudyApp,
   [AppID.FriendFeed]: FriendFeedApp,
   [AppID.FAQ]: FAQApp, [AppID.Game]: GameApp, [AppID.Worldbook]: WorldbookApp,
@@ -972,6 +974,8 @@ const PhoneShell: React.FC = () => {
       case AppID.Gallery: return <Gallery />;
       case AppID.Date: return <DateApp />; 
       case AppID.User: return <UserApp />;
+      case AppID.Taobao: return <TaobaoApp />;
+      case AppID.Meituan: return <MeituanApp />;
       case AppID.Journal: return <JournalApp />; 
       case AppID.Schedule: return <ScheduleApp />;
       case AppID.Room: return <RoomApp />; 
