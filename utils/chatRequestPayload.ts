@@ -1,3 +1,4 @@
+import { buildRecentListenBlock, buildListenSongGuide, collectListenCandidates, isListenSongEnabled, isSongListeningAvailable } from './songListening';
 import { getMemoryPalaceHighWaterMarkForContext, selectCharacterContextMessages } from './chatContextRange';
 import { expandHomeContextHistory } from './homeContextSegments';
 import { protectPendingChatTurn } from './storyTheaterTimeline';
@@ -403,6 +404,17 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
     systemPrompt += outputStylePrompt;
 
     const messagesWithWorldbookDepth = parts.history;
+
+    const listenMemory = buildRecentListenBlock(char, userProfile?.name || '用户');
+    if (listenMemory) volatileTail += `\n${listenMemory}`;
+    if (input.recallEntryPoint === 'chat_app' && isSongListeningAvailable() && isListenSongEnabled(char)) {
+      try {
+        const choices = await collectListenCandidates(char, userProfile?.name || '用户');
+        const guide = buildListenSongGuide(choices, userProfile?.name || '用户');
+        if (guide) volatileTail += `\n${guide}`;
+      } catch (error) { console.warn('[audio-listening] 候选歌曲加载失败', error); }
+    }
+
 
     // ── 9. 麦当劳小程序上下文（购物车/菜单实时快照 → 易变尾段） ──
     const mcdActive = !!mcdMiniSnap?.open;
