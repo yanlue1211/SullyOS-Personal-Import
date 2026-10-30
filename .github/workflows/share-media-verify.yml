@@ -23,6 +23,6 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Focused share regression tests
-        run: pnpm exec vitest run utils/shareCardImages.test.ts utils/videoParser.test.ts utils/xhsMcpClient.test.ts
+        run: pnpm exec vitest run utils/shareCardImages.test.ts utils/videoParser.test.ts utils/xhsMcpClient.test.ts utils/personalInnerVoice.test.ts
       - name: Production build
         run: pnpm run build
