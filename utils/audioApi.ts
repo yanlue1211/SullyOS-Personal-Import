@@ -190,7 +190,13 @@ export async function fetchSongAudio(song: Song, cfg: MusicCfg, quality: AudioAp
       lastError = new Error('音频太大');
       continue;
     }
-    const blob = await downloadAudio(url);
+    let blob: Blob;
+    try {
+      blob = await downloadAudio(url);
+    } catch (error) {
+      // 浏览器里播放器可以使用跨源音频 URL，但 fetch() 下载需要 CDN 允许 CORS。
+      throw new Error('已取得歌曲播放地址，但无法下载音频供模型识别（可能是跨域/CORS 或网络限制）：' + (error instanceof Error ? error.message : String(error)));
+    }
     if (blob.size > MAX_AUDIO_BYTES) { lastError = new Error('音频太大'); continue; }
     return { blob, nameHint: url, isTrial: !!item.freeTrialInfo };
   }
