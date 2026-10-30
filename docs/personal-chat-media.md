@@ -1,0 +1,15 @@
+# 个人扩展：聊天媒体
+
+基于 `personal/audio-listening`，功能分支 `personal/chat-media`。
+
+私聊输入栏上方新增「语音 / 虚拟图片 / 视频」。真实录音最多 120 秒，支持停止、试听、重录、发送。关闭面板、切换角色、退出组件时停止采集；异步麦克风授权返回后若会话已退出，立即释放媒体流。
+
+录音先转为 16kHz 单声道 PCM WAV，保存进现有 blob_assets；消息类型为 `audio`，content 为 blobref，metadata 保存 duration/fileName。使用现有整包二进制备份和孤儿引用扫描，不把 object URL 写进数据库。纯文字导出只保留说明。
+
+对话构建使用已有音迹 audioApi 配置，调用 materializeAudioDescriptions。识别结果写回 audioDescription 并缓存；主模型只接收转写与声音说明。未配置/失败时只提供「尚未识别」，不得推测用户原话。录音本身仍可回放，下次构建可重试识别。该配置来自现有设置，不另存密钥。
+
+虚拟消息继续使用 text 类型，内容为 `[[虚拟图片:描述]]`、`[[虚拟视频:描述]]`、`[[虚拟语音:文字]]`。无数据迁移；原始文字备份可保留完整内容。char 的输出指南随聊天系统提示注入，分段器保护多行卡片为原子块，消息视图用同一组件呈现 user/char 卡片。虚拟视频不包含真实视频文件；虚拟语音是可展开文字的模拟语音条。
+
+核心接点：Chat.tsx（入口和发送）、MessageItem.tsx（呈现）、chatParser.ts（原子分段）、chatPrompts.ts（输出规则和历史）、chatRequestPayload.ts（音频识别）、types.ts（audio 类型）。实现集中在 features/personal/chatMedia。合并上游时保留这些小接点。
+
+验证：媒体格式经 sanitize 后仍可解析、多行卡片不拆开、WAV 头和 PCM 边界正确、音频引用不泄漏到主模型、切换会话释放麦克风、退出后迟到授权释放麦克风。还需真实设备验收麦克风权限、录音回放和当前音频 API 的实际识别。
