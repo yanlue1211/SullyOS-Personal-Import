@@ -46,6 +46,8 @@ export interface VideoShareInfo {
   images?: string[];
   /** Direct media URL when supplied by the parser; may be cross-origin or expire. */
   videoUrl?: string;
+  /** Sampled video frames, only when browser CORS permits canvas reads. */
+  frames?: { timeSeconds: number; image: string }[];
 }
 
 /** 抓取并解析后的网页结构。卡片 metadata 存这一份。 */
