@@ -412,7 +412,7 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
 
     // 用户在聊天功能菜单独立启用；不依赖模型是否生成音乐卡片。
     // 未分析过时等待客观音频分析完成，命中缓存则直接提供给主模型。
-    if (isRealSongListeningEnabled(char) && isSongListeningAvailable() && isListeningTogether) {
+    if (isRealSongListeningEnabled(char) && isSongListeningAvailable() && (input.musicSnapshot?.playing ?? !!userListeningContext)) {
       const currentSong = input.musicSnapshot?.current;
       if (currentSong) {
         try {
