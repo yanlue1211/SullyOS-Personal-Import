@@ -141,6 +141,8 @@ const loadCfg = (): MusicCfg => {
  * MusicCfg。走 localStorage 持久化层，不挂 Context。
  */
 export const loadMusicCfgStandalone = (): MusicCfg => loadCfg();
+export const loadLocalAlbumStandalone = (): Song[] => loadLocalAlbum();
+export const loadNeteaseUidStandalone = (): number | null => null;
 
 /**
  * 实时播放快照 — 给 OSContext 主动消息流程读，避免 OSProvider 在 MusicProvider
@@ -177,6 +179,8 @@ export const loadMusicPlaybackSnapshot = (): MusicPlaybackSnapshot | null => __m
  */
 let __musicHooks: PostProcessMusicHooks | null = null;
 export const loadMusicHooks = (): PostProcessMusicHooks | null => __musicHooks;
+let __musicControl: { playSong: (song: Song) => Promise<void> } | null = null;
+export const loadMusicControl = () => __musicControl;
 
 const saveCfg = (cfg: MusicCfg) => {
   try { localStorage.setItem(LS_CFG_KEY, JSON.stringify(cfg)); } catch {}
@@ -923,6 +927,11 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       },
       joinListeningTogether: (cid: string) => {
         addListeningPartner(cid);
+        if (current) {
+          void import('../utils/songListening').then(({ startSongListen, isSongListeningAvailable }) => {
+            if (isSongListeningAvailable()) void startSongListen(cid, current, 'together');
+          }).catch(error => console.warn('[audio-listening] 一起听失败', error));
+        }
       },
       addSongToCharPlaylist: async (cid, song, target) => {
         try {
@@ -1019,6 +1028,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     regeneratingId, regeneratingStatus, markRegenerating,
   };
 
+  __musicControl = { playSong };
   return <MusicContext.Provider value={value}>{children}</MusicContext.Provider>;
 };
 
