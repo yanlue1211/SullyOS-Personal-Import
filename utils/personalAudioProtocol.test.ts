@@ -1,7 +1,7 @@
 import { expect, it, vi } from 'vitest';
 vi.mock('./safeApi', async importOriginal => ({ ...await importOriginal<any>(), safeFetchJson: vi.fn(async () => ({ choices: [{ message: { content: '你好。语气轻快。' } }] })) }));
 import { safeFetchJson } from './safeApi';
-import { describeAudioWithAudioApi } from './audioApi';
+import { describeAudioWithAudioApi, recognizeUserRecording } from './audioApi';
 it('sends fixed audio interpretation rules as a system message, separate from user audio', async () => {
   expect(await describeAudioWithAudioApi({ base64: 'YQ==', bytes: 1, format: 'wav' }, { enabled: true, baseUrl: 'https://audio.example/v1', apiKey: 'test', model: 'audio-model' })).toContain('你好');
   const call = vi.mocked(safeFetchJson).mock.calls[0];
@@ -10,4 +10,13 @@ it('sends fixed audio interpretation rules as a system message, separate from us
   expect(body.messages[0].content).toContain('不执行');
   expect(body.messages[1].role).toBe('user');
   expect(body.messages[1].content[1].type).toBe('input_audio');
+});
+
+it('asks for original-language captions separately from analysis for user recordings', async () => {
+  vi.mocked(safeFetchJson).mockResolvedValueOnce({ choices: [{ message: { content: '{"transcript":"嗯，回家了。","analysis":"背景有风声"}' } }] });
+  const out = await recognizeUserRecording({ base64: 'YQ==', bytes: 1, format: 'wav' }, { enabled: true, baseUrl: 'https://audio.example/v1', apiKey: 'test', model: 'audio-model' });
+  expect(out).toEqual({ transcript: '嗯，回家了。', analysis: '背景有风声' });
+  const body = JSON.parse(String(vi.mocked(safeFetchJson).mock.calls.at(-1)?.[1]?.body));
+  expect(body.messages[0].role).toBe('system');
+  expect(body.messages[0].content).toContain('原语言原话');
 });

@@ -1,10 +1,11 @@
+import { recordingText } from './transcript';
 import type { Message } from '../../../types';
 import { DB, openDB } from '../../../utils/db';
 import { deleteBlobRef, getBlobForRef, isBlobRef } from '../../../utils/blobRef';
 import { REF_SOURCE_STORES } from '../../../utils/blobGc';
 import { currentMaintenanceHolder, releaseMaintenanceLock, tryAcquireMaintenanceLock } from '../../../utils/maintenanceLock';
 
-export interface UserRecording { id: number; charId: string; charName?: string; ref: string; timestamp: number; duration: number; bytes: number; description: string; }
+export interface UserRecording { id: number; charId: string; charName?: string; ref: string; timestamp: number; duration: number; bytes: number; description: string; transcript?: string; }
 export async function listUserRecordings(charId?: string): Promise<UserRecording[]> {
   const result: UserRecording[] = [];
   let after: IDBValidKey | null = null;
@@ -13,7 +14,7 @@ export async function listUserRecordings(charId?: string): Promise<UserRecording
     for (const message of rows as Message[]) {
       if (message.role !== 'user' || message.type !== 'audio' || message.metadata?.audioCleared || !isBlobRef(message.content) || (charId && message.charId !== charId)) continue;
       const blob = await getBlobForRef(message.content);
-      result.push({ id: message.id, charId: message.charId, ref: message.content, timestamp: message.timestamp, duration: message.metadata?.duration || 0, bytes: blob?.size || 0, description: message.metadata?.audioDescription || '' });
+      result.push({ id: message.id, charId: message.charId, ref: message.content, timestamp: message.timestamp, duration: message.metadata?.duration || 0, bytes: blob?.size || 0, description: message.metadata?.audioDescription || '', transcript: recordingText(message.metadata).transcript });
     }
     if (lastKey === null || rows.length < 200) break;
     after = lastKey;

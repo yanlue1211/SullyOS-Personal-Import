@@ -1,10 +1,21 @@
-import RecordingManager from './RecordingManager';
 import React, { useEffect, useRef, useState } from 'react';
+import { Microphone, ChatText, Image, VideoCamera, X, ArrowUp, ArrowCounterClockwise } from '@phosphor-icons/react';
 import { virtualMedia, type VirtualMediaKind } from './format';
-export default function MediaComposer({ conversationId, onSend, onRecordingsChanged, recordingOnly = false, disabled = false, onRecordingStart, onBusyChange }: { recordingOnly?: boolean; disabled?: boolean; onRecordingStart?: () => void; onBusyChange?: (busy: boolean) => void; onRecordingsChanged: () => void | Promise<void>; conversationId: string; onSend: (content: string, audio?: Blob, duration?: number, signal?: AbortSignal) => Promise<void> }) {
-  const [managerOpen, setManagerOpen] = useState(false);
-  const [mode, setMode] = useState<VirtualMediaKind | '录音'>('录音');
-  const [visible, setVisible] = useState(false);
+interface Props {
+  conversationId: string;
+  onSend: (content: string, audio?: Blob, duration?: number, signal?: AbortSignal) => Promise<void>;
+  recordingOnly?: boolean;
+  visualOnly?: boolean;
+  disabled?: boolean;
+  dark?: boolean;
+  onRecordingStart?: () => void;
+  onBusyChange?: (busy: boolean) => void;
+  onClose?: () => void;
+  sheet?: boolean;
+  onRecordingsChanged?: () => void | Promise<void>;
+}
+export default function MediaComposer({ conversationId, onSend, recordingOnly = false, visualOnly = false, disabled = false, dark = false, onRecordingStart, onBusyChange, onClose, sheet = false }: Props) {
+  const [mode, setMode] = useState<VirtualMediaKind | '录音'>(visualOnly ? '图片' : '录音');
   const [text, setText] = useState('');
   const [blob, setBlob] = useState<Blob>();
   const [seconds, setSeconds] = useState(0);
@@ -14,63 +25,86 @@ export default function MediaComposer({ conversationId, onSend, onRecordingsChan
   const recorder = useRef<MediaRecorder>();
   const stream = useRef<MediaStream>();
   const epoch = useRef(0);
+  const held = useRef(false);
   const sendAbort = useRef<AbortController>();
+  const timer = useRef<ReturnType<typeof setInterval>>();
+  const swipe = useRef<{ x: number; y: number }>();
   useEffect(() => { onBusyChange?.(busy || recording); }, [busy, recording, onBusyChange]);
   useEffect(() => () => onBusyChange?.(false), [onBusyChange]);
-  const timer = useRef<ReturnType<typeof setInterval>>();
-  const cleanup = () => { sendAbort.current?.abort(); epoch.current++; clearInterval(timer.current); if (recorder.current?.state === 'recording') recorder.current.stop(); stream.current?.getTracks().forEach(t => t.stop()); };
+  const cleanup = () => {
+    held.current = false; sendAbort.current?.abort(); epoch.current++; clearInterval(timer.current);
+    if (recorder.current?.state === 'recording') recorder.current.stop();
+    stream.current?.getTracks().forEach(track => track.stop());
+  };
   useEffect(() => () => cleanup(), []);
-  useEffect(() => { cleanup(); setVisible(false); setBlob(undefined); setRecording(false); setSeconds(0); setText(''); }, [conversationId]);
+  useEffect(() => { cleanup(); setBlob(undefined); setRecording(false); setSeconds(0); setText(''); }, [conversationId]);
+  const release = () => { held.current = false; if (recorder.current?.state === 'recording') recorder.current.stop(); };
   const start = async () => {
-    onRecordingStart?.();
-    setError(''); setBlob(undefined); setBusy(true);
+    if (disabled || busy || recording) return;
+    held.current = true; onRecordingStart?.(); setError(''); setBlob(undefined); setBusy(true);
     const token = ++epoch.current;
     let mic: MediaStream | undefined;
     try {
-      if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') throw new Error('当前环境不支持录音，请使用 HTTPS 浏览器并允许麦克风权限。');
+      if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') throw new Error('当前环境不支持录音，请使用 HTTPS 并允许麦克风权限。');
       mic = await navigator.mediaDevices.getUserMedia({ audio: true });
-      if (token !== epoch.current) { mic.getTracks().forEach(t => t.stop()); return; }
+      if (token !== epoch.current || !held.current) { mic.getTracks().forEach(track => track.stop()); return; }
       stream.current = mic;
-      const mimeType = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/ogg;codecs=opus'].find(t => MediaRecorder.isTypeSupported(t));
-      const rec = new MediaRecorder(mic, mimeType ? { mimeType } : undefined);
-      recorder.current = rec;
+      const mimeType = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/ogg;codecs=opus'].find(type => MediaRecorder.isTypeSupported(type));
+      const rec = new MediaRecorder(mic, mimeType ? { mimeType } : undefined); recorder.current = rec;
       const chunks: Blob[] = [];
-      rec.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+      rec.ondataavailable = event => { if (event.data.size) chunks.push(event.data); };
       rec.onstop = () => {
-        mic?.getTracks().forEach(t => t.stop()); clearInterval(timer.current);
+        mic?.getTracks().forEach(track => track.stop()); clearInterval(timer.current);
         if (token !== epoch.current) return;
-        setRecording(false);
+        setRecording(false); held.current = false;
         const result = new Blob(chunks, { type: rec.mimeType });
         if (result.size) setBlob(result); else setError('录音为空，请重试。');
       };
-      rec.onerror = () => { cleanup(); setRecording(false); setError('录音中断，请重新录制。'); };
+      rec.onerror = () => { cleanup(); setRecording(false); setBusy(false); setError('录音中断，请重新录制。'); };
       rec.start(); setSeconds(0); setRecording(true);
       const started = performance.now();
-      timer.current = setInterval(() => { const elapsed = (performance.now() - started) / 1000; setSeconds(elapsed); if (elapsed >= 120 && rec.state === 'recording') rec.stop(); }, 200);
-    } catch (e) { mic?.getTracks().forEach(t => t.stop()); if (token === epoch.current) setError(e instanceof Error ? e.message : '无法访问麦克风'); }
+      timer.current = setInterval(() => { const elapsed = (performance.now() - started) / 1000; setSeconds(elapsed); if (elapsed >= 120) release(); }, 150);
+    } catch (e) { mic?.getTracks().forEach(track => track.stop()); if (token === epoch.current) setError(e instanceof Error ? e.message : '无法访问麦克风'); }
     finally { if (token === epoch.current) setBusy(false); }
   };
   const send = async () => {
-    setBusy(true); setError('');
-    const abort = new AbortController(); sendAbort.current = abort;
-    try { await onSend(mode === '录音' ? '[用户发送了一条真实语音]' : virtualMedia(mode, text), mode === '录音' ? blob : undefined, seconds, abort.signal); if (abort.signal.aborted) return; setText(''); setBlob(undefined); setVisible(false); }
-    catch (e) { if (!abort.signal.aborted) setError(e instanceof Error ? e.message : '发送失败，内容已保留，请重试。'); }
+    setBusy(true); setError(''); const abort = new AbortController(); sendAbort.current = abort;
+    try {
+      await onSend(mode === '录音' ? '[用户发送了一条真实语音]' : virtualMedia(mode, text), mode === '录音' ? blob : undefined, seconds, abort.signal);
+      if (abort.signal.aborted) return;
+      setText(''); setBlob(undefined); onClose?.();
+    } catch (e) { if (!abort.signal.aborted) setError(e instanceof Error ? e.message : '发送失败，内容已保留，请重试。'); }
     finally { setBusy(false); }
   };
-  return <div className="px-3 py-1 text-xs text-slate-600">
-    <button type="button" disabled={busy || disabled} onClick={() => { if (visible) { cleanup(); setRecording(false); } setVisible(!visible); }} className="rounded-full border px-3 py-1 bg-white/80">{recordingOnly ? '录制真实语音' : '语音 / 虚拟图片 / 视频'}</button>
-    <button type="button" disabled={recording || busy || disabled} onClick={() => setManagerOpen(true)} className="ml-2 rounded-full border px-3 py-1 bg-white/80">录音管理</button>
-    {managerOpen && <RecordingManager charId={conversationId} onClose={() => setManagerOpen(false)} onChanged={onRecordingsChanged} />}
-    {visible && <div className="mt-2 rounded-2xl bg-white border p-3 space-y-3">
-      <div className="flex flex-wrap gap-2">{(recordingOnly ? ['录音'] as const : ['录音', '语音', '图片', '视频'] as const).map(kind => <button type="button" disabled={recording || busy || disabled} key={kind} onClick={() => setMode(kind)} className={`px-2 py-1 rounded-lg ${mode === kind ? 'bg-amber-100' : 'bg-slate-100'}`}>{kind === '录音' ? '真实录音' : `虚拟${kind}`}</button>)}</div>
-      {mode === '录音' ? <div className="space-y-2"><p>最长 120 秒 · {Math.floor(seconds)} 秒</p><button type="button" disabled={busy || disabled} onClick={() => recording ? recorder.current?.stop() : void start()} className="rounded-lg bg-slate-100 px-3 py-2">{recording ? '结束录音' : blob ? '重新录制' : '开始录音'}</button>{blob && <Preview blob={blob} />}</div> : <textarea value={text} maxLength={4000} onChange={e => setText(e.target.value)} placeholder={mode === '语音' ? '输入语音文字' : `描述${mode}里的内容`} className="w-full border rounded-lg p-2 text-sm" />}
-      {error && <p role="alert" className="text-red-600">{error}</p>}
-      <button type="button" disabled={busy || disabled || recording || (mode === '录音' ? !blob : !text.trim())} onClick={() => void send()} className="rounded-lg bg-amber-100 px-4 py-2 disabled:opacity-40">{busy ? '处理中…' : '发送'}</button>
-    </div>}
-  </div>;
+  const modes = visualOnly ? ['图片', '视频'] as const : recordingOnly ? ['录音'] as const : ['录音', '语音'] as const;
+  const content = <section role={sheet ? 'dialog' : undefined} aria-modal={sheet || undefined} aria-label={visualOnly ? '虚拟影像' : '发送语音'}
+    onPointerDown={e => { if ((e.target as HTMLElement).closest('button, textarea, audio')) return; swipe.current = { x: e.clientX, y: e.clientY }; }}
+    onPointerUp={e => { const from = swipe.current; swipe.current = undefined; if (!from || recording || busy || recordingOnly) return; const dx = e.clientX - from.x; if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(e.clientY - from.y)) return; setMode(visualOnly ? dx > 0 ? '视频' : '图片' : dx > 0 ? '语音' : '录音'); }}
+    style={{ touchAction: 'pan-y' }}
+    className={`sully-media-composer ${dark ? 'bg-white/[0.04] text-white/80 border border-white/10' : 'bg-white text-slate-700'} ${sheet ? 'rounded-t-[28px] px-5 pt-4 pb-6 w-full shadow-xl' : 'rounded-2xl px-4 py-3 mx-3 mb-2'}`}>
+    <div className="flex items-center justify-between gap-3 mb-4"><div className="flex gap-5" role="tablist" aria-label="发送方式">{modes.map(kind => <button type="button" role="tab" aria-selected={kind === mode} disabled={recording || busy} key={kind} onClick={() => setMode(kind)} className={`flex items-center gap-1.5 pb-2 text-sm border-b-2 ${mode === kind ? dark ? 'text-white border-white font-medium' : 'text-slate-900 border-slate-900 font-medium' : dark ? 'text-white/40 border-transparent' : 'text-slate-400 border-transparent'}`}>{kind === '录音' ? <Microphone size={17} /> : kind === '语音' ? <ChatText size={17} /> : kind === '图片' ? <Image size={17} /> : <VideoCamera size={17} />}{kind === '录音' ? '真实语音' : `虚拟${kind}`}</button>)}</div>{onClose && <button type="button" aria-label="关闭语音面板" disabled={busy || recording} onClick={onClose} className="p-2 text-slate-400"><X size={19} /></button>}</div>
+    {mode === '录音' ? <div className="text-center select-none py-1">
+      {blob ? <div className="py-2"><Preview blob={blob} /><button type="button" disabled={busy} onClick={() => { setBlob(undefined); setSeconds(0); }} className="inline-flex gap-1 items-center mt-3 text-xs text-slate-400"><ArrowCounterClockwise size={14} />重新录制</button></div> : <>
+        <button type="button" aria-label="按住录音" disabled={disabled}
+          onContextMenu={e => e.preventDefault()}
+          onPointerDown={e => { if (e.button !== 0) return; e.preventDefault(); e.stopPropagation(); e.currentTarget.setPointerCapture?.(e.pointerId); void start(); }}
+          onPointerUp={e => { e.stopPropagation(); release(); }}
+          onPointerCancel={() => { cleanup(); setRecording(false); setBusy(false); }}
+          onLostPointerCapture={release}
+          onKeyDown={e => { if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) { e.preventDefault(); void start(); } }}
+          onKeyUp={e => { if (e.key === ' ' || e.key === 'Enter') release(); }}
+          style={{ touchAction: 'none', WebkitTouchCallout: 'none' }}
+          className={`w-20 h-20 rounded-full inline-flex items-center justify-center transition-colors ${recording ? 'bg-rose-100 text-rose-500' : dark ? 'bg-white/10 text-white/75' : 'bg-slate-100 text-slate-600'} disabled:opacity-50`}><Microphone size={34} weight={recording ? 'fill' : 'regular'} /></button>
+        <p className="text-sm mt-3">{recording ? `松开结束 · ${Math.floor(seconds)} 秒` : busy ? '正在获取麦克风权限' : '按住说话'}</p><p className={`text-[11px] mt-1 ${dark ? 'text-white/40' : 'text-slate-400'}`}>{recordingOnly ? '最长 2 分钟' : '右滑输入虚拟语音 · 最长 2 分钟'}</p>
+      </>}
+    </div> : <textarea rows={3} value={text} maxLength={4000} onChange={e => setText(e.target.value)} placeholder={mode === '语音' ? '输入想说的话…' : `描述${mode}中的画面…`} className="w-full bg-slate-50 rounded-2xl p-3 text-sm outline-none resize-none" />}
+    {error && <p role="alert" className="text-rose-500 text-xs mt-3">{error}</p>}
+    {(blob || mode !== '录音') && <div className="flex justify-end mt-3"><button type="button" disabled={busy || disabled || recording || (mode === '录音' ? !blob : !text.trim())} onClick={() => void send()} className="rounded-full bg-slate-800 text-white px-4 py-2 text-xs flex items-center gap-1 disabled:opacity-30">{busy ? '处理中…' : '发送'}<ArrowUp size={14} /></button></div>}
+  </section>;
+  return sheet ? <div className="fixed inset-0 z-[160] bg-black/25 flex items-end" onClick={e => { if (e.target === e.currentTarget && !busy && !recording) onClose?.(); }}>{content}</div> : content;
 }
 function Preview({ blob }: { blob: Blob }) {
   const [url, setUrl] = useState('');
-  useEffect(() => { const next = URL.createObjectURL(blob); setUrl(next); return () => URL.revokeObjectURL(next); }, [blob]);
-  return <audio src={url} controls className="w-full" />;
+  useEffect(() => { const value = URL.createObjectURL(blob); setUrl(value); return () => URL.revokeObjectURL(value); }, [blob]);
+  return <audio src={url} controls className="w-full h-10" />;
 }

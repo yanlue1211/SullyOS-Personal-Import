@@ -1,7 +1,7 @@
 import EmojiExportDialog from './EmojiExportDialog';
 import ChatCamera from './ChatCamera';
 import React, { useRef, useState, useEffect, useMemo } from 'react';
-import { ShareNetwork, Trash, Plus, Smiley, PaperPlaneTilt, Lightning, Money, BookOpenText, GearSix, Image, Lock, ArrowsClockwise, ChatCircleDots, CalendarBlank, ForkKnife, Coffee, Code, Brain, PencilSimple, BellSimpleRinging, Alarm, Sparkle, FadersHorizontal, LinkSimple, Star, Briefcase } from '@phosphor-icons/react';
+import { ShareNetwork, Trash, Plus, Smiley, PaperPlaneTilt, Lightning, Money, BookOpenText, GearSix, Image, Lock, ArrowsClockwise, ChatCircleDots, CalendarBlank, ForkKnife, Coffee, Code, Brain, PencilSimple, BellSimpleRinging, Alarm, Sparkle, FadersHorizontal, LinkSimple, Star, Briefcase, Microphone, Images } from '@phosphor-icons/react';
 import { CharacterProfile, ChatTheme, EmojiCategory, Emoji } from '../../types';
 import { PRESET_THEMES } from './ChatConstants';
 import TokenImg from '../os/TokenImg';
@@ -16,6 +16,7 @@ const ACTION_PAGE_SIZE = 8;
 
 interface ChatInputAreaProps {
     compactHome?: boolean;
+    personalMediaEnabled?: boolean;
 
     /** Initial page for static decoration previews; does not run menu actions. */
     previewActionsPage?: number;
@@ -86,7 +87,7 @@ interface ChatInputAreaProps {
 }
 
 const ChatInputArea: React.FC<ChatInputAreaProps> = ({
-    input, setInput, isTyping, selectionMode, compactHome=false,
+    input, setInput, isTyping, selectionMode, compactHome=false, personalMediaEnabled=false,
     showPanel, setShowPanel, onSend, onDeleteSelected, onForwardSelected, onFavoriteSelected, favoriteSelectedCount = 0, selectedCount,
     sendButtonGenerates = false, enterToSend = true, onGenerate,
     autoReplyEnabled = false, autoReplySeconds = null, onCancelAutoReply, onInputFocusChange,
@@ -485,7 +486,10 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
     const selectedEmojiNames = emojiSelectionMode ? new Set(selectedEmojis.map(se => se.name)) : new Set();
 
     // Keep one ordered list so removed or added entries cannot leave holes between pages.
+    const mediaTile = (key: string, label: string, icon: React.ReactNode) => <button key={key} onClick={() => onPanelAction(key)} className={`flex flex-col items-center gap-2 active:scale-95 transition-transform ${isDiscordStyle ? 'text-slate-200' : 'text-slate-600'}`}><span className={`w-14 h-14 rounded-2xl grid place-items-center border shadow-sm ${isDiscordStyle ? 'bg-slate-800 border-slate-600 text-slate-200' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>{icon}</span><span className="text-xs font-bold">{label}</span></button>;
+    const firstPageOrder = ['voice-input', 'virtual-media', 'image', 'transfer', 'poke', 'reroll', 'meetup', 'settings'];
     const actionTiles = [
+        ...(personalMediaEnabled ? [mediaTile('voice-input', '语音', <Microphone className="w-6 h-6" />), mediaTile('virtual-media', '图片／视频', <Images className="w-6 h-6" />)] : []),
         <button key="collaboration" onClick={() => onPanelAction('collaboration')} className={`flex flex-col items-center gap-2 active:scale-95 transition-transform ${acnh ? 'text-[#725d42]' : isDiscordStyle ? 'text-slate-200' : 'text-slate-600'}`}>
             <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm border ${acnh ? 'bg-white/70 border-[#e6dab4] text-[#7c6ee6]' : isDiscordStyle ? 'bg-slate-800 text-indigo-300 border-indigo-400/20' : 'bg-indigo-50 text-indigo-500 border-indigo-100'}`}>
                 <Briefcase className="w-6 h-6" weight="fill" />
@@ -663,7 +667,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
           <span className={`w-14 h-14 rounded-2xl grid place-items-center shadow-sm border ${acnh ? 'bg-white/70 border-[#e6dab4]' : isDiscordStyle ? 'bg-slate-800 border-slate-600' : 'bg-slate-50 border-slate-200'}`}><BookOpenText className="w-6 h-6" weight="bold" /></span>
           <span className="text-xs font-bold">导出记录</span>
         </button>
-    ].filter(tile=>!compactHome||['transfer','poke','image','reroll','memory-link','favorites'].includes(String(tile.key)));
+    ].filter(tile=>!compactHome||['voice-input','virtual-media','transfer','poke','image','reroll','memory-link','favorites'].includes(String(tile.key))).sort((a,b) => { if (!personalMediaEnabled) return 0; const rank = (key: string) => key === 'schedule' ? 8 : firstPageOrder.includes(key) ? firstPageOrder.indexOf(key) : 9; return rank(String(a.key)) - rank(String(b.key)); });
     const actionPageCount = Math.max(1, Math.ceil(actionTiles.length / ACTION_PAGE_SIZE));
     useEffect(() => setActionsPage(page => Math.min(page, actionPageCount - 1)), [actionPageCount]);
 

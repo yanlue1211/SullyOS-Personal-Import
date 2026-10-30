@@ -174,6 +174,8 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
     // 角色切换「登场」过场是否显示。切换/进入角色时由 useLayoutEffect 在绘制前置真，覆盖住加载、避免闪到新聊天。
     const [showEntry, setShowEntry] = useState(false);
     const [input, setInput] = useState('');
+    const [personalMediaPanel, setPersonalMediaPanel] = useState<'voice' | 'visual' | null>(null);
+    useEffect(() => setPersonalMediaPanel(null), [activeCharacterId]);
     const [isInputFocused, setIsInputFocused] = useState(false);
     const [showPanel, setShowPanel] = useState<'none' | 'actions' | 'emojis' | 'chars'>('none');
     const [collaborationOpen, setCollaborationOpen] = useState(false);
@@ -1803,6 +1805,8 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
             trackEvent('打开聊天功能面板项', { action: type });
         }
         switch (type) {
+            case 'voice-input': setShowPanel('none'); setPersonalMediaPanel('voice'); break;
+            case 'virtual-media': setShowPanel('none'); setPersonalMediaPanel('visual'); break;
             case 'export-chat': void handleExportChat(); break;
             case 'collaboration': setShowPanel('none'); setCollaborationOpen(true); break;
             case 'memory-link': setShowPanel('none'); setMemoryRepairOpen(true); break;
@@ -4464,7 +4468,7 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
                 {/* 开关写着「已开启」、这一轮却在本地生成时，把原因说给用户听 */}
                 <InstantChatRouteNotice charId={activeCharacterId} />
 
-                {!selectionMode && <PersonalMediaComposer key={char.id} conversationId={char.id} onRecordingsChanged={() => reloadMessages(visibleCountRef.current)} onSend={async (content, blob, duration, signal) => {
+                {!selectionMode && personalMediaPanel && <PersonalMediaComposer key={`${char.id}:${personalMediaPanel}`} sheet visualOnly={personalMediaPanel === 'visual'} onClose={() => setPersonalMediaPanel(null)} conversationId={char.id} onSend={async (content, blob, duration, signal) => {
                     if (blob) {
                         const wav = await recordingToWav(blob);
                         signal?.throwIfAborted();
@@ -4473,6 +4477,7 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
                     } else await handleSendText(content, 'text');
                 }} />}
                 <ChatInputArea
+                    personalMediaEnabled
                     compactHome={!!homePhone}
                     input={input} setInput={handleInputChange}
                     isTyping={isTyping || instantChatPending} selectionMode={selectionMode}
