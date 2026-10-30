@@ -34,6 +34,7 @@ export const SELF_SAFE_AREA_APPS: ReadonlySet<AppID> = new Set<AppID>([
     AppID.Browser,
     AppID.Songwriting,
     AppID.Music,
+    AppID.SongArchive,
     AppID.Call,
     AppID.VoiceDesigner,
     AppID.Guidebook,
