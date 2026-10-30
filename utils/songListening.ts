@@ -54,6 +54,61 @@ export const publishSongListenStatus = (message: string) => {
   } catch { /* diagnostics must not interrupt listening */ }
 };
 
+
+/** 聊天面板上的独立开关，默认关闭；不影响原版一起听。 */
+export const isRealSongListeningEnabled = (char: CharacterProfile | null | undefined): boolean =>
+  !!(char as any)?.realSongListeningEnabled;
+
+/** 读取每首歌唯一的客观声音描述，和角色音乐日记互相独立。 */
+export const getSongSoundCache = (songId: number): string => {
+  try { return localStorage.getItem('sully_song_sound_v1_' + songId) || ''; }
+  catch { return ''; }
+};
+
+const putSongSoundCache = (songId: number, text: string): void => {
+  try { localStorage.setItem('sully_song_sound_v1_' + songId, text); }
+  catch (error) { console.warn('[audio-listening] 歌曲缓存写入失败', error); }
+};
+
+/** 一次分析，所有角色复用；进行中的调用也按 songId 去重。 */
+const soundInFlight = new Map<number, Promise<string>>();
+export const getOrAnalyzeSongSound = (song: Song): Promise<string> => {
+  const cached = getSongSoundCache(song.id);
+  if (cached) { publishSongListenStatus('✅ 已复用歌曲客观分析：' + song.name); return Promise.resolve(cached); }
+  const inflight = soundInFlight.get(song.id);
+  if (inflight) return inflight;
+  const task = (async () => {
+    const config = loadAudioApiConfig();
+    if (!isAudioApiReady(config)) throw new Error('音频 API 尚未配置完成');
+    publishSongListenStatus('⏳ 正在获取歌曲音频：' + song.name);
+    const cfg = loadMusicCfgStandalone();
+    const audio = await fetchSongAudio(song, cfg, config.songQuality || 'exhigh');
+    publishSongListenStatus('⏳ 已获取音频（' + (audio.blob.size / 1048576).toFixed(1) + 'MB），正在生成客观分析…');
+    const { describeAudioWithAudioApi } = await import('./audioApi');
+    const description = await describeAudioWithAudioApi(await audioBlobToPayload(audio.blob, audio.nameHint), config);
+    const record = JSON.stringify({ description, isTrial: audio.isTrial, songName: song.name, artists: song.artists });
+    putSongSoundCache(song.id, record);
+    publishSongListenStatus('✅ 已保存歌曲客观分析：' + song.name);
+    return record;
+  })().catch(error => {
+    publishSongListenStatus('❌ 歌曲客观分析失败：' + (error instanceof Error ? error.message : String(error)));
+    throw error;
+  }).finally(() => soundInFlight.delete(song.id));
+  soundInFlight.set(song.id, task);
+  return task;
+};
+
+/** 在最新动态上下文区域插入，让主模型自行形成感受，而非每轮硬评歌曲。 */
+export const buildCurrentSongSoundBlock = (song: Song, record: string): string => {
+  try {
+    const parsed = JSON.parse(record);
+    return '\\n### 【当前播放歌曲的客观声音信息】\\n歌曲：' + song.name + ' — ' + song.artists
+      + (parsed.isTrial ? '\\n注意：仅分析到了试听片段，不代表整首歌。' : '')
+      + '\\n' + parsed.description
+      + '\\n以上是歌曲本身的声音特征，不是你写的听歌日记，也不代表你的主观评价。无需每轮提起音乐；自然回应当前对话即可。\\n';
+  } catch { return ''; }
+};
+
 const inFlight = new Map<string, Promise<SongListenOutcome>>();
 
 /**
