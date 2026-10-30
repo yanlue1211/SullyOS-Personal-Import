@@ -1,4 +1,4 @@
-import { VIRTUAL_MEDIA_GUIDE } from '../features/personal/chatMedia/format';
+import { VIRTUAL_MEDIA_GUIDE, RECORDING_HISTORY_GUIDE } from '../features/personal/chatMedia/format';
 import {secretNoteContext} from './secretNote';
 import { buildCharacterResponsePrinciples } from './characterResponsePrinciples';
 import { expandHomeContextHistory } from './homeContextSegments';
@@ -1081,7 +1081,7 @@ ${voiceActingGuide()}`;
             .join(' ');
         console.log(`⏱ [buildSystemPrompt] total=${perfTotal}ms | stable=${baseSystemPrompt.length}ch volatile=${volatileState.length}ch | ${timingStr}`);
 
-        return { stable: baseSystemPrompt + VIRTUAL_MEDIA_GUIDE, volatileState, recencyTail, history: context.history };
+        return { stable: baseSystemPrompt + VIRTUAL_MEDIA_GUIDE + RECORDING_HISTORY_GUIDE, volatileState, recencyTail, history: context.history };
     },
 
     // 格式化消息历史

@@ -1,7 +1,7 @@
 import RecordingManager from './RecordingManager';
 import React, { useEffect, useRef, useState } from 'react';
 import { virtualMedia, type VirtualMediaKind } from './format';
-export default function MediaComposer({ conversationId, onSend, onRecordingsChanged }: { onRecordingsChanged: () => void | Promise<void>; conversationId: string; onSend: (content: string, audio?: Blob, duration?: number) => Promise<void> }) {
+export default function MediaComposer({ conversationId, onSend, onRecordingsChanged, recordingOnly = false, disabled = false, onRecordingStart, onBusyChange }: { recordingOnly?: boolean; disabled?: boolean; onRecordingStart?: () => void; onBusyChange?: (busy: boolean) => void; onRecordingsChanged: () => void | Promise<void>; conversationId: string; onSend: (content: string, audio?: Blob, duration?: number, signal?: AbortSignal) => Promise<void> }) {
   const [managerOpen, setManagerOpen] = useState(false);
   const [mode, setMode] = useState<VirtualMediaKind | '录音'>('录音');
   const [visible, setVisible] = useState(false);
@@ -14,11 +14,15 @@ export default function MediaComposer({ conversationId, onSend, onRecordingsChan
   const recorder = useRef<MediaRecorder>();
   const stream = useRef<MediaStream>();
   const epoch = useRef(0);
+  const sendAbort = useRef<AbortController>();
+  useEffect(() => { onBusyChange?.(busy || recording); }, [busy, recording, onBusyChange]);
+  useEffect(() => () => onBusyChange?.(false), [onBusyChange]);
   const timer = useRef<ReturnType<typeof setInterval>>();
-  const cleanup = () => { epoch.current++; clearInterval(timer.current); if (recorder.current?.state === 'recording') recorder.current.stop(); stream.current?.getTracks().forEach(t => t.stop()); };
+  const cleanup = () => { sendAbort.current?.abort(); epoch.current++; clearInterval(timer.current); if (recorder.current?.state === 'recording') recorder.current.stop(); stream.current?.getTracks().forEach(t => t.stop()); };
   useEffect(() => () => cleanup(), []);
   useEffect(() => { cleanup(); setVisible(false); setBlob(undefined); setRecording(false); setSeconds(0); setText(''); }, [conversationId]);
   const start = async () => {
+    onRecordingStart?.();
     setError(''); setBlob(undefined); setBusy(true);
     const token = ++epoch.current;
     let mic: MediaStream | undefined;
@@ -48,19 +52,20 @@ export default function MediaComposer({ conversationId, onSend, onRecordingsChan
   };
   const send = async () => {
     setBusy(true); setError('');
-    try { await onSend(mode === '录音' ? '[用户发送了一条真实语音]' : virtualMedia(mode, text), mode === '录音' ? blob : undefined, seconds); setText(''); setBlob(undefined); setVisible(false); }
-    catch { setError('发送失败，内容已保留，请重试。'); }
+    const abort = new AbortController(); sendAbort.current = abort;
+    try { await onSend(mode === '录音' ? '[用户发送了一条真实语音]' : virtualMedia(mode, text), mode === '录音' ? blob : undefined, seconds, abort.signal); if (abort.signal.aborted) return; setText(''); setBlob(undefined); setVisible(false); }
+    catch (e) { if (!abort.signal.aborted) setError(e instanceof Error ? e.message : '发送失败，内容已保留，请重试。'); }
     finally { setBusy(false); }
   };
   return <div className="px-3 py-1 text-xs text-slate-600">
-    <button type="button" onClick={() => { if (visible) { cleanup(); setRecording(false); } setVisible(!visible); }} className="rounded-full border px-3 py-1 bg-white/80">语音 / 虚拟图片 / 视频</button>
-    <button type="button" disabled={recording || busy} onClick={() => setManagerOpen(true)} className="ml-2 rounded-full border px-3 py-1 bg-white/80">录音管理</button>
+    <button type="button" disabled={busy || disabled} onClick={() => { if (visible) { cleanup(); setRecording(false); } setVisible(!visible); }} className="rounded-full border px-3 py-1 bg-white/80">{recordingOnly ? '录制真实语音' : '语音 / 虚拟图片 / 视频'}</button>
+    <button type="button" disabled={recording || busy || disabled} onClick={() => setManagerOpen(true)} className="ml-2 rounded-full border px-3 py-1 bg-white/80">录音管理</button>
     {managerOpen && <RecordingManager charId={conversationId} onClose={() => setManagerOpen(false)} onChanged={onRecordingsChanged} />}
     {visible && <div className="mt-2 rounded-2xl bg-white border p-3 space-y-3">
-      <div className="flex flex-wrap gap-2">{(['录音', '语音', '图片', '视频'] as const).map(kind => <button type="button" disabled={recording || busy} key={kind} onClick={() => setMode(kind)} className={`px-2 py-1 rounded-lg ${mode === kind ? 'bg-amber-100' : 'bg-slate-100'}`}>{kind === '录音' ? '真实录音' : `虚拟${kind}`}</button>)}</div>
-      {mode === '录音' ? <div className="space-y-2"><p>最长 120 秒 · {Math.floor(seconds)} 秒</p><button type="button" disabled={busy} onClick={() => recording ? recorder.current?.stop() : void start()} className="rounded-lg bg-slate-100 px-3 py-2">{recording ? '结束录音' : blob ? '重新录制' : '开始录音'}</button>{blob && <Preview blob={blob} />}</div> : <textarea value={text} maxLength={4000} onChange={e => setText(e.target.value)} placeholder={mode === '语音' ? '输入语音文字' : `描述${mode}里的内容`} className="w-full border rounded-lg p-2 text-sm" />}
+      <div className="flex flex-wrap gap-2">{(recordingOnly ? ['录音'] as const : ['录音', '语音', '图片', '视频'] as const).map(kind => <button type="button" disabled={recording || busy || disabled} key={kind} onClick={() => setMode(kind)} className={`px-2 py-1 rounded-lg ${mode === kind ? 'bg-amber-100' : 'bg-slate-100'}`}>{kind === '录音' ? '真实录音' : `虚拟${kind}`}</button>)}</div>
+      {mode === '录音' ? <div className="space-y-2"><p>最长 120 秒 · {Math.floor(seconds)} 秒</p><button type="button" disabled={busy || disabled} onClick={() => recording ? recorder.current?.stop() : void start()} className="rounded-lg bg-slate-100 px-3 py-2">{recording ? '结束录音' : blob ? '重新录制' : '开始录音'}</button>{blob && <Preview blob={blob} />}</div> : <textarea value={text} maxLength={4000} onChange={e => setText(e.target.value)} placeholder={mode === '语音' ? '输入语音文字' : `描述${mode}里的内容`} className="w-full border rounded-lg p-2 text-sm" />}
       {error && <p role="alert" className="text-red-600">{error}</p>}
-      <button type="button" disabled={busy || recording || (mode === '录音' ? !blob : !text.trim())} onClick={() => void send()} className="rounded-lg bg-amber-100 px-4 py-2 disabled:opacity-40">{busy ? '处理中…' : '发送'}</button>
+      <button type="button" disabled={busy || disabled || recording || (mode === '录音' ? !blob : !text.trim())} onClick={() => void send()} className="rounded-lg bg-amber-100 px-4 py-2 disabled:opacity-40">{busy ? '处理中…' : '发送'}</button>
     </div>}
   </div>;
 }

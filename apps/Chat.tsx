@@ -4464,9 +4464,10 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
                 {/* 开关写着「已开启」、这一轮却在本地生成时，把原因说给用户听 */}
                 <InstantChatRouteNotice charId={activeCharacterId} />
 
-                {!selectionMode && <PersonalMediaComposer key={char.id} conversationId={char.id} onRecordingsChanged={() => reloadMessages(visibleCountRef.current)} onSend={async (content, blob, duration) => {
+                {!selectionMode && <PersonalMediaComposer key={char.id} conversationId={char.id} onRecordingsChanged={() => reloadMessages(visibleCountRef.current)} onSend={async (content, blob, duration, signal) => {
                     if (blob) {
                         const wav = await recordingToWav(blob);
+                        signal?.throwIfAborted();
                         const ref = await putImageBlob(wav);
                         await handleSendText(ref, 'audio', { duration, fileName: 'voice.wav' });
                     } else await handleSendText(content, 'text');

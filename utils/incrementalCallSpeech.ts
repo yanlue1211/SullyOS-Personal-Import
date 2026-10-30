@@ -1,3 +1,4 @@
+import { stripCallNarration } from '../features/personal/chatMedia/callFormat';
 import { parseCallAssistantMessage, stripCallTextFormatting } from './callReplyFormat';
 
 /** Consume cumulative SSE content. Never send incomplete reasoning/acting markup to TTS. */
@@ -7,7 +8,7 @@ export class IncrementalCallSpeech {
 
   update(raw: string, final = false): void {
     const safe = raw.replace(/<[^>]*$/, '').replace(/\[\[(?:(?!\]\])[^])*$/, '');
-    let content = parseCallAssistantMessage({ content: safe }).text;
+    let content = parseCallAssistantMessage({ content: stripCallNarration(safe) }).text;
     if (this.voiceOnly) {
       const voice = content.match(/<[语語]音(?=\s|>)[^>]*>([^]*?)(?:<\/[语語]音\s*>|$)/);
       if (!voice && !final) return;
