@@ -1,3 +1,5 @@
+import { materializeAudioDescriptions } from './audioApi';
+import { loadAudioApiConfig } from './songListening';
 import { buildListenSongGuide, collectListenCandidates, isListenSongEnabled, isSongListeningAvailable, isRealSongListeningEnabled, getOrAnalyzeSongSound, buildCurrentSongSoundBlock } from './songListening';
 import { getMemoryPalaceHighWaterMarkForContext, selectCharacterContextMessages } from './chatContextRange';
 import { expandHomeContextHistory } from './homeContextSegments';
@@ -281,6 +283,11 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
         historyMsgsForPrompt = selectedHistory.map(message => preparedById.get(message.id) || message);
         recentMsgsHint = rawRecentMsgsHint.map(message => preparedById.get(message.id) || message);
     }
+
+    historyMsgsForPrompt = await materializeAudioDescriptions(historyMsgsForPrompt, loadAudioApiConfig());
+    const audioById = new Map(historyMsgsForPrompt.map(message => [message.id, message]));
+    recentMsgsHint = recentMsgsHint.map(message => audioById.get(message.id) || message);
+    input.signal?.throwIfAborted();
 
     // Range/vision processing must retain database IDs. Only after those steps may
     // legacy home rows expand into their actual speakers and chronological events.

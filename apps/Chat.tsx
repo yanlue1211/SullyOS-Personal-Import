@@ -1,3 +1,5 @@
+import { recordingToWav } from '../features/personal/chatMedia/recording';
+import PersonalMediaComposer from '../features/personal/chatMedia/Composer';
 import {avatarFrameLayer} from '../utils/avatarFrameTarget';
 import ChatRuntimeStyle from '../components/chat/ChatRuntimeStyle';
 import {homePhoneAppearance,HOME_PHONE_BUBBLES} from './room3d/homePhoneAppearance';
@@ -1666,7 +1668,7 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
         const finish = autoReply.beginSend(char?.id || null);
         try {
             const sent = await sendText(customContent, customType, metadata);
-            finish(sent === true && (!customType || ['text', 'image', 'emoji'].includes(customType)));
+            finish(sent === true && (!customType || ['text', 'image', 'emoji', 'audio'].includes(customType)));
         } catch (error) {
             finish(false);
             throw error;
@@ -4462,6 +4464,14 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
                 {/* 开关写着「已开启」、这一轮却在本地生成时，把原因说给用户听 */}
                 <InstantChatRouteNotice charId={activeCharacterId} />
 
+                {!selectionMode && <PersonalMediaComposer key={char.id} conversationId={char.id} onRecordingsChanged={() => reloadMessages(visibleCountRef.current)} onSend={async (content, blob, duration, signal) => {
+                    if (blob) {
+                        const wav = await recordingToWav(blob);
+                        signal?.throwIfAborted();
+                        const ref = await putImageBlob(wav);
+                        await handleSendText(ref, 'audio', { duration, fileName: 'voice.wav' });
+                    } else await handleSendText(content, 'text');
+                }} />}
                 <ChatInputArea
                     compactHome={!!homePhone}
                     input={input} setInput={handleInputChange}

@@ -25,6 +25,7 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     env:
       GITHUB_PAGES: 'true'
+      NODE_OPTIONS: '--max-old-space-size=4096'
       VITE_HIDE_BUILD_BADGE: '1'
       # 使用统计。值存在仓库的 Variables 里，不写死在这份 YAML——
       # fork 出去的仓库继承得到工作流、继承不到 Variables，构建出来就是零统计的版本
@@ -48,6 +49,9 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Verify personal chat and call media
+        run: pnpm vitest run utils/personalChatMedia.test.ts utils/personalChatMediaComposer.test.ts utils/personalRecordingCleanup.test.ts utils/personalCallMedia.test.ts utils/personalAudioProtocol.test.ts utils/incrementalCallSpeech.test.ts utils/callReplyFormat.test.ts
 
       - name: Build
         run: pnpm run build

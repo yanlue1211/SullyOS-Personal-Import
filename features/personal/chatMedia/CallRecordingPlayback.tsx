@@ -1,0 +1,8 @@
+import React from 'react';
+import { useBlobRefUrl } from '../../../utils/blobRef';
+export interface CallRecording { ref?: string; duration?: number; cleared?: boolean; }
+export default function CallRecordingPlayback({ recording }: { recording?: CallRecording }) {
+  const url = useBlobRefUrl(recording?.cleared ? undefined : recording?.ref);
+  if (!recording) return null;
+  return <div className="mt-2 text-xs"><span>{recording.cleared ? '录音已清理 · 文字保留' : `真实语音 · ${Math.ceil(recording.duration || 0)} 秒`}</span>{url && <audio controls preload="metadata" src={url} className="w-full max-w-[260px] mt-1" />}</div>;
+}

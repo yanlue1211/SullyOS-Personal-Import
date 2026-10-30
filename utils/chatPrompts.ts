@@ -1,3 +1,4 @@
+import { VIRTUAL_MEDIA_GUIDE, RECORDING_HISTORY_GUIDE } from '../features/personal/chatMedia/format';
 import {secretNoteContext} from './secretNote';
 import { buildCharacterResponsePrinciples } from './characterResponsePrinciples';
 import { expandHomeContextHistory } from './homeContextSegments';
@@ -1080,7 +1081,7 @@ ${voiceActingGuide()}`;
             .join(' ');
         console.log(`⏱ [buildSystemPrompt] total=${perfTotal}ms | stable=${baseSystemPrompt.length}ch volatile=${volatileState.length}ch | ${timingStr}`);
 
-        return { stable: baseSystemPrompt, volatileState, recencyTail, history: context.history };
+        return { stable: baseSystemPrompt + VIRTUAL_MEDIA_GUIDE + RECORDING_HISTORY_GUIDE, volatileState, recencyTail, history: context.history };
     },
 
     // 格式化消息历史
@@ -1183,6 +1184,8 @@ ${voiceActingGuide()}`;
                     content = '[' + speaker + '引用了' + whose + '「' + quoted + '」，并回复了 ↓]\n' + content;
                 }
                 
+                if (m.type === 'audio') return { role: m.role, content: `${timeStr} [真实语音：${m.metadata?.audioDescription || (m.metadata?.audioCleared ? '录音已清理，未保留转写，不能推测原话' : '尚未识别，不能推测用户说了什么')}]` };
+
                 if (m.type === 'image') {
                      const visionDescription = options?.useVisionDescriptions
                          && typeof m.metadata?.visionDescription === 'string'

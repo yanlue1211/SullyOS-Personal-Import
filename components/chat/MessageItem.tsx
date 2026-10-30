@@ -1,3 +1,5 @@
+import PersonalMediaMessage from '../../features/personal/chatMedia/MediaMessage';
+import { parseVirtualMedia } from '../../features/personal/chatMedia/format';
 import { avatarDecorationImageStyle, isAnniversaryFrame } from '../../utils/anniversaryGifts';
 
 
@@ -3112,6 +3114,8 @@ const MessageItem = React.memo(({
             )
         );
     }
+
+    if (m.type === 'audio' || parseVirtualMedia(m.content)) return commonLayout(<PersonalMediaMessage key={m.id} message={m} />);
 
     if (m.type === 'image') {
         return commonLayout(
