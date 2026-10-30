@@ -1742,7 +1742,7 @@ const MessageItem = React.memo(({
                     </div>
                 )}
             </div>
-            {!isUser && m.metadata?.innerVoice && (
+            {!isUser && isLastInGroup && m.metadata?.innerVoice && (
                 <div className="sully-inner-voice-after-message flex justify-start pl-[4.25rem] pr-3 mt-1 mb-2">
                     <InnerVoiceChip value={m.metadata.innerVoice} />
                 </div>

@@ -645,10 +645,11 @@ export async function applyAssistantPostProcessing(
     // 正文 / 表情 / 卡片 / 系统提示时间戳一致；没传则维持 DB.saveMessage 默认（写库当刻）。
     // 全函数落库一律走这里，别直接调 DB.saveMessage——漏一处就会出现气泡时间戳互相打架。
     let pendingInnerVoice: InnerVoice | undefined;
-    const persistMessage: typeof DB.saveMessage = (msg) => {
-        const value = pendingInnerVoice && msg.role === 'assistant' ? { ...msg, metadata: { ...msg.metadata, innerVoice: pendingInnerVoice } } : msg;
-        if (value !== msg) pendingInnerVoice = undefined;
-        return (ctx.replyRun?.saveMessage ?? DB.saveMessage)(messageTimestamp != null ? { ...value, timestamp: messageTimestamp } : value);
+    let lastAssistantMessageId: number | undefined;
+    const persistMessage: typeof DB.saveMessage = async (msg) => {
+        const id = await (ctx.replyRun?.saveMessage ?? DB.saveMessage)(messageTimestamp != null ? { ...msg, timestamp: messageTimestamp } : msg);
+        if (msg.role === 'assistant') lastAssistantMessageId = id;
+        return id;
     };
     const {
         setMessages,
@@ -2386,5 +2387,10 @@ export async function applyAssistantPostProcessing(
         } else {
             setMessages(await replyStep(async () => DB.getRecentMessagesByCharId(char.id, 200)));
         }
+    }
+    // Attach one heart to the final assistant message of this response, not its first bubble.
+    if (pendingInnerVoice && lastAssistantMessageId != null) {
+        await replyStep(async () => DB.updateMessageMetadata(lastAssistantMessageId!, previous => ({ ...(previous || {}), innerVoice: pendingInnerVoice })));
+        setMessages(await replyStep(async () => DB.getRecentMessagesByCharId(char.id, 200)));
     }
 }

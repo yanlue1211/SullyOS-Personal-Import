@@ -9,6 +9,11 @@ describe('personal chat media', () => {
     const content = virtualMedia('图片', '窗边的一只白色小狗');
     expect(parseVirtualMedia(ChatParser.sanitize(content))).toEqual({ kind: '图片', description: '窗边的一只白色小狗' });
   });
+  it('treats standalone assistant media as visible content', () => {
+    expect(ChatParser.hasDisplayContent('[[虚拟图片:窗边的白色小狗]]')).toBe(true);
+    expect(ChatParser.hasDisplayContent('[[虚拟视频:小狗跑过草地]]')).toBe(true);
+    expect(ChatParser.hasDisplayContent('[[MUSIC_ACTION:add]]')).toBe(false);
+  });
   it('does not turn ordinary text into media', () => {
     expect(parseVirtualMedia('我想发张图片')).toBeNull();
     expect(parseVirtualMedia('[[虚拟图片: ]]')).toBeNull();

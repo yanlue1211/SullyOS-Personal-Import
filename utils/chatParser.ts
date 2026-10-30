@@ -561,6 +561,8 @@ export const ChatParser = {
      * Used to decide whether a chunk is worth saving as a message.
      */
     hasDisplayContent: (text: string): boolean => {
+        // Virtual media markers are complete visible cards, not disposable control tags.
+        if (/\[\[虚拟(?:图片|视频|语音)[:：][\s\S]+?\]\]/.test(text)) return true;
         const stripped = text
             .replace(/%%BILINGUAL%%/gi, '')
             .replace(/%%TRANS%%[\s\S]*/gi, '')
