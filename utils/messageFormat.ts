@@ -1,3 +1,4 @@
+import { getShareCardImageUrls } from './shareCardImages';
 /**
  * 消息内容规范化：把带特殊 type / metadata 的消息转成可读的单行文本。
  *
@@ -300,7 +301,7 @@ export function normalizeMessageContent(
         const details = (stats ? '\n互动：' + stats : '') + commentsPart;
         if (desc) return `${head}\n笔记正文：\n${desc}${details}`;
         // 只有标题（没部署 MCP / 没抓到正文）：角色至少知道是哪篇笔记，但别假装读过正文。
-        if (title) return `${head}${details}\n（注：只拿到了笔记标题，正文/图片没抓到；可用原链接调用已配置的解析工具。别假装读过正文。）`;
+        if (title) return `${head}${details}\n（注：只拿到了笔记标题，正文没抓到；不要推测未获取的正文。）`;
         return `${head}${details}\n（注：这篇笔记的内容没能获取到。）`;
     }
 
@@ -327,7 +328,8 @@ export function normalizeMessageContent(
                 v.commentCount ? `评论 ${formatStatCount(v.commentCount)}` : '',
                 v.collectCount ? `收藏 ${formatStatCount(v.collectCount)}` : '',
             ].filter(Boolean);
-            const note = isImage
+            const hasImages = getShareCardImageUrls(msg as Message).length > 0;
+            const note = hasImages ? '' : isImage
                 ? '（注：你能看到的是这个图文的标题、作者和热度数据，看不到图片内容本身，别假装看过图。）'
                 : '（注：你能看到的是这个视频的标题、作者和热度数据，看不到视频画面和声音，别假装看过视频内容。）';
             return [

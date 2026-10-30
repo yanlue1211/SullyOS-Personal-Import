@@ -1,3 +1,4 @@
+import { getShareCardImageUrls } from './shareCardImages';
 import type { ApiPreset, Message, VisionApiConfig } from '../types';
 import { DB } from './db';
 import { extractContent, safeFetchJson } from './safeApi';
@@ -134,6 +135,26 @@ export async function materializeVisionDescriptions(
       if(!descriptions.length){prepared.push(message);continue;}
       const metadata={...message.metadata,visionDescription:descriptions.join('\n'),visionRecognizedAt:Date.now(),visionModel:config.model.trim()};
       await DB.updateMessageMetadata(message.id,prev=>({...prev,...metadata}));prepared.push({...message,metadata});continue;
+    }
+    if (message.type === 'xhs_card' || message.type === 'webpage_card') {
+      if (readVisionDescription(message)) { prepared.push(message); continue; }
+      const refs = getShareCardImageUrls(message);
+      if (!refs.length) { prepared.push(message); continue; }
+      const descriptions: string[] = [];
+      for (const [index, ref] of refs.entries()) {
+        try {
+          const description = descriptionByImage.get(ref) || await describeImageWithVisionApi(ref, config);
+          descriptionByImage.set(ref, description);
+          descriptions.push(`配图 ${index + 1}：${description}`);
+        } catch (error) {
+          console.warn('[share vision] Unable to describe shared image', index + 1, error);
+        }
+      }
+      if (!descriptions.length) { prepared.push(message); continue; }
+      const metadata = { ...message.metadata, visionDescription: descriptions.join('\n'), visionRecognizedAt: Date.now(), visionModel: config.model.trim() };
+      await DB.updateMessageMetadata(message.id, prev => ({ ...(prev || {}), ...metadata }));
+      prepared.push({ ...message, metadata });
+      continue;
     }
     if (message.type !== 'image') {
       prepared.push(message);
