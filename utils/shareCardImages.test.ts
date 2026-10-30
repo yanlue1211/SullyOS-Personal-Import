@@ -15,6 +15,14 @@ describe('share card image sources', () => {
     } } } as any);
     expect(urls).toEqual(['https://cdn.example/cover.jpg']);
   });
+  it('passes real video frames before cover, not the video URL', () => {
+    const urls = getShareCardImageUrls({ type: 'webpage_card', metadata: { webpage: {
+      video: { contentType: 'video', videoUrl: 'https://example.com/movie.mp4',
+        frames: [{ timeSeconds: 1, image: 'data:image/jpeg;base64,abc' }] },
+      image: 'https://example.com/cover.jpg',
+    } } } as any);
+    expect(urls).toEqual(['data:image/jpeg;base64,abc', 'https://example.com/cover.jpg']);
+  });
   it('ignores webpage and unsupported schemes', () => {
     expect(getShareCardImageUrls({ type: 'xhs_card', metadata: { xhsNote: {
       images: ['javascript:alert(1)', 'https://cdn.example/p.png'],
