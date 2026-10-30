@@ -26,6 +26,10 @@ export function getShareCardImageUrls(message: Message): string[] {
         if (Array.isArray(list)) list.forEach(add);
       });
     }
+    // Captured frames represent actual video content; do not pretend cover = video.
+    if (video.contentType === 'video' && Array.isArray(video.frames)) {
+      video.frames.forEach((frame: any) => add(frame?.image));
+    }
     add(video.coverUrl);
     add(page.image);
     add(page.imageUrl);
