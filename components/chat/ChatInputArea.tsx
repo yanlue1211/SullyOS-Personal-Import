@@ -74,6 +74,7 @@ interface ChatInputAreaProps {
     luckinActivated?: boolean;
     // HTML 模块模式
     htmlModeEnabled?: boolean;
+    realSongListeningEnabled?: boolean;
     // 思考过程展示（会话级）
     showThinkingChain?: boolean;
     // Input style
@@ -104,6 +105,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
     luckinConfigured = false,
     luckinActivated = false,
     htmlModeEnabled = false,
+    realSongListeningEnabled = false,
     showThinkingChain = false,
     inputStyle = 'default',
     sendButtonStyle = 'circle',
@@ -584,6 +586,13 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
               {luckinActivated && <span className={`absolute -top-1 -right-1 w-3 h-3 rounded-full border-2 ${isDiscordStyle ? 'bg-[#C6A15B] border-slate-900' : 'bg-[#C6A15B] border-white'}`} />}
           </div>
           <span className="text-xs font-bold">{luckinActivated ? '结束瑞一杯' : '瑞一杯'}</span>
+        </button>,
+        <button key="real-song-listening" onClick={() => onPanelAction('real-song-listening-toggle')} className={`flex flex-col items-center gap-2 active:scale-95 transition-transform ${acnh ? 'text-[#725d42]' : isDiscordStyle ? 'text-slate-200' : 'text-slate-600'}`}>
+          <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm border relative ${realSongListeningEnabled ? 'bg-emerald-100 text-emerald-700 border-emerald-300' : 'bg-slate-50 text-slate-500 border-slate-200'}`}>
+            <span className="text-2xl" aria-hidden="true">🎧</span>
+            {realSongListeningEnabled && <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-emerald-500 border-2 border-white" />}
+          </div>
+          <span className="text-xs font-bold">{realSongListeningEnabled ? '真实听歌已开' : '真实听歌'}</span>
         </button>,
         <button key="html-mode-toggle"
           onClick={() => onPanelAction('html-mode-toggle')}
