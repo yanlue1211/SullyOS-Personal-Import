@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, MagnifyingGlass, MusicNotes, ArrowClockwise, PencilSimple, Trash, Check, X, FloppyDisk } from '@phosphor-icons/react';
 import { useOS } from '../context/OSContext';
 import { type Song } from '../context/MusicContext';
-import { getOrAnalyzeSongSound, isSongListeningAvailable } from '../utils/songListening';
+import { isSongListeningAvailable } from '../utils/songListening';
 import {
   deleteSongSoundRecord,
   editSongSoundRecord,
@@ -64,8 +64,6 @@ const SongArchiveApp: React.FC = () => {
         id: active.songId, name: active.songName, artists: active.artists,
         album: active.album || '', albumPic: '', duration: 0,
       } as Song;
-      // 为了防止覆盖已编辑档案，先保持当前记录并调用模型；
-      // getOrAnalyzeSongSound(force) 在成功后会更新数据库，下面恢复旧版供用户预览确认。
       const { analyzeSongSoundPreview } = await import('../features/personal/songArchive/reanalysis');
       const result = await analyzeSongSoundPreview(song);
       setCandidate(result);
