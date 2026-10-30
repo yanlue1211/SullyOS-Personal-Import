@@ -16,8 +16,6 @@ export interface SongSoundRecord {
   updatedAt: number;
 }
 
-type LegacySoundRecord = Pick<SongSoundRecord, 'songName' | 'artists' | 'description' | 'isTrial'> & { album?: string };
-
 const parseRecord = (songId: number, raw: string | null): SongSoundRecord | null => {
   if (!raw) return null;
   try {
