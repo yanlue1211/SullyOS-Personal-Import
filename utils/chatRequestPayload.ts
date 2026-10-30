@@ -402,6 +402,10 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
         ...(!input.appPrompt ? { translationConfig, htmlMode, thinkingChain, sarEnvelopeActive } : {}),
     });
     systemPrompt += outputStylePrompt;
+    if (isRealSongListeningEnabled(char)) {
+      systemPrompt += `\n### 【真实听歌说明】
+当你与用户一起听音乐时，系统可能在本轮动态上下文提供歌曲的客观声音分析。它是歌曲本身的声音资料，不是你写的日记，也不是你已经发表的评价。你可以基于真实声音信息和当下情境形成自己的感受，但绝不必每轮都谈论音乐；优先自然回应用户。不要照搬分析报告，不要编造没有分析到的乐器或旋律。没有分析结果时，不要假装听清了曲调。听歌日记不是自动任务，只有用户明确要求时才写。\n`;
+    }
 
     const messagesWithWorldbookDepth = parts.history;
 
