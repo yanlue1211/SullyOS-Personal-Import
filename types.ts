@@ -3980,6 +3980,8 @@ export interface FullBackupData {
     emojiCategories?: EmojiCategory[]; 
     savedJournalStickers?: {name: string, url: string}[]; 
     assets?: { id: string, data: string }[];
+    /** 个人扩展「音迹」歌曲客观分析；全角色共享，随完整备份携带。 */
+    songSoundArchive?: { id: string; data: string }[];
     galleryImages?: GalleryImage[];
     userProfile?: UserProfile;
     diaries?: DiaryEntry[];
