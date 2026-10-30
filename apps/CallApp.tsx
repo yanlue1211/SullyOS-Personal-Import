@@ -1,3 +1,6 @@
+import InnerVoiceChip from '../features/personal/innerVoice/InnerVoiceChip';
+import { INNER_VOICE_SYSTEM, type InnerVoice } from '../features/personal/innerVoice/protocol';
+import { editRecordingText } from '../features/personal/chatMedia/editRecording';
 import { recordingText, recordingContext } from '../features/personal/chatMedia/transcript';
 import PersonalMediaComposer from '../features/personal/chatMedia/Composer';
 import CallRecordingPlayback, { type CallRecording } from '../features/personal/chatMedia/CallRecordingPlayback';
@@ -153,6 +156,7 @@ type CallBubble = {
   audioUrl?: string;
   timestamp: number;
   thinkingChain?: string;
+  innerVoice?: InnerVoice;
   performance?: AvatarPerformanceDirection;
   performanceTimeline?: AvatarPerformanceCue[];
   recording?: CallRecording;
@@ -301,6 +305,7 @@ const prepareCallAssistantReply = (reply: ParsedCallReply, enhanceBasicTimeline 
   return {
     text,
     thinkingChain: reply.thinkingChain,
+    innerVoice: reply.innerVoice,
     speechEmotion,
     performance,
     performanceCues,
@@ -532,7 +537,7 @@ ${mode === 'video' ? '台词只写说出口的话；屏幕旁白是唯一例外�
 - <语音> 里只写会被朗读的文字；演出标记继续遵守上方「当前引擎规则」，不要混用其它引擎语法，也不要写中文舞台旁白
 - 每条消息只有一个 <语音> 标签，emotion 属性可选；情绪不强就别加
 - 中文部分和 <语音> 部分表达的意思要一致` : '';
-  return [coreContext, timeContext, callPrompt, voiceLangPrompt, CALL_RECORDING_GUIDE, mode === 'video' ? VIDEO_NARRATION_GUIDE : VOICE_CALL_NARRATION_GUIDE].filter(Boolean).join('\n\n');
+  return [coreContext, timeContext, callPrompt, voiceLangPrompt, INNER_VOICE_SYSTEM, CALL_RECORDING_GUIDE, mode === 'video' ? VIDEO_NARRATION_GUIDE : VOICE_CALL_NARRATION_GUIDE].filter(Boolean).join('\n\n');
 };
 const CallApp: React.FC = () => {
   const { closeApp, openApp, characters, activeCharacterId, addToast, apiConfig, updateApiConfig, userProfile, customThemes, suspendCall, suspendedCall, clearSuspendedCall, updateCharacter, characterGroups, groups, realtimeConfig, memoryPalaceConfig } = useOS();
@@ -619,6 +624,7 @@ const CallApp: React.FC = () => {
   const [callStartedAt, setCallStartedAt] = useState<number | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [showInputPanel, setShowInputPanel] = useState(true);
+  const [editingAnalysis, setEditingAnalysis] = useState('');
   const [editingBubble, setEditingBubble] = useState<CallBubble | null>(null);
   const [editingText, setEditingText] = useState('');
   const [rerollingBubbleId, setRerollingBubbleId] = useState<string | null>(null);
@@ -1631,6 +1637,7 @@ const CallApp: React.FC = () => {
           text: m.type === 'audio' ? recordingText(m.metadata).transcript || '[语音]' : m.content,
           ...(m.type === 'audio' ? { recording: { ref: m.metadata?.audioCleared ? undefined : m.content, duration: m.metadata?.duration, cleared: m.metadata?.audioCleared, analysis: recordingText(m.metadata).analysis } } : {}),
           audioUrl: m.metadata?.audioUrl,
+          innerVoice: m.metadata?.innerVoice,
           thinkingChain: typeof m.metadata?.thinkingChain === 'string' ? m.metadata.thinkingChain : undefined,
           performance: m.metadata?.avatarPerformance as AvatarPerformanceDirection | undefined,
           performanceTimeline: m.metadata?.avatarPerformanceCues as AvatarPerformanceCue[] | undefined,
@@ -2508,6 +2515,7 @@ ${sentencePlan}`;
           time: formatTime(),
           timestamp: nowTs,
           thinkingChain: greetingReply.thinkingChain,
+          innerVoice: greetingReply.innerVoice,
           performance: greetingReply.performance,
           performanceTimeline: greetingReply.performanceCues,
         };
@@ -2522,6 +2530,7 @@ ${sentencePlan}`;
             source: 'call',
             callSessionId: currentSessionId,
             ...(greetingReply.thinkingChain ? { thinkingChain: greetingReply.thinkingChain } : {}),
+            ...(greetingReply.innerVoice ? { innerVoice: greetingReply.innerVoice } : {}),
             avatarPerformance: greetingReply.performance,
             avatarPerformanceCues: greetingReply.performanceCues,
           },
@@ -2773,6 +2782,7 @@ ${sentencePlan}`;
     setErrorMessage('');
     let assistantText = '';
     let assistantThinkingChain: string | undefined;
+    let assistantInnerVoice: InnerVoice | undefined;
     let turnSpeechEmotion: string | undefined;
     let turnPerformance = DEFAULT_AVATAR_PERFORMANCE;
     let turnPerformanceCues: AvatarPerformanceCue[] = [];
@@ -2792,6 +2802,7 @@ ${sentencePlan}`;
       }
       assistantText = reply.text;
       assistantThinkingChain = reply.thinkingChain;
+      assistantInnerVoice = reply.innerVoice;
       turnSpeechEmotion = reply.speechEmotion;
       turnPerformance = reply.performance;
       turnPerformanceCues = reply.performanceCues;
@@ -2811,6 +2822,7 @@ ${sentencePlan}`;
       time: now,
       timestamp: nowTs,
       thinkingChain: assistantThinkingChain,
+      innerVoice: assistantInnerVoice,
       performance: turnPerformance,
       performanceTimeline: turnPerformanceCues,
     };
@@ -2827,6 +2839,7 @@ ${sentencePlan}`;
           callSessionId: currentSessionId,
           callMode,
           ...(assistantThinkingChain ? { thinkingChain: assistantThinkingChain } : {}),
+          ...(assistantInnerVoice ? { innerVoice: assistantInnerVoice } : {}),
           avatarPerformance: turnPerformance,
           avatarPerformanceCues: turnPerformanceCues,
         },
@@ -2908,14 +2921,24 @@ ${sentencePlan}`;
     addToast('通话记录已删除', 'success');
     trackEvent('删除一条通话记录');
   };
+  useEffect(() => {
+    const changed = (event: Event) => {
+      const row = (event as CustomEvent<Message>).detail;
+      const apply = (bubble: CallBubble): CallBubble => bubble.dbId === row.id ? { ...bubble, text: recordingText(row.metadata).transcript || '[语音]', recording: { ...bubble.recording, analysis: recordingText(row.metadata).analysis } } : bubble;
+      setBubbles(previous => previous.map(apply)); setCallRecords(previous => previous.map(record => ({ ...record, transcript: record.transcript.map(apply) }))); if (row.charId === selectedChar?.id) markCallTurnDirty();
+    };
+    window.addEventListener('personal-recording-edited', changed); return () => window.removeEventListener('personal-recording-edited', changed);
+  }, [selectedChar?.id]);
   const startEditBubble = (bubble: CallBubble) => {
     if (bubble.role !== 'user') return;
     setEditingBubble(bubble);
-    setEditingText(bubble.text);
+    setEditingText(bubble.text === '[语音]' ? '' : bubble.text);
+    setEditingAnalysis(bubble.recording?.analysis || '');
   };
   const saveEditedBubble = async () => {
     if (!editingBubble) return;
     const next = editingText.trim();
+    if (editingBubble.recording && editingBubble.dbId) { try { await editRecordingText(editingBubble.dbId, next, editingAnalysis); setEditingBubble(null); } catch { addToast('语音识别修改保存失败，请重试', 'error'); } return; }
     if (!next) return addToast('内容不能为空', 'error');
     setBubbles(prev => prev.map(b => b.id === editingBubble.id ? { ...b, text: next } : b));
     if (editingBubble.dbId) await DB.updateMessage(editingBubble.dbId, next);
@@ -2946,6 +2969,7 @@ ${sentencePlan}`;
         text: rerolled,
         audioUrl: undefined,
         thinkingChain: rerollReply.thinkingChain,
+        innerVoice: rerollReply.innerVoice,
         performance: rerollReply.performance,
         performanceTimeline: rerollReply.performanceCues,
       } : b));
@@ -2957,6 +2981,7 @@ ${sentencePlan}`;
             avatarPerformance: rerollReply.performance,
             avatarPerformanceCues: rerollReply.performanceCues,
           };
+          if (rerollReply.innerVoice) next.innerVoice = rerollReply.innerVoice; else delete next.innerVoice;
           if (rerollReply.thinkingChain) next.thinkingChain = rerollReply.thinkingChain;
           else delete next.thinkingChain;
           return next;
@@ -3020,6 +3045,7 @@ ${sentencePlan}`;
         time: formatTime(),
         timestamp: nudgeTs,
         thinkingChain: reply.thinkingChain,
+    innerVoice: reply.innerVoice,
         performance: reply.performance,
         performanceTimeline: reply.performanceCues,
       };
@@ -3036,6 +3062,7 @@ ${sentencePlan}`;
           source: 'call',
           callSessionId: currentSessionId,
           ...(reply.thinkingChain ? { thinkingChain: reply.thinkingChain } : {}),
+          ...(reply.innerVoice ? { innerVoice: reply.innerVoice } : {}),
           avatarPerformance: reply.performance,
           avatarPerformanceCues: reply.performanceCues,
         },
@@ -3623,7 +3650,8 @@ ${sentencePlan}`;
               className={`rounded-2xl px-3.5 py-2.5 border border-white/10 backdrop-blur-md ${item.role === 'user' ? 'bg-white/[0.07] ml-6' : 'bg-white/[0.03] mr-6'}`}
             >
               <div className="text-[10px] text-white/45">{item.role === 'user' ? '你' : recordDetail.characterName} · {item.time}</div>
-              {item.role === 'user' && <CallRecordingPlayback recording={item.recording} />}
+              {item.role === 'assistant' && <InnerVoiceChip value={item.innerVoice} dark={!lightTheme} />}
+              {item.role === 'user' && <CallRecordingPlayback messageId={item.dbId} transcript={item.text} recording={item.recording} />}
               {item.role === 'user' && <CallSnapshotImage imageRef={item.cameraSnapshotRef} expired={item.cameraSnapshotExpired} />}
               <div className="text-sm mt-1 leading-relaxed">{(() => {
                 if (item.role !== 'assistant') return item.text;
@@ -4036,7 +4064,8 @@ ${sentencePlan}`;
                   {showTranslatedText && cleanVoice && <div className="mt-1 text-[11px] text-white/45 italic">{cleanVoice}</div>}
                 </>;
               })() : (line || bubble.text)}
-              {bubble.role === 'user' && <CallRecordingPlayback recording={bubble.recording} />}
+              {bubble.role === 'assistant' && <InnerVoiceChip value={bubble.innerVoice} dark={!lightTheme} />}
+              {bubble.role === 'user' && <CallRecordingPlayback messageId={bubble.dbId} transcript={bubble.text} recording={bubble.recording} />}
             </div>
             {bubble.role === 'assistant' && (
               <div className="mt-2 flex gap-2 flex-wrap">
@@ -4252,6 +4281,7 @@ ${sentencePlan}`;
           <div className={`w-full border-t border-white/10 p-5 space-y-3 ${lightTheme ? 'bg-[#f6f4fc]' : 'bg-[#120c22]'}`}>
             <div className="text-sm text-white/70">改一下刚才说的话</div>
             <textarea value={editingText} onChange={(e) => setEditingText(e.target.value)} className="w-full h-24 bg-black/30 rounded-xl p-3 text-sm outline-none resize-none placeholder:text-white/30" placeholder="重新措辞……" autoFocus />
+            {editingBubble.recording && <label className="block text-xs text-white/60">语气、背景声等说明<textarea value={editingAnalysis} onChange={event => setEditingAnalysis(event.target.value)} className="w-full h-24 mt-2 bg-black/30 rounded-xl p-3 text-sm" /></label>}
             <div className="flex gap-2">
               <button onClick={() => setEditingBubble(null)} className="flex-1 py-2.5 rounded-xl border border-white/15 text-white/70 transition active:scale-[0.97]">算了</button>
               <button onClick={saveEditedBubble} className="keep-white flex-1 py-2.5 rounded-xl font-medium text-white transition active:scale-[0.97]" style={{ backgroundColor: accentColor }}>就这样</button>

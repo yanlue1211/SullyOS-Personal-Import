@@ -1,3 +1,4 @@
+import InnerVoiceChip from '../../features/personal/innerVoice/InnerVoiceChip';
 import PersonalMediaMessage from '../../features/personal/chatMedia/MediaMessage';
 import { parseVirtualMedia } from '../../features/personal/chatMedia/format';
 import { avatarDecorationImageStyle, isAnniversaryFrame } from '../../utils/anniversaryGifts';
@@ -1651,6 +1652,7 @@ const MessageItem = React.memo(({
     ) : null;
     const commonLayout = (content: React.ReactNode) => (
         <>
+            {!isUser && <InnerVoiceChip value={m.metadata?.innerVoice} />}
             {centerModules && thinkingChainNode && (
                 <div className="px-3 flex justify-center">
                     <div className="w-[72%] max-w-[72%]">{thinkingChainNode}</div>

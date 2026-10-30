@@ -400,8 +400,9 @@ export async function materializeAudioDescriptions(messages: Message[], config?:
       const recognition = await pending;
       const description = recordingContext(recognition);
       const metadata = { ...(message.metadata || {}), [AUDIO_DESCRIPTION_METADATA_KEY]: description, audioTranscript: recognition.transcript, audioAnalysis: recognition.analysis, audioRecognizedAt: Date.now(), audioModel: config.model.trim() };
-      await DB.updateMessageMetadata(message.id, prev => ({ ...(prev || {}), ...metadata }));
-      prepared.push({ ...message, metadata });
+      let saved = metadata;
+      await DB.updateMessageMetadata(message.id, prev => { saved = prev?.audioTextEdited ? prev : { ...(prev || {}), ...metadata }; return saved; });
+      prepared.push({ ...message, metadata: saved });
     } catch (error) {
       console.warn('[audioApi] 音频识别失败，这条按占位发送', error);
       prepared.push(message);

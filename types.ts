@@ -3097,6 +3097,7 @@ export interface CharacterProfile {
   activeMsg2Config?: ActiveMsg2CharacterConfig;
   activeBuffs?: CharacterBuff[];
   buffInjection?: string;   // 注入到systemPrompt的叙事型情绪底色描述
+  emotionIndependent?: boolean;
   emotionConfig?: {
     enabled: boolean;
     api?: {

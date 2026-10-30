@@ -1,7 +1,9 @@
+import { extractInnerVoice, type InnerVoice } from '../features/personal/innerVoice/protocol';
 import { extractAvatarPerformanceTimeline, type AvatarPerformanceCue, type AvatarPerformanceDirection } from './avatarPerformance';
 
 export interface ParsedCallReply {
   text: string;
+  innerVoice?: InnerVoice;
   thinkingChain?: string;
   /** 第一条演出指令（立即生效）。 */
   performance?: AvatarPerformanceDirection;
@@ -53,10 +55,12 @@ export const parseCallAssistantMessage = (message: any, keepThinking = false): P
   });
   cleaned = cleaned.replace(/<\/?(?:think|thinking|thought)\b[^>]*>/gi, '');
 
-  const { text, cues } = extractAvatarPerformanceTimeline(cleaned);
+  const heart = extractInnerVoice(cleaned);
+  const { text, cues } = extractAvatarPerformanceTimeline(heart.text);
   const uniqueChains = [...new Set([nativeChain, ...inlineChains].map(item => item.trim()).filter(Boolean))];
   return {
     text,
+    ...(heart.innerVoice ? { innerVoice: heart.innerVoice } : {}),
     ...(keepThinking && uniqueChains.length ? { thinkingChain: uniqueChains.join('\n\n') } : {}),
     ...(cues.length ? { performance: cues[0].direction, performanceCues: cues } : {}),
   };

@@ -51,7 +51,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Verify personal chat and call media
-        run: pnpm vitest run utils/personalChatMedia.test.ts utils/personalChatMediaComposer.test.ts utils/personalRecordingCleanup.test.ts utils/personalCallMedia.test.ts utils/personalAudioProtocol.test.ts utils/personalRecordingTranscript.test.ts utils/personalMediaMenu.test.ts utils/incrementalCallSpeech.test.ts utils/callReplyFormat.test.ts
+        run: pnpm vitest run utils/personalChatMedia.test.ts utils/personalChatMediaComposer.test.ts utils/personalRecordingCleanup.test.ts utils/personalCallMedia.test.ts utils/personalAudioProtocol.test.ts utils/personalRecordingTranscript.test.ts utils/personalMediaMenu.test.ts utils/personalRecordingEdit.test.ts utils/personalInnerVoice.test.ts utils/personalInnerVoiceUI.test.ts utils/personalScheduleOnce.test.ts utils/personalScheduleGeneration.test.ts utils/scheduleInjection.test.ts utils/incrementalCallSpeech.test.ts utils/callReplyFormat.test.ts
 
       - name: Build
         run: pnpm run build

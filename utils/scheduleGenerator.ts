@@ -1,3 +1,4 @@
+import { claimDailySchedule } from '../features/personal/innerVoice/scheduleOnce';
 
 import { CharacterProfile, UserProfile, DailySchedule, ScheduleSlot, Message, Emoji } from '../types';
 import { ContextBuilder } from './context';
@@ -224,7 +225,7 @@ ${chatHistoryBlock ? `**重要：上面给了你最近和「${user.name}」的�
 仅输出JSON，不要其他内容。`;
 }
 
-export async function generateDailyScheduleForChar(
+async function generateDailyScheduleOnce(
     char: CharacterProfile,
     userProfile: UserProfile,
     apiConfig: ApiConfig,
@@ -239,10 +240,13 @@ export async function generateDailyScheduleForChar(
     const today = getScheduleDateKey(char, baseNow);
 
     // Check if already exists
-    if (!forceRegenerate) {
+    {
         const existing = await getDailyScheduleForChar(char, baseNow);
         if (existing) return existing;
     }
+
+    if (!apiConfig.baseUrl?.trim() || !apiConfig.apiKey?.trim() || !apiConfig.model?.trim()) return null;
+    if (!(await claimDailySchedule(char.id, today))) return null;
 
     // Preserve cover image from previous schedules
     let coverImage: string | undefined;
@@ -281,9 +285,9 @@ export async function generateDailyScheduleForChar(
     const {scheduleHomeVisitPrompt,submitScheduleHomeVisits}=await import('./homeVisits');
     const homePrompt = buildHomeSchedulePrompt(char);
     const visitPrompt=await scheduleHomeVisitPrompt(char);
-    const prompt = (style === 'mindful'
-        ? buildMindfulPrompt('', char, userProfile, today, dayOfWeek, chatHistoryBlock)
-        : buildLifestylePrompt('', char, userProfile, today, dayOfWeek, chatHistoryBlock)) + homePrompt + visitPrompt;
+    const prompt = `为角色生成今天 ${today}（星期${dayOfWeek}）的一份初步日程。只生成一次，安排要符合人设、当前真实关系和已知事件，包含角色自己的工作、爱好、休息和生活，不围绕用户打转。这是一天开始时的大致打算，可以被真实事件、聊天、意愿或突发情况改变，不是必须照表执行的事实或对用户的要求。${style === 'mindful' ? '角色为意识系，只安排其能力范围内的活动，不捏造实体生活。' : ''}
+只输出 JSON {"slots":[{"startTime":"08:00","activity":"活动","description":"简要计划","emoji":"☀️"}]}，约5至7个时段。不生成情绪、意识流独白或预先决定每轮心声。
+${chatHistoryBlock}` + homePrompt + visitPrompt;
 
     try {
         const response = await fetch(`${apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
@@ -291,7 +295,7 @@ export async function generateDailyScheduleForChar(
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiConfig.apiKey}` },
             body: JSON.stringify({
                 model: apiConfig.model,
-                messages: (await ContextBuilder.buildCharacterRequest(characterContextInput, [{ role: 'user', content: prompt }])),
+                messages: (await ContextBuilder.buildCharacterRequest(characterContextInput, [{ role: 'system', content: '【日程固定协议】本次仅生成当天初步安排，返回 slots JSON；不生成情绪或预设心声，不把计划当已发生事实。' }, { role: 'user', content: prompt }])),
                 temperature: 0.85,
                 max_tokens: 8000
             }),
@@ -461,4 +465,12 @@ ${chatSummary}
         console.error('[Schedule/Evolve] Failed:', e);
         return null;
     }
+}
+
+const dailyScheduleFlights = new Map<string, Promise<DailySchedule | null>>();
+export function generateDailyScheduleForChar(char: CharacterProfile, user: UserProfile, api: ApiConfig, forceRegenerate = false): Promise<DailySchedule | null> {
+    const key = `${char.id}:${getScheduleDateKey(char, new Date())}`;
+    const existing = dailyScheduleFlights.get(key); if (existing) return existing;
+    const pending = generateDailyScheduleOnce(char, user, api, forceRegenerate).finally(() => dailyScheduleFlights.delete(key));
+    dailyScheduleFlights.set(key, pending); return pending;
 }

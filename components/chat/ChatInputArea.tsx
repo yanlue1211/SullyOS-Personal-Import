@@ -489,7 +489,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
     const mediaTile = (key: string, label: string, icon: React.ReactNode) => <button key={key} onClick={() => onPanelAction(key)} className={`flex flex-col items-center gap-2 active:scale-95 transition-transform ${isDiscordStyle ? 'text-slate-200' : 'text-slate-600'}`}><span className={`w-14 h-14 rounded-2xl grid place-items-center border shadow-sm ${isDiscordStyle ? 'bg-slate-800 border-slate-600 text-slate-200' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>{icon}</span><span className="text-xs font-bold">{label}</span></button>;
     const firstPageOrder = ['voice-input', 'virtual-media', 'image', 'transfer', 'poke', 'reroll', 'meetup', 'settings'];
     const actionTiles = [
-        ...(personalMediaEnabled ? [mediaTile('voice-input', '语音', <Microphone className="w-6 h-6" />), mediaTile('virtual-media', '图片／视频', <Images className="w-6 h-6" />)] : []),
+        ...(personalMediaEnabled ? [mediaTile('voice-input', '语音', <Microphone className="w-6 h-6" />), mediaTile('virtual-media', '图片／视频', <Images className="w-6 h-6" />), mediaTile('emotion', '情绪', <Sparkle className="w-6 h-6" />)] : []),
         <button key="collaboration" onClick={() => onPanelAction('collaboration')} className={`flex flex-col items-center gap-2 active:scale-95 transition-transform ${acnh ? 'text-[#725d42]' : isDiscordStyle ? 'text-slate-200' : 'text-slate-600'}`}>
             <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm border ${acnh ? 'bg-white/70 border-[#e6dab4] text-[#7c6ee6]' : isDiscordStyle ? 'bg-slate-800 text-indigo-300 border-indigo-400/20' : 'bg-indigo-50 text-indigo-500 border-indigo-100'}`}>
                 <Briefcase className="w-6 h-6" weight="fill" />
@@ -539,7 +539,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
             <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm border ${isDiscordStyle ? 'bg-slate-800 text-cyan-300 border-cyan-400/20' : 'bg-cyan-50 text-cyan-500 border-cyan-100'}`}>
                 <CalendarBlank className="w-6 h-6" weight="bold" />
             </div>)}
-            <span className="text-xs font-bold">日程/情绪</span>
+            <span className="text-xs font-bold">日程</span>
         </button>,
         <button key="proactive" onClick={() => onPanelAction('proactive')} className={`flex flex-col items-center gap-2 active:scale-95 transition-transform relative ${acnh ? 'text-[#725d42]' : isDiscordStyle ? 'text-slate-200' : 'text-slate-600'}`}>
             {acnh ? <AcnhActionTile kind="proactive" /> : (

@@ -1,3 +1,4 @@
+import { isEmotionFeatureOn } from '../utils/scheduleFeature';
 import { recordingToWav } from '../features/personal/chatMedia/recording';
 import PersonalMediaComposer from '../features/personal/chatMedia/Composer';
 import {avatarFrameLayer} from '../utils/avatarFrameTarget';
@@ -223,7 +224,7 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
     // Reply Logic
     const [replyTarget, setReplyTarget] = useState<Message | null>(null);
 
-    const [modalType, setModalType] = useState<'none' | 'transfer' | 'emoji-import' | 'chat-settings' | 'message-options' | 'edit-message' | 'delete-emoji' | 'delete-category' | 'add-category' | 'history-manager' | 'archive-settings' | 'archive-legacy-warning' | 'prompt-editor' | 'category-options' | 'category-visibility' | 'emoji-options' | 'rename-emoji' | 'rename-category' | 'schedule' | 'chrome-css' | 'chrome-sound' | 'memory-vectorize-confirm' | 'memory-vectorize-result'>('none');
+    const [modalType, setModalType] = useState<'none' | 'transfer' | 'emoji-import' | 'chat-settings' | 'message-options' | 'edit-message' | 'delete-emoji' | 'delete-category' | 'add-category' | 'history-manager' | 'archive-settings' | 'archive-legacy-warning' | 'prompt-editor' | 'category-options' | 'category-visibility' | 'emoji-options' | 'rename-emoji' | 'rename-category' | 'schedule' | 'emotion' | 'chrome-css' | 'chrome-sound' | 'memory-vectorize-confirm' | 'memory-vectorize-result'>('none');
     // 「聊天装扮」悬浮态：不走全屏 modal——圆气泡挂在聊天上，点开小面板边看真聊天边调。
     const [decorationTab, setDecorationTab] = useState<DecorationTab>('layout');
     // 切换角色时收掉装扮气泡：定制是 per-character 的，避免误改到下一个角色
@@ -1829,7 +1830,7 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
             case 'meetup': if (char) { setShowPanel('none'); openDateWithChar(char.id); } break;
             case 'proactive': setShowProactiveModal(true); break;
             case 'active-msg-2': setShowActiveMsg2Modal(true); break;
-            case 'emotion': setModalType('schedule'); break; // 情绪已并入日程，打开同一 modal
+            case 'emotion': setModalType('emotion'); break; // 情绪已并入日程，打开同一 modal
             case 'schedule': setModalType('schedule'); break;
             case 'mcd-not-configured':
                 addToast('请先到设置 → 麦当劳 启用并填入 MCP Token', 'info');
@@ -2228,12 +2229,8 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
 
     const handleScheduleStyleChange = async (style: 'lifestyle' | 'mindful') => {
         if (!char) return;
-        // 与情绪/意识流强制同步：启用日程时自动启用情绪感知
-        const prevEmotion = char.emotionConfig;
-        const nextEmotion = { ...(prevEmotion || {}), enabled: true };
-        updateCharacter(char.id, { scheduleStyle: style, emotionConfig: nextEmotion });
-        // Force regenerate with new style — use updated char object
-        const updatedChar = { ...char, scheduleStyle: style, emotionConfig: nextEmotion };
+        updateCharacter(char.id, { scheduleStyle: style, emotionIndependent: true, emotionConfig: { ...char.emotionConfig, enabled: isEmotionFeatureOn(char) } });
+        const updatedChar = { ...char, scheduleStyle: style };
         if (!isScheduleFeatureOn(updatedChar)) return;
         setIsScheduleGenerating(true);
         try {
@@ -2252,25 +2249,14 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
     const handleToggleScheduleFeature = async () => {
         if (!char) return;
         const nextEnabled = !isScheduleFeatureOn(char);
-        const patch: any = { scheduleFeatureEnabled: nextEnabled };
-        if (nextEnabled) {
-            // 与 handleScheduleStyleChange 对齐：开日程 = 同步开情绪/意识流。
-            // 旧逻辑下，新角色的 emotionConfig 从未初始化（undefined），
-            // 仅切总开关而不点风格时，emotionConfig?.enabled 始终落 false，
-            // 副 API 闸门 (isScheduleFeatureOn && emotionConfig?.enabled) 永远过不去。
-            patch.emotionConfig = { ...(char.emotionConfig || {}), enabled: true };
-        } else {
-            // 关闭时顺手把 buff 注入清空，避免上一轮残留继续注入
-            patch.buffInjection = '';
-            patch.activeBuffs = [];
-        }
+        const patch: any = { scheduleFeatureEnabled: nextEnabled, emotionIndependent: true, emotionConfig: { ...char.emotionConfig, enabled: isEmotionFeatureOn(char) } };
         updateCharacter(char.id, patch);
         if (!nextEnabled) {
             setScheduleData(null);
-            addToast('日程与情绪已关闭', 'info');
+            addToast('日程已关闭', 'info');
             return;
         }
-        addToast('日程与情绪已开启', 'success');
+        addToast('日程已开启', 'success');
         // 打开后立刻尝试生成（若今日未生成且已选风格）
         const updatedChar = { ...char, ...patch };
         if (updatedChar.scheduleStyle) {
@@ -2977,6 +2963,11 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
         };
     },[char?.id,visibleCount,reloadMessages]);
 
+    useEffect(() => {
+        const changed = (event: Event) => { const row = (event as CustomEvent<Message>).detail; if (row.charId !== char?.id) return; setMessages(previous => previous.map(message => message.id === row.id ? row : message)); markAmsgStateDirty({ char, userProfile, groups, realtimeConfig }); };
+        window.addEventListener('personal-recording-edited', changed);
+        return () => window.removeEventListener('personal-recording-edited', changed);
+    }, [char, userProfile, groups, realtimeConfig]);
     // --- Message Management ---
     const handleDeleteMessage = async () => {
         if (!selectedMessage) return;
@@ -3924,7 +3915,7 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
                 onOpenHistoryCleanup={() => { setModalType('none'); setShowHistoryCleanup(true); }} onArchive={handleFullArchive}
                 onCreatePrompt={createNewPrompt} onEditPrompt={editSelectedPrompt} onSavePrompt={handleSavePrompt} onDeletePrompt={handleDeletePrompt}
                 onSetHistoryStart={handleSetHistoryStart} onRestoreAdaptiveContext={restoreAdaptiveContext} onJumpToMessageInChat={handleJumpToMessageInChat} onEnterSelectionMode={handleEnterSelectionMode}
-                onReplyMessage={handleReplyMessage} onEditMessageStart={() => { if (selectedMessage) { setEditContent(selectedMessage.content); setModalType('edit-message'); } }}
+                onReplyMessage={handleReplyMessage} onEditMessageStart={() => { if (selectedMessage?.type === 'audio') { setModalType('none'); addToast('长按语音卡片或声音细节可修改原文和语气', 'info'); return; } if (selectedMessage) { setEditContent(selectedMessage.content); setModalType('edit-message'); } }}
                 onConfirmEditMessage={confirmEditMessage} onDeleteMessage={handleDeleteMessage} onCopyMessage={handleCopyMessage}
                 messageFavorited={!!(selectedMessage && contentFavoriteIds.has(contentFavoriteIdForMessage(selectedMessage)))}
                 onToggleMessageFavorite={selectedMessage ? () => handleToggleContentFavorite(selectedMessage) : undefined}
@@ -4011,6 +4002,7 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
                     // API 同步到所有角色，enabled 仅写到当前角色
                     syncEmotionApiToAllCharacters(config.api);
                     updateCharacter(char.id, {
+                        emotionIndependent: true,
                         emotionConfig: {
                             enabled: config.enabled,
                             ...(config.api && config.api.baseUrl ? { api: config.api } : {}),
