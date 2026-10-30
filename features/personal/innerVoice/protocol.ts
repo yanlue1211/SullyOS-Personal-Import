@@ -10,7 +10,7 @@ export function extractInnerVoice(raw: string): { text: string; innerVoice?: Inn
   // Only recover a clearly marked trailing context block; never strip ordinary
   // dialogue containing words such as "状态" or "内心".
   if (!innerVoice) {
-    const marker = /(?:\\n|^)[\\[【]角色当时的心声[，,、\\s]*未说出口[、，,\\s]*用户未必知情[\\]】]\\s*\\n状态[：:]\\s*([^\\n]*)\\n内心[：:]\\s*([^\\n]*)(?:\\n暗流[：:]\\s*([^\\n]*))?\\s*$/;
+    const marker = /(?:\n|^)[\[【]角色当时的心声[^\n\]】]*未说出口[^\n\]】]*用户未必知情[\]】]\s*\n状态[：:]\s*([^\n]*)\n内心[：:]\s*([^\n]*)(?:\n暗流[：:]\s*([^\n]*))?\s*$/;
     const match = marker.exec(text);
     if (match) {
       innerVoice = { state: match[1].trim(), thoughts: match[2].trim(), undercurrent: (match[3] || '').trim() };
