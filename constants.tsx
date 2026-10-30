@@ -68,6 +68,7 @@ export const Icons: Record<string, React.FC<{ className?: string }>> = {
   Browser: ({ className }) => <GlobeSimple className={className} weight="regular" />,
   Songwriting: ({ className }) => <MusicNotes className={className} weight="regular" />,
   Music: ({ className }) => <MusicNotes className={className} weight="regular" />,
+  SongArchive: ({ className }) => <MusicNotes className={className} weight="regular" />,
   Call: ({ className }) => <PhoneCall className={className} weight="regular" />,
   Guidebook: ({ className }) => <Crosshair className={className} weight="regular" />,
   LifeSim: ({ className }) => <Smiley className={className} weight="regular" />,
@@ -116,6 +117,7 @@ export const INSTALLED_APPS: AppConfig[] = [
   { id: AppID.LifeSim, name: '都市人生', icon: 'LifeSim', color: 'purple' },
   { id: AppID.SpecialMoments, name: '特别时光', icon: 'SpecialMoments', color: 'pink' },
   { id: AppID.Music, name: '音乐', icon: 'Music', color: 'rose' },
+  { id: AppID.SongArchive, name: '音迹', icon: 'SongArchive', color: 'amber' },
   { id: AppID.CharCreatorDev, name: '捏脸·开发', icon: 'CharCreatorDev', color: 'amber' }, // 仅开发模式显示（Launcher 过滤）
   // { id: AppID.QQBridge, name: 'QQ 桥', icon: 'QQBridge', color: 'sky' }, // Hidden temporarily
 ];
