@@ -59,25 +59,21 @@ export const publishSongListenStatus = (message: string) => {
 export const isRealSongListeningEnabled = (char: CharacterProfile | null | undefined): boolean =>
   !!(char as any)?.realSongListeningEnabled;
 
-/** 读取每首歌唯一的客观声音描述，和角色音乐日记互相独立。 */
-export const getSongSoundCache = (songId: number): string => {
-  try { return localStorage.getItem('sully_song_sound_v1_' + songId) || ''; }
-  catch { return ''; }
-};
+/** IndexedDB 存档由独立音迹模块负责，旧 localStorage 缓存首次读取时自动迁移。 */
+export { getSongSoundCache } from '../features/personal/songArchive/storage';
+import { getSongSoundCache, saveSongSoundRecord, getSongSoundRecord } from '../features/personal/songArchive/storage';
 
-const putSongSoundCache = (songId: number, text: string): void => {
-  try { localStorage.setItem('sully_song_sound_v1_' + songId, text); }
-  catch (error) { console.warn('[audio-listening] 歌曲缓存写入失败', error); }
-};
-
-/** 一次分析，所有角色复用；进行中的调用也按 songId 去重。 */
+/** 同一歌曲正在识别时只调用一次，所有角色共享声音分析。 */
 const soundInFlight = new Map<number, Promise<string>>();
-export const getOrAnalyzeSongSound = (song: Song): Promise<string> => {
-  const cached = getSongSoundCache(song.id);
-  if (cached) { publishSongListenStatus('✅ 已复用歌曲客观分析：' + song.name); return Promise.resolve(cached); }
+export const getOrAnalyzeSongSound = (song: Song, force = false): Promise<string> => {
   const inflight = soundInFlight.get(song.id);
   if (inflight) return inflight;
   const task = (async () => {
+    const cached = !force ? await getSongSoundCache(song.id) : '';
+    if (cached) {
+      publishSongListenStatus('✅ 已复用歌曲客观分析：' + song.name);
+      return cached;
+    }
     const config = loadAudioApiConfig();
     if (!isAudioApiReady(config)) throw new Error('音频 API 尚未配置完成');
     publishSongListenStatus('⏳ 正在获取歌曲音频：' + song.name);
@@ -86,10 +82,21 @@ export const getOrAnalyzeSongSound = (song: Song): Promise<string> => {
     publishSongListenStatus('⏳ 已获取音频（' + (audio.blob.size / 1048576).toFixed(1) + 'MB），正在生成客观分析…');
     const { describeAudioWithAudioApi } = await import('./audioApi');
     const description = await describeAudioWithAudioApi(await audioBlobToPayload(audio.blob, audio.nameHint), config);
-    const record = JSON.stringify({ description, isTrial: audio.isTrial, songName: song.name, artists: song.artists });
-    putSongSoundCache(song.id, record);
+    const previous = await getSongSoundRecord(song.id);
+    const record = {
+      description,
+      isTrial: audio.isTrial,
+      songName: song.name,
+      artists: song.artists,
+      album: song.album,
+    };
+    const serialized = JSON.stringify(record);
+    await saveSongSoundRecord(song.id, serialized, {
+      ...(previous ? { originalDescription: previous.originalDescription } : {}),
+      updatedBy: 'ai',
+    });
     publishSongListenStatus('✅ 已保存歌曲客观分析：' + song.name);
-    return record;
+    return serialized;
   })().catch(error => {
     publishSongListenStatus('❌ 歌曲客观分析失败：' + (error instanceof Error ? error.message : String(error)));
     throw error;
@@ -98,7 +105,7 @@ export const getOrAnalyzeSongSound = (song: Song): Promise<string> => {
   return task;
 };
 
-/** 在最新动态上下文区域插入，让主模型自行形成感受，而非每轮硬评歌曲。 */
+/** 当前歌的客观声音内容在记忆召回附近的动态上下文中被注入。 */
 export const buildCurrentSongSoundBlock = (song: Song, record: string): string => {
   try {
     const parsed = JSON.parse(record);
