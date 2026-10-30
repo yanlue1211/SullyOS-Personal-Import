@@ -1031,8 +1031,8 @@ export const normalizeNote = (n: any): {
             entry?.urlDefault, entry?.url_default, entry?.url, entry?.urlPre,
             entry?.info_list?.[0]?.url, entry?.infoList?.[0]?.url,
         ];
-        const first = values.find((value: unknown) => typeof value === 'string' && /^https?:\\/\\//i.test(value as string));
-        return first ? [String(first).replace(/^http:\\/\\//, 'https://')] : [];
+        const first = values.find((value: unknown) => typeof value === 'string' && /^https?:\/\//i.test(value as string));
+        return first ? [String(first).replace(/^http:\/\//, 'https://')] : [];
     }))] : [];
 
     // 点赞数：支持 interactInfo.likedCount (profile notes) 和 interact_info.liked_count (search results)
