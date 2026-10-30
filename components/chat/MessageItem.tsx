@@ -2016,7 +2016,7 @@ const MessageItem = React.memo(({
                             referrerPolicy="no-referrer"
                             onError={(e: any) => { const c = e.target?.parentElement; if (c) c.style.display = 'none'; }}
                         />
-                        {shareImages.length > 1 && <div className="absolute bottom-2 right-2"><ShareGalleryButton images={shareImages} title={wp.title || '分享图集'} /></div>}
+                        {vd?.contentType === 'image' && shareImages.length > 1 && <div className="absolute bottom-2 right-2 z-10"><ShareGalleryButton images={shareImages} title={wp.title || '分享图集'} /></div>}
                         {/* 视频分享：封面加播放角标；图集显示张数 */}
                         {vd && vd.contentType !== 'image' && (
                             <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
@@ -2025,7 +2025,7 @@ const MessageItem = React.memo(({
                                 </span>
                             </span>
                         )}
-                        {vd && vd.contentType === 'image' && !!vd.imageCount && (
+                        {vd && vd.contentType === 'image' && !!vd.imageCount && shareImages.length < 2 && (
                             <span className="absolute bottom-1.5 right-1.5 px-1.5 py-0.5 rounded-md bg-black/45 text-white text-[9px] font-medium pointer-events-none">
                                 图集 · {vd.imageCount}张
                             </span>
