@@ -1,7 +1,7 @@
 name: Commerce and character diary verification
 on:
   push:
-    branches: [personal/commerce-character-diary, personal/commerce-stores-access]
+    branches: [personal/commerce-character-diary, personal/commerce-stores-access, personal/store-prompts-audio-presets]
   workflow_dispatch:
 permissions:
   contents: read
@@ -21,5 +21,5 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec vitest run utils/commerceAppUI.test.ts utils/personalCommerce.test.ts utils/characterDiary.test.ts utils/chatPrompts.test.ts utils/sanitize.test.ts utils/messageFormat.cards.test.ts utils/applyAssistantPostProcessing.test.ts utils/journalRerollRuntime.test.ts utils/personalInnerVoice.test.ts
+      - run: pnpm exec vitest run utils/audioApiFields.test.ts utils/commerceAppUI.test.ts utils/personalCommerce.test.ts utils/characterDiary.test.ts utils/chatPrompts.test.ts utils/sanitize.test.ts utils/messageFormat.cards.test.ts utils/applyAssistantPostProcessing.test.ts utils/journalRerollRuntime.test.ts utils/personalInnerVoice.test.ts
       - run: pnpm run build

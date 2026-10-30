@@ -16,7 +16,10 @@ const click=async(text:string)=>{const btn=[...host.querySelectorAll('button')].
 it('refreshes categorized shops without a role, opens a menu and purchases only after opt-in',async()=>{
  vi.mocked(safeFetchJson).mockResolvedValueOnce({choices:[{message:{content:JSON.stringify([{name:'杯子铺',category:'家居',description:'日常杯具'}])}}]}).mockResolvedValueOnce({choices:[{message:{content:JSON.stringify([{title:'蓝色马克杯',detail:'350毫升',price:29}])}}]});
  await act(async()=>{root.render(React.createElement(CommerceApp));await new Promise(r=>setTimeout(r,30));});
- expect(safeFetchJson).not.toHaveBeenCalled();await click('刷新店铺');expect(host.textContent).toContain('家居');
+ expect(safeFetchJson).not.toHaveBeenCalled();
+ const preference=host.querySelector('textarea[aria-label="商城生成偏好"]') as HTMLTextAreaElement;
+ await act(async()=>{const setter=Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!;setter.call(preference,'复古文具店，商品用奶油色');preference.dispatchEvent(new Event('input',{bubbles:true}));});
+ await click('刷新店铺');expect(host.textContent).toContain('家居');
  const store=[...host.querySelectorAll('button')].find(b=>b.textContent?.includes('杯子铺'))!;
  await act(async()=>{store.click();await new Promise(r=>setTimeout(r,30));});
  expect(host.textContent).toContain('蓝色马克杯');
@@ -28,4 +31,6 @@ it('refreshes categorized shops without a role, opens a menu and purchases only 
  await click('店铺');const productAgain=[...host.querySelectorAll('button')].find(b=>b.textContent?.includes('蓝色马克杯'))!;await act(async()=>productAgain.click());
  await click('我给 TA 买');const {orders}=await readCommerce();expect(orders).toHaveLength(1);expect(orders[0].recipient).toBe('char');expect(host.textContent).toContain('等待发货');
  const req=JSON.parse(vi.mocked(safeFetchJson).mock.calls[0][1].body as string);expect(JSON.stringify(req.messages)).not.toContain('小雨');
+ expect(JSON.stringify(req.messages)).toContain('复古文具店');expect((await readCommerce()).preferences.taobao).toContain('奶油色');
+ const menuRequest=JSON.parse(vi.mocked(safeFetchJson).mock.calls[1][1].body as string);expect(JSON.stringify(menuRequest.messages)).toContain('奶油色');
 });
