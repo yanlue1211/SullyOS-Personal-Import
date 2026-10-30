@@ -1,3 +1,4 @@
+import { commerceContext } from './personalCommerce';
 import { getShareCardImageUrls } from './shareCardImages';
 import { INNER_VOICE_SYSTEM, innerVoiceContext } from '../features/personal/innerVoice/protocol';
 import { VIRTUAL_MEDIA_GUIDE, RECORDING_HISTORY_GUIDE } from '../features/personal/chatMedia/format';
@@ -1073,6 +1074,11 @@ ${voiceActingGuide()}`;
 
         }
 
+        if (!forFirePack && !promptOptions?.appRules) {
+            const shopping = await commerceContext(char.id);
+            volatileState += shopping.pending + shopping.guide;
+        }
+
         // Shared with in-person interaction; keep this after chat-specific mode instructions.
         const recencyTail = buildCharacterResponsePrinciples(char.name, userProfile.name);
 
@@ -1415,6 +1421,8 @@ ${voiceActingGuide()}`;
                             content = `${timeStr} ${formatLifeSimResetCardForContext(card, char?.name)}`;
                         } else if (qixiCard) {
                             content = `${timeStr} ${formatQixiEventCardForContext(qixiCard, 'char')}`;
+                        } else if (card?.type === 'commerce_order' || (card?.type === 'diary_card' && card.diaryKind === 'character')) {
+                            content = `${timeStr} ${normalizeMessageContent(m, char?.name || '你', userProfile?.name || '用户')}`;
                         } else if (card?.type === 'diary_card') {
                             const uName = card.userName || userProfile?.name || '用户';
                             const userText = (card.userText || '').trim();

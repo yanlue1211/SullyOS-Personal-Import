@@ -1,3 +1,4 @@
+import { consumeCommerceAction } from './personalCommerce';
 import { extractInnerVoice, type InnerVoice } from '../features/personal/innerVoice/protocol';
 import { withReplyCancellation, type ReplyRun } from './chatReplyCancellation';
 import { dialogueMaxTokens } from './characterApi';
@@ -775,6 +776,19 @@ export async function applyAssistantPostProcessing(
         }
         return result.cleanedText;
     };
+
+    // Simulated purchases execute at most once per persisted reply/source round.
+    if (rawAiContent.includes('<购物>')) {
+        const original = rawAiContent;
+        try {
+            rawAiContent = await replyStep(() => consumeCommerceAction(char.id, char.name, userProfile.name, original,
+                ctx.replyRun?.uuid || `reply:${char.id}:${contextMsgs.filter(m=>m.role==='user').at(-1)?.id || spokenAt}`));
+        } catch (error: any) {
+            rawAiContent = original.replace(/<购物>[\s\S]*?<\/购物>/g, '');
+            hooks.addToast?.(`模拟订单未创建：${error.message}`, 'info');
+            await persistMessage({charId:char.id,role:'system',type:'text',content:`模拟购物未成功：${error.message}。未创建这次订单，不能视为已经购买。`,metadata:{source:'personal-commerce'}});
+        }
+    }
 
     // ─── Step 1: 初次粗洗 ───
     rawAiContent = await replyStep(() => consumeHomeVisitReply(char.id, rawAiContent,

@@ -376,7 +376,7 @@ const extractTranslationOriginal = (t: string): string => {
  * 顺序很重要 — 见处理顺序注释.
  */
 export function sanitizeForNotification(text: string): string {
-  let result = text;
+  let result = text.replace(/<购物>[\s\S]*?(?:<\/购物>|$)/g, '');
   // 1. 字面 \n 还原 — 否则后续 ^ 锚定失效
   result = stripLiteralBackslashN(result);
   // 2. think 块最早剥 — 里面可能含其他 tag 影响后续匹配

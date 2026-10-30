@@ -1,3 +1,4 @@
+import { reconcileCommerce } from '../utils/personalCommerce';
 import { isEmotionFeatureOn } from '../utils/scheduleFeature';
 import { handleLocalBack } from '../utils/localBackHandlers';
 import {isHomeAssetDisposal} from '../utils/homeAssetCancellation';
@@ -926,6 +927,14 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
   const [virtualTime, setVirtualTime] = useState<VirtualTime>(getRealTime());
   
+  useEffect(() => {
+    const scan = () => { void reconcileCommerce().catch(e => console.warn('[commerce] Pending delivery retained for retry', e)); };
+    scan(); const timer = setInterval(scan, 30000);
+    const onVisible = () => { if (document.visibilityState === 'visible') scan(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { clearInterval(timer); document.removeEventListener('visibilitychange', onVisible); };
+  }, []);
+
   // Real-time Clock Sync
   useEffect(() => {
       const timer = setInterval(() => {
