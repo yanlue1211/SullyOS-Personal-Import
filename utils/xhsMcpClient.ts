@@ -1014,6 +1014,7 @@ export const normalizeNote = (n: any): {
     shareCount: number;
     xsecToken?: string;
     coverUrl?: string;
+    images?: string[];
     type?: string;
 } => {
     const card = n.noteCard || n.note_card || n.notecard;
@@ -1023,6 +1024,17 @@ export const normalizeNote = (n: any): {
         : coverObj?.urlDefault || coverObj?.url_default || coverObj?.url || coverObj?.urlPre
         || coverObj?.info_list?.[0]?.url || undefined;
     const coverUrl = rawCoverUrl?.replace(/^http:\/\//, 'https://');
+    // Preserve every picture returned by note detail, not only the first cover.
+    const rawImages = n.image_list || n.imageList || n.images || card?.image_list || card?.imageList || card?.images;
+    const images: string[] = Array.isArray(rawImages) ? [...new Set(rawImages.flatMap((entry: any) => {
+        const values = typeof entry === 'string' ? [entry] : [
+            entry?.urlDefault, entry?.url_default, entry?.url, entry?.urlPre,
+            entry?.info_list?.[0]?.url, entry?.infoList?.[0]?.url,
+        ];
+        const first = values.find((value: unknown) => typeof value === 'string' && /^https?:\\/\\//i.test(value as string));
+        return first ? [String(first).replace(/^http:\\/\\//, 'https://')] : [];
+    }))] : [];
+
     // 点赞数：支持 interactInfo.likedCount (profile notes) 和 interact_info.liked_count (search results)
     const interact = n.interact_info || n.interactInfo
         || card?.interact_info || card?.interactInfo || {};
@@ -1042,6 +1054,7 @@ export const normalizeNote = (n: any): {
         shareCount: parseXhsCount(shareCountRaw),
         xsecToken: n.xsecToken || n.xsec_token || card?.xsec_token || card?.xsecToken || undefined,
         coverUrl,
+        images,
         type: n.type || card?.type || undefined,
     };
 };
