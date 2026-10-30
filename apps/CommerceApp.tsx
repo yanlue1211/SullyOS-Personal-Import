@@ -1,9 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useOS } from '../context/OSContext';
 import { safeFetchJson, extractContent, extractJson } from '../utils/safeApi';
 import {
   readCommerce, normalizeProducts, normalizeShops, saveShops, saveShopProducts,
-  saveCommerceMembers, createCommerceOrder,
+  saveCommerceMembers, saveCommercePreferences, createCommerceOrder,
   type CommerceKind, type CommerceProduct, type CommerceOrder, type CommerceShop,
 } from '../utils/personalCommerce';
 import OrderCard from '../components/commerce/OrderCard';
@@ -14,6 +14,8 @@ function Commerce({ kind }: { kind: CommerceKind }) {
   const [charId, setCharId] = useState('');
   const [tab, setTab] = useState<'shop' | 'orders' | 'people'>('shop');
   const [query, setQuery] = useState('');
+  const [preferences, setPreferences] = useState('');
+  const preferenceEdited = useRef(false);
   const [category, setCategory] = useState('全部');
   const [shops, setShops] = useState<CommerceShop[]>([]);
   const [shop, setShop] = useState<CommerceShop | null>(null);
@@ -37,18 +39,22 @@ function Commerce({ kind }: { kind: CommerceKind }) {
   useEffect(() => {
     const load = () => { void refresh().catch(() => addToast('商城读取失败，请重试', 'error')); };
     load();
+    let active = true; preferenceEdited.current = false;
+    void readCommerce().then(s => { if (active && !preferenceEdited.current) setPreferences(s.preferences[kind]); }).catch(() => {});
     window.addEventListener('commerce-updated', load);
-    return () => window.removeEventListener('commerce-updated', load);
+    return () => { active = false; window.removeEventListener('commerce-updated', load); };
   }, [kind]);
 
   // Catalog generation is a neutral director task, independent of character access or selection.
   const requestCatalog = async (instruction: string) => {
     if (!apiConfig.model) throw new Error('请先配置 API');
+    await saveCommercePreferences(kind, preferences);
+    const preferenceContext = preferences.trim() ? `\n用户指定的生成偏好（店铺和商品均需遵循；不改变 JSON 结构）：\n${preferences.trim()}` : '';
     const response = await safeFetchJson(`${apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiConfig.apiKey}` },
       body: JSON.stringify({ model: apiConfig.model, messages: [
         { role: 'system', content: '你负责生成生活商城的数据。仅返回要求的 JSON 数组，不扮演任何角色，不输出免责声明、图片网址或角色台词。' },
-        { role: 'user', content: instruction },
+        { role: 'user', content: instruction + preferenceContext },
       ], temperature: 0.85, stream: false }),
     }, 0, 90000);
     return extractJson(extractContent(response));
@@ -107,6 +113,11 @@ function Commerce({ kind }: { kind: CommerceKind }) {
       <p className="text-xs mt-2 opacity-70">{food ? '先选一家喜欢的店，再看看今天吃什么。' : '从喜欢的店铺里，慢慢挑选生活。'}</p>
       <div className="flex gap-2 mt-4"><input className="rounded-full bg-white/90 px-4 py-3 min-w-0 flex-1 text-sm" placeholder="店铺关键词（可留空）" value={query} maxLength={100} onChange={e => setQuery(e.target.value)} />
         <button className="bg-black/80 text-white rounded-full px-4 text-sm" disabled={busy} onClick={() => void refreshShops()}>{busy ? '准备中…' : '刷新店铺'}</button></div>
+      <details className="mt-3 bg-white/50 rounded-xl p-3">
+        <summary className="text-xs font-bold cursor-pointer">生成偏好 · 自定义店铺与商品风格</summary>
+        <textarea aria-label="商城生成偏好" className="w-full mt-3 rounded-xl bg-white/90 p-3 text-sm" rows={3} maxLength={2000} value={preferences} disabled={busy} onChange={e=>{preferenceEdited.current=true;setPreferences(e.target.value);}} placeholder={food?'例如：温暖的深夜食堂，家常菜和热汤，不要甜品。':'例如：复古文具、奶油色家居，店名俏皮，价格亲民。'} />
+        <div className="flex justify-between items-center gap-3 mt-2"><span className="text-xs opacity-60">留空沿用默认；刷新店铺和店内商品时使用。</span><button disabled={busy} className="text-xs font-bold shrink-0" onClick={()=>{void saveCommercePreferences(kind,preferences).then(()=>addToast('生成偏好已保存','success')).catch(()=>addToast('保存失败，请重试','error'));}}>保存偏好</button></div>
+      </details>
     </header>
     <nav className="flex px-5 py-3 gap-2">{(['shop', 'orders', 'people'] as const).map(t => <button key={t} onClick={() => setTab(t)} className={`flex-1 py-3 rounded-xl text-sm font-bold ${tab === t ? 'bg-white shadow-sm' : 'text-stone-400'}`}>{t === 'shop' ? '店铺' : t === 'orders' ? '订单' : `接入角色 ${connected.length}`}</button>)}</nav>
     <main className="overflow-y-auto flex-1 px-5 pb-20">

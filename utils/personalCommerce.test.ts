@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import {beforeEach,it,expect} from 'vitest';
 import {DB} from './db';
-import {normalizeProducts,saveProducts,createCommerceOrder,readCommerce,reconcileCommerce,orderStatus,commerceContext,consumeCommerceAction,saveCommerceMembers,commerceContext as getContext,orderText,normalizeShops,saveShops,saveShopProducts} from './personalCommerce';
+import {normalizeProducts,saveProducts,createCommerceOrder,readCommerce,reconcileCommerce,orderStatus,commerceContext,consumeCommerceAction,saveCommerceMembers,saveCommercePreferences,commerceContext as getContext,orderText,normalizeShops,saveShops,saveShopProducts} from './personalCommerce';
 let productId:string;
 beforeEach(async()=>{await DB.deleteDB();const p=normalizeProducts([{title:'热汤面',shop:'小面馆',price:22,detail:'清汤'}],'meituan');await saveProducts(p,'meituan');productId=p[0].id;await saveCommerceMembers('meituan',['a','b']);});
 const input=()=>({charId:'a',charName:'甲',userName:'我',productId,buyer:'char' as const,recipient:'user' as const});
@@ -54,4 +54,10 @@ it('migrates the old flat catalog into stable stores without enrolling every cha
  expect(first.members).toEqual({taobao:[],meituan:[]});
  expect(first.shops[0].id).toBe(second.shops[0].id);expect(first.products[0].shopId).toBe(first.shops[0].id);
  expect((await commerceContext('a')).guide).toBe('');
+});
+
+it('saves generation preferences separately for the two apps without injecting them into role shopping rules',async()=>{
+ await saveCommercePreferences('taobao','复古书店');await saveCommercePreferences('meituan','夜宵热汤');
+ const s=await readCommerce();expect(s.preferences).toEqual({taobao:'复古书店',meituan:'夜宵热汤'});
+ expect((await commerceContext('a')).guide).not.toContain('夜宵热汤');
 });

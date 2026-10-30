@@ -1,3 +1,4 @@
+import AudioApiFields from '../components/settings/AudioApiFields';
 import RecordingManager from '../features/personal/chatMedia/RecordingManager';
 import AudioApiTestButton from '../components/settings/AudioApiTestButton';
 import NavigationBallSettings from '../components/settings/NavigationBallSettings';
@@ -2706,11 +2707,7 @@ const Settings: React.FC = () => {
             <div className="space-y-3 text-sm">
                 <p className="text-xs text-slate-500">使用支持 input_audio 的 OpenAI 兼容音频模型。角色听歌时会发送歌曲音频，并把听后感写入音乐档案。</p>
                 <label className="flex items-center gap-2"><input type="checkbox" checked={apiConfig.audioApi?.enabled === true} onChange={e => updateApiConfig({ audioApi: { baseUrl: '', apiKey: '', model: '', ...apiConfig.audioApi, enabled: e.target.checked } })} />开启真实听歌</label>
-                {(['baseUrl', 'apiKey', 'model'] as const).map(field => (
-                    <label key={field} className="block text-xs text-slate-600">{field === 'baseUrl' ? '接口地址' : field === 'apiKey' ? 'API Key' : '音频模型名称'}
-                        <input className="w-full mt-1 p-2 border border-slate-200 rounded-lg bg-white" type={field === 'apiKey' ? 'password' : 'text'} value={apiConfig.audioApi?.[field] || ''} placeholder={field === 'baseUrl' ? 'https://example.com/v1' : field === 'model' ? '支持音频输入的模型 ID' : ''} onChange={e => updateApiConfig({ audioApi: { enabled: false, baseUrl: '', apiKey: '', model: '', ...apiConfig.audioApi, [field]: e.target.value } })} />
-                    </label>
-                ))}
+                <AudioApiFields config={apiConfig.audioApi} presets={apiPresets} onChange={audioApi => updateApiConfig({audioApi})} />
                 <label className="block text-xs">音质
                     <select className="w-full mt-1 p-2 border rounded-lg" value={apiConfig.audioApi?.songQuality || 'exhigh'} onChange={e => updateApiConfig({ audioApi: { enabled: false, baseUrl: '', apiKey: '', model: '', ...apiConfig.audioApi, songQuality: e.target.value as 'standard' | 'exhigh' | 'lossless' } })}>
                         <option value="standard">标准 · 更省流量</option><option value="exhigh">极高 · 推荐</option><option value="lossless">无损 · 可能超出 API 限制</option>

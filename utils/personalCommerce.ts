@@ -3,10 +3,11 @@ export type CommerceKind = 'taobao' | 'meituan';
 export interface CommerceProduct { id: string; kind: CommerceKind; title: string; shop: string; detail: string; price: number; deliveryMinutes?: number; shopId?: string; category?: string; }
 export interface CommerceOrder { id: string; charId: string; charName: string; userName: string; product: CommerceProduct; buyer: 'user'|'char'; recipient: 'user'|'char'; createdAt: number; eta: number; autonomous: boolean; requestId?: string; createdNotified?: boolean; deliveredNotified?: boolean; }
 export interface CommerceShop { id:string; kind:CommerceKind; name:string; category:string; description:string; }
-interface State { products: CommerceProduct[]; orders: CommerceOrder[]; shops:CommerceShop[]; members:Record<CommerceKind,string[]>; }
+interface State { products: CommerceProduct[]; orders: CommerceOrder[]; shops:CommerceShop[]; members:Record<CommerceKind,string[]>; preferences:Record<CommerceKind,string>; }
 const KEY = 'personal_commerce_v1';
-const empty = (): State => ({products: [], orders: [], shops:[], members:{taobao:[],meituan:[]}});
+const empty = (): State => ({products: [], orders: [], shops:[], members:{taobao:[],meituan:[]},preferences:{taobao:'',meituan:''}});
 function decode(raw: unknown): State { if (!raw) return empty(); const s = typeof raw === 'string' ? JSON.parse(raw) : raw; if (!Array.isArray(s.products)||!Array.isArray(s.orders)) throw new Error('订单数据无法读取，请保留备份'); s.members={taobao:Array.isArray(s.members?.taobao)?s.members.taobao:[],meituan:Array.isArray(s.members?.meituan)?s.members.meituan:[]};
+ s.preferences={taobao:typeof s.preferences?.taobao==='string'?s.preferences.taobao:'',meituan:typeof s.preferences?.meituan==='string'?s.preferences.meituan:''};
  if(!Array.isArray(s.shops)){const byName=new Map<string,CommerceShop>();for(const product of s.products){const key=`${product.kind}:${product.shop}`;if(!byName.has(key))byName.set(key,{id:`legacy:${product.kind}:${product.shop}`,kind:product.kind,name:product.shop,category:product.category||'精选店铺',description:''});product.shopId=byName.get(key)!.id;}s.shops=[...byName.values()];}
  return s; }
 export const readCommerce = async (): Promise<State> => decode(await DB.getAsset(KEY));
@@ -28,6 +29,7 @@ export function normalizeProducts(raw: unknown, kind: CommerceKind): CommercePro
  if(!items.length) throw new Error('没有生成有效商品，请重试');return items;
 }
 export async function saveProducts(products:CommerceProduct[],kind:CommerceKind){await mutate(s=>{s.products=[...s.products.filter(p=>p.kind!==kind),...products];});}
+export async function saveCommercePreferences(kind:CommerceKind,value:string){await mutate(s=>{s.preferences[kind]=value.trim().slice(0,2000);});}
 export async function saveCommerceMembers(kind:CommerceKind,ids:string[]){await mutate(s=>{s.members[kind]=[...new Set(ids.filter(id=>typeof id==='string'&&id))];});notify();}
 export function normalizeShops(raw:unknown,kind:CommerceKind):CommerceShop[]{
  if(!Array.isArray(raw))throw new Error('店铺数据格式不正确');
