@@ -33,6 +33,7 @@ import { getRoomLabel } from '../utils/memoryPalace/types';
 import { XhsMcpClient, extractNotesFromMcpData, normalizeXhsLiteDetail } from '../utils/xhsMcpClient';
 import { extractWebpageContent, detectFirstUrl, detectXhsShortUrl, extractXhsShareTitle, isXhsUrl, extractXhsNoteLink, expandShortUrl, type ExtractedWebpage } from '../utils/webpageExtractor';
 import { isVideoShareUrl, parseVideoShareUrl } from '../utils/videoParser';
+import { extractVideoFrames } from '../utils/shareVideoFrames';
 import { isDevDebugAvailable } from '../utils/devDebug';
 import { isImageValue, migrateDataUrlToRef, putImageBlob, putImageBlobDeduped, useBlobRefUrl } from '../utils/blobRef';
 import { buildReplySnapshotContent } from '../utils/applyAssistantPostProcessing';
@@ -1633,6 +1634,13 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
                         console.warn('Webpage fetch failed:', e);
                         addToast(`网页抓取失败：${e?.message || '可能被这个站点拦截了，换个链接或稍后再试。'}`, 'error');
                     }
+                }
+                if (webpage?.video?.contentType === 'video' && webpage.video.videoUrl) {
+                    // Best-effort: sample a few frames before saving the card, so both
+                    // the default multimodal model and optional vision API can see them.
+                    // Cross-origin or expired media simply keeps the existing cover.
+                    const frames = await extractVideoFrames(webpage.video.videoUrl, { count: 4, width: 400, timeoutMs: 3500 });
+                    if (frames.length) webpage = { ...webpage, video: { ...webpage.video, frames } };
                 }
                 if (webpage) {
                     await DB.saveMessage({
