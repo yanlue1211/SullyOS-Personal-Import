@@ -329,7 +329,12 @@ export function normalizeMessageContent(
                 v.collectCount ? `收藏 ${formatStatCount(v.collectCount)}` : '',
             ].filter(Boolean);
             const hasImages = getShareCardImageUrls(msg as Message).length > 0;
-            const note = hasImages ? '' : isImage
+            const frameCount = Array.isArray(v.frames) ? v.frames.length : 0;
+            const note = !isImage && frameCount > 0
+                ? `（已提取 ${frameCount} 张视频关键帧，可理解这些时间点的画面，但不能据此推断完整视频或声音。）`
+                : !isImage
+                ? '（注：目前只有视频封面及标题等元数据，尚未获得实际视频关键帧；不要假装看过视频内容或听过声音。）'
+                : hasImages ? '' : isImage
                 ? '（注：你能看到的是这个图文的标题、作者和热度数据，看不到图片内容本身，别假装看过图。）'
                 : '（注：你能看到的是这个视频的标题、作者和热度数据，看不到视频画面和声音，别假装看过视频内容。）';
             return [
