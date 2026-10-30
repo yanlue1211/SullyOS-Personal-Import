@@ -1,7 +1,7 @@
 name: Commerce and character diary verification
 on:
   push:
-    branches: [personal/commerce-character-diary]
+    branches: [personal/commerce-character-diary, personal/commerce-stores-access]
   workflow_dispatch:
 permissions:
   contents: read
