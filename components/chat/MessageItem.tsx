@@ -1729,8 +1729,13 @@ const MessageItem = React.memo(({
                     <div className={selectionMode ? 'pointer-events-none' : ''}>
                         {<ChatCardSurface message={m}>{content}</ChatCardSurface>}
                     </div>
-                    {isLastInGroup && showTimestamp !== 'never' && (
-                        <div className={`absolute top-full ${isUser ? 'right-0' : 'left-0'} mt-0.5 px-1 text-[9px] text-slate-400/80 font-medium whitespace-nowrap pointer-events-none ${showTimestamp === 'hover' ? 'opacity-0 group-hover:opacity-100 transition-opacity' : ''}`}>{formatTime(m.timestamp)}</div>
+                    {isLastInGroup && (showTimestamp !== 'never' || (!isUser && m.metadata?.innerVoice)) && (
+                        <div className={`sully-chat-message-meta absolute top-full ${isUser ? 'right-0' : 'left-0'} mt-0.5 px-1 inline-flex items-center gap-1.5 whitespace-nowrap`}>
+                            {showTimestamp !== 'never' && (
+                                <span className={`text-[9px] text-slate-400/80 font-medium pointer-events-none ${showTimestamp === 'hover' ? 'opacity-0 group-hover:opacity-100 transition-opacity' : ''}`}>{formatTime(m.timestamp)}</span>
+                            )}
+                            {!isUser && m.metadata?.innerVoice && <InnerVoiceChip value={m.metadata.innerVoice} />}
+                        </div>
                     )}
                     </div>
                 </div>
@@ -1742,11 +1747,6 @@ const MessageItem = React.memo(({
                     </div>
                 )}
             </div>
-            {!isUser && isLastInGroup && m.metadata?.innerVoice && (
-                <div className="sully-inner-voice-after-message flex justify-start pl-[4.25rem] pr-3 mt-1 mb-2">
-                    <InnerVoiceChip value={m.metadata.innerVoice} />
-                </div>
-            )}
         </>
     );
 
@@ -3635,6 +3635,7 @@ const MessageItem = React.memo(({
            // 否则用户点了「确认」，DB 已更新、消息已重载，卡片却因 memo 判等而纹丝不动。
            prev.msg.metadata?.reviewStatus === next.msg.metadata?.reviewStatus &&
            prev.msg.metadata?.status === next.msg.metadata?.status &&
+           prev.msg.metadata?.innerVoice === next.msg.metadata?.innerVoice &&
            prev.msg.metadata?.receipt === next.msg.metadata?.receipt &&
            prev.msg.metadata?.sarModuleSurface?.surface === next.msg.metadata?.sarModuleSurface?.surface &&
            prev.isFirstInGroup === next.isFirstInGroup &&
