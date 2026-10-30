@@ -1652,7 +1652,6 @@ const MessageItem = React.memo(({
     ) : null;
     const commonLayout = (content: React.ReactNode) => (
         <>
-            {!isUser && <InnerVoiceChip value={m.metadata?.innerVoice} />}
             {centerModules && thinkingChainNode && (
                 <div className="px-3 flex justify-center">
                     <div className="w-[72%] max-w-[72%]">{thinkingChainNode}</div>
@@ -1743,6 +1742,11 @@ const MessageItem = React.memo(({
                     </div>
                 )}
             </div>
+            {!isUser && m.metadata?.innerVoice && (
+                <div className="sully-inner-voice-after-message flex justify-start pl-[4.25rem] pr-3 mt-1 mb-2">
+                    <InnerVoiceChip value={m.metadata.innerVoice} />
+                </div>
+            )}
         </>
     );
 
