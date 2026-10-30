@@ -37,5 +37,5 @@ export function getShareCardImageUrls(message: Message): string[] {
   }
   return [...new Set(candidates.filter((value): value is string =>
     typeof value === 'string' && /^(https?:\/\/|data:image\/|blobref:)/i.test(value)
-  ))].slice(0, 9);
+  ))].slice(0, 18);
 }
