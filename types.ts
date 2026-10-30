@@ -7,6 +7,7 @@ export enum AppID {
   GroupChat = 'group_chat', 
   Gallery = 'gallery',
   Music = 'music',
+  SongArchive = 'song_archive',
   Browser = 'browser',
   ThemeMaker = 'thememaker', // Legacy shortcut ID; opens the embedded bubble maker, not an installed App.
   Appearance = 'appearance',
