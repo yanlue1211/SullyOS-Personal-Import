@@ -35,7 +35,9 @@ describe('call narration safety', () => {
     expect(CALL_RECORDING_GUIDE).toContain('未识别');
     expect(VIDEO_NARRATION_GUIDE).toContain('禁止朗读');
     expect(VOICE_CALL_NARRATION_GUIDE).toContain('不输出');
-    expect(VIRTUAL_MEDIA_GUIDE).toContain('虚拟语音');
+    expect(VIRTUAL_MEDIA_GUIDE).toContain('[[虚拟图片:画面描述]]');
+    expect(VIRTUAL_MEDIA_GUIDE).toContain('[[虚拟视频:视频内容描述]]');
+    expect(VIRTUAL_MEDIA_GUIDE).toContain('双方发送的图片和视频都是真实的聊天媒体内容');
     expect(RECORDING_HISTORY_GUIDE).toContain('清理');
   });
 });
