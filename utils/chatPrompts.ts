@@ -1280,6 +1280,9 @@ ${voiceActingGuide()}`;
                 else if ((m.type as string) === 'xhs_card' || (m.type as string) === 'webpage_card') {
                     const text = `${timeStr} ${normalizeMessageContent(m, char?.name || '你', userProfile?.name || '用户')}`;
                     const images = getShareCardImageUrls(m);
+                    const frames = (m.type as string) === 'webpage_card' && m.metadata?.webpage?.video?.contentType === 'video'
+                        ? (m.metadata.webpage.video.frames || []) : [];
+                    const frameTimes = Array.isArray(frames) ? frames.map((f: any) => Number(f.timeSeconds).toFixed(1) + '秒').join('、') : '';
                     const description = options?.useVisionDescriptions && typeof m.metadata?.visionDescription === 'string'
                         ? m.metadata.visionDescription.trim() : '';
                     if (description) return { role: m.role, content: text + '\n配图视觉内容：\n' + description };
@@ -1287,7 +1290,9 @@ ${voiceActingGuide()}`;
                         content = text;
                     } else {
                         return { role: m.role, content: [
-                            { type: 'text', text: text + '\n以下为分享卡片的实际配图：' },
+                            { type: 'text', text: text + (frameTimes
+                                ? '\n以下包含视频实际截取的关键帧（时间点：' + frameTimes + '），以及封面；只根据可见画面判断，不推测未截取部分或声音：'
+                                : '\n以下为分享卡片的实际配图：') },
                             ...images.map(url => ({ type: 'image_url', image_url: { url } })),
                         ] };
                     }

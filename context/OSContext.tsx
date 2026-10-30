@@ -46,6 +46,7 @@ import { encodeVectorsForBackupChunked } from '../utils/memoryPalace/db';
 import { createBackupArchive } from '../utils/backupArchive';
 import { streamBackupArrayStore } from '../utils/backupStoreStreaming';
 import { ProactiveChat } from '../utils/proactiveChat';
+import { extractInnerVoice } from '../features/personal/innerVoice/protocol';
 import { VRScheduler, type VRSessionOutcome } from '../utils/vrWorld/scheduler';
 import { runVRSession } from '../utils/vrWorld/runSession';
 import { allowsAutomaticVR } from '../utils/vrWorld/participation';
@@ -2580,7 +2581,17 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
               aiContent = aiContent.replace(/\s*\[(?:聊天|通话|约会)\]\s*/g, '\n').trim();
 
               aiContent = normalizeProactiveAiContent(aiContent);
+              // Proactive 1.0 is an online chat reply: use the same heart parser
+              // before chunking or HTML rendering, never expose raw <心声> tags.
+              const proactiveHeart = extractInnerVoice(aiContent);
+              aiContent = proactiveHeart.text;
 
+              let lastProactiveAssistantId: number | undefined;
+              const saveProactiveMessage: typeof DB.saveMessage = async msg => {
+                  const id = await DB.saveMessage(msg);
+                  if (msg.role === 'assistant') lastProactiveAssistantId = id;
+                  return id;
+              };
               const savedPreviewChunks: string[] = [];
               const baseTimestamp = Date.now();
               let offset = 0;
@@ -2599,7 +2610,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                   for (const blk of blocks) {
                       try {
                           const meta = consumeThinkingMeta();
-                          await DB.saveMessage({
+                          await saveProactiveMessage({
                               charId,
                               role: 'assistant',
                               type: 'html_card',
@@ -2635,7 +2646,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                           const foundEmoji = emojis.find(e => e.name === name);
                           if (!foundEmoji?.url) return;
                           const meta = consumeThinkingMeta();
-                          await DB.saveMessage({
+                          await saveProactiveMessage({
                               charId,
                               role: 'assistant',
                               type: 'emoji',
@@ -2657,7 +2668,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                               for (const chunk of ChatParser.chunkText(cleaned)) {
                                   if (!chunk) continue;
                                   const meta = consumeThinkingMeta();
-                                  await DB.saveMessage({
+                                  await saveProactiveMessage({
                                       charId,
                                       role: 'assistant',
                                       type: 'text',
@@ -2689,7 +2700,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                                   ? `${originalText}\n%%BILINGUAL%%\n${translatedText}`
                                   : (originalText || translatedText);
                               const meta = consumeThinkingMeta();
-                              await DB.saveMessage({
+                              await saveProactiveMessage({
                                   charId,
                                   role: 'assistant',
                                   type: 'text',
@@ -2715,7 +2726,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                               const foundEmoji = emojis.find(e => e.name === part.content);
                               if (foundEmoji?.url) {
                                   const meta = consumeThinkingMeta();
-                                  await DB.saveMessage({
+                                  await saveProactiveMessage({
                                       charId,
                                       role: 'assistant',
                                       type: 'emoji',
@@ -2726,7 +2737,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                               } else {
                                   const fallbackText = `发送了表情包：${part.content}`;
                                   const meta = consumeThinkingMeta();
-                                  await DB.saveMessage({
+                                  await saveProactiveMessage({
                                       charId,
                                       role: 'assistant',
                                       type: 'text',
@@ -2746,7 +2757,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
                           for (const chunk of textChunks) {
                               const meta = consumeThinkingMeta();
-                              await DB.saveMessage({
+                              await saveProactiveMessage({
                                   charId,
                                   role: 'assistant',
                                   type: 'text',
@@ -2759,6 +2770,10 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                           }
                       }
                   }
+              }
+
+              if (proactiveHeart.innerVoice && lastProactiveAssistantId != null) {
+                  await DB.updateMessageMetadata(lastProactiveAssistantId, previous => ({ ...(previous || {}), innerVoice: proactiveHeart.innerVoice }));
               }
 
               if (offset > 0) {
