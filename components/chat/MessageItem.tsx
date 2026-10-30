@@ -1,4 +1,6 @@
 import InnerVoiceChip from '../../features/personal/innerVoice/InnerVoiceChip';
+import ShareGalleryButton from './ShareGalleryButton';
+import { getShareCardImageUrls } from '../../utils/shareCardImages';
 import PersonalMediaMessage from '../../features/personal/chatMedia/MediaMessage';
 import { parseVirtualMedia } from '../../features/personal/chatMedia/format';
 import { avatarDecorationImageStyle, isAnniversaryFrame } from '../../utils/anniversaryGifts';
@@ -1908,6 +1910,7 @@ const MessageItem = React.memo(({
     // --- XHS Card Rendering (小红书笔记卡片) ---
     if (m.type === 'xhs_card' && m.metadata?.xhsNote) {
         const note = m.metadata.xhsNote;
+        const shareImages = getShareCardImageUrls(m);
         const openXhsNote = () => {
             const nid = note.noteId || note.note_id || note.id;
             if (!nid) return;
@@ -1943,6 +1946,7 @@ const MessageItem = React.memo(({
                                 container.appendChild(fallback);
                             }}
                         />
+                        {shareImages.length > 1 && <div className="absolute bottom-2 right-2"><ShareGalleryButton images={shareImages} title={note.title || '小红书笔记'} /></div>}
                         {note.type === 'video' && (
                             <div className="absolute top-2 right-2 bg-black/50 rounded-full px-1.5 py-0.5 flex items-center gap-0.5">
                                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3 text-white"><path d="M6.3 2.841A1.5 1.5 0 004 4.11V15.89a1.5 1.5 0 002.3 1.269l9.344-5.89a1.5 1.5 0 000-2.538L6.3 2.84z" /></svg>
@@ -1984,6 +1988,7 @@ const MessageItem = React.memo(({
     if (m.type === 'webpage_card' && m.metadata?.webpage) {
         const wp = m.metadata.webpage;
         const vd = wp.video; // videoParser 解析路径才有：平台/作者/热度
+        const shareImages = getShareCardImageUrls(m);
         let host = (wp.siteName || '').trim();
         try { host = new URL(wp.finalUrl || wp.url).hostname.replace(/^www\./, ''); } catch { /* 用 siteName 兜底 */ }
         const openPage = () => {
@@ -2011,6 +2016,7 @@ const MessageItem = React.memo(({
                             referrerPolicy="no-referrer"
                             onError={(e: any) => { const c = e.target?.parentElement; if (c) c.style.display = 'none'; }}
                         />
+                        {shareImages.length > 1 && <div className="absolute bottom-2 right-2"><ShareGalleryButton images={shareImages} title={wp.title || '分享图集'} /></div>}
                         {/* 视频分享：封面加播放角标；图集显示张数 */}
                         {vd && vd.contentType !== 'image' && (
                             <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
