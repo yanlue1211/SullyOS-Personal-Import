@@ -7,6 +7,7 @@ import {safeFetchJson,extractContent} from '../../utils/safeApi';
 import {WorkroomStorage as W} from './storage';
 import {cloneWorkroomState,validText} from './schema';
 import {readRuntimeRequest} from './runtimeProtocol';
+import {drainWorkroomOutbox} from './delivery';
 export {readRuntimeRequest} from './runtimeProtocol';
 const locks=new Set<string>(),lastCall=new Map<string,number>();
 export async function generateRuntimeTurn(input:{charId:string;workId:string;versionId:string;request:unknown;requestId:string;api:APIConfig;user:UserProfile;signal:AbortSignal;context?:Pick<BuildChatPayloadInput,'realtimeConfig'|'groups'|'emojis'|'categories'>}):Promise<unknown>{
@@ -28,9 +29,10 @@ export async function generateRuntimeTurn(input:{charId:string;workId:string;ver
   const latest=await W.getWork(char.id,input.workId);input.signal.throwIfAborted();if(!latest.runtimeAiEnabled||latest.currentVersionId!==input.versionId)throw Error('作品或运行时AI设置已变化，本轮结果未应用');
   // Record the visible turn once; the component may also report its displayed result.
   if(request.publicEvent){
-   await W.appendPlayTurn(char.id,input.workId,input.versionId,'user',request.publicEvent,'play-u-'+input.requestId);
+   await W.appendPlayTurn(char.id,input.workId,input.versionId,'user',request.publicEvent,'play-u-'+input.requestId,request.companion===true);
    const displayed=request.format==='text'?text:'游戏生成了新数据；具体界面变化由组件报告';
-   await W.appendPlayTurn(char.id,input.workId,input.versionId,'assistant',displayed.slice(0,6000),'play-a-'+input.requestId);
+   await W.appendPlayTurn(char.id,input.workId,input.versionId,'assistant',displayed.slice(0,6000),'play-a-'+input.requestId,request.companion===true);
+   if(request.companion)await drainWorkroomOutbox(char.id);
   }
   return result;
  }finally{locks.delete(key);}
