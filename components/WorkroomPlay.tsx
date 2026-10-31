@@ -24,10 +24,11 @@ export default function WorkroomPlay({charId,version,onNotify,onError}:{charId:s
  };
  const speak=async(text:string)=>{try{await generate({instruction:'与用户一起体验当前作品，根据本轮互动及保存状态自然回应。需要采取动作时只提出建议，不谎称已执行；不泄露题目隐藏答案。',context:{userMessage:text},format:'text',publicEvent:text,shareReply:true,companion:true},crypto.randomUUID());}catch{/* visible error retained */}};
  const toggle=async(value:boolean)=>{const previous=allow.current;setEnabled(value);setPermissionBusy(true);if(!value){allow.current=false;controller.current?.abort();clearTimeout(timer.current);events.current=[];}try{await W.setRuntimeAi(charId,version.workId,value);if(alive.current)allow.current=value;}catch(e){if(alive.current){allow.current=previous;setEnabled(previous);setError(String(e));}}finally{if(alive.current)setPermissionBusy(false);}};
- const [settingsOpen,setSettingsOpen]=useState(false);
+ const [settingsOpen,setSettingsOpen]=useState(false),settingsPanel=useRef<HTMLDivElement|null>(null);
  useEffect(()=>{const handle=()=>setSettingsOpen(v=>!v);window.addEventListener('workroom-toggle-settings',handle);return()=>window.removeEventListener('workroom-toggle-settings',handle);},[]);
+ useEffect(()=>{if(!settingsOpen)return;const close=(event:PointerEvent)=>{const target=event.target as Node;if(settingsPanel.current?.contains(target))return;if(target instanceof Element&&target.closest('.wr-tools'))return;setSettingsOpen(false);};const escape=(event:KeyboardEvent)=>{if(event.key==='Escape')setSettingsOpen(false);};document.addEventListener('pointerdown',close);document.addEventListener('keydown',escape);return()=>{document.removeEventListener('pointerdown',close);document.removeEventListener('keydown',escape);};},[settingsOpen]);
  return <div className="wr-play">
- {settingsOpen&&<div className="wr-nested-settings" role="group" aria-label="游戏设置">
+ {settingsOpen&&<div ref={settingsPanel} className="wr-nested-settings" role="group" aria-label="游戏设置">
    <label><input type="checkbox" disabled={permissionBusy} checked={enabled} onChange={e=>void toggle(e.target.checked)}/> 允许本游戏调用 API</label>
    <label><input type="checkbox" disabled={permissionBusy||!enabled} checked={auto} onChange={e=>setAuto(e.target.checked)}/> 操作后让 {os.characters.find(c=>c.id===charId)?.name||'TA'} 回应</label>
    <small>游戏生成和独立回应使用当前角色 API。</small>
