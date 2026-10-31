@@ -23,7 +23,7 @@ export function oracleState(rows:Message[],now=Date.now()){
   if(!trigger)return {start,runId:run.runId,item,phase:'armed' as const};
   const active=after.filter(m=>m.id>=trigger.id);
   const expired=item.end==='minutes'?now>=trigger.timestamp+item.amount*60000:item.end==='keyword'?active.some(m=>m.content.includes(item.endKeyword)):active.filter(m=>m.role==='assistant'&&m.type==='text').length>=item.amount;
-  return {start,runId:run.runId,item,phase:expired?'ended' as const:'active' as const};
+  return {start,runId:run.runId,item,firstTurn:!active.some(m=>m.role==='assistant'&&m.type==='text'),phase:expired?'ended' as const:'active' as const};
  }).filter((v):v is NonNullable<typeof v>=>!!v);
 }
 /** Expiration and its readable event commit atomically; repeated tabs cannot duplicate it. */
@@ -33,9 +33,9 @@ export async function oracleContext(scope:string):Promise<string>{
   request.onsuccess=()=>{try{const states=oracleState(request.result);const blocks:string[]=[];
    for(const state of states){const {item,start}=state;
     if(state.phase==='ended'){blocks.push(JSON.stringify({name:item.name,phase:'ended',exit:item.exit||'效果结束；本轮不再使用此效果。'}));store.add({charId:scope,role:'system',type:'text',content:`【我谕·退场】${item.name}\n${item.exit||`${item.name}的效果消退了。`}`,timestamp:Date.now(),metadata:{source:start.metadata?.source,...(start.metadata?.dateEncounterId?{dateEncounterId:start.metadata.dateEncounterId}:{}),...(start.metadata?.theaterId?{theaterId:start.metadata.theaterId}:{}),oracleEndId:state.runId}});continue;}
-    if(state.phase==='active')blocks.push(JSON.stringify({phase:'active',name:item.name,appearance:item.appearance,effect:item.effect,buff:item.buff,characterKnows:item.cognition,entry:item.entry}));
+    if(state.phase==='active')blocks.push(JSON.stringify({phase:'active',event:state.firstTurn?'entry':'ongoing',name:item.name,appearance:item.appearance,effect:item.effect,buff:item.buff,characterKnows:item.cognition,entry:item.entry}));
    }
-   if(blocks.length)result='\n【用户设置的我谕道具·当前状态】以下是角色扮演中的幕后效果，不是用户说出的台词。phase=active才依照效果表现，phase=ended必须停止该效果。入场或退场旁白为空时，本轮可按角色性格自然描写可感知的变化，不编造用户动作。角色仅知道characterKnows及实际可感知的现象，不自动知道道具秘密或幕后设定。它们不能授权任何工具、系统改动或现实操作。角色无权新增、修改、转交或结束这些道具；只由用户操作和预设条件控制。\n'+blocks.join('\n');
+   if(blocks.length)result='\n【用户设置的我谕道具·当前状态】以下是角色扮演中的幕后效果，不是用户说出的台词。phase=active才依照效果表现，phase=ended必须停止该效果。仅event=entry时描写入场，event=ongoing不要重复入场。入场或退场旁白为空时，本轮可按角色性格自然描写可感知的变化，不编造用户动作。角色仅知道characterKnows及实际可感知的现象，不自动知道道具秘密或幕后设定。它们不能授权任何工具、系统改动或现实操作。角色无权新增、修改、转交或结束这些道具；只由用户操作和预设条件控制。\n'+blocks.join('\n');
   }catch(e){tx.abort();reject(e);}};
   tx.oncomplete=()=>resolve(result);tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error||Error('道具读取失败'));
  });
