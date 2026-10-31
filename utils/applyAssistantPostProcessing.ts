@@ -1,3 +1,4 @@
+import { extractResponseStatus } from '../features/personal/responseStatus/protocol';
 import { consumeCommerceAction } from './personalCommerce';
 import { extractInnerVoice, type InnerVoice } from '../features/personal/innerVoice/protocol';
 import { withReplyCancellation, type ReplyRun } from './chatReplyCancellation';
@@ -85,7 +86,9 @@ export function buildReplySnapshotContent(msg: { type?: string; content: string 
 
 /** 第一遍粗洗 — 剥 <think> / 时间戳 / 历史里漏出的 [聊天]/[通话]/[约会] / 表情包反向 tag */
 const normalizeAiContent = (raw: string): string => {
-    let cleaned = normalizeAssistantActionFormatting(extractInnerVoice(raw || '').text);
+    const status = extractResponseStatus(raw || '');
+    if (status) return `<回应状态>${JSON.stringify(status)}</回应状态>`;
+    let cleaned = normalizeAssistantActionFormatting(extractInnerVoice(raw || '').text.replace(/<回应状态\s*>[\s\S]*?(?:<\/回应状态\s*>|$)/g, ''));
     // Strip hidden chain-of-thought blocks: <think> / <thinking> / <thought>
     cleaned = cleaned.replace(/<(think|thinking|thought)>[\s\S]*?<\/\1>/gi, '');
     cleaned = cleaned.replace(/<(?:think|thinking|thought)>[\s\S]*$/gi, '');
@@ -777,6 +780,15 @@ export async function applyAssistantPostProcessing(
         return result.cleanedText;
     };
 
+    // A status is the entire response. Resolve before actions, tools or speech.
+    const responseStatus = extractResponseStatus(rawAiContent);
+    if (responseStatus) {
+        await replyStep(() => persistMessage({ charId: char.id, role: 'assistant', type: 'score_card',
+            content: JSON.stringify(responseStatus), metadata: { ...(mcdInheritMeta || {}), responseStatus } }));
+        setMessages(await replyStep(() => DB.getRecentMessagesByCharId(char.id, 200)));
+        return;
+    }
+
     // Simulated purchases execute at most once per persisted reply/source round.
     if (rawAiContent.includes('<购物>')) {
         const original = rawAiContent;
@@ -846,6 +858,15 @@ export async function applyAssistantPostProcessing(
     // 与原 inline 末尾逻辑一致。抽出来是为了让"执行功能前的本轮正文 A"能在二轮前先展示, 二轮结果 B 复用同一套。
     let sarSurfaceClaimed = false;
     const renderAndPersist = async (rawContent: string, firstThinkingChain: string | null): Promise<void> => {
+        const status = extractResponseStatus(rawContent);
+        if (status) {
+            pendingInnerVoice = undefined;
+            await replyStep(() => persistMessage({ charId: char.id, role: 'assistant', type: 'score_card',
+                content: JSON.stringify(status), metadata: { ...(mcdInheritMeta || {}), responseStatus: status } }));
+            setMessages(await replyStep(() => DB.getRecentMessagesByCharId(char.id, 200)));
+            return;
+        }
+
         let firstMeta: any = firstThinkingChain ? { thinkingChain: firstThinkingChain } : null;
         const surfaceChunks = !sarSurfaceClaimed && sarModuleSurface?.surface
             ? splitSARChatSurfaceBubbles(sarModuleSurface.surface)

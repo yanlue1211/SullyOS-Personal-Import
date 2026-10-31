@@ -4,7 +4,7 @@ import { Microphone, ChatText, Image, VideoCamera, X, ArrowUp, ArrowCounterClock
 import { virtualMedia, type VirtualMediaKind } from './format';
 interface Props {
   conversationId: string;
-  onSend: (content: string, audio?: Blob, duration?: number, signal?: AbortSignal, recognition?: Promise<RecordingRecognition>) => Promise<void>;
+  onSend: (content: string, audio?: Blob, duration?: number, signal?: AbortSignal, recognition?: Promise<RecordingRecognition>, completedRecognition?: RecordingRecognition) => Promise<void>;
   onRecognize?: (audio: Blob) => Promise<RecordingRecognition>;
   recordingOnly?: boolean;
   visualOnly?: boolean;
@@ -84,7 +84,7 @@ export default function MediaComposer({ conversationId, onSend, onRecognize, rec
   const send = async () => {
     setBusy(true); setError(''); const abort = new AbortController(); sendAbort.current = abort;
     try {
-      await onSend(mode === '录音' ? '[用户发送了一条真实语音]' : virtualMedia(mode, text), mode === '录音' ? blob : undefined, seconds, abort.signal, mode === '录音' ? recognized ? Promise.resolve(recognized) : recognition.current : undefined);
+      await onSend(mode === '录音' ? '[用户发送了一条真实语音]' : virtualMedia(mode, text), mode === '录音' ? blob : undefined, seconds, abort.signal, mode === '录音' ? recognized ? Promise.resolve(recognized) : recognition.current : undefined, mode === '录音' ? recognized : undefined);
       if (abort.signal.aborted) return;
       resetRecognition(); setText(''); setBlob(undefined); onClose?.();
     } catch (e) { if (!abort.signal.aborted) setError(e instanceof Error ? e.message : '发送失败，内容已保留，请重试。'); }

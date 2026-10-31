@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Composer from '../features/personal/chatMedia/Composer';
 let root: Root; let host: HTMLDivElement; let stopTrack = vi.fn();
 let activeRecorder: FakeRecorder | undefined;
-const onSend = vi.fn(async (_content: string, _audio?: Blob, _duration?: number, _signal?: AbortSignal, _recognition?: Promise<any>) => {});
+const onSend = vi.fn(async (_content: string, _audio?: Blob, _duration?: number, _signal?: AbortSignal, _recognition?: Promise<any>, _completed?: any) => {});
 class FakeRecorder {
   static isTypeSupported() { return true; }
   state = 'inactive'; mimeType = 'audio/webm';
@@ -88,4 +88,5 @@ it('lets the user edit both recognition fields before sending', async () => {
   }
   await act(async () => [...host.querySelectorAll('button')].find(b => b.textContent?.includes('发送'))!.click());
   await expect(onSend.mock.calls[0][4]).resolves.toEqual({ transcript: '新字幕', analysis: '新语气' });
+  expect(onSend.mock.calls[0][5]).toEqual({ transcript: '新字幕', analysis: '新语气' });
 });

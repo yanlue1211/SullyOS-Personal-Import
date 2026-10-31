@@ -1,3 +1,5 @@
+import ResponseStatusCard from '../../features/personal/responseStatus/ResponseStatusCard';
+import { readResponseStatus } from '../../features/personal/responseStatus/protocol';
 import OrderCard from '../commerce/OrderCard';
 import InnerVoiceChip from '../../features/personal/innerVoice/InnerVoiceChip';
 import ShareGalleryButton from './ShareGalleryButton';
@@ -1378,6 +1380,12 @@ const MessageItem = React.memo(({
             <FriendFeedNote note={m.metadata.friendFeedComment}/>
         </div>;
     }
+
+    const responseStatus = m.type === 'score_card' ? readResponseStatus(m.content, m.metadata) : undefined;
+    if (responseStatus) return <div className={`w-full px-4 my-3 relative ${selectionMode ? 'pl-12' : ''}`} {...interactionProps}>
+        {selectionMode && <button type="button" className="absolute left-2 top-1/2" aria-label="选择状态卡片" aria-pressed={isSelected} onClick={event => { event.stopPropagation(); onToggleSelect(m.id); }}>{isSelected ? '●' : '○'}</button>}
+        <div className="flex justify-center"><ResponseStatusCard value={responseStatus} /></div>
+    </div>;
 
     // --- SYSTEM MESSAGE RENDERING ---
     if (isSystem) {
@@ -3650,6 +3658,10 @@ const MessageItem = React.memo(({
            prev.msg.metadata?.reviewStatus === next.msg.metadata?.reviewStatus &&
            prev.msg.metadata?.status === next.msg.metadata?.status &&
            prev.msg.metadata?.innerVoice === next.msg.metadata?.innerVoice &&
+           prev.msg.metadata?.audioTranscript === next.msg.metadata?.audioTranscript &&
+           prev.msg.metadata?.audioAnalysis === next.msg.metadata?.audioAnalysis &&
+           prev.msg.metadata?.audioDescription === next.msg.metadata?.audioDescription &&
+           prev.msg.metadata?.audioCleared === next.msg.metadata?.audioCleared &&
            prev.msg.metadata?.receipt === next.msg.metadata?.receipt &&
            prev.msg.metadata?.sarModuleSurface?.surface === next.msg.metadata?.sarModuleSurface?.surface &&
            prev.isFirstInGroup === next.isFirstInGroup &&
