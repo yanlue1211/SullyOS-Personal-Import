@@ -8,3 +8,27 @@
 .wr-companion-body>small{display:block;color:#a48e7b;font-size:10px;margin-top:4px}
 .wr-companion-body .wr-auto{margin-top:10px;font-size:11px}
 .wr-play-stage{min-height:0;flex:1}
+
+/* Mobile game-first layout: compact heading and right-side menus. */
+.wr-work-toolbar{display:flex;align-items:center;gap:8px;justify-content:space-between;padding:7px 12px;flex:none;min-height:46px;position:relative;z-index:8}
+.wr-work-heading{min-width:0;flex:1}
+.wr-work-heading h2{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wr-work-heading p{font-size:10px;opacity:.6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wr-tools{position:relative;flex:none}
+.wr-tools>button,.wr-play-settings>button{border:1px solid #eadbc4;background:#fffdf7;border-radius:14px;padding:7px 10px;font-size:11px;white-space:nowrap}
+.wr-tools-menu,.wr-play-settings-menu{position:absolute;right:0;top:calc(100% + 5px);z-index:20;display:flex;flex-direction:column;min-width:146px;gap:3px;background:#fffaf5;border:1px solid #e8d9c8;border-radius:14px;padding:8px;box-shadow:0 9px 25px #5d403020}
+.wr-tools-menu button{text-align:left;padding:9px 11px;border-radius:9px;font-size:12px;white-space:nowrap}
+.wr-tools-menu button.selected{background:#f8eacb}
+.wr-play{position:relative}
+.wr-play-settings{position:absolute;right:8px;top:4px;z-index:9}
+.wr-play-settings-menu{min-width:225px;gap:10px}
+.wr-play-settings-menu label{display:flex;align-items:center;gap:6px;font-size:12px}
+.wr-play-settings-menu input{accent-color:#d9a55c}
+.wr-play-settings-menu small{font-size:10px;opacity:.65}
+.wr-play-stage{flex:1;min-height:0}
+.wr-companion{flex:none;max-height:38%;overflow-y:auto;padding:4px 10px 8px;background:#fffaf5}
+.wr-companion-toggle{width:auto;padding:4px 7px;font-size:10px;background:transparent}
+.wr-play-history{max-height:120px;overflow:auto;padding:4px 7px;font-size:11px}
+.wr-companion form{display:flex;flex-wrap:nowrap;gap:5px;margin:3px 0 0}
+.wr-companion form input{min-width:0;flex:1;padding:8px;font-size:12px}
+.wr-companion form button{padding:7px 8px;font-size:11px;white-space:nowrap}
