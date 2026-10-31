@@ -184,3 +184,13 @@ saveState/loadState 只访问当前作品状态；emitEvent 只记录组件内�
 - 新增运行器和移动端验收仍受当前执行环境限制：浏览器安装源返回截断 ZIP，不能把 jsdom 或协议集成测试描述为真实浏览器安全验收。上线前仍需处理真实浏览器验收，不能据自动化测试宣称没有 CPU/网络边界。
 
 - 创作专用 test_code 工具现在可明确请求对已保存草稿执行短时启动观察：独立临时 iframe、同一 CSP/端口宿主、空临时进度、错误收集和超时/取消销毁。本轮 read_code 和 test_code 各最多一次，不开放给正常聊天。结果保存为绑定修订的 testReport，并返回模型继续修改；不把短时无错误冒充全部玩法验收。
+
+
+## 真实浏览器补充验收结果
+
+先前的浏览器下载/执行阻碍已通过独立 GitHub CI 解决。`workroom-verify.yml` 只在开发分支运行，不发布站点。真实 Chromium 已通过两轮集成验证，第二轮记录：
+https://github.com/yanlue1211/SullyOS-Personal-Import/actions/runs/41208070292
+
+验收使用实际 App/iframe/MessageChannel、原生 IndexedDB、分享和 ZIP 实现。实际喂食到2级、卸载重开 App 恢复2级、临时启动观察、分享不自动收藏、接收副本空进度、五类卡片可读文字、组件导入导出、完整 ZIP 恢复、已关闭通知不复现均通过。补充父DOM/存储隔离和CSP fetch阻断测试也通过。
+
+这一记录更新此前“真实浏览器尚未完成”的状态；不表示已覆盖用户真机、实际 Claude API 返回的任意代码或所有恶意程序。iframe 自身导航和 CPU 资源仍遵循既有能力边界。没有因测试通过自动合并或部署 PR #21。
