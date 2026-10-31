@@ -63,7 +63,7 @@ export function flattenHistoricalImageParts(
             m.content.some((p:any)=>p?.type==='image_url')) latestImageTurn=i;
     }
     return messages.map((m,i)=>{
-        if (i===latestImageTurn || !Array.isArray(m.content)) return m;
+        if ((i===latestImageTurn && i>=messages.length-3) || !Array.isArray(m.content)) return m;
         if (!m.content.some((p:any)=>p?.type==='image_url')) return m;
         const content=m.content.filter((p:any)=>p?.type!=='image_url');
         return {...m,content:content.length?content:[{type:'text',text:'[历史图片]'}]};
