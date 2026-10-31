@@ -97,6 +97,15 @@ describe('造物间 App 与真实消息组件', () => {
         expect(container.querySelector('iframe')?.getAttribute('srcdoc')).toContain('PREVIEW_CODE');
         expect(await W.list('b')).toEqual([]);expect(mocks.generate).not.toHaveBeenCalled();
     });
+    it('保存草稿后可临时试运行并记录反馈，正式进度不被测试覆盖',async()=>{
+        const work=await W.create('a','草稿试运行','验证按钮');await W.saveDraft('a',work.id,{html:'<button>TEST_DRAFT</button>',css:'',js:''},0,null);
+        vi.stubGlobal('MessageChannel',class {port1={onmessage:null,postMessage:()=>{},close:()=>{}};port2={};});
+        await act(async()=>root.render(React.createElement(WorkroomApp)));await choose('a');await waitText('草稿试运行');
+        const entry=[...container.querySelectorAll('button')].find(b=>b.textContent?.includes('草稿试运行'))!;await act(async()=>entry.click());await waitText('创作交流');await click('代码草稿');
+        await click('试运行已保存草稿');await waitText('草稿试运行：');expect(container.querySelector('iframe')?.getAttribute('srcdoc')).toContain('TEST_DRAFT');
+        await fill('测试反馈','按钮需要更大');await click('结束测试并保存记录');await waitText('试运行记录已保存');
+        expect((await W.get('a',work.id)).work.testReport?.notes).toBe('按钮需要更大');expect(await DB.getRawStoreData('workroom_states')).toEqual([]);
+    });
     it('系统角色的完成卡实际渲染且只有一层卡面，隐藏系统日志也不会隐藏它', async () => {
         const message = { id: 42, ...createWorkroomMessage({ version: 1, eventId: 'card', charId: 'a', charName: '阿源', kind: 'completed',
             subjectId: 'work', title: '小狗饲养屋', summary: '喂食散步', detail: '一起完成了游戏。', timestamp: Date.now() }) };

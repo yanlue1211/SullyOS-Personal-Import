@@ -44,6 +44,7 @@ const ScheduleApp = lazyApp(() => import('../apps/ScheduleApp'));
 const RoomApp = lazyApp(() => import('../apps/RoomApp'));
 const CheckPhone = lazyApp(() => import('../apps/CheckPhone'));
 const FriendFeedApp = lazyApp(() => import('../apps/FriendFeedApp'));
+const WorkroomNotification = React.lazy(() => import('./os/WorkroomNotification'));
 const FriendFeedNotification = React.lazy(() => import('./os/FriendFeedNotification'));
 const SocialApp = lazyApp(() => import('../apps/SocialApp'));
 const StudyApp = lazyApp(() => import('../apps/StudyApp'));
@@ -1088,7 +1089,7 @@ const PhoneShell: React.FC = () => {
           {/* Overlays: Global Mini Player (when music is playing in background) */}
           <GlobalMiniPlayer />
           <NavigationBall />
-          {isDataLoaded&&!isLocked&&<Suspense fallback={null}><FriendFeedNotification/></Suspense>}
+          {isDataLoaded&&!isLocked&&<Suspense fallback={null}><FriendFeedNotification/>{activeApp===AppID.Launcher&&<WorkroomNotification/>}</Suspense>}
           {!isLocked && <SARModuleMonitor />}
 
           {/* Overlays: 人格模拟生成全局指示条 */}

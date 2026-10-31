@@ -9,6 +9,9 @@ export const WORKROOM_STORES = Object.keys(WORKROOM_FIELDS) as Array<keyof typeo
 export interface WorkroomWork {
     id: string; charId: string; title: string; summary: string;
     createdAt: number; updatedAt: number; currentVersionId: string | null;
+    lastError?: string;
+    maintenanceRequests?: string[];
+    testReport?: {draftRevision: number; createdAt: number; errors: string[]; notes: string};
     idea?: {status: 'open' | 'shelved' | 'done'; invitationId: string};
     source?: {authorId: string; authorName: string; workId: string; versionId: string; shareId: string};
 }
@@ -27,6 +30,7 @@ export interface WorkroomStoredEvent {
     /** Closed-link interactions remain local; completions and enabled interactions enter the outbox. */
     delivery: 'local' | 'pending' | 'delivered';
     messageId?: number;
+    notice?: 'pending' | 'dismissed';
 }
 export interface WorkroomTurn {
     id: string; charId: string; workId: string; workTitle: string; role: 'user' | 'assistant';
@@ -78,6 +82,7 @@ export function createWorkroomStores(db: IDBDatabase, upgrade: IDBTransaction) {
         const store = db.objectStoreNames.contains(name) ? upgrade.objectStore(name) : db.createObjectStore(name, { keyPath: 'id' });
         if (!store.indexNames.contains('charId')) store.createIndex('charId', 'charId');
         if (name !== 'workroom_works' && !store.indexNames.contains('workId')) store.createIndex('workId', 'workId');
+        if (name === 'workroom_events' && !store.indexNames.contains('notice')) store.createIndex('notice', 'notice');
         if (name === 'workroom_turns' && !store.indexNames.contains('workId_createdAt')) store.createIndex('workId_createdAt', ['workId', 'createdAt']);
         if ((name === 'workroom_events' || name === 'workroom_turns') && !store.indexNames.contains('charId_delivery')) {
             store.createIndex('charId_delivery', ['charId', 'delivery']);

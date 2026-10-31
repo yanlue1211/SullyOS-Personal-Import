@@ -96,11 +96,26 @@ export const WorkroomStorage = {
             await idbResult(tx.objectStore('workroom_drafts').delete(workId));
             const char = await idbResult(tx.objectStore('characters').get(charId));
             const id = workroomId();
-            await idbResult(tx.objectStore('workroom_events').add({ id, charId, workId, delivery: 'pending', event: {
+            await idbResult(tx.objectStore('workroom_events').add({ id, charId, workId, delivery: 'pending', notice: 'pending', event: {
                 version: 1, eventId: id, charId, charName: char.name || '角色', kind: 'completed', subjectId: workId,
                 title: work.title, summary: work.summary, detail: `发布了第 ${version.number} 版作品。`, timestamp: now,
             } } satisfies WorkroomStoredEvent));
             return version;
+        });
+    },
+    recordDiagnostic: (charId:string,workId:string,versionId:string,kind:'error'|'update',text:string) => {
+        if(!validText(text,2000))throw Error('维护记录无效');
+        return transact(charId,'readwrite',async tx=>{
+            const work=await owned(tx,charId,workId);if(work.currentVersionId!==versionId)throw Error('运行版本已变化');
+            await idbResult(tx.objectStore('workroom_works').put(kind==='error'?{...work,lastError:text}:{...work,maintenanceRequests:[...(work.maintenanceRequests||[]),text].slice(-20)}));
+        });
+    },
+    saveTestReport: (charId:string,workId:string,draftRevision:number,errors:string[],notes:string) => {
+        if(!validInteger(draftRevision)||!Array.isArray(errors)||errors.length>20||errors.some(e=>!validText(e,2000))||typeof notes!=='string'||notes.length>2000)throw Error('测试记录无效');
+        return transact(charId,'readwrite',async tx=>{
+            const work=await owned(tx,charId,workId),draft=await idbResult<WorkroomDraft|undefined>(tx.objectStore('workroom_drafts').get(workId));
+            if(!draft||draft.revision!==draftRevision)throw Error('草稿已变化，请重新测试');
+            await idbResult(tx.objectStore('workroom_works').put({...work,testReport:{draftRevision,createdAt:Date.now(),errors:[...errors],notes}}));
         });
     },
     loadState: (charId: string, workId: string, versionId: string) => transact(charId, 'readonly', async tx => {

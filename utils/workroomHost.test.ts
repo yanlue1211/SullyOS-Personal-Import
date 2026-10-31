@@ -80,3 +80,10 @@ it('分享预览的状态与事件只留在内存，不能创建任务或改写�
     expect(await DB.getRawStoreData('workroom_states')).toEqual([]);expect(await DB.getRawStoreData('workroom_events')).toEqual([]);
     expect(await DB.getRawStoreData('workroom_works')).toEqual([]);host.close();
 });
+
+it('正式运行的错误和修改请求持久保存，创作读取时可继续维护',async()=>{
+    const h=await harness();h.send(1,'reportError',['按钮事件报错']);expect((await h.wait(1)).ok).toBe(true);
+    h.send(2,'requestUpdate',['增加散步功能']);expect((await h.wait(2)).ok).toBe(true);
+    const saved=(await W.get('runner-char',h.work.id)).work;
+    expect(saved.lastError).toBe('按钮事件报错');expect(saved.maintenanceRequests).toEqual(['增加散步功能']);h.host.close();
+});

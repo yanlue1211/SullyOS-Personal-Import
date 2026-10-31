@@ -2,7 +2,7 @@ import { assertCode, type WorkroomCode } from './schema';
 
 export const WORKROOM_SANDBOX = 'allow-scripts';
 export const WORKROOM_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; media-src data:; font-src data:; connect-src 'none'; frame-src 'none'; child-src 'none'; worker-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
-export const WORKROOM_RPC_METHODS = ['loadState', 'saveState', 'emitEvent', 'notify', 'requestUpdate', 'reportError'] as const;
+export const WORKROOM_RPC_METHODS = ['loadState', 'saveState', 'emitEvent', 'notify', 'requestUpdate', 'reportError', 'reportReady'] as const;
 export type WorkroomMethod = typeof WORKROOM_RPC_METHODS[number];
 export interface WorkroomRpc { id: string; method: WorkroomMethod; args: unknown[] }
 export function readWorkroomRpc(value: unknown): WorkroomRpc | undefined {
@@ -50,6 +50,7 @@ export function buildWorkroomDocument(code: WorkroomCode, session: string): stri
             waiting.splice(0).forEach(message => port.postMessage(message));
         }
         window.addEventListener('message', init);
+        window.addEventListener('DOMContentLoaded', () => {void call('reportReady','ready').catch(()=>{});}, {once:true});
         window.addEventListener('error', event => {void call('reportError', String(event.message).slice(0,2000)).catch(()=>{});});
         window.addEventListener('unhandledrejection', event => {void call('reportError', String(event.reason).slice(0,2000)).catch(()=>{});});
     })();`;
