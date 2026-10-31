@@ -1,3 +1,4 @@
+import { consumeWorkroomActions } from '../features/workroom/bridge';
 import { extractResponseStatus } from '../features/personal/responseStatus/protocol';
 import { consumeCommerceAction } from './personalCommerce';
 import { extractInnerVoice, type InnerVoice } from '../features/personal/innerVoice/protocol';
@@ -808,7 +809,9 @@ export async function applyAssistantPostProcessing(
     rawAiContent = await replyStep(() => consumeFriendFeedMainReply(char.id, rawAiContent,
         (directives || []).flatMap(d => d.type === 'friend_feed_reply' ? [d.action] : [])));
     let aiContent = replayedTagPrefix ? `${replayedTagPrefix}${rawAiContent}` : rawAiContent;
-    const heart = extractInnerVoice(aiContent); pendingInnerVoice = heart.innerVoice; aiContent = normalizeAiContent(heart.text);
+    const heart = extractInnerVoice(aiContent); pendingInnerVoice = heart.innerVoice;
+    aiContent = await replyStep(() => consumeWorkroomActions(heart.text, char.id, message => addToast('造物间操作未完成：'+message,'info'), ctx.replyRun?.signal));
+    aiContent = normalizeAiContent(aiContent);
     // 先于 lead-in / 二轮渲染消费：否则控制标签会作为普通气泡短暂闪给用户看。
     aiContent = await replyStep(async () => consumeScheduleChanges(aiContent, utteranceAt));
     // 在任何 lead-in/二轮渲染之前先剥掉仿卡片文本，防止它被 chunkText 拆成灰色普通气泡。

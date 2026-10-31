@@ -76,6 +76,7 @@ interface ChatInputAreaProps {
     // HTML 模块模式
     htmlModeEnabled?: boolean;
     realSongListeningEnabled?: boolean;
+    workroomLinkEnabled?: boolean;
     // 思考过程展示（会话级）
     showThinkingChain?: boolean;
     // Input style
@@ -107,6 +108,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
     luckinActivated = false,
     htmlModeEnabled = false,
     realSongListeningEnabled = false,
+    workroomLinkEnabled = false,
     showThinkingChain = false,
     inputStyle = 'default',
     sendButtonStyle = 'circle',
@@ -591,6 +593,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
           </div>
           <span className="text-xs font-bold">{luckinActivated ? '结束瑞一杯' : '瑞一杯'}</span>
         </button>,
+        <button key="workroom" onClick={() => onPanelAction('workroom-toggle')} className="flex flex-col items-center gap-2 text-slate-600"><span className={`w-14 h-14 rounded-2xl flex items-center justify-center border text-2xl ${workroomLinkEnabled ? 'bg-amber-100 border-amber-300' : 'bg-slate-50 border-slate-200'}`}>🧸</span><span className="text-xs font-bold">{workroomLinkEnabled ? '造物间联动已开' : '造物间联动'}</span></button>,
         <button key="real-song-listening" onClick={() => onPanelAction('real-song-listening-toggle')} className={`flex flex-col items-center gap-2 active:scale-95 transition-transform ${acnh ? 'text-[#725d42]' : isDiscordStyle ? 'text-slate-200' : 'text-slate-600'}`}>
           <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm border relative ${realSongListeningEnabled ? 'bg-emerald-100 text-emerald-700 border-emerald-300' : 'bg-slate-50 text-slate-500 border-slate-200'}`}>
             <span className="text-2xl" aria-hidden="true">🎧</span>

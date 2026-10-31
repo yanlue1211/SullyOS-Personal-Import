@@ -1,3 +1,4 @@
+import { drainWorkroomOutbox, WORKROOM_HISTORY_UPDATED } from '../features/workroom/delivery';
 import { reconcileCommerce } from '../utils/personalCommerce';
 import { isEmotionFeatureOn } from '../utils/scheduleFeature';
 import { handleLocalBack } from '../utils/localBackHandlers';
@@ -25,7 +26,8 @@ import { FEEDBACK_INVITATION_KEY, hasPriorFeedbackInstallEvidence, initializeFee
 import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react';
 import type { VRSARActivity } from '../types';
 import { APIConfig, AppID, OSTheme, VirtualTime, CharacterProfile, CharacterGroup, ChatTheme, Toast, FullBackupData, UserProfile, ApiPreset, GroupProfile, SystemLog, Worldbook, NovelBook, SongSheet, Message, RealtimeConfig, AppearancePreset, CloudBackupConfig, CloudBackupFile, MemoryPalaceFeatureFlags } from '../types';
-import { DB } from '../utils/db';
+import { DB, openDB } from '../utils/db';
+import { streamWorkroomBackup } from '../features/workroom/backup';
 import { reportDatabaseFailure } from '../utils/databaseHealth';
 import type { AvatarTouchRecord } from '../utils/avatarTouch';
 import { clampClaudeTemperature, modelRejectsSamplingParams, stripSamplingParams } from '../utils/samplingParamCompat';
@@ -2364,6 +2366,39 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
   useEffect(() => {
       if (!isDataLoaded) return;
+      const memoryChains = new Map<string, Promise<void>>();
+      const historyChanged = (event: Event) => {
+          const charId = (event as CustomEvent).detail?.charId;
+          if (typeof charId !== 'string') return;
+          setLastMsgTimestamp(Date.now());
+          const task = (memoryChains.get(charId) || Promise.resolve()).catch(() => {}).then(async () => {
+              const char = await DB.getCharacter(charId), config = memoryPalaceConfigRef.current;
+              const llm = config.lightLLM?.baseUrl ? config.lightLLM : apiConfigRef.current;
+              if (!char?.memoryPalaceEnabled || !config.embedding?.baseUrl || !config.embedding.apiKey || !llm.baseUrl) return;
+              const { processNewMessagesWithAutoArchive } = await import('../utils/memoryPalace/autoArchive');
+              await processNewMessagesWithAutoArchive([], char.id, char.name, config.embedding, llm, userProfileRef.current.name, false);
+          });
+          memoryChains.set(charId, task);
+          void task.catch(error => console.warn('[Workroom] Memory buffer retained for retry', error)).finally(() => {
+              if (memoryChains.get(charId) === task) memoryChains.delete(charId);
+          });
+      };
+      const drain = () => { if (document.hidden) return; void DB.getAllCharacters().then(async rows => {
+          for (const char of rows) await drainWorkroomOutbox(char.id);
+      }).catch(error => console.warn('[Workroom] Chat outbox retained for retry', error)); };
+      const openWorkroom = () => setActiveApp(AppID.Workroom);
+      const askWorkroom = (event:Event) => { const id=(event as CustomEvent).detail?.charId; if(typeof id==='string'){setActiveCharacterId(id);setActiveApp(AppID.Chat);} };
+      window.addEventListener('workroom-chat-requested', askWorkroom);
+      window.addEventListener('workroom-open-requested', openWorkroom);
+      window.addEventListener(WORKROOM_HISTORY_UPDATED, historyChanged);
+      document.addEventListener('visibilitychange', drain);
+      drain();
+      return () => { window.removeEventListener('workroom-chat-requested', askWorkroom); window.removeEventListener('workroom-open-requested', openWorkroom); window.removeEventListener(WORKROOM_HISTORY_UPDATED, historyChanged); document.removeEventListener('visibilitychange', drain); };
+  }, [isDataLoaded]);
+
+
+  useEffect(() => {
+      if (!isDataLoaded) return;
 
       const drainQueuedProactive = () => {
           const next = proactiveQueueRef.current.shift();
@@ -4245,6 +4280,10 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           // 可能多达数 MB（壁纸 base64）的克隆。
           const cloneForInPlace = <T,>(v: T): T => (mode === 'text_only' ? v : deepCloneForExport(v));
 
+          if (mode === 'full' || mode === 'text_only') {
+              const { listSongSoundRecords } = await import('../features/personal/songArchive/storage');
+              await listSongSoundRecords();
+          }
           const backupData: Partial<FullBackupData> = {
               friendFeed: mode === 'text_only' ? stripBackupImages(await readFriendFeed()) : undefined,
               friendFeedMedia: mode === 'media_only' ? collectFriendFeedMedia(await readFriendFeed()) : undefined,
@@ -4601,7 +4640,10 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
               med_plans: 'medPlans',
               life_record_settings: 'lifeRecordSettings',
           };
-          const prewrittenStores: BackupManifest['stores'] = {};
+          const workroomOwnerIds = new Set<string>();
+          const exportedCharacterIds = new Set<string>();
+          const prewrittenStores: BackupManifest['stores'] = mode === 'full' || mode === 'text_only'
+              ? await streamWorkroomBackup(await openDB(), zip as unknown as ZipFileWriter, collectSerialized, id => workroomOwnerIds.add(id)) : {};
           // Vectors retain the existing binary format, read one record at a time.
           let vectorPayload: Awaited<ReturnType<typeof encodeVectorsForBackupChunked>> | undefined;
           // Only voice Blobs reachable from the exported Live2D settings are portable.
@@ -4632,6 +4674,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                       onSerialized: collectSerialized,
                       transform: (item, index) => {
                           if (storeName === 'characters') {
+                              exportedCharacterIds.add(item.id);
                               normalizeCharacterRoomAssetsInPlace(item);
                               if (mode !== 'text_only') {
                                   collectCharacterCompanionVoiceAssetIds([item])
@@ -4723,6 +4766,10 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                   default: throw new Error(`未配置备份字段：${storeName}`);
               }
               await new Promise(resolve => setTimeout(resolve, 10));
+          }
+
+          if ([...workroomOwnerIds].some(id => !exportedCharacterIds.has(id))) {
+              throw new Error('备份期间角色资料发生变化，请重新导出，以保持造物间归属完整');
           }
 
           // 进度条停在 70% 让用户看到接下来的"压缩中 X%"实际推进，而不是卡在 95% 干等。

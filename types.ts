@@ -1,3 +1,4 @@
+import type { WorkroomBackup } from './features/workroom/schema';
 
 export enum AppID {
   Launcher = 'launcher',
@@ -8,6 +9,7 @@ export enum AppID {
   Gallery = 'gallery',
   Music = 'music',
   SongArchive = 'song_archive',
+  Workroom = 'workroom',
   Browser = 'browser',
   ThemeMaker = 'thememaker', // Legacy shortcut ID; opens the embedded bubble maker, not an installed App.
   Appearance = 'appearance',
@@ -2743,6 +2745,8 @@ export interface MemoryPalaceWaterlineConfig {
 }
 
 export interface CharacterProfile {
+  /** Controls new workroom chat abilities; historical events remain readable. */
+  workroomLinkEnabled?: boolean;
   /** Local default for this character's dialogue; absent means follow Settings. Never shared in cards. */
   dialogueApi?: DialogueApiConfig;
   id: string;
@@ -3913,7 +3917,7 @@ export interface GameSession {
     lastPlayedAt: number;
 }
 
-export type MessageType = 'audio' | 'friend_feed_share_card' | 'friend_feed_card' | 'secret_note' | 'text' | 'image' | 'emoji' | 'voice' | 'collaboration_file' | 'interaction' | 'transfer' | 'system' | 'social_card' | 'chat_forward' | 'xhs_card' | 'score_card' | 'music_card' | 'mcd_card' | 'luckin_card' | 'html_card' | 'news_card' | 'vr_card' | 'trpg_card' | 'novel_card' | 'world_card' | 'sim_card' | 'phone_card' | 'webpage_card' | 'theater_card' | 'room_card' | 'life_card' | 'group_topic_card';
+export type MessageType = 'workroom_card' | 'audio' | 'friend_feed_share_card' | 'friend_feed_card' | 'secret_note' | 'text' | 'image' | 'emoji' | 'voice' | 'collaboration_file' | 'interaction' | 'transfer' | 'system' | 'social_card' | 'chat_forward' | 'xhs_card' | 'score_card' | 'music_card' | 'mcd_card' | 'luckin_card' | 'html_card' | 'news_card' | 'vr_card' | 'trpg_card' | 'novel_card' | 'world_card' | 'sim_card' | 'phone_card' | 'webpage_card' | 'theater_card' | 'room_card' | 'life_card' | 'group_topic_card';
 
 export interface Message {
     id: number;
@@ -3944,7 +3948,7 @@ export interface Emoji {
     categoryId?: string; 
 }
 
-export interface FullBackupData {
+export interface FullBackupData extends Partial<WorkroomBackup> {
     /** 好友圈正文；文字备份单列，完整备份随 assets 保存。 */
     friendFeed?: import('./utils/friendFeed').FriendFeedState;
     /** Media-only patches never replace feed text or settings. */

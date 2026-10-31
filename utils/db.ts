@@ -1,5 +1,8 @@
+import { createWorkroomMessage } from './workroomEvent';
+import { createWorkroomStores, WORKROOM_STORES } from '../features/workroom/schema';
+import { exportWorkroomBackup, restoreWorkroomBackup, validateWorkroomBackup } from '../features/workroom/backup';
 import { readLocalCursor } from './localRead';
-import { applyFriendFeedMedia, collectFriendFeedMedia, isActivityTextAsset } from './activityBackup';
+import { applyFriendFeedMedia, collectFriendFeedMedia, isActivityTextAsset, isPersonalTextAsset } from './activityBackup';
 import { compactMemoryLink } from './memoryPalace/linkPrecision';
 import { reportDatabaseFailure } from './databaseHealth';
 import { associateDatabaseOpen, beginDatabaseOpen, recordDatabaseOpen } from './databaseOpenDiagnostics';
@@ -48,7 +51,10 @@ const DB_NAME = 'AetherOS_Data';
 // v72: home projection reads only home-source rows, never scans private-chat history.
 // v73: direct home-turn lookups for incremental journal writes.
 // v74: merge master delivery lookup with both home indexes, including existing v73 databases.
-const DB_VERSION = 74;
+// v75: per-character workroom works, immutable versions, drafts, state and events.
+// v76: persistent workroom creative discussion, included in both backup paths.
+// v77: frozen user-initiated workroom shares. Ideas reuse work metadata.
+const DB_VERSION = 77;
 
 const STORE_CHARACTERS = 'characters';
 const STORE_CHAR_GROUPS = 'character_groups'; // 角色分组定义（角色通过 groupId 指向；与群聊 groups 无关）
@@ -287,6 +293,7 @@ export const openDB = (): Promise<IDBDatabase> => {
           }
       };
 
+      createWorkroomStores(db, upgradeTransaction);
       createStore(STORE_CHARACTERS, { keyPath: 'id' });
       createStore(STORE_CHAR_GROUPS, { keyPath: 'id' }); // v68: 角色分组
 
@@ -650,8 +657,19 @@ export const DB = {
 
   deleteCharacter: async (id: string): Promise<void> => {
     const db = await openDB();
-    const transaction = db.transaction(STORE_CHARACTERS, 'readwrite');
+    const transaction = db.transaction([STORE_CHARACTERS, ...WORKROOM_STORES], 'readwrite');
+    const done = new Promise<void>((resolve, reject) => {
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error || new Error('角色删除失败'));
+    });
     transaction.objectStore(STORE_CHARACTERS).delete(id);
+    for (const name of WORKROOM_STORES) {
+      const store = transaction.objectStore(name);
+      const request = store.index('charId').openCursor(IDBKeyRange.only(id));
+      request.onsuccess = () => { const cursor = request.result; if (cursor) { cursor.delete(); cursor.continue(); } };
+    }
+    await done;
   },
 
   // ---- 角色分组（神经链接"文件夹"，与群聊 groups 无关）----
@@ -1018,6 +1036,58 @@ export const DB = {
       };
       tx.onerror = () => reject(tx.error);
       tx.onabort = () => reject(tx.error || new Error('消息未能保存'));
+    });
+  },
+
+  /** Commit a durable workroom outbox row and its chat projection atomically. */
+  deliverWorkroomPending: async (charId: string, name: 'workroom_events' | 'workroom_turns', id: string): Promise<number | null> => {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(['characters', 'messages', 'assets', name], 'readwrite');
+      let result: number | null = null;
+      let failure: unknown;
+      const fail = (error: unknown) => { failure = error; try { tx.abort(); } catch {} };
+      const source = tx.objectStore(name), messages = tx.objectStore('messages');
+      const rowRequest = source.get(id);
+      rowRequest.onsuccess = () => {
+        const row = rowRequest.result;
+        if (!row || row.charId !== charId || row.delivery !== 'pending') return;
+        const charRequest = tx.objectStore('characters').get(charId);
+        charRequest.onsuccess = () => {
+          const char = charRequest.result;
+          if (!char) { fail(new Error('角色已不存在')); return; }
+          if (name === 'workroom_events' && row.event?.kind === 'progress' && char.workroomLinkEnabled !== true) {
+            source.put({ ...row, delivery: 'local' }); return;
+          }
+          try {
+            const deliveryId = `workroom:${name}:${id}`;
+            const message = name === 'workroom_events' ? createWorkroomMessage(row.event) : {
+              charId, role: row.role, type: 'text', timestamp: row.createdAt,
+              content: `【造物间·创作交流】《${row.workTitle}》\n${row.text}`,
+              metadata: { source: 'workroom', workroomTurnId: row.id, workroomWorkId: row.workId },
+            };
+            if (message.charId !== charId) throw new Error('造物间事件归属不符');
+            const lookup = messages.index('charId_deliveryId').get([charId, deliveryId]);
+            lookup.onsuccess = () => {
+              if (lookup.result) {
+                result = lookup.result.id; source.put({ ...row, delivery: 'delivered', messageId: result }); return;
+              }
+              const request = messages.add({ ...message, metadata: { ...message.metadata, deliveryId } });
+              request.onsuccess = () => {
+                result = request.result as number;
+                clearStaleMemoryMirror(tx, charId, result);
+                source.put({ ...row, delivery: 'delivered', messageId: result });
+              };
+            };
+          } catch (error) { fail(error); }
+        };
+      };
+      tx.oncomplete = () => {
+        if (result !== null) { try { const key = `mp_lastMsgId_${charId}`; if (Number(localStorage.getItem(key)) >= result) localStorage.removeItem(key); } catch {} }
+        resolve(result);
+      };
+      tx.onerror = () => reject(failure || tx.error);
+      tx.onabort = () => reject(failure || tx.error || new Error('造物间聊天记录未能保存'));
     });
   },
 
@@ -3587,6 +3657,8 @@ export const DB = {
       options: { includeBackendConnection?: boolean } = {},
   ): Promise<Partial<FullBackupData>> => {
       await migrateLegacyWhiteboxPresets(DB);
+      const { listSongSoundRecords } = await import('../features/personal/songArchive/storage');
+      await listSongSoundRecords();
       const db = await openDB();
       await ensureStoryTimelineRepair(db);
       
@@ -3667,7 +3739,11 @@ export const DB = {
       const mainState = bankData.find((d: any) => d.id === 'main_state');
       const dollhouseRecord = bankData.find((d: any) => d.id === 'dollhouse_state');
 
+      const workroomBackup = await exportWorkroomBackup(db);
+      const exportedOwners = new Set(characters.map((c: CharacterProfile) => c.id));
+      if ([...workroomBackup.workroomWorks, ...workroomBackup.workroomShares].some(w => !exportedOwners.has(w.charId))) throw new Error('备份期间角色资料发生变化，请重试');
       return {
+          ...workroomBackup,
           characters, characterGroups, messages, customThemes: themes, savedEmojis: emojis, emojiCategories, assets, galleryImages, userProfile, diaries, tasks, anniversaries, roomTodos, roomNotes, groups, savedJournalStickers: journalStickers, socialPosts, courses, games, worldbooks, storyTheaters, storyTheaterPresets, storyTheaterMasks, novels,
           bankState: mainState ? { ...mainState, id: undefined } : undefined,
           bankDollhouse: dollhouseRecord?.data || undefined,
@@ -3734,6 +3810,11 @@ export const DB = {
       } = {}
   ): Promise<void> => {
       const db = await openDB();
+      const workroomBackup = data.collaborationBackupMode === 'media_only' ? undefined : validateWorkroomBackup(data);
+      if (workroomBackup) {
+          const owners = new Set((data.characters ?? await DB.getAllCharacters()).map(c => c.id));
+          if ([...workroomBackup.workroomWorks, ...workroomBackup.workroomShares].some(w => !owners.has(w.charId))) throw new Error('造物间备份的角色不存在');
+      }
       invalidateStoryTimelineRepair(db);
       
       const availableStores = [
@@ -3805,6 +3886,7 @@ export const DB = {
           }
       }
       const plannedSections = [
+          workroomBackup !== undefined,
           data.characters !== undefined || data.mediaAssets !== undefined,
           data.characterGroups !== undefined,
           data.messages !== undefined,
@@ -3999,6 +4081,10 @@ export const DB = {
 
       const hasCharacterBackup = Array.isArray(data.characters);
 
+      await runSection('造物间', workroomBackup !== undefined, async () => {
+          await restoreWorkroomBackup(db, workroomBackup!);
+      });
+
       await runSection('角色资料', data.characters !== undefined || data.mediaAssets !== undefined, async () => {
           if (data.characters) {
               if (data.mediaAssets) {
@@ -4088,7 +4174,9 @@ export const DB = {
           await withStore(STORE_ASSETS, store => {
               const keys = store.getAllKeys();
               keys.onsuccess = () => {
-                  for (const key of keys.result) if (typeof key === 'string' && key !== 'friend_feed_v1' && isActivityTextAsset(key)) store.delete(key);
+                  const incomingPersonal = new Set(records.filter(a=>isPersonalTextAsset(a.id)).map(a=>a.id));
+                  // Older text archives do not know these new records; missing must not mean delete.
+                  for (const key of keys.result) if (typeof key === 'string' && key !== 'friend_feed_v1' && isActivityTextAsset(key) && (!isPersonalTextAsset(key) || incomingPersonal.has(key))) store.delete(key);
                   for (const item of records) store.put(item);
               };
           });

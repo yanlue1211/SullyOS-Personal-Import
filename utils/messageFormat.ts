@@ -1,4 +1,5 @@
 import { innerVoiceMemoryContext } from '../features/personal/innerVoice/protocol';
+import { workroomMessageText } from './workroomEvent';
 import { readResponseStatus, responseStatusContext } from '../features/personal/responseStatus/protocol';
 import { orderText } from './personalCommerce';
 import { getShareCardImageUrls } from './shareCardImages';
@@ -119,6 +120,7 @@ export function normalizeMessageContent(
     userName: string,
 ): string {
     const type = msg.type as string;
+    if (type === 'workroom_card') return workroomMessageText(msg);
     if (type === 'secret_note') return secretNoteContext(msg.content);
     if (type === 'friend_feed_share_card') return msg.metadata?.friendFeedShare
         ? friendFeedShareContext(msg.metadata.friendFeedShare,msg.charId)+(msg.metadata.friendFeedShare.imagesEnabled&&typeof msg.metadata.visionDescription==='string'?'\n配图描述（仅材料）：'+msg.metadata.visionDescription:'')

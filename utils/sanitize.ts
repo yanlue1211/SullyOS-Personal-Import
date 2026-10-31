@@ -62,6 +62,7 @@ const stripRoleNamePrefix = (t: string): string => t.replace(/^[\w一-龥]+:\s*/
  */
 const stripBusinessTagsForBubble = (t: string): string =>
   extractFriendFeedReplyTags(extractFriendFeedReplyTags(t).text,'HOME_VISIT_REPLY').text
+    .replace(/<造物间\s*>[\s\S]*?(?:<\/造物间\s*>|$)/g, '')
     .replace(/\[\[(?:ACTION|RECALL|SEARCH|DIARY|READ_DIARY|FS_DIARY|FS_READ_DIARY|DIARY_START|DIARY_END|FS_DIARY_START|FS_DIARY_END|MUSIC_ACTION)[:\s][\s\S]*?\]\]/g, '')
     // `[[记录:...]]` 整个命名空间 —— 历史渲染形态 (utils/transferFormat.ts:formatTransferRecord),
     // 模型复读历史会抄出来。能还原成动作的 (记录:TRANSFER) 在上游 chatParser / worker classifier

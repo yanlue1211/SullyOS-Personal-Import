@@ -395,6 +395,10 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
     input.signal?.throwIfAborted();
     let systemPrompt = parts.stable;
     let volatileTail = parts.volatileState;
+    if (!input.appPrompt && char.workroomLinkEnabled === true && (!input.recallEntryPoint || ['chat_app','proactive_chat','chat_payload'].includes(input.recallEntryPoint))) {
+        const { buildWorkroomGuide } = await import('../features/workroom/bridge');
+        volatileTail += await buildWorkroomGuide(char.id);
+    }
     const sarModulePlan = input.recallEntryPoint === 'chat_app' && !input.appPrompt
         ? getSARModuleRuntimePlan(char, userProfile)
         : undefined;

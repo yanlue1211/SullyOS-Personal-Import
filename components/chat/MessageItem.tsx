@@ -1,3 +1,4 @@
+import WorkroomCard from './WorkroomCard';
 import ResponseStatusCard from '../../features/personal/responseStatus/ResponseStatusCard';
 import { readResponseStatus } from '../../features/personal/responseStatus/protocol';
 import OrderCard from '../commerce/OrderCard';
@@ -1385,6 +1386,11 @@ const MessageItem = React.memo(({
     if (responseStatus) return <div className={`w-full px-4 my-3 relative ${selectionMode ? 'pl-12' : ''}`} {...interactionProps}>
         {selectionMode && <button type="button" className="absolute left-2 top-1/2" aria-label="选择状态卡片" aria-pressed={isSelected} onClick={event => { event.stopPropagation(); onToggleSelect(m.id); }}>{isSelected ? '●' : '○'}</button>}
         <div className="flex justify-center"><ResponseStatusCard value={responseStatus} /></div>
+    </div>;
+
+    if (m.type === 'workroom_card') return <div className={`w-full px-4 py-2 flex justify-center relative ${selectionMode ? 'pl-12' : ''}`} {...interactionProps}>
+        {selectionMode && <button type="button" className="absolute left-2 top-4" aria-label="选择造物间卡片" aria-pressed={isSelected} onClick={event => {event.stopPropagation(); onToggleSelect(m.id);}}>{isSelected ? '☑' : '□'}</button>}
+        <div className={selectionMode ? 'pointer-events-none' : ''}><ChatCardSurface message={m}><WorkroomCard message={m}/></ChatCardSurface></div>
     </div>;
 
     // --- SYSTEM MESSAGE RENDERING ---
@@ -3695,7 +3701,7 @@ const MessageItem = React.memo(({
 // System-authored diary/settlement/call cards bypass the normal bubble layout.
 // They still participate in the same whitebox styling contract.
 export default function ChatMessage(props:MessageItemProps){
- return props.msg.role==='system'
+ return props.msg.type==='workroom_card' ? <MessageItem {...props}/> : props.msg.role==='system'
   ? <ChatCardSurface message={props.msg}><div className="sully-chat-system"> <MessageItem {...props}/> </div></ChatCardSurface>
   : props.msg.type==='interaction' ? <div className="sully-chat-interaction"><MessageItem {...props}/></div> : <MessageItem {...props}/>;
 }
