@@ -15,6 +15,8 @@ export function createWorkroomHost(charId: string, workId: string, versionId: st
     let stateRevision: number | undefined;
     let queue = Promise.resolve();
     let highestRequest = 0;
+    let lastPublicEvent = '';
+    let lastPublicAt = 0;
     const inFlight = new Set<string>();
     const replies = new Map<string, unknown>();
     const respond = (id: string, reply: unknown) => {
@@ -59,8 +61,12 @@ export function createWorkroomHost(charId: string, workId: string, versionId: st
                             stateRevision = state.revision; result = { revision: state.revision };
                         } else if (request.method === 'emitEvent') {
                             if (!validText(args[0], 2000) || !validText(args[1], 100)) throw Error('互动事件格式无效');
-                            result = preview ? 'preview-'+request.id : (await WorkroomStorage.recordEvent(charId, workId, versionId, args[1], args[0])).id;
-                            if(!preview){await drainWorkroomOutbox(charId);if(active)callbacks.onEvent?.(args[0]);}
+                            const description = String(args[0]);
+                            // A component may report the same visible interaction more than once.
+                            const isRepeat = description === lastPublicEvent && Date.now()-lastPublicAt < 1500;
+                            if(!isRepeat){lastPublicEvent=description;lastPublicAt=Date.now();}
+                            result = preview ? 'preview-'+request.id : isRepeat ? 'duplicate-'+request.id : (await WorkroomStorage.recordEvent(charId, workId, versionId, args[1], description)).id;
+                            if(!preview && !isRepeat){await drainWorkroomOutbox(charId);if(active)callbacks.onEvent?.(description);}
                         } else {
                             if (!validText(args[0], 2000)) throw Error('组件说明无效');
                             if(request.method==='reportReady'){
