@@ -1,3 +1,4 @@
+import {readRealMedia,realMediaContent} from '../features/experience/format';
 import { RESPONSE_STATUS_SYSTEM } from '../features/personal/responseStatus/protocol';
 import { commerceContext } from './personalCommerce';
 import { getShareCardImageUrls } from './shareCardImages';
@@ -1144,6 +1145,7 @@ ${voiceActingGuide()}`;
 
         return {
             apiMessages: historySlice.map((m, index) => {
+                if(readRealMedia(m.metadata?.realMedia))return {role:m.role,content:realMediaContent(m,options?.useVisionDescriptions)};
                 if (m.type === 'secret_note') return {role: m.role, content: secretNoteContext(m.content)};
                 if (m.type === 'friend_feed_card') return {role: 'system', content: m.content};
                 if (m.type === 'friend_feed_share_card') {

@@ -1,3 +1,4 @@
+import {readGameActions,type GameAction} from './actions';
 import { drainWorkroomOutbox } from './delivery';
 import { WorkroomStorage } from './storage';
 import { cloneWorkroomState, validText } from './schema';
@@ -6,7 +7,7 @@ import { readWorkroomRpc } from './runner';
 
 /** Revocable capability: identity comes from the host, never from RPC arguments. */
 export function createWorkroomHost(charId: string, workId: string, versionId: string, session: string,
-    callbacks: { onNotify?: (text: string) => void; onError?: (text: string) => void; onStop?: () => void; onReady?: () => void; onGenerateError?: (error:unknown)=>void; onEvent?: (text:string) => void; onGenerate?: (request:unknown,requestId:string,signal:AbortSignal)=>Promise<unknown> } = {}, preview = false) {
+    callbacks: { onActions?: (actions:GameAction[])=>void; onNotify?: (text: string) => void; onError?: (text: string) => void; onStop?: () => void; onReady?: () => void; onGenerateError?: (error:unknown)=>void; onEvent?: (text:string) => void; onGenerate?: (request:unknown,requestId:string,signal:AbortSignal)=>Promise<unknown> } = {}, preview = false) {
     const generationAbort=new AbortController();
     let previewData:unknown = {};
     let previewRevision = 1;
@@ -29,6 +30,7 @@ export function createWorkroomHost(charId: string, workId: string, versionId: st
     const dispose = () => { active = false; generationAbort.abort(new DOMException('组件已关闭','AbortError'));port?.close(); };
     return {
         close: dispose,
+        characterPlay(){if(active&&!preview)port?.postMessage({event:'characterPlay'});},
         bind(nextPort: MessagePort) {
             if (!active || port) { nextPort.close(); return; }
             port = nextPort;
@@ -49,7 +51,8 @@ export function createWorkroomHost(charId: string, workId: string, versionId: st
                     try {
                         let result: unknown;
                         const args = request.args;
-                        if(request.method==='generate'){
+                        if(request.method==='registerActions'){if(preview)throw Error('预览不开放角色操作');callbacks.onActions?.(readGameActions(args[0]));result=true;
+                        } else if(request.method==='generate'){
                             if(preview||!callbacks.onGenerate)throw Error('请在正式作品中开启运行时AI后使用');
                             const task=readRuntimeRequest(args[0]);result=await callbacks.onGenerate(task,session+'-'+request.id,generationAbort.signal);
                         } else if (request.method === 'loadState') {

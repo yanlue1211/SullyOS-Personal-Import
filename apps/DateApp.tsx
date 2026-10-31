@@ -1,3 +1,5 @@
+import {resolveBlobRefsInRequestBody} from '../utils/apiBlobRefs';
+import type {ExperienceMessage} from '../features/experience/media';
 import { resolveDialogueApi } from '../utils/characterApi';
 import { useDateMessageHistory } from '../utils/useDateMessageHistory';
 import { loadCharacterContextMessages } from '../utils/chatContextRange';
@@ -203,7 +205,7 @@ const DateApp: React.FC = () => {
         const response = await fetch(`${dialogueApi.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${dialogueApi.apiKey}` },
-            body: JSON.stringify({
+            body: await resolveBlobRefsInRequestBody(JSON.stringify({
                 model: dialogueApi.model,
                 messages,
                 temperature,
@@ -212,7 +214,7 @@ const DateApp: React.FC = () => {
                 // 与私聊 (useChatAI.ts) 对齐，统一带 8000。
                 max_tokens: 8000,
                 stream: dialogueApi.stream ?? false,
-            })
+            })) as string
         });
         if (!response.ok) throw new Error(`API Error ${response.status}`);
         const data = await safeResponseJson(response);
@@ -1110,6 +1112,7 @@ const DateApp: React.FC = () => {
                     messages={dateMessages}
                     peekStatus={peekStatus}
                     encounterId={encounterIdRef.current}
+                    onExperienceSend={async(message:ExperienceMessage)=>{const owner=char.id,encounter=encounterIdRef.current;await DB.saveMessage({charId:owner,role:'user',type:'text',content:message.content,metadata:{...message.metadata,source:'date',dateEncounterId:encounter}});if(encounterIdRef.current!==encounter)throw Error('见面会话已切换，附件已保存在原会话');await loadDateMessages();return handleSendMessage(message.content);}}
                     onSendMessage={handleSendMessage}
                     onReroll={handleReroll}
                     onExit={onExitSession}

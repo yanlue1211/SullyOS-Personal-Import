@@ -1,3 +1,4 @@
+import RealMediaView from '../../features/experience/RealMediaView';
 import WorkroomCard from './WorkroomCard';
 import ResponseStatusCard from '../../features/personal/responseStatus/ResponseStatusCard';
 import { readResponseStatus } from '../../features/personal/responseStatus/protocol';
@@ -3149,6 +3150,7 @@ const MessageItem = React.memo(({
         );
     }
 
+    if(m.metadata?.realMedia)return commonLayout(<RealMediaView value={m.metadata.realMedia}/>);
     if (m.type === 'audio' || parseVirtualMedia(m.content)) return commonLayout(<PersonalMediaMessage key={m.id} message={m} />);
 
     if (m.type === 'image') {

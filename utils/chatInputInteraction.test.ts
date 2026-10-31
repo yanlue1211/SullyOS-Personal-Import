@@ -268,3 +268,14 @@ it.each(['actions','emojis','chars'] as const)('closes %s when typing starts wit
  expect(props.setShowPanel).toHaveBeenCalledWith('none');
  expect(document.activeElement).toBe(textarea());
 });
+
+it.each(['聊天功能','表情包'])('switches keyboard and %s on pointerdown before the target can move',label=>{
+ renderInput({showPanel:'none'});act(()=>textarea().focus());
+ const toggle=container.querySelector(`[aria-label="${label}"]`)!;
+ const event=pointerdown(toggle);expect(event.defaultPrevented).toBe(true);
+ expect(document.activeElement).not.toBe(textarea());
+ expect(props.setShowPanel).toHaveBeenLastCalledWith(label==='聊天功能'?'actions':'emojis');
+ renderInput({showPanel:label==='聊天功能'?'actions':'emojis'});
+ const press=pointerdown(textarea());expect(press.defaultPrevented).toBe(true);
+ expect(document.activeElement).toBe(textarea());expect(props.setShowPanel).toHaveBeenLastCalledWith('none');
+});

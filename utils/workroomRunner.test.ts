@@ -27,7 +27,7 @@ describe('造物间沙盒协议', () => {
     it('引导脚本定义异步 API，拒绝来自非父窗口的初始化消息', async () => {
         const dom = new JSDOM(buildWorkroomDocument({ html: '', css: '', js: '' }, '</script>test'), { runScripts: 'dangerously', url: 'https://sandbox.invalid' });
         const window = dom.window as any;
-        expect(Object.keys(window.workroom)).toEqual(['loadState', 'saveState', 'emitEvent', 'generate', 'notify', 'requestUpdate']);
+        expect(Object.keys(window.workroom)).toEqual(['loadState', 'saveState', 'emitEvent', 'generate', 'registerActions', 'notify', 'requestUpdate']);
         expect(Object.isFrozen(window.workroom)).toBe(true);
         const sent: any[] = [];
         const port = { postMessage: (v: unknown) => sent.push(v), onmessage: undefined as any };

@@ -2,7 +2,7 @@ import { assertCode, type WorkroomCode } from './schema';
 
 export const WORKROOM_SANDBOX = 'allow-scripts';
 export const WORKROOM_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; media-src data:; font-src data:; connect-src 'none'; frame-src 'none'; child-src 'none'; worker-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
-export const WORKROOM_RPC_METHODS = ['loadState', 'saveState', 'emitEvent', 'notify', 'requestUpdate', 'reportError', 'reportReady', 'generate'] as const;
+export const WORKROOM_RPC_METHODS = ['loadState', 'saveState', 'emitEvent', 'notify', 'requestUpdate', 'reportError', 'reportReady', 'generate', 'registerActions'] as const;
 export type WorkroomMethod = typeof WORKROOM_RPC_METHODS[number];
 export interface WorkroomRpc { id: string; method: WorkroomMethod; args: unknown[] }
 export function readWorkroomRpc(value: unknown): WorkroomRpc | undefined {
@@ -21,7 +21,7 @@ export function buildWorkroomDocument(code: WorkroomCode, session: string): stri
     assertCode(code);
     const bootstrap = `(() => {
         const session = ${JSON.stringify(session).replace(/</g, '\\u003c')};
-        let port; let sequence = 0; const pending = new Map(); const waiting = [];
+        let actions = []; let playing = false; let port; let sequence = 0; const pending = new Map(); const waiting = [];
         function call(method, ...args) {
             return new Promise((resolve, reject) => {
                 if(pending.size >= 60) return reject(new Error('请求过多'));
@@ -36,6 +36,11 @@ export function buildWorkroomDocument(code: WorkroomCode, session: string): stri
             loadState: () => call('loadState'), saveState: state => call('saveState', state),
             emitEvent: (detail, actionId) => call('emitEvent', detail, actionId || 'event-'+(++sequence)),
             generate: request => call('generate', request),
+            registerActions: async entries => {
+                if(!Array.isArray(entries)||entries.some(a=>typeof a.run!=='function')) throw Error('动作需要run处理函数');
+                await call('registerActions',entries.map(a=>({id:a.id,label:a.label})));
+                actions=entries.slice();
+            },
             notify: text => call('notify', text), requestUpdate: text => call('requestUpdate', text)
         });
         Object.defineProperty(window, 'workroom', {value: api, writable: false, configurable: false});
@@ -43,7 +48,21 @@ export function buildWorkroomDocument(code: WorkroomCode, session: string): stri
             if(event.source !== parent || event.data?.workroomSession !== session || !event.ports[0] || port) return;
             port = event.ports[0];
             port.onmessage = event => {
-                const reply = event.data; const request = pending.get(reply?.id); if(!request) return;
+                const reply = event.data;
+                if(reply?.event==='characterPlay') {
+                    if(playing||!actions.length)return;playing=true;
+                    void (async()=>{
+                        const state=await call('loadState');
+                        const choice=await call('generate',{instruction:'你受邀一起玩。根据当前游戏状态，从availableActions中选择一个愿意执行的动作，或选择none不行动。只返回JSON对象：{actionId:动作id或none,reply:简短公开回应}。不要声称动作已经完成。',context:{state,availableActions:actions.map(a=>({id:a.id,label:a.label}))},format:'json'});
+                        if(!choice||typeof choice.actionId!=='string'||typeof choice.reply!=='string')throw Error('角色动作选择格式无效');
+                        if(choice.actionId==='none'){await call('notify',choice.reply.slice(0,1000)||'角色这次没有行动');return;}
+                        const action=actions.find(a=>a.id===choice.actionId);if(!action)throw Error('角色选择了不可用动作');
+                        await action.run({actor:'char'});
+                        await call('emitEvent','角色在游戏中执行了「'+action.label+'」。'+choice.reply.slice(0,1000),'char-action-'+Date.now());
+                    })().catch(e=>call('reportError',String(e).slice(0,2000)).catch(()=>{})).finally(()=>{playing=false;});
+                    return;
+                }
+                const request = pending.get(reply?.id); if(!request) return;
                 pending.delete(reply.id); clearTimeout(request.timer);
                 if(reply.ok) request.resolve(reply.value); else request.reject(new Error(reply.error || '接口失败'));
             };
