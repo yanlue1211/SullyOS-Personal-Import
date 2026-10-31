@@ -1458,7 +1458,7 @@ ${voiceActingGuide()}`;
                         content = `${timeStr} [系统卡片]`;
                     }
                 }
-                else if ((m.type as string) === 'trpg_card' || (m.type as string) === 'novel_card') {
+                else if ((m.type as string) === 'workroom_card' || (m.type as string) === 'trpg_card' || (m.type as string) === 'novel_card') {
                     // TRPG 跑团片段 / 笔友会小说章节：从对应 app 多选转发进来的内容。
                     // 复用 normalizeMessageContent 翻成完整文本，让角色"记得"一起玩过/写过什么。
                     content = `${timeStr} ${normalizeMessageContent(m, char?.name || '你', userProfile?.name || '用户')}`;
