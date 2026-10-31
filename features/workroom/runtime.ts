@@ -29,7 +29,11 @@ export async function generateRuntimeTurn(input:{charId:string;workId:string;ver
   const latest=await W.getWork(char.id,input.workId);input.signal.throwIfAborted();if(!latest.runtimeAiEnabled||latest.currentVersionId!==input.versionId)throw Error('作品或运行时AI设置已变化，本轮结果未应用');
   // Hidden tasks and generated answers stay in the component; only explicit public material is mirrored.
   if(request.publicEvent){await W.appendPlayTurn(char.id,input.workId,input.versionId,'user',request.publicEvent,'play-u-'+input.requestId);
-   await W.appendPlayTurn(char.id,input.workId,input.versionId,'assistant',request.shareReply&&request.format==='text'?text.slice(0,8000):'本轮游戏内容已生成；隐藏材料不写入聊天。','play-a-'+input.requestId);await drainWorkroomOutbox(char.id);}
+   const publicReply=request.shareReply&&request.format==='text'?text.slice(0,1000):'本轮生成已完成（非公开的游戏材料不展示）';
+   await W.appendPlayTurn(char.id,input.workId,input.versionId,'assistant',publicReply,'play-a-'+input.requestId);
+   await W.recordEvent(char.id,input.workId,input.versionId,'api-'+input.requestId,
+    '用户操作：'+request.publicEvent.slice(0,600)+'；角色/游戏回应：'+publicReply);
+   await drainWorkroomOutbox(char.id);}
   return result;
  }finally{locks.delete(key);}
 }
