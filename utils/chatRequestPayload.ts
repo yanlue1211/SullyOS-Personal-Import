@@ -38,7 +38,7 @@ import { buildMcpSystemBlock, MCP_TAIL_REMINDER } from './mcpToolBridge';
 import type { MusicCfg, Song, LyricLine, MusicPlaybackSnapshot, RecentTrackChange } from '../context/MusicContext';
 import { isPromptBuildSkipped, isSystemMessageMergeEnabled } from './devDebug';
 import { mergeSystemMessages } from './systemMessageMerge';
-import { cleanApiMessages, flattenImageContentParts } from './promptMessageCleanup';
+import { cleanApiMessages, flattenImageContentParts, flattenHistoricalImageParts } from './promptMessageCleanup';
 import { materializeVisionDescriptions } from './visionApi';
 import type { RecallEntryPoint, RecallTrace } from './memoryPalace/trace';
 import { isChatConversationEntry } from './memoryPalace/trace';
@@ -305,7 +305,7 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
             undefined,
             { useVisionDescriptions, contextHighWaterMark, protectPendingChatTurn: true },
         );
-        const cleanedApiMessages = cleanApiMessages(input.stripImages ? flattenImageContentParts(apiMessages) : apiMessages);
+        const cleanedApiMessages = cleanApiMessages(input.stripImages ? flattenImageContentParts(apiMessages) : flattenHistoricalImageParts(apiMessages));
         console.warn('[DevDebug] Prompt Build skipped: sending chat history without system prompt injection.');
         return {
             systemPrompt: '',
@@ -373,7 +373,7 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
     );
 
     // ── 8. 剥离历史里旧的双语标签（stripImages 时先压平 image_url → 纯文本占位） ──
-    const cleanedApiMessages = cleanApiMessages(input.stripImages ? flattenImageContentParts(apiMessages) : apiMessages);
+    const cleanedApiMessages = cleanApiMessages(input.stripImages ? flattenImageContentParts(apiMessages) : flattenHistoricalImageParts(apiMessages));
     // Scene materials participate in keyword/depth handling, without fake private-message IDs.
     if (input.appPrompt?.messages) cleanedApiMessages.push(...input.appPrompt.messages);
 
