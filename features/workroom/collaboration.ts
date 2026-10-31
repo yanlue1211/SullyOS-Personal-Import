@@ -59,7 +59,7 @@ export const listShares = (charId:string):Promise<WorkroomShareSummary[]> => tra
 }));
 export async function acceptShare(charId:string,shareId:string){
     const work=await transact(charId,'readwrite',async tx=>{
-        const char=await idbResult(tx.objectStore('characters').get(charId)); if(char.workroomLinkEnabled!==true)throw Error('造物间联动已关闭');
+        const char=await idbResult(tx.objectStore('characters').get(charId)); if(!char)throw Error('角色已不存在');
         const share=await idbResult<WorkroomShare|undefined>(tx.objectStore('workroom_shares').get(shareId));
         if(!share||share.charId!==charId)throw Error('分享不存在或不属于当前角色');
         if(share.acceptedWorkId)return owned(tx,charId,share.acceptedWorkId);
