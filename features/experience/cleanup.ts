@@ -34,8 +34,8 @@ export async function scanArchivedMedia(charId?:string):Promise<ArchivedMediaPre
 export async function clearArchivedMedia(preview:ArchivedMediaPreview):Promise<{cleared:number;freedBytes:number;retainedFiles:number;skipped:number}>{
  if(!tryAcquireMaintenanceLock('归档图片与视频清理'))throw Error(`请等待「${currentMaintenanceHolder()}」完成`);
  try{
- const db=await openDB(),names=[...new Set<string>([...REF_SOURCE_STORES,...WORKROOM_STORES,'story_theaters','blob_assets'])];
- for(const name of names)if(!db.objectStoreNames.contains(name))throw Error('引用范围读取不完整，未清理任何附件');
+ const db=await openDB(),names=Array.from(db.objectStoreNames);
+ for(const name of [...REF_SOURCE_STORES,...WORKROOM_STORES,'story_theaters','blob_assets'])if(!db.objectStoreNames.contains(name))throw Error('引用范围读取不完整，未清理任何附件');
  const tx=db.transaction(names,'readwrite'),done=transactionDone(tx);void done.catch(()=>{});
  const clearedIds:number[]=[];let cleared=0,freedBytes=0,retainedFiles=0,skipped=0;
  try{
