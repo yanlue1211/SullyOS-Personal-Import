@@ -21,6 +21,8 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Verify workroom regressions
+        run: pnpm vitest run utils/workroomRuntime.test.ts utils/workroomUI.test.ts utils/workroomCreation.test.ts utils/workroomHost.test.ts utils/workroomDelivery.test.ts utils/workroomPortable.test.ts --maxWorkers=2 --minWorkers=1
       - name: Install isolated browser test runtime
         run: |
           mkdir -p "$RUNNER_TEMP/workroom-browser"

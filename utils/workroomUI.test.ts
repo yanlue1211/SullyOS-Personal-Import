@@ -106,6 +106,14 @@ describe('造物间 App 与真实消息组件', () => {
         await fill('测试反馈','按钮需要更大');await click('结束测试并保存记录');await waitText('试运行记录已保存');
         expect((await W.get('a',work.id)).work.testReport?.notes).toBe('按钮需要更大');expect(await DB.getRawStoreData('workroom_states')).toEqual([]);
     });
+    it('正式作品从游戏库直接进入体验，运行时AI开关保存后可恢复',async()=>{
+        const work=await W.create('a','动态场景','每轮生成');await W.saveDraft('a',work.id,{html:'<p>GAME</p>',css:'',js:''},0,null);await W.publish('a',work.id,1);
+        vi.stubGlobal('MessageChannel',class {port1={onmessage:null,postMessage:()=>{},close:()=>{}};port2={};});
+        await act(async()=>root.render(React.createElement(WorkroomApp)));await choose('a');await waitText('阿源 的造物间');await click('游戏库');await waitText('动态场景');
+        const entry=[...container.querySelectorAll('button')].find(b=>b.textContent?.includes('动态场景'))!;await act(async()=>entry.click());await waitText('运行时AI');
+        expect(container.querySelector('iframe')?.getAttribute('srcdoc')).toContain('GAME');const toggle=container.querySelector('[aria-label="角色互动"] input') as HTMLInputElement;
+        await vi.waitFor(()=>expect(toggle.disabled).toBe(false));await act(async()=>toggle.click());await waitText('运行时AI已开启');expect((await W.getWork('a',work.id)).runtimeAiEnabled).toBe(true);
+    });
     it('系统角色的完成卡实际渲染且只有一层卡面，隐藏系统日志也不会隐藏它', async () => {
         const message = { id: 42, ...createWorkroomMessage({ version: 1, eventId: 'card', charId: 'a', charName: '阿源', kind: 'completed',
             subjectId: 'work', title: '小狗饲养屋', summary: '喂食散步', detail: '一起完成了游戏。', timestamp: Date.now() }) };

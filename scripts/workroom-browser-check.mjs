@@ -14,7 +14,7 @@ try{
  await page.goto('http://127.0.0.1:4179/test/fixtures/workroom-browser.html');
  await page.getByRole('button',{name:'准备隔离测试数据'}).click();
  await page.getByText('测试数据已准备',{exact:true}).waitFor();
- const selectCreator=async()=>{await page.getByLabel('当前创作者').selectOption({label:'测试 Claude'});await page.getByRole('button',{name:/游戏库/}).click();await page.getByRole('button').filter({hasText:'浏览器小狗屋'}).click();};
+ const selectCreator=async()=>{await page.getByLabel('当前创作者').selectOption({label:'测试 Claude'});await page.screenshot({path:'test-results/workroom/desktop.png'});await page.getByRole('button',{name:/游戏库/}).click();await page.getByRole('button').filter({hasText:'浏览器小狗屋'}).click();};
  await selectCreator();const frame=page.frameLocator('iframe[title="造物间作品"]');
  await frame.getByText('等级 1',{exact:true}).waitFor();await frame.getByRole('button',{name:'喂小狗'}).click();await frame.getByText('等级 2',{exact:true}).waitFor();
  await page.getByRole('button',{name:'重开造物间',exact:true}).click();await selectCreator();await frame.getByText('等级 2',{exact:true}).waitFor();

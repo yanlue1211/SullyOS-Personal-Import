@@ -37,6 +37,8 @@ it('未授权、跨角色和无效任务不调用API；格式失败不覆盖进�
 it('分段创作协议保留引号、换行和代码，不再要求JSON转义；截断回复不覆盖草稿',()=>{
  const js='const choices = ["是", "不是"];\ndocument.body.textContent = "新题目";';
  expect(parseWorkroomReply(`<workroom-text>做好了</workroom-text><workroom-html><button title="开始">玩</button></workroom-html><workroom-css></workroom-css><workroom-js>${js}</workroom-js>`).code?.js).toBe(js);
+ expect(parseWorkroomReply('我们先聊聊想做什么吧。')).toEqual({text:'我们先聊聊想做什么吧。'});
+ expect(parseWorkroomReply('好的。<workroom-text>继续讨论</workroom-text>')).toEqual({text:'继续讨论'});
  expect(()=>parseWorkroomReply('["bad" x]')).toThrow('JSON转义错误');expect(()=>parseWorkroomReply('<workroom-text>好</workroom-text><workroom-js>const')).toThrow('不完整');
 });
 it('联动关闭时公开运行互动只保存在作品内，恢复后仍可读且不重新投递',async()=>{
