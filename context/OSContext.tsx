@@ -1,3 +1,4 @@
+import { drainWorkroomOutbox, WORKROOM_HISTORY_UPDATED } from '../features/workroom/delivery';
 import { reconcileCommerce } from '../utils/personalCommerce';
 import { isEmotionFeatureOn } from '../utils/scheduleFeature';
 import { handleLocalBack } from '../utils/localBackHandlers';
@@ -2362,6 +2363,37 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   realtimeConfigRef.current = realtimeConfig;
   const memoryPalaceConfigRef = useRef(memoryPalaceConfig);
   memoryPalaceConfigRef.current = memoryPalaceConfig;
+
+  useEffect(() => {
+      if (!isDataLoaded) return;
+      const memoryChains = new Map<string, Promise<void>>();
+      const historyChanged = (event: Event) => {
+          const charId = (event as CustomEvent).detail?.charId;
+          if (typeof charId !== 'string') return;
+          setLastMsgTimestamp(Date.now());
+          const task = (memoryChains.get(charId) || Promise.resolve()).catch(() => {}).then(async () => {
+              const char = await DB.getCharacter(charId), config = memoryPalaceConfigRef.current;
+              const llm = config.lightLLM?.baseUrl ? config.lightLLM : apiConfigRef.current;
+              if (!char?.memoryPalaceEnabled || !config.embedding?.baseUrl || !config.embedding.apiKey || !llm.baseUrl) return;
+              const { processNewMessagesWithAutoArchive } = await import('../utils/memoryPalace/autoArchive');
+              await processNewMessagesWithAutoArchive([], char.id, char.name, config.embedding, llm, userProfileRef.current.name, false);
+          });
+          memoryChains.set(charId, task);
+          void task.catch(error => console.warn('[Workroom] Memory buffer retained for retry', error)).finally(() => {
+              if (memoryChains.get(charId) === task) memoryChains.delete(charId);
+          });
+      };
+      const drain = () => { if (document.hidden) return; void DB.getAllCharacters().then(async rows => {
+          for (const char of rows) await drainWorkroomOutbox(char.id);
+      }).catch(error => console.warn('[Workroom] Chat outbox retained for retry', error)); };
+      const openWorkroom = () => setActiveApp(AppID.Workroom);
+      window.addEventListener('workroom-open-requested', openWorkroom);
+      window.addEventListener(WORKROOM_HISTORY_UPDATED, historyChanged);
+      document.addEventListener('visibilitychange', drain);
+      drain();
+      return () => { window.removeEventListener('workroom-open-requested', openWorkroom); window.removeEventListener(WORKROOM_HISTORY_UPDATED, historyChanged); document.removeEventListener('visibilitychange', drain); };
+  }, [isDataLoaded]);
+
 
   useEffect(() => {
       if (!isDataLoaded) return;

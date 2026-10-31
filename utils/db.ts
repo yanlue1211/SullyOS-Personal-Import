@@ -1,3 +1,4 @@
+import { createWorkroomMessage } from './workroomEvent';
 import { createWorkroomStores, WORKROOM_STORES } from '../features/workroom/schema';
 import { exportWorkroomBackup, restoreWorkroomBackup, validateWorkroomBackup } from '../features/workroom/backup';
 import { readLocalCursor } from './localRead';
@@ -51,7 +52,8 @@ const DB_NAME = 'AetherOS_Data';
 // v73: direct home-turn lookups for incremental journal writes.
 // v74: merge master delivery lookup with both home indexes, including existing v73 databases.
 // v75: per-character workroom works, immutable versions, drafts, state and events.
-const DB_VERSION = 75;
+// v76: persistent workroom creative discussion, included in both backup paths.
+const DB_VERSION = 76;
 
 const STORE_CHARACTERS = 'characters';
 const STORE_CHAR_GROUPS = 'character_groups'; // 角色分组定义（角色通过 groupId 指向；与群聊 groups 无关）
@@ -290,7 +292,7 @@ export const openDB = (): Promise<IDBDatabase> => {
           }
       };
 
-      createWorkroomStores(db);
+      createWorkroomStores(db, upgradeTransaction);
       createStore(STORE_CHARACTERS, { keyPath: 'id' });
       createStore(STORE_CHAR_GROUPS, { keyPath: 'id' }); // v68: 角色分组
 
@@ -1033,6 +1035,58 @@ export const DB = {
       };
       tx.onerror = () => reject(tx.error);
       tx.onabort = () => reject(tx.error || new Error('消息未能保存'));
+    });
+  },
+
+  /** Commit a durable workroom outbox row and its chat projection atomically. */
+  deliverWorkroomPending: async (charId: string, name: 'workroom_events' | 'workroom_turns', id: string): Promise<number | null> => {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(['characters', 'messages', 'assets', name], 'readwrite');
+      let result: number | null = null;
+      let failure: unknown;
+      const fail = (error: unknown) => { failure = error; try { tx.abort(); } catch {} };
+      const source = tx.objectStore(name), messages = tx.objectStore('messages');
+      const rowRequest = source.get(id);
+      rowRequest.onsuccess = () => {
+        const row = rowRequest.result;
+        if (!row || row.charId !== charId || row.delivery !== 'pending') return;
+        const charRequest = tx.objectStore('characters').get(charId);
+        charRequest.onsuccess = () => {
+          const char = charRequest.result;
+          if (!char) { fail(new Error('角色已不存在')); return; }
+          if (name === 'workroom_events' && row.event?.kind === 'progress' && char.workroomLinkEnabled !== true) {
+            source.put({ ...row, delivery: 'local' }); return;
+          }
+          try {
+            const deliveryId = `workroom:${name}:${id}`;
+            const message = name === 'workroom_events' ? createWorkroomMessage(row.event) : {
+              charId, role: row.role, type: 'text', timestamp: row.createdAt,
+              content: `【造物间·创作交流】《${row.workTitle}》\n${row.text}`,
+              metadata: { source: 'workroom', workroomTurnId: row.id, workroomWorkId: row.workId },
+            };
+            if (message.charId !== charId) throw new Error('造物间事件归属不符');
+            const lookup = messages.index('charId_deliveryId').get([charId, deliveryId]);
+            lookup.onsuccess = () => {
+              if (lookup.result) {
+                result = lookup.result.id; source.put({ ...row, delivery: 'delivered', messageId: result }); return;
+              }
+              const request = messages.add({ ...message, metadata: { ...message.metadata, deliveryId } });
+              request.onsuccess = () => {
+                result = request.result as number;
+                clearStaleMemoryMirror(tx, charId, result);
+                source.put({ ...row, delivery: 'delivered', messageId: result });
+              };
+            };
+          } catch (error) { fail(error); }
+        };
+      };
+      tx.oncomplete = () => {
+        if (result !== null) { try { const key = `mp_lastMsgId_${charId}`; if (Number(localStorage.getItem(key)) >= result) localStorage.removeItem(key); } catch {} }
+        resolve(result);
+      };
+      tx.onerror = () => reject(failure || tx.error);
+      tx.onabort = () => reject(failure || tx.error || new Error('造物间聊天记录未能保存'));
     });
   },
 

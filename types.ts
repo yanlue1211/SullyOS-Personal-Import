@@ -9,6 +9,7 @@ export enum AppID {
   Gallery = 'gallery',
   Music = 'music',
   SongArchive = 'song_archive',
+  Workroom = 'workroom',
   Browser = 'browser',
   ThemeMaker = 'thememaker', // Legacy shortcut ID; opens the embedded bubble maker, not an installed App.
   Appearance = 'appearance',
@@ -2744,6 +2745,8 @@ export interface MemoryPalaceWaterlineConfig {
 }
 
 export interface CharacterProfile {
+  /** Controls new workroom chat abilities; historical events remain readable. */
+  workroomLinkEnabled?: boolean;
   /** Local default for this character's dialogue; absent means follow Settings. Never shared in cards. */
   dialogueApi?: DialogueApiConfig;
   id: string;

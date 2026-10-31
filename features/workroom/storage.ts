@@ -4,7 +4,7 @@ import {
     WORKROOM_STORES, assertCode, cloneWorkroomState, idbResult, transactionDone,
     stateId, validInteger, validText, workroomId,
     type WorkroomCode, type WorkroomDraft, type WorkroomState, type WorkroomStoredEvent,
-    type WorkroomVersion, type WorkroomWork,
+    type WorkroomVersion, type WorkroomWork, type WorkroomTurn,
 } from './schema';
 
 async function transact<T>(charId: string, mode: IDBTransactionMode, action: (tx: IDBTransaction) => Promise<T>): Promise<T> {
@@ -33,6 +33,11 @@ async function versionFor(tx: IDBTransaction, work: WorkroomWork, versionId: str
     const version = await idbResult<WorkroomVersion | undefined>(tx.objectStore('workroom_versions').get(versionId));
     if (!version || version.workId !== work.id || version.charId !== work.charId) throw Error('作品版本不存在');
     return version;
+}
+async function lastTurn(tx: IDBTransaction, workId: string): Promise<WorkroomTurn | undefined> {
+    const cursor = await idbResult(tx.objectStore('workroom_turns').index('workId_createdAt').openCursor(
+        IDBKeyRange.bound([workId, 0], [workId, Number.MAX_SAFE_INTEGER]), 'prev'));
+    return cursor?.value;
 }
 const codeOnly = (code: WorkroomCode): WorkroomCode => ({ html: code.html, css: code.css, js: code.js });
 
@@ -91,7 +96,7 @@ export const WorkroomStorage = {
             await idbResult(tx.objectStore('workroom_drafts').delete(workId));
             const char = await idbResult(tx.objectStore('characters').get(charId));
             const id = workroomId();
-            await idbResult(tx.objectStore('workroom_events').add({ id, charId, workId, delivery: 'local', event: {
+            await idbResult(tx.objectStore('workroom_events').add({ id, charId, workId, delivery: 'pending', event: {
                 version: 1, eventId: id, charId, charName: char.name || '角色', kind: 'completed', subjectId: workId,
                 title: work.title, summary: work.summary, detail: `发布了第 ${version.number} 版作品。`, timestamp: now,
             } } satisfies WorkroomStoredEvent));
@@ -141,9 +146,52 @@ export const WorkroomStorage = {
             const event = readWorkroomEvent({ version: 1, eventId: workroomId(), charId, charName: char.name || '角色',
                 kind: 'progress', subjectId: workId, title: work.title, summary: work.summary,
                 detail: `组件内互动（由作品报告）：${detail}`, timestamp: Date.now() }, charId)!;
-            const row: WorkroomStoredEvent = { id, charId, workId, event, delivery: 'local' };
+            const row: WorkroomStoredEvent = { id, charId, workId, event, delivery: char.workroomLinkEnabled === true ? 'pending' : 'local' };
             await idbResult(store.add(row));
             return row;
+        });
+    },
+    turns: (charId: string, workId: string): Promise<WorkroomTurn[]> => transact(charId, 'readonly', async tx => {
+        await owned(tx, charId, workId);
+        const rows = await idbResult<WorkroomTurn[]>(tx.objectStore('workroom_turns').index('workId').getAll(workId));
+        return rows.sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+    }),
+    appendTurn: (charId: string, workId: string, role: 'user' | 'assistant', text: string, id = workroomId()) => {
+        if (!['user', 'assistant'].includes(role) || !validText(text, 12000) || !validText(id, 200)) throw Error('创作交流内容无效');
+        return transact(charId, 'readwrite', async tx => {
+            const work = await owned(tx, charId, workId);
+            const store = tx.objectStore('workroom_turns');
+            const previous = await idbResult<WorkroomTurn | undefined>(store.get(id));
+            if (previous) {
+                if (previous.charId !== charId || previous.workId !== workId || previous.role !== role || previous.text !== text) throw Error('创作交流标识冲突');
+                return previous;
+            }
+            const latest = await lastTurn(tx, workId);
+            const turn: WorkroomTurn = { id, charId, workId, workTitle: work.title, role, text, createdAt: Math.max(Date.now(), (latest?.createdAt || 0) + 1), delivery: 'pending' };
+            await idbResult(store.add(turn)); return turn;
+        });
+    },
+    commitReply: (charId: string, workId: string, input: {
+        userTurnId: string; expectedVersionId: string | null; expectedDraftRevision: number;
+        text: string; code?: WorkroomCode; signal?: AbortSignal;
+    }) => {
+        if (!validText(input.text, 8000)) throw Error('角色回复无效');
+        if (input.code) assertCode(input.code);
+        input.signal?.throwIfAborted();
+        return transact(charId, 'readwrite', async tx => {
+            const work = await owned(tx, charId, workId);
+            const latest = await lastTurn(tx, workId);
+            const draft = await idbResult<WorkroomDraft | undefined>(tx.objectStore('workroom_drafts').get(workId));
+            if (!latest || latest.id !== input.userTurnId || latest.role !== 'user') throw Error('已有新的创作交流，请重新生成');
+            if (work.currentVersionId !== input.expectedVersionId || (draft?.revision || 0) !== input.expectedDraftRevision) throw Error('作品已被其他窗口修改，请重新读取');
+            input.signal?.throwIfAborted();
+            if (input.code) await idbResult(tx.objectStore('workroom_drafts').put({
+                id: workId, workId, charId, baseVersionId: work.currentVersionId, revision: (draft?.revision || 0) + 1, ...codeOnly(input.code),
+            } satisfies WorkroomDraft));
+            const turn: WorkroomTurn = { id: workroomId(), charId, workId, workTitle: work.title, role: 'assistant',
+                text: input.text, createdAt: Math.max(Date.now(), latest.createdAt + 1), delivery: 'pending' };
+            await idbResult(tx.objectStore('workroom_turns').add(turn));
+            return turn;
         });
     },
     delete: (charId: string, workId: string) => transact(charId, 'readwrite', async tx => {

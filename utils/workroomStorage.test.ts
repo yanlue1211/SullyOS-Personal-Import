@@ -29,7 +29,8 @@ describe('造物间持久化、版本和角色隔离', () => {
         const { work, version } = await make();
         const initial = await W.loadState('a', work.id, version.id);
         await W.saveState('a', work.id, version.id, initial.revision, { level: 3, dog: '糯米' });
-        forceCloseDatabase(await openDB());
+        // fake-indexeddb v6 declares a constructor type here; its runtime accepts a DB instance.
+        forceCloseDatabase(await openDB() as unknown as Parameters<typeof forceCloseDatabase>[0]);
         await new Promise(resolve => setTimeout(resolve, 0));
         const loaded = await W.get('a', work.id);
         expect(loaded.versions[0].html).toBe(code.html);

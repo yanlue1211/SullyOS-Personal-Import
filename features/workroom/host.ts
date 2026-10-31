@@ -1,3 +1,4 @@
+import { drainWorkroomOutbox } from './delivery';
 import { WorkroomStorage } from './storage';
 import { validText } from './schema';
 import { readWorkroomRpc } from './runner';
@@ -52,11 +53,13 @@ export function createWorkroomHost(charId: string, workId: string, versionId: st
                         } else if (request.method === 'emitEvent') {
                             if (!validText(args[0], 2000) || !validText(args[1], 100)) throw Error('互动事件格式无效');
                             result = (await WorkroomStorage.recordEvent(charId, workId, versionId, args[1], args[0])).id;
+                            await drainWorkroomOutbox(charId);
                         } else {
                             if (!validText(args[0], 2000)) throw Error('组件说明无效');
                             if (request.method === 'requestUpdate') {
                                 result = (await WorkroomStorage.recordEvent(charId, workId, versionId, `update-${request.id}-${session}`,
-                                `作品提出修改请求（尚未执行）：${args[0]}`)).id;
+                                    `作品提出修改请求（尚未执行）：${args[0]}`)).id;
+                                await drainWorkroomOutbox(charId);
                             } else if (request.method === 'notify') {
                                 if (active) callbacks.onNotify?.(args[0]);
                             } else if (active) callbacks.onError?.(args[0]);

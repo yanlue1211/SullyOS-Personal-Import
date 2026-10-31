@@ -9,6 +9,8 @@ import {
 export function validateWorkroomBackup(input: Partial<WorkroomBackup>): WorkroomBackup | undefined {
     const fields = Object.values(WORKROOM_FIELDS);
     if (!fields.some(field => input[field] !== undefined)) return;
+    // v75 backups predate creative discussion; absence means an empty turn table.
+    if (input.workroomTurns === undefined) input = { ...input, workroomTurns: [] };
     if (fields.some(field => !Array.isArray(input[field]))) throw Error('造物间备份缺少数据表');
     const data = input as WorkroomBackup;
     for (const field of fields) {
@@ -59,6 +61,10 @@ export function validateWorkroomBackup(input: Partial<WorkroomBackup>): Workroom
     for (const row of data.workroomEvents) {
         const event = readWorkroomEvent(row.event, row.charId);
         if (!event || event.subjectId !== row.workId || !['local', 'pending', 'delivered'].includes(row.delivery)) throw Error('造物间事件无效');
+    }
+    for (const turn of data.workroomTurns) {
+        if (!['user', 'assistant'].includes(turn.role) || !validText(turn.text, 12000) || !validText(turn.workTitle, 300)
+            || !Number.isFinite(turn.createdAt) || turn.createdAt <= 0 || !['pending', 'delivered'].includes(turn.delivery)) throw Error('造物间创作交流无效');
     }
     return data;
 }

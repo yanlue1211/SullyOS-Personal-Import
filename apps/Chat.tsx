@@ -2994,9 +2994,11 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
         };
         window.addEventListener('home-secrets-updated',refresh);
         window.addEventListener('friend-feed-history-updated',refresh);
+        window.addEventListener('workroom-history-updated',refresh);
         return()=>{
             window.removeEventListener('home-secrets-updated',refresh);
             window.removeEventListener('friend-feed-history-updated',refresh);
+            window.removeEventListener('workroom-history-updated',refresh);
         };
     },[char?.id,visibleCount,reloadMessages]);
 

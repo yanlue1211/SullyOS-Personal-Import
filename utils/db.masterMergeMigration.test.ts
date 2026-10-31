@@ -17,6 +17,7 @@ async function seedLegacy(factory:IDBFactory,version:number){
    }
    messages.put({id:1,charId:'c',role:'user',type:'text',content:'保留原来的聊天',timestamp:10});
    messages.put({id:2,charId:'c',role:'user',type:'text',content:'保留原来的家园',timestamp:5,metadata:{source:'home',homeTurnId:'turn'}});
+   if(version===75){const oldEvents=req.result.createObjectStore('workroom_events',{keyPath:'id'});oldEvents.createIndex('charId','charId');oldEvents.createIndex('workId','workId');oldEvents.put({id:'old-event',charId:'c',workId:'w',delivery:'local'});}
    req.result.createObjectStore('characters',{keyPath:'id'}).put({id:'c',name:'旧角色'});
    req.result.createObjectStore('assets',{keyPath:'id'}).put({id:'old-wallpaper',data:'原图片'});
   };
@@ -24,17 +25,19 @@ async function seedLegacy(factory:IDBFactory,version:number){
  });
 }
 
-it.each([72,73,74])('upgrades v%s without losing records and installs both branches of message indexes',async version=>{
+it.each([72,73,74,75])('upgrades v%s without losing records and installs both branches of message indexes',async version=>{
  vi.resetModules();
  const factory=new IDBFactory();vi.stubGlobal('indexedDB',factory);
  await seedLegacy(factory,version);
  const {openDB,DB}=await import('./db');const db=await openDB();
  try {
-  expect(db.version).toBe(75);
-  for(const store of ['workroom_works','workroom_versions','workroom_drafts','workroom_states','workroom_events']) {
+  expect(db.version).toBe(76);
+  for(const store of ['workroom_works','workroom_versions','workroom_drafts','workroom_states','workroom_events','workroom_turns']) {
    expect(db.objectStoreNames.contains(store)).toBe(true);
    expect(Array.from(db.transaction(store).objectStore(store).indexNames)).toContain('charId');
   }
+  expect(Array.from(db.transaction('workroom_events').objectStore('workroom_events').indexNames)).toContain('charId_delivery');
+  if(version===75)expect((await DB.getRawStoreData('workroom_events'))[0].id).toBe('old-event');
   const names=Array.from(db.transaction('messages').objectStore('messages').indexNames);
   expect(names).toEqual(expect.arrayContaining(['charId_source','charId_homeTurn','charId_deliveryId']));
   expect((await DB.getMessagesByCharId('c',true)).map(m=>m.content)).toEqual(['保留原来的聊天','保留原来的家园']);
@@ -82,7 +85,7 @@ it('rolls back an interrupted v72 home-index upgrade, preserves the archive and 
  expect(databaseOpenDiagnostic()).not.toContain('upgrade-committed');
  const retried=await openDB();
  try {
-  expect(retried.version).toBe(75);
+  expect(retried.version).toBe(76);
   expect((await DB.getAllCharacters())[0].name).toBe('旧角色');
   expect(await DB.getAsset('old-wallpaper')).toBe('原图片');
   expect((await DB.getMessagesByCharId('c',true)).map(row=>row.id)).toEqual([1,2]);

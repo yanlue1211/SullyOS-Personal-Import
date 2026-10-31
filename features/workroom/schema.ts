@@ -3,6 +3,7 @@ import type { WorkroomEvent } from '../../utils/workroomEvent';
 export const WORKROOM_FIELDS = {
     workroom_works: 'workroomWorks', workroom_versions: 'workroomVersions',
     workroom_drafts: 'workroomDrafts', workroom_states: 'workroomStates', workroom_events: 'workroomEvents',
+    workroom_turns: 'workroomTurns',
 } as const;
 export const WORKROOM_STORES = Object.keys(WORKROOM_FIELDS) as Array<keyof typeof WORKROOM_FIELDS>;
 export interface WorkroomWork {
@@ -21,12 +22,18 @@ export interface WorkroomState {
 }
 export interface WorkroomStoredEvent {
     id: string; charId: string; workId: string; event: WorkroomEvent;
-    /** Local until the chat linkage feature explicitly activates delivery. */
+    /** Closed-link interactions remain local; completions and enabled interactions enter the outbox. */
     delivery: 'local' | 'pending' | 'delivered';
+    messageId?: number;
+}
+export interface WorkroomTurn {
+    id: string; charId: string; workId: string; workTitle: string; role: 'user' | 'assistant';
+    text: string; createdAt: number; delivery: 'pending' | 'delivered';
+    messageId?: number;
 }
 export interface WorkroomBackup {
     workroomWorks: WorkroomWork[]; workroomVersions: WorkroomVersion[];
-    workroomDrafts: WorkroomDraft[]; workroomStates: WorkroomState[]; workroomEvents: WorkroomStoredEvent[];
+    workroomDrafts: WorkroomDraft[]; workroomStates: WorkroomState[]; workroomEvents: WorkroomStoredEvent[]; workroomTurns: WorkroomTurn[];
 }
 export const stateId = (workId: string, schemaVersion: number) => JSON.stringify([workId, schemaVersion]);
 export const workroomId = () => crypto.randomUUID();
@@ -60,14 +67,18 @@ export function cloneWorkroomState(value: unknown): unknown {
     return copy;
 }
 
-export function createWorkroomStores(db: IDBDatabase) {
+export function createWorkroomStores(db: IDBDatabase, upgrade: IDBTransaction) {
     for (const name of WORKROOM_STORES) {
-        if (db.objectStoreNames.contains(name)) continue;
-        const store = db.createObjectStore(name, { keyPath: 'id' });
-        store.createIndex('charId', 'charId');
-        if (name !== 'workroom_works') store.createIndex('workId', 'workId');
+        const store = db.objectStoreNames.contains(name) ? upgrade.objectStore(name) : db.createObjectStore(name, { keyPath: 'id' });
+        if (!store.indexNames.contains('charId')) store.createIndex('charId', 'charId');
+        if (name !== 'workroom_works' && !store.indexNames.contains('workId')) store.createIndex('workId', 'workId');
+        if (name === 'workroom_turns' && !store.indexNames.contains('workId_createdAt')) store.createIndex('workId_createdAt', ['workId', 'createdAt']);
+        if ((name === 'workroom_events' || name === 'workroom_turns') && !store.indexNames.contains('charId_delivery')) {
+            store.createIndex('charId_delivery', ['charId', 'delivery']);
+        }
     }
 }
+
 export const idbResult = <T>(r: IDBRequest<T>) => new Promise<T>((resolve, reject) => {
     r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error);
 });
