@@ -7,7 +7,7 @@ import {
     type WorkroomVersion, type WorkroomWork, type WorkroomTurn,
 } from './schema';
 
-async function transact<T>(charId: string, mode: IDBTransactionMode, action: (tx: IDBTransaction) => Promise<T>): Promise<T> {
+export async function transact<T>(charId: string, mode: IDBTransactionMode, action: (tx: IDBTransaction) => Promise<T>): Promise<T> {
     const db = await openDB();
     const tx = db.transaction(['characters', ...WORKROOM_STORES], mode);
     const done = transactionDone(tx);
@@ -24,7 +24,7 @@ async function transact<T>(charId: string, mode: IDBTransactionMode, action: (tx
         throw error;
     }
 }
-async function owned(tx: IDBTransaction, charId: string, workId: string): Promise<WorkroomWork> {
+export async function owned(tx: IDBTransaction, charId: string, workId: string): Promise<WorkroomWork> {
     const work = await idbResult<WorkroomWork | undefined>(tx.objectStore('workroom_works').get(workId));
     if (!work || work.charId !== charId) throw Error('作品不存在或不属于当前角色');
     return work;
@@ -92,7 +92,7 @@ export const WorkroomStorage = {
             if (!existing) await idbResult(tx.objectStore('workroom_states').add({
                 id: stateId(workId, schemaVersion), charId, workId, schemaVersion, revision: 1, data: initial === undefined ? {} : initial,
             } satisfies WorkroomState));
-            await idbResult(tx.objectStore('workroom_works').put({ ...work, currentVersionId: version.id, updatedAt: now }));
+            await idbResult(tx.objectStore('workroom_works').put({ ...work, ...(work.idea ? {idea: {...work.idea, status: 'done'}} : {}), currentVersionId: version.id, updatedAt: now }));
             await idbResult(tx.objectStore('workroom_drafts').delete(workId));
             const char = await idbResult(tx.objectStore('characters').get(charId));
             const id = workroomId();

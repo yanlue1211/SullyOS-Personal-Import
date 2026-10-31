@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { DB, openDB } from './db';
 import { WORKROOM_STORES, transactionDone } from '../features/workroom/schema';
+import { shareWork } from '../features/workroom/collaboration';
 import { WorkroomStorage as W } from '../features/workroom/storage';
 import { createWorkroomMessage } from './workroomEvent';
 import { isVisibleChatMessage } from './chatMessageVisibility';
@@ -85,6 +86,16 @@ describe('造物间 App 与真实消息组件', () => {
         await act(async () => entry.click());
         await waitText('上次没来得及完成的想法');
         expect([...container.querySelectorAll('button')].some(b => b.textContent === '重试上一条')).toBe(true);
+    });
+    it('收到的分享可先查看简介与打开沙盒预览，不自动加入组件库', async () => {
+        const work=await W.create('a','分享预览作品','可以先体验');await W.saveDraft('a',work.id,{html:'<p>PREVIEW_CODE</p>',css:'',js:''},0,null);await W.publish('a',work.id,1);
+        await shareWork('a',work.id,'b');
+        vi.stubGlobal('MessageChannel',class {port1={onmessage:null,postMessage:()=>{},close:()=>{}};port2={};});
+        await act(async()=>root.render(React.createElement(WorkroomApp)));
+        await choose('b');await waitText('分享预览作品');await click('打开看看');await waitText('预览进度仅保留本次');
+        expect(container.querySelector('iframe')?.getAttribute('sandbox')).toBe('allow-scripts');
+        expect(container.querySelector('iframe')?.getAttribute('srcdoc')).toContain('PREVIEW_CODE');
+        expect(await W.list('b')).toEqual([]);expect(mocks.generate).not.toHaveBeenCalled();
     });
     it('系统角色的完成卡实际渲染且只有一层卡面，隐藏系统日志也不会隐藏它', async () => {
         const message = { id: 42, ...createWorkroomMessage({ version: 1, eventId: 'card', charId: 'a', charName: '阿源', kind: 'completed',

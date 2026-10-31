@@ -68,3 +68,15 @@ describe('沙盒宿主与真实 IndexedDB 联通', () => {
         h.host.close();
     });
 });
+
+it('分享预览的状态与事件只留在内存，不能创建任务或改写真实进度',async()=>{
+    const replies:any[]=[];const port={onmessage:undefined as any,postMessage:(v:unknown)=>replies.push(v),close:vi.fn()};
+    const host=createWorkroomHost('runner-char','preview-work','preview-version','preview',{},true);host.bind(port as unknown as MessagePort);
+    const send=async(id:number,method:string,args:unknown[]=[])=>{port.onmessage({data:{id:String(id),method,args}});await vi.waitFor(()=>expect(replies.some(r=>r.id===String(id))).toBe(true));return replies.find(r=>r.id===String(id));};
+    expect((await send(1,'loadState')).value).toEqual({});
+    await send(2,'saveState',[{level:8}]);expect((await send(3,'loadState')).value).toEqual({level:8});
+    expect((await send(4,'emitEvent',['预览里喂食','preview-feed'])).ok).toBe(true);
+    expect((await send(5,'requestUpdate',['不要真的创建任务'])).ok).toBe(false);
+    expect(await DB.getRawStoreData('workroom_states')).toEqual([]);expect(await DB.getRawStoreData('workroom_events')).toEqual([]);
+    expect(await DB.getRawStoreData('workroom_works')).toEqual([]);host.close();
+});

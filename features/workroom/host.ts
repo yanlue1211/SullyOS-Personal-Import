@@ -1,11 +1,13 @@
 import { drainWorkroomOutbox } from './delivery';
 import { WorkroomStorage } from './storage';
-import { validText } from './schema';
+import { cloneWorkroomState, validText } from './schema';
 import { readWorkroomRpc } from './runner';
 
 /** Revocable capability: identity comes from the host, never from RPC arguments. */
 export function createWorkroomHost(charId: string, workId: string, versionId: string, session: string,
-    callbacks: { onNotify?: (text: string) => void; onError?: (text: string) => void; onStop?: () => void } = {}) {
+    callbacks: { onNotify?: (text: string) => void; onError?: (text: string) => void; onStop?: () => void } = {}, preview = false) {
+    let previewData:unknown = {};
+    let previewRevision = 1;
     let active = true;
     let port: MessagePort | undefined;
     let stateRevision: number | undefined;
@@ -44,19 +46,20 @@ export function createWorkroomHost(charId: string, workId: string, versionId: st
                         let result: unknown;
                         const args = request.args;
                         if (request.method === 'loadState') {
-                            const state = await WorkroomStorage.loadState(charId, workId, versionId);
+                            const state = preview ? {revision:previewRevision,data:previewData} : await WorkroomStorage.loadState(charId, workId, versionId);
                             stateRevision = state.revision; result = state.data;
                         } else if (request.method === 'saveState') {
                             if (stateRevision === undefined) throw Error('请先读取进度');
-                            const state = await WorkroomStorage.saveState(charId, workId, versionId, stateRevision, args[0]);
+                            const state = preview ? (()=>{const data=cloneWorkroomState(args[0]);previewData=data;return {revision:++previewRevision,data};})() : await WorkroomStorage.saveState(charId, workId, versionId, stateRevision, args[0]);
                             stateRevision = state.revision; result = { revision: state.revision };
                         } else if (request.method === 'emitEvent') {
                             if (!validText(args[0], 2000) || !validText(args[1], 100)) throw Error('互动事件格式无效');
-                            result = (await WorkroomStorage.recordEvent(charId, workId, versionId, args[1], args[0])).id;
-                            await drainWorkroomOutbox(charId);
+                            result = preview ? 'preview-'+request.id : (await WorkroomStorage.recordEvent(charId, workId, versionId, args[1], args[0])).id;
+                            if(!preview) await drainWorkroomOutbox(charId);
                         } else {
                             if (!validText(args[0], 2000)) throw Error('组件说明无效');
                             if (request.method === 'requestUpdate') {
+                                if(preview)throw Error('预览不创建开发任务，请先收藏独立副本');
                                 result = (await WorkroomStorage.recordEvent(charId, workId, versionId, `update-${request.id}-${session}`,
                                     `作品提出修改请求（尚未执行）：${args[0]}`)).id;
                                 await drainWorkroomOutbox(charId);

@@ -88,7 +88,8 @@ describe('造物间事件真实聊天投递', () => {
     });
     it('五种卡片协议经真实持久化、ZIP 与恢复后都保留可读材料', async () => {
         const { work } = await build();
-        const db = await openDB(), tx = db.transaction('workroom_events', 'readwrite'), done = transactionDone(tx);
+        const db = await openDB(), tx = db.transaction(['workroom_events','workroom_shares'], 'readwrite'), done = transactionDone(tx);
+        tx.objectStore('workroom_shares').put({id:'fixture-share',charId:'a',createdAt:Date.now(),snapshot:{html:'<p>test</p>',css:'',js:'',title:work.title,summary:work.summary,schemaVersion:1,authorId:'b',authorName:'Claude',workId:work.id,versionId:'fixture-version'}});
         for (const kind of ['inspiration', 'shared', 'accepted'] as const) {
             const id = `fixture-${kind}`;
             tx.objectStore('workroom_events').add({ id, charId: 'a', workId: work.id, delivery: 'pending', event: {

@@ -1,3 +1,4 @@
+import { consumeWorkroomCollection } from '../features/workroom/launch';
 import { isAudioApiReady, audioBlobToPayload, recognizeUserRecording, registerRecordingRecognition, recordingMetadata, materializeAudioDescriptions } from '../utils/audioApi';
 import { isEmotionFeatureOn } from '../utils/scheduleFeature';
 import { recordingToWav } from '../features/personal/chatMedia/recording';
@@ -1888,6 +1889,7 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
             case 'luckin-end':
                 deactivateLuckin();
                 break;
+            case 'workroom-toggle': { if(char) updateCharacter(char.id,{workroomLinkEnabled:char.workroomLinkEnabled!==true}); break; }
             case 'real-song-listening-toggle': {
                 if (!char) break;
                 const next = !((char as any).realSongListeningEnabled);
@@ -2985,6 +2987,11 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
             setArchiveProgress('');
         }
     };
+
+    useEffect(() => {
+        const ask=()=>{if(!char)return;const request=consumeWorkroomCollection(char.id);if(request)void handleSendText('我分享给你的这个小组件，你感兴趣吗？想不想收藏一个独立副本？分享编号：'+request.shareId,'text');};
+        ask();window.addEventListener('workroom-chat-requested',ask);return()=>window.removeEventListener('workroom-chat-requested',ask);
+    },[char?.id]);
 
     useEffect(() => {
         const refresh=(event:Event)=>{
@@ -4550,6 +4557,7 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
                     luckinActivated={luckinActivated}
                     htmlModeEnabled={!!(char as any).htmlModeEnabled}
                     realSongListeningEnabled={!!(char as any).realSongListeningEnabled}
+                    workroomLinkEnabled={char.workroomLinkEnabled === true}
                     showThinkingChain={!!(char as any).showThinkingChain}
                     inputStyle={osTheme.chatInputStyle}
                     sendButtonStyle={osTheme.chatSendButtonStyle}

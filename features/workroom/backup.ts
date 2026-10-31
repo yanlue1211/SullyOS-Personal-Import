@@ -10,6 +10,7 @@ export function validateWorkroomBackup(input: Partial<WorkroomBackup>): Workroom
     const fields = Object.values(WORKROOM_FIELDS);
     if (!fields.some(field => input[field] !== undefined)) return;
     // v75 backups predate creative discussion; absence means an empty turn table.
+    if (input.workroomShares === undefined) input = {...input, workroomShares: []};
     if (input.workroomTurns === undefined) input = { ...input, workroomTurns: [] };
     if (fields.some(field => !Array.isArray(input[field]))) throw Error('造物间备份缺少数据表');
     const data = input as WorkroomBackup;
@@ -24,6 +25,8 @@ export function validateWorkroomBackup(input: Partial<WorkroomBackup>): Workroom
     const versions = new Map(data.workroomVersions.map(v => [v.id, v]));
     const numbers = new Set<string>();
     for (const work of works.values()) {
+        if (work.idea && (!['open','shelved','done'].includes(work.idea.status) || !validText(work.idea.invitationId,200))) throw Error('灵感状态无效');
+        if (work.source && ['authorId','authorName','workId','versionId','shareId'].some(key => !validText((work.source as unknown as Record<string,unknown>)[key],200))) throw Error('作品来源无效');
         if (!validText(work.title, 300) || !validText(work.summary, 2000) || !Number.isFinite(work.createdAt) || work.createdAt <= 0
             || !Number.isFinite(work.updatedAt) || work.updatedAt <= 0 || (work.currentVersionId !== null && !validText(work.currentVersionId, 200))) throw Error('造物间作品信息无效');
         if (work.currentVersionId) {
@@ -31,8 +34,9 @@ export function validateWorkroomBackup(input: Partial<WorkroomBackup>): Workroom
             if (!version || version.workId !== work.id || version.charId !== work.charId) throw Error('造物间正式版本引用无效');
         }
     }
-    for (const field of fields.filter(field => field !== 'workroomWorks')) {
+    for (const field of fields.filter(field => field !== 'workroomWorks' && field !== 'workroomShares')) {
         for (const row of data[field]) {
+            if (field === 'workroomEvents' && 'event' in row && row.event.kind === 'shared') continue;
             const work = works.get(row.workId);
             if (!work || row.charId !== work.charId) throw Error('造物间备份包含孤立记录或跨角色引用');
         }
@@ -58,9 +62,14 @@ export function validateWorkroomBackup(input: Partial<WorkroomBackup>): Workroom
         if (draft.id !== draft.workId || !validInteger(draft.revision)
             || (draft.baseVersionId !== null && (!base || base.workId !== draft.workId || base.charId !== draft.charId))) throw Error('造物间草稿引用无效');
     }
+    for (const share of data.workroomShares) {
+        assertCode(share.snapshot);
+        const v = share.snapshot;
+        if (!validText(v.title,300) || !validText(v.summary,2000) || ![v.authorId,v.authorName,v.workId,v.versionId].every(s => validText(s,200)) || !validInteger(v.schemaVersion) || !Number.isFinite(share.createdAt) || share.createdAt <= 0 || (share.acceptedWorkId!==undefined && (!validText(share.acceptedWorkId,200) || (works.has(share.acceptedWorkId) && works.get(share.acceptedWorkId)!.charId!==share.charId)))) throw Error('分享快照无效');
+    }
     for (const row of data.workroomEvents) {
         const event = readWorkroomEvent(row.event, row.charId);
-        if (!event || event.subjectId !== row.workId || !['local', 'pending', 'delivered'].includes(row.delivery)) throw Error('造物间事件无效');
+        if (!event || (event.kind === 'shared' ? !data.workroomShares.some(s => s.id === event.shareId && s.charId === row.charId) : event.subjectId !== row.workId) || !['local', 'pending', 'delivered'].includes(row.delivery)) throw Error('造物间事件无效');
     }
     for (const turn of data.workroomTurns) {
         if (!['user', 'assistant'].includes(turn.role) || !validText(turn.text, 12000) || !validText(turn.workTitle, 300)
@@ -92,7 +101,7 @@ export async function streamWorkroomBackup(db: IDBDatabase, zip: ZipFileWriter,
             const cursor = request.result;
             if (!cursor) return;
             try {
-                if (name === 'workroom_works') onOwner?.(cursor.value.charId);
+                if (name === 'workroom_works' || name === 'workroom_shares') onOwner?.(cursor.value.charId);
                 writers[i].appendSync([cursor.value]); cursor.continue();
             }
             catch (e) { error = e; tx.abort(); }

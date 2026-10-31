@@ -3,12 +3,14 @@ import type { WorkroomEvent } from '../../utils/workroomEvent';
 export const WORKROOM_FIELDS = {
     workroom_works: 'workroomWorks', workroom_versions: 'workroomVersions',
     workroom_drafts: 'workroomDrafts', workroom_states: 'workroomStates', workroom_events: 'workroomEvents',
-    workroom_turns: 'workroomTurns',
+    workroom_turns: 'workroomTurns', workroom_shares: 'workroomShares',
 } as const;
 export const WORKROOM_STORES = Object.keys(WORKROOM_FIELDS) as Array<keyof typeof WORKROOM_FIELDS>;
 export interface WorkroomWork {
     id: string; charId: string; title: string; summary: string;
     createdAt: number; updatedAt: number; currentVersionId: string | null;
+    idea?: {status: 'open' | 'shelved' | 'done'; invitationId: string};
+    source?: {authorId: string; authorName: string; workId: string; versionId: string; shareId: string};
 }
 export interface WorkroomCode { html: string; css: string; js: string }
 export interface WorkroomVersion extends WorkroomCode {
@@ -31,12 +33,16 @@ export interface WorkroomTurn {
     text: string; createdAt: number; delivery: 'pending' | 'delivered';
     messageId?: number;
 }
+export interface WorkroomShare {
+    id: string; charId: string; createdAt: number; acceptedWorkId?: string;
+    snapshot: WorkroomCode & {title: string; summary: string; schemaVersion: number; authorId: string; authorName: string; workId: string; versionId: string};
+}
 export interface WorkroomBackup {
     workroomWorks: WorkroomWork[]; workroomVersions: WorkroomVersion[];
-    workroomDrafts: WorkroomDraft[]; workroomStates: WorkroomState[]; workroomEvents: WorkroomStoredEvent[]; workroomTurns: WorkroomTurn[];
+    workroomDrafts: WorkroomDraft[]; workroomStates: WorkroomState[]; workroomEvents: WorkroomStoredEvent[]; workroomTurns: WorkroomTurn[]; workroomShares: WorkroomShare[];
 }
 export const stateId = (workId: string, schemaVersion: number) => JSON.stringify([workId, schemaVersion]);
-export const workroomId = () => crypto.randomUUID();
+export const workroomId = (): string => crypto.randomUUID();
 export const validText = (v: unknown, max: number): v is string => typeof v === 'string' && !!v.trim() && v.length <= max;
 export const validInteger = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= 1;
 export function assertCode(code: WorkroomCode) {

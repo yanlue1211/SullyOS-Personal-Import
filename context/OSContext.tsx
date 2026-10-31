@@ -2387,11 +2387,13 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           for (const char of rows) await drainWorkroomOutbox(char.id);
       }).catch(error => console.warn('[Workroom] Chat outbox retained for retry', error)); };
       const openWorkroom = () => setActiveApp(AppID.Workroom);
+      const askWorkroom = (event:Event) => { const id=(event as CustomEvent).detail?.charId; if(typeof id==='string'){setActiveCharacterId(id);setActiveApp(AppID.Chat);} };
+      window.addEventListener('workroom-chat-requested', askWorkroom);
       window.addEventListener('workroom-open-requested', openWorkroom);
       window.addEventListener(WORKROOM_HISTORY_UPDATED, historyChanged);
       document.addEventListener('visibilitychange', drain);
       drain();
-      return () => { window.removeEventListener('workroom-open-requested', openWorkroom); window.removeEventListener(WORKROOM_HISTORY_UPDATED, historyChanged); document.removeEventListener('visibilitychange', drain); };
+      return () => { window.removeEventListener('workroom-chat-requested', askWorkroom); window.removeEventListener('workroom-open-requested', openWorkroom); window.removeEventListener(WORKROOM_HISTORY_UPDATED, historyChanged); document.removeEventListener('visibilitychange', drain); };
   }, [isDataLoaded]);
 
 
@@ -4278,6 +4280,10 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           // 可能多达数 MB（壁纸 base64）的克隆。
           const cloneForInPlace = <T,>(v: T): T => (mode === 'text_only' ? v : deepCloneForExport(v));
 
+          if (mode === 'full' || mode === 'text_only') {
+              const { listSongSoundRecords } = await import('../features/personal/songArchive/storage');
+              await listSongSoundRecords();
+          }
           const backupData: Partial<FullBackupData> = {
               friendFeed: mode === 'text_only' ? stripBackupImages(await readFriendFeed()) : undefined,
               friendFeedMedia: mode === 'media_only' ? collectFriendFeedMedia(await readFriendFeed()) : undefined,

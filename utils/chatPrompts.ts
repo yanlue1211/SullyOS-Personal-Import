@@ -1075,7 +1075,7 @@ ${voiceActingGuide()}`;
 
         }
 
-        if (!forFirePack && !promptOptions?.appRules) {
+        if (!forFirePack && promptOptions?.appRules === undefined) {
             const shopping = await commerceContext(char.id);
             volatileState += shopping.pending + shopping.guide;
         }
@@ -1090,7 +1090,7 @@ ${voiceActingGuide()}`;
             .join(' ');
         console.log(`⏱ [buildSystemPrompt] total=${perfTotal}ms | stable=${baseSystemPrompt.length}ch volatile=${volatileState.length}ch | ${timingStr}`);
 
-        return { stable: baseSystemPrompt + VIRTUAL_MEDIA_GUIDE + RECORDING_HISTORY_GUIDE + (promptOptions?.appRules ? '' : INNER_VOICE_SYSTEM + RESPONSE_STATUS_SYSTEM), volatileState, recencyTail, history: context.history };
+        return { stable: baseSystemPrompt + (promptOptions?.appRules !== undefined ? '' : VIRTUAL_MEDIA_GUIDE + RECORDING_HISTORY_GUIDE + INNER_VOICE_SYSTEM + RESPONSE_STATUS_SYSTEM), volatileState, recencyTail, history: context.history };
     },
 
     // 格式化消息历史

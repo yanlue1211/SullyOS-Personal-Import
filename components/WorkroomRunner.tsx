@@ -8,9 +8,10 @@ export interface WorkroomRunnerProps {
     version: WorkroomVersion;
     onNotify?: (text: string) => void;
     onError?: (text: string) => void;
+    preview?: boolean;
 }
 /** Each mount/version owns a fresh iframe and capability port; teardown revokes old work. */
-export default function WorkroomRunner({ charId, version, onNotify, onError }: WorkroomRunnerProps) {
+export default function WorkroomRunner({ charId, version, onNotify, onError, preview = false }: WorkroomRunnerProps) {
     const iframe = useRef<HTMLIFrameElement>(null);
     const [stopped, setStopped] = useState(false);
     const callbacks = useRef({ onNotify, onError });
@@ -27,7 +28,7 @@ export default function WorkroomRunner({ charId, version, onNotify, onError }: W
             onNotify: text => callbacks.current.onNotify?.(text),
             onError: text => callbacks.current.onError?.(text),
             onStop: () => setStopped(true),
-        });
+        }, preview);
         const dispose = () => { active = false; port?.close(); host.close(); };
         stop.current = dispose;
         setup.current = () => {
@@ -43,7 +44,7 @@ export default function WorkroomRunner({ charId, version, onNotify, onError }: W
         if (version.charId !== charId) { setStopped(true); return dispose; }
         setDoc(buildWorkroomDocument(version, session));
         return () => { dispose(); setup.current = undefined; stop.current = undefined; };
-    }, [charId, version.id]);
+    }, [charId, version.id, preview]);
     if (stopped) return <div role="status">组件已停止。</div>;
     return <div className="h-full flex flex-col">
         <button type="button" onClick={() => { stop.current?.(); setup.current = undefined; setStopped(true); }} className="self-end px-3 py-1 text-xs">停止运行</button>

@@ -2,7 +2,7 @@ import { createWorkroomMessage } from './workroomEvent';
 import { createWorkroomStores, WORKROOM_STORES } from '../features/workroom/schema';
 import { exportWorkroomBackup, restoreWorkroomBackup, validateWorkroomBackup } from '../features/workroom/backup';
 import { readLocalCursor } from './localRead';
-import { applyFriendFeedMedia, collectFriendFeedMedia, isActivityTextAsset } from './activityBackup';
+import { applyFriendFeedMedia, collectFriendFeedMedia, isActivityTextAsset, isPersonalTextAsset } from './activityBackup';
 import { compactMemoryLink } from './memoryPalace/linkPrecision';
 import { reportDatabaseFailure } from './databaseHealth';
 import { associateDatabaseOpen, beginDatabaseOpen, recordDatabaseOpen } from './databaseOpenDiagnostics';
@@ -53,7 +53,8 @@ const DB_NAME = 'AetherOS_Data';
 // v74: merge master delivery lookup with both home indexes, including existing v73 databases.
 // v75: per-character workroom works, immutable versions, drafts, state and events.
 // v76: persistent workroom creative discussion, included in both backup paths.
-const DB_VERSION = 76;
+// v77: frozen user-initiated workroom shares. Ideas reuse work metadata.
+const DB_VERSION = 77;
 
 const STORE_CHARACTERS = 'characters';
 const STORE_CHAR_GROUPS = 'character_groups'; // 角色分组定义（角色通过 groupId 指向；与群聊 groups 无关）
@@ -3656,6 +3657,8 @@ export const DB = {
       options: { includeBackendConnection?: boolean } = {},
   ): Promise<Partial<FullBackupData>> => {
       await migrateLegacyWhiteboxPresets(DB);
+      const { listSongSoundRecords } = await import('../features/personal/songArchive/storage');
+      await listSongSoundRecords();
       const db = await openDB();
       await ensureStoryTimelineRepair(db);
       
@@ -3738,7 +3741,7 @@ export const DB = {
 
       const workroomBackup = await exportWorkroomBackup(db);
       const exportedOwners = new Set(characters.map((c: CharacterProfile) => c.id));
-      if (workroomBackup.workroomWorks.some(w => !exportedOwners.has(w.charId))) throw new Error('备份期间角色资料发生变化，请重试');
+      if ([...workroomBackup.workroomWorks, ...workroomBackup.workroomShares].some(w => !exportedOwners.has(w.charId))) throw new Error('备份期间角色资料发生变化，请重试');
       return {
           ...workroomBackup,
           characters, characterGroups, messages, customThemes: themes, savedEmojis: emojis, emojiCategories, assets, galleryImages, userProfile, diaries, tasks, anniversaries, roomTodos, roomNotes, groups, savedJournalStickers: journalStickers, socialPosts, courses, games, worldbooks, storyTheaters, storyTheaterPresets, storyTheaterMasks, novels,
@@ -3810,7 +3813,7 @@ export const DB = {
       const workroomBackup = data.collaborationBackupMode === 'media_only' ? undefined : validateWorkroomBackup(data);
       if (workroomBackup) {
           const owners = new Set((data.characters ?? await DB.getAllCharacters()).map(c => c.id));
-          if (workroomBackup.workroomWorks.some(w => !owners.has(w.charId))) throw new Error('造物间备份的角色不存在');
+          if ([...workroomBackup.workroomWorks, ...workroomBackup.workroomShares].some(w => !owners.has(w.charId))) throw new Error('造物间备份的角色不存在');
       }
       invalidateStoryTimelineRepair(db);
       
@@ -4171,7 +4174,9 @@ export const DB = {
           await withStore(STORE_ASSETS, store => {
               const keys = store.getAllKeys();
               keys.onsuccess = () => {
-                  for (const key of keys.result) if (typeof key === 'string' && key !== 'friend_feed_v1' && isActivityTextAsset(key)) store.delete(key);
+                  const incomingPersonal = new Set(records.filter(a=>isPersonalTextAsset(a.id)).map(a=>a.id));
+                  // Older text archives do not know these new records; missing must not mean delete.
+                  for (const key of keys.result) if (typeof key === 'string' && key !== 'friend_feed_v1' && isActivityTextAsset(key) && (!isPersonalTextAsset(key) || incomingPersonal.has(key))) store.delete(key);
                   for (const item of records) store.put(item);
               };
           });
