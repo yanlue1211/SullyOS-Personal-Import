@@ -1,5 +1,4 @@
 import React, {useState} from 'react';
-import { DB } from '../../utils/db';
 import { requestWorkroomCollection } from '../../features/workroom/launch';
 import { setIdeaStatus } from '../../features/workroom/collaboration';
 import type { Message } from '../../types';
@@ -19,7 +18,7 @@ export default function WorkroomCard({ message }: { message: Message }) {
         <button type="button" className="rounded-full px-4 py-2 border border-current/20 text-xs" onClick={() => {
             workroomLaunch.request({ charId: event.charId, workId: event.kind === 'shared' ? '' : event.subjectId, ...(event.kind === 'shared' ? {shareId:event.shareId}: {}) }); window.dispatchEvent(new Event('workroom-open-requested'));
         }}>去造物间看看 ↗</button>
-        {event.kind === 'shared' && <button type="button" className="text-xs border rounded-full p-2" onClick={()=>void DB.getCharacter(event.charId).then(char=>{if(char?.workroomLinkEnabled)requestWorkroomCollection(event.charId,event.shareId!);else setNotice('先开启造物间联动，再询问 TA 是否收藏。');}).catch(error=>setNotice(String(error)))}>询问 TA 是否收藏</button>}
+        {event.kind === 'shared' && <button type="button" className="text-xs border rounded-full p-2" onClick={()=>requestWorkroomCollection(event.charId,event.shareId!)}>询问 TA 是否收藏</button>}
         {event.kind === 'inspiration' && <button type="button" className="text-xs border rounded-full p-2" onClick={()=>void setIdeaStatus(event.charId,event.subjectId,'shelved').then(()=>setNotice('灵感已搁置，随时可以继续。')).catch(error=>setNotice(String(error)))}>暂时搁置</button>}
         {notice && <p role="status" className="text-xs">{notice}</p>}
     </article>;
