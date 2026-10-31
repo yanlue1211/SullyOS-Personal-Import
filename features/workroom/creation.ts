@@ -8,15 +8,8 @@ import { WorkroomStorage as W } from './storage';
 import { assertCode, validText, type WorkroomCode } from './schema';
 import { drainWorkroomOutbox } from './delivery';
 
-export interface WorkroomReply { text: string; code?: WorkroomCode; action?: 'read_code' | 'test_code' }
-export function parseWorkroomReply(raw: string): WorkroomReply {
-    const value = JSON.parse(raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, ''));
-    if (!value || typeof value !== 'object' || Array.isArray(value)) throw Error('角色回复格式不正确，请重试');
-    if (['read_code','test_code'].includes(value.action) && value.code === undefined) return {text:'',action:value.action};
-    if (!validText(value.text, 8000)) throw Error('没有收到完整的创作回复');
-    if (value.code !== undefined) assertCode(value.code);
-    return { text: value.text, ...(value.code ? { code: { html: value.code.html, css: value.code.css, js: value.code.js } } : {}) };
-}
+import {parseWorkroomReply} from './reply';
+export {parseWorkroomReply} from './reply';
 
 const locks = new Set<string>();
 export async function generateWorkroomReply(input: {
@@ -28,6 +21,7 @@ export async function generateWorkroomReply(input: {
     if (locks.has(key)) throw Error('这个作品正在等待回复');
     if (!validText(input.text, 12000)) throw Error('请填写创作要求');
     locks.add(key);
+    let stage='准备创作';
     try {
         input.signal.throwIfAborted();
         const char = await DB.getCharacter(input.charId);
@@ -50,11 +44,13 @@ export async function generateWorkroomReply(input: {
         const current = snapshot.versions.find(v => v.id === snapshot.work.currentVersionId);
         const rules = `你在造物间与用户共同创作当前作品。保持真实人设、关系、记忆与世界书。讨论本身很重要，正常交流，不要每轮强行改代码。
 只能管理当前作品；不读其他角色的私有资料，不修改糯米机源码。代码不含凭据，不接入网络。
-输出完整 JSON：{"text":"给用户的自然回复","code":{"html":"完整HTML主体","css":"完整CSS","js":"完整JS"}}。本轮无需改动时省略 code。
-已有代码按需读取：需要查看时仅返回 {"action":"read_code"}，宿主会提供当前草稿或正式代码，最多读取一次。需要试运行已经保存的草稿时仅返回 {"action":"test_code"}，系统在临时进度沙盒做启动和短时错误观察，最多一次；该观察不等于全部玩法验证。没有已保存草稿时先生成草稿，不能测试尚未保存的代码。
+输出分段文本，不要把代码装进JSON字符串：<workroom-text>给用户的自然回复</workroom-text>。需要代码时再追加<workroom-html>完整HTML主体</workroom-html><workroom-css>完整CSS，可为空</workroom-css><workroom-js>完整JavaScript，可为空</workroom-js>。不使用Markdown围栏；代码里的引号和换行原样输出。三个代码片段必须一起完整提供，不改代码时全部省略。
+已有代码按需读取：需要查看时仅返回 <workroom-tool>read_code</workroom-tool>，宿主会提供当前草稿或正式代码，最多读取一次。需要试运行已经保存的草稿时仅返回 <workroom-tool>test_code</workroom-tool>，系统在临时进度沙盒做启动和短时错误观察，最多一次；该观察不等于全部玩法验证。没有已保存草稿时先生成草稿，不能测试尚未保存的代码。
 生成的 code 只保存为草稿，尚未发布或通过运行测试；不能在 text 中声称已发布或测试通过。不要把代码、内部工具过程写入 text。
 代码使用 window.workroom 异步接口：await loadState() 先读取状态；await saveState(JSON状态) 保存；emitEvent(行为文字,唯一actionId) 记录组件内重要行为；notify(短文字) 显示组件通知；requestUpdate(说明) 只提出修改请求。接口全名如 window.workroom.loadState()。
+组件可以运行时生成新内容，不限固定模板或预设选项：await window.workroom.generate({instruction:"本轮生成任务",context:可选JSON材料,format:"text"或"json",publicEvent:"可选的公开互动摘要",shareReply:false})。宿主复用当前角色API和正常上下文；返回文本或JSON数据，组件负责验证并saveState保存结果。生成题目/汤底/场景/随机事件、逐轮问答均可调用；隐藏答案放context和状态里，不写publicEvent，不设shareReply:true。只有公开的角色对话才设shareReply:true。调用需要用户开启“运行时AI”，未开启/失败时保留已有进度并显示重试入口。重要操作再emitEvent，不要把隐藏汤底写入聊天卡。随机事件可由本地概率或生成接口决定，结果和检查时间要持久保存，不能每次打开重抽；禁止定时频繁调用API。
 单状态256000字符，40层；代码各字段最多500000字符。先读取再保存进度，同格式更新沿用旧状态，兼容既有字段；本轮不擅自改变状态格式。DOM可自由设计，适配手机宽度，按钮便于触摸。`;
+        stage='组装角色上下文';
         const payload = await buildChatRequestPayload({
             ...input.context, char, userProfile: input.user, groups: input.context?.groups || [], emojis: input.context?.emojis || [], categories: input.context?.categories || [],
             historyMsgs: range.messages, contextLimit: Math.max(1, range.messages.length), contextHighWaterMark: range.hwm,
@@ -65,12 +61,14 @@ export async function generateWorkroomReply(input: {
         let messages = payload.fullMessages;
         const call = async () => {
             input.signal.throwIfAborted();
+            stage='调用创作API';
             const data = await safeFetchJson(`${api.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
                 method: 'POST', signal: input.signal,
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${api.apiKey || 'sk-none'}` },
                 body: JSON.stringify({ model: api.model, messages, temperature: api.temperature ?? .8, max_tokens: dialogueMaxTokens(api), stream: false }),
             }, 0, 0, { appName: '造物间', charId: char.id, charName: char.name, purpose: '创作交流' });
             input.signal.throwIfAborted();
+            stage='解析创作回复';
             return parseWorkroomReply(extractContent(data));
         };
         let result = await call();
@@ -99,5 +97,5 @@ export async function generateWorkroomReply(input: {
             text: result.text, code: result.code, signal: input.signal });
         await drainWorkroomOutbox(char.id);
         return { turn, savedDraft: !!result.code };
-    } finally { locks.delete(key); }
+    } catch(error){if(error instanceof SyntaxError)throw Error(stage+'时读取到无效JSON，请保留旧草稿并重试：'+error.message);throw error;} finally { locks.delete(key); }
 }

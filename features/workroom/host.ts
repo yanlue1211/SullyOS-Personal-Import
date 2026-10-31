@@ -1,11 +1,13 @@
 import { drainWorkroomOutbox } from './delivery';
 import { WorkroomStorage } from './storage';
 import { cloneWorkroomState, validText } from './schema';
+import {readRuntimeRequest} from './runtimeProtocol';
 import { readWorkroomRpc } from './runner';
 
 /** Revocable capability: identity comes from the host, never from RPC arguments. */
 export function createWorkroomHost(charId: string, workId: string, versionId: string, session: string,
-    callbacks: { onNotify?: (text: string) => void; onError?: (text: string) => void; onStop?: () => void; onReady?: () => void } = {}, preview = false) {
+    callbacks: { onNotify?: (text: string) => void; onError?: (text: string) => void; onStop?: () => void; onReady?: () => void; onEvent?: (text:string) => void; onGenerate?: (request:unknown,requestId:string,signal:AbortSignal)=>Promise<unknown> } = {}, preview = false) {
+    const generationAbort=new AbortController();
     let previewData:unknown = {};
     let previewRevision = 1;
     let active = true;
@@ -22,7 +24,7 @@ export function createWorkroomHost(charId: string, workId: string, versionId: st
     };
     let windowStart = performance.now();
     let count = 0;
-    const dispose = () => { active = false; port?.close(); };
+    const dispose = () => { active = false; generationAbort.abort(new DOMException('组件已关闭','AbortError'));port?.close(); };
     return {
         close: dispose,
         bind(nextPort: MessagePort) {
@@ -45,7 +47,10 @@ export function createWorkroomHost(charId: string, workId: string, versionId: st
                     try {
                         let result: unknown;
                         const args = request.args;
-                        if (request.method === 'loadState') {
+                        if(request.method==='generate'){
+                            if(preview||!callbacks.onGenerate)throw Error('请在正式作品中开启运行时AI后使用');
+                            const task=readRuntimeRequest(args[0]);result=await callbacks.onGenerate(task,session+'-'+request.id,generationAbort.signal);
+                        } else if (request.method === 'loadState') {
                             const state = preview ? {revision:previewRevision,data:previewData} : await WorkroomStorage.loadState(charId, workId, versionId);
                             stateRevision = state.revision; result = state.data;
                         } else if (request.method === 'saveState') {
@@ -55,7 +60,7 @@ export function createWorkroomHost(charId: string, workId: string, versionId: st
                         } else if (request.method === 'emitEvent') {
                             if (!validText(args[0], 2000) || !validText(args[1], 100)) throw Error('互动事件格式无效');
                             result = preview ? 'preview-'+request.id : (await WorkroomStorage.recordEvent(charId, workId, versionId, args[1], args[0])).id;
-                            if(!preview) await drainWorkroomOutbox(charId);
+                            if(!preview){await drainWorkroomOutbox(charId);if(active)callbacks.onEvent?.(args[0]);}
                         } else {
                             if (!validText(args[0], 2000)) throw Error('组件说明无效');
                             if(request.method==='reportReady'){

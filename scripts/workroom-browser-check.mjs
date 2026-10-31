@@ -10,13 +10,15 @@ page.on('request',request=>{if(request.url().includes('/qa-network-canary'))cana
 page.on('pageerror',error=>errors.push(String(error)));
 await mkdir('test-results/workroom',{recursive:true});
 try{
+ await page.route('https://qa-runtime.invalid/**',route=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({choices:[{message:{content:JSON.stringify({question:'现场生成的第七扇门',solution:'隐藏答案不能进入聊天'})}}]})}));
  await page.goto('http://127.0.0.1:4179/test/fixtures/workroom-browser.html');
  await page.getByRole('button',{name:'准备隔离测试数据'}).click();
  await page.getByText('测试数据已准备',{exact:true}).waitFor();
- const selectCreator=async()=>{await page.getByLabel('当前创作者').selectOption({label:'测试 Claude'});await page.getByRole('button').filter({hasText:'浏览器小狗屋'}).click();await page.getByRole('button',{name:'体验作品',exact:true}).click();};
+ const selectCreator=async()=>{await page.getByLabel('当前创作者').selectOption({label:'测试 Claude'});await page.screenshot({path:'test-results/workroom/desktop.png'});await page.getByRole('button',{name:/游戏库/}).click();await page.getByRole('button').filter({hasText:'浏览器小狗屋'}).click();};
  await selectCreator();const frame=page.frameLocator('iframe[title="造物间作品"]');
  await frame.getByText('等级 1',{exact:true}).waitFor();await frame.getByRole('button',{name:'喂小狗'}).click();await frame.getByText('等级 2',{exact:true}).waitFor();
  await page.getByRole('button',{name:'重开造物间',exact:true}).click();await selectCreator();await frame.getByText('等级 2',{exact:true}).waitFor();
+ await page.getByLabel(/运行时AI ·/).check();await page.getByText(/运行时AI已开启/).waitFor();await frame.getByRole('button',{name:'生成新题目',exact:true}).click();await frame.getByText('现场生成的第七扇门',{exact:true}).waitFor();
  await page.screenshot({path:'test-results/workroom/mobile.png'});
  await page.getByRole('button',{name:'验证启动观察',exact:true}).click();await page.getByText('PASS: 真实浏览器启动观察',{exact:true}).waitFor();
  await page.getByRole('button',{name:'验证分享与备份整链',exact:true}).click();

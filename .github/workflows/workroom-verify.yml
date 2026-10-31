@@ -21,6 +21,8 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Verify workroom regressions
+        run: pnpm vitest run utils/workroomRuntime.test.ts utils/workroomUI.test.ts utils/workroomCreation.test.ts utils/workroomHost.test.ts utils/workroomDelivery.test.ts utils/workroomPortable.test.ts --maxWorkers=2 --minWorkers=1
       - name: Install isolated browser test runtime
         run: |
           mkdir -p "$RUNNER_TEMP/workroom-browser"
@@ -34,6 +36,8 @@ jobs:
           exit 1
       - name: Verify mobile sandbox and restore flow
         run: WORKROOM_PLAYWRIGHT_MODULE="$RUNNER_TEMP/workroom-browser/node_modules/playwright/index.mjs" node scripts/workroom-browser-check.mjs
+      - name: Verify production build
+        run: pnpm run build
       - uses: actions/upload-artifact@v4
         if: always()
         with:

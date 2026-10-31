@@ -9,6 +9,7 @@ export const WORKROOM_STORES = Object.keys(WORKROOM_FIELDS) as Array<keyof typeo
 export interface WorkroomWork {
     id: string; charId: string; title: string; summary: string;
     createdAt: number; updatedAt: number; currentVersionId: string | null;
+    runtimeAiEnabled?: boolean;
     lastError?: string;
     maintenanceRequests?: string[];
     testReport?: {draftRevision: number; createdAt: number; errors: string[]; notes: string};
@@ -34,7 +35,8 @@ export interface WorkroomStoredEvent {
 }
 export interface WorkroomTurn {
     id: string; charId: string; workId: string; workTitle: string; role: 'user' | 'assistant';
-    text: string; createdAt: number; delivery: 'pending' | 'delivered';
+    text: string; createdAt: number; delivery: 'pending' | 'delivered' | 'local';
+    kind?: 'play';
     messageId?: number;
 }
 export interface WorkroomShare {

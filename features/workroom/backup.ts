@@ -28,6 +28,7 @@ export function validateWorkroomBackup(input: Partial<WorkroomBackup>): Workroom
     for (const work of works.values()) {
         if(work.lastError!==undefined&&!validText(work.lastError,2000))throw Error('运行错误记录无效');
         if(work.maintenanceRequests!==undefined&&(!Array.isArray(work.maintenanceRequests)||work.maintenanceRequests.length>20||work.maintenanceRequests.some(t=>!validText(t,2000))))throw Error('维护任务无效');
+        if(work.runtimeAiEnabled!==undefined&&typeof work.runtimeAiEnabled!=='boolean')throw Error('运行时AI设置无效');
         const report=work.testReport;
         if(report&&(!validInteger(report.draftRevision)||!Number.isFinite(report.createdAt)||report.createdAt<=0||!Array.isArray(report.errors)||report.errors.length>20||report.errors.some(e=>!validText(e,2000))||typeof report.notes!=='string'||report.notes.length>2000))throw Error('测试记录无效');
         if (work.idea && (!['open','shelved','done'].includes(work.idea.status) || !validText(work.idea.invitationId,200))) throw Error('灵感状态无效');
@@ -78,7 +79,7 @@ export function validateWorkroomBackup(input: Partial<WorkroomBackup>): Workroom
     }
     for (const turn of data.workroomTurns) {
         if (!['user', 'assistant'].includes(turn.role) || !validText(turn.text, 12000) || !validText(turn.workTitle, 300)
-            || !Number.isFinite(turn.createdAt) || turn.createdAt <= 0 || !['pending', 'delivered'].includes(turn.delivery)) throw Error('造物间创作交流无效');
+            || !Number.isFinite(turn.createdAt) || turn.createdAt <= 0 || !['pending', 'delivered', 'local'].includes(turn.delivery) || (turn.kind!==undefined&&turn.kind!=='play') || (turn.delivery==='local'&&turn.kind!=='play')) throw Error('造物间创作交流无效');
     }
     return data;
 }

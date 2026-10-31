@@ -87,3 +87,11 @@ it('正式运行的错误和修改请求持久保存，创作读取时可继续�
     const saved=(await W.get('runner-char',h.work.id)).work;
     expect(saved.lastError).toBe('按钮事件报错');expect(saved.maintenanceRequests).toEqual(['增加散步功能']);h.host.close();
 });
+it('动态生成接口传递纯数据并在销毁时取消，预览不能触发付费调用',async()=>{
+ let signal:AbortSignal|undefined;const generate=vi.fn(async(_task:unknown,_id:string,abort:AbortSignal)=>{signal=abort;return new Promise((resolve,reject)=>abort.addEventListener('abort',()=>reject(abort.reason)));});
+ const replies:any[]=[];const port={onmessage:undefined as any,close:vi.fn(),postMessage:(r:unknown)=>replies.push(r)};
+ const host=createWorkroomHost('runner-char','work','version','session',{onGenerate:generate});host.bind(port as unknown as MessagePort);
+ port.onmessage({data:{id:'1',method:'generate',args:[{instruction:'随机生成一个新场景',format:'json',context:{chapter:2}}]}});
+ await vi.waitFor(()=>expect(generate).toHaveBeenCalledOnce());host.close();expect(signal?.aborted).toBe(true);
+ const previewPort={...port,onmessage:undefined as any};const preview=createWorkroomHost('runner-char','w','v','s',{onGenerate:generate},true);preview.bind(previewPort as unknown as MessagePort);previewPort.onmessage({data:{id:'1',method:'generate',args:[{instruction:'新题'}]}});await vi.waitFor(()=>expect(replies.some(r=>r.ok===false)).toBe(true));expect(generate).toHaveBeenCalledOnce();preview.close();
+});
