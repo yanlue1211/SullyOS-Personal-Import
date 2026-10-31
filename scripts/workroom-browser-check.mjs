@@ -5,7 +5,8 @@ if(!runtime)throw Error('Set WORKROOM_PLAYWRIGHT_MODULE to the installed Playwri
 const {chromium}=await import(pathToFileURL(runtime));
 const browser=await chromium.launch({headless:true,...(process.env.WORKROOM_CHROME_PATH?{executablePath:process.env.WORKROOM_CHROME_PATH}:{})});
 const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true});
-const page=await context.newPage(),errors=[];
+const page=await context.newPage(),errors=[],canaryRequests=[];
+page.on('request',request=>{if(request.url().includes('/qa-network-canary'))canaryRequests.push(request.url());});
 page.on('pageerror',error=>errors.push(String(error)));
 await mkdir('test-results/workroom',{recursive:true});
 try{
@@ -20,8 +21,10 @@ try{
  await page.getByRole('button',{name:'验证启动观察',exact:true}).click();await page.getByText('PASS: 真实浏览器启动观察',{exact:true}).waitFor();
  await page.getByRole('button',{name:'验证分享与备份整链',exact:true}).click();
  await page.getByText('PASS: 进度、独立分享、五类卡片语义、组件文件、真实ZIP恢复',{exact:true}).waitFor();
+ await page.getByRole('button',{name:'验证沙盒边界',exact:true}).click();await page.getByText('PASS: 父页面隔离、存储隔离与CSP网络限制',{exact:true}).waitFor();
+ if(canaryRequests.length)throw Error('CSP没有阻止测试网络请求');
  if(errors.length)throw Error(errors.join('\n'));
  await writeFile('test-results/workroom/result.txt','PASS: mobile UI; real iframe/MessageChannel; native IndexedDB reload; smoke test; explicit copy; card text; ZIP restore; independent notice dismissal.\n');
- console.log('PASS: workroom browser integration');
-}catch(error){await page.screenshot({path:'test-results/workroom/failure.png'}).catch(()=>{});await writeFile('test-results/workroom/error.txt',String(error)+'\n'+errors.join('\n')+'\n'+await page.locator('body').innerText().catch(()=>''));throw error;}
+ console.log('PASS: workroom browser integration, sandbox parent/storage/connect-src boundaries');
+}catch(error){console.error(await page.locator('body').innerText().catch(()=>''));await page.screenshot({path:'test-results/workroom/failure.png'}).catch(()=>{});await writeFile('test-results/workroom/error.txt',String(error)+'\n'+errors.join('\n')+'\n'+await page.locator('body').innerText().catch(()=>''));throw error;}
 finally{await browser.close();}

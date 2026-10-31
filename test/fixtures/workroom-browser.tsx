@@ -4,6 +4,8 @@ import {OSPreviewProvider} from '../../context/OSContext';
 import WorkroomApp from '../../apps/WorkroomApp';
 import {DB} from '../../utils/db';
 import {WorkroomStorage as W} from '../../features/workroom/storage';
+import {buildWorkroomDocument,WORKROOM_SANDBOX} from '../../features/workroom/runner';
+import {createWorkroomHost} from '../../features/workroom/host';
 import {smokeTestWorkroom} from '../../features/workroom/smokeTest';
 import {proposeIdea,shareWork,acceptShare} from '../../features/workroom/collaboration';
 import {drainWorkroomOutbox} from '../../features/workroom/delivery';
@@ -19,6 +21,17 @@ const chars=[{id:a,name:'测试 Claude',workroomLinkEnabled:true,contextLimit:10
 let workId='';
 function check(value:unknown,message:string){if(!value)throw Error(message);}
 async function seed(){for(const char of chars)await DB.saveCharacter(char as any);const work=await proposeIdea(a,'浏览器小狗屋','喂食和保存进度','browser-idea');workId=work.id;await W.saveDraft(a,work.id,code,0,null);await W.publish(a,work.id,1);await drainWorkroomOutbox(a);return work;}
+async function verifyBoundaries(){
+ await new Promise<void>((resolve,reject)=>{
+  const frame=document.createElement('iframe'),session=crypto.randomUUID();let timer:ReturnType<typeof setTimeout>;
+  const finish=(error?:unknown)=>{clearTimeout(timer);host.close();frame.remove();error?reject(error):resolve();};
+  const host=createWorkroomHost('qa','qa','qa',session,{onError:finish,onNotify:text=>text==='BOUNDARIES_PASS'?finish():finish(Error('未知边界结果'))},true);
+  frame.setAttribute('sandbox',WORKROOM_SANDBOX);frame.style.cssText='position:fixed;left:-10000px;width:360px;height:640px';
+  frame.onload=()=>{const channel=new MessageChannel();host.bind(channel.port1);frame.contentWindow!.postMessage({workroomSession:session},'*',[channel.port2]);};
+  frame.srcdoc=buildWorkroomDocument({html:'',css:'',js:`(async()=>{let denied=0;try{parent.document.body;}catch{denied++;}try{localStorage.getItem('qa-parent-secret');}catch{denied++;}try{await fetch('http://127.0.0.1:4179/qa-network-canary');}catch{denied++;}if(denied!==3)throw Error('沙盒边界不符合预期:'+denied);await window.workroom.notify('BOUNDARIES_PASS');})();`},session);
+  timer=setTimeout(()=>finish(Error('沙盒边界验证超时')),5000);document.body.append(frame);
+ });
+}
 function Harness(){const [ready,setReady]=useState(false),[result,setResult]=useState('尚未验证'),[characters,setCharacters]=useState(chars);const [nonce,setNonce]=useState(0);
  const action=async(fn:()=>Promise<void>)=>{try{await fn();}catch(error){setResult('FAIL: '+String(error));}};
  return <><section id="qa" style={{padding:12,background:'#eef2ff'}}><button disabled={ready} onClick={()=>void action(async()=>{await seed();setReady(true);setResult('测试数据已准备');})}>准备隔离测试数据</button>
@@ -27,6 +40,7 @@ function Harness(){const [ready,setReady]=useState(false),[result,setResult]=use
  const messages=[...await DB.getMessagesByCharId(a,true),...await DB.getMessagesByCharId(b,true)];const history=JSON.stringify(ChatPrompts.buildMessageHistory(messages,100,chars[0] as any,{} as any,[]).apiMessages);const memory=messages.map(m=>formatMessageForPrompt(m,'测试角色','User')).join('\n');for(const kind of ['灵感邀请','作品完成','互动进度','作品分享','作品收藏'])check(memory.includes(kind)||history.includes(kind),'缺少卡片语义：'+kind);
  const notices=await listWorkroomNotices();const notice=notices.find(n=>n.workId===workId);check(notice,'没有完成通知');await dismissWorkroomNotice(notice!.id);
  const full=await DB.exportFullData(),zip=new JSZip();await writeV2Backup(zip as any,full);const reader=await JSZip.loadAsync(await zip.generateAsync({type:'uint8array'}));const data=await assembleV2Backup(reader as any,JSON.parse(await reader.file('manifest.json')!.async('string')));await DB.importFullData(data as any);await drainWorkroomOutbox(a);check((await W.loadState(a,workId,v.id)).data&&JSON.stringify((await W.loadState(a,workId,v.id)).data)===JSON.stringify(state.data),'恢复进度不一致');check((await DB.getMessagesByCharId(a,true)).length+(await DB.getMessagesByCharId(b,true)).length===messages.length,'恢复后消息重复');check(!(await listWorkroomNotices()).some(n=>n.id===notice!.id),'恢复后通知重复');setResult('PASS: 进度、独立分享、五类卡片语义、组件文件、真实ZIP恢复');})}>验证分享与备份整链</button>
+ <button disabled={!ready} onClick={()=>void action(async()=>{await verifyBoundaries();setResult('PASS: 父页面隔离、存储隔离与CSP网络限制');})}>验证沙盒边界</button>
  <button disabled={!ready} onClick={()=>setNonce(n=>n+1)}>重开造物间</button><pre id="result">{result}</pre></section><div style={{height:720,width:390,maxWidth:'100%',border:'1px solid #ddd'}}>{ready&&<OSPreviewProvider value={{characters,apiConfig:{},userProfile:{name:'User'},groups:[],realtimeConfig:{},closeApp:()=>{},updateCharacter:async(id:string,patch:any)=>{const c={...await DB.getCharacter(id),...patch};await DB.saveCharacter(c as any);setCharacters(old=>old.map(row=>row.id===id?c:row) as any);}} as any}><WorkroomApp key={nonce}/></OSPreviewProvider>}</div></>;
 }
 createRoot(document.getElementById('root')!).render(<Harness/>);
