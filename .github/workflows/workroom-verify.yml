@@ -22,7 +22,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Verify workroom regressions
-        run: pnpm vitest run utils/responseStatus.test.ts utils/workroomResponse.test.ts utils/chatPrompts.firePack.test.ts utils/applyAssistantPostProcessing.test.ts utils/workroomRuntime.test.ts utils/workroomUI.test.ts utils/workroomCreation.test.ts utils/workroomHost.test.ts utils/workroomDelivery.test.ts utils/workroomPortable.test.ts --maxWorkers=2 --minWorkers=1
+        run: pnpm vitest run utils/chatInputInteraction.test.ts utils/chatInputEmojis.test.ts utils/responseStatus.test.ts utils/workroomResponse.test.ts utils/chatPrompts.firePack.test.ts utils/applyAssistantPostProcessing.test.ts utils/workroomRuntime.test.ts utils/workroomUI.test.ts utils/workroomCreation.test.ts utils/workroomHost.test.ts utils/workroomDelivery.test.ts utils/workroomPortable.test.ts --maxWorkers=2 --minWorkers=1
       - name: Install isolated browser test runtime
         run: |
           mkdir -p "$RUNNER_TEMP/workroom-browser"

@@ -346,8 +346,8 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
 
     const handleInputFocus = () => {
         setIsInputFocused(true);
-        if (!useIOSStandaloneInputFix) return;
         setShowPanel('none');
+        if (!useIOSStandaloneInputFix) return;
         const textarea = textareaRef.current;
         if (!textarea) return;
         window.requestAnimationFrame(() => {
@@ -750,6 +750,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                             value={input}
                             onChange={(e) => setInput(e.target.value)}
                             onKeyDown={handleKeyDown}
+                            onPointerDown={() => setShowPanel('none')}
                             onFocus={handleInputFocus}
                             onBlur={() => setIsInputFocused(false)}
                             onCompositionStart={() => setIsComposing(true)}
