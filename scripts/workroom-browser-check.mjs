@@ -10,7 +10,7 @@ page.on('request',request=>{if(request.url().includes('/qa-network-canary'))cana
 page.on('pageerror',error=>errors.push(String(error)));
 await mkdir('test-results/workroom',{recursive:true});
 try{
- await page.route('https://qa-runtime.invalid/**',async route=>{await new Promise(resolve=>setTimeout(resolve,600));await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({choices:[{finish_reason:'stop',message:{content:failGeneration?'[{"broken":true}':'```json\n'+JSON.stringify({question:'现场生成的第七扇门',solution:'隐藏答案不能进入聊天'})+'\n```'}}]})});});
+ await page.route('https://qa-runtime.invalid/**',async route=>{await new Promise(resolve=>setTimeout(resolve,600));await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({choices:[{finish_reason:'stop',message:{content:failGeneration?'[{"broken":true}':'```json\n'+JSON.stringify({question:'现场生成的第七扇门',solution:'隐藏答案不能进入聊天'})+'```'}}]})});});
  await page.goto('http://127.0.0.1:4179/test/fixtures/workroom-browser.html');
  await page.getByRole('button',{name:'准备隔离测试数据'}).click();
  await page.getByText('测试数据已准备',{exact:true}).waitFor();

@@ -16,3 +16,17 @@ it('reports a truncated model response with diagnostic details, once, and ignore
  expect(popup.mock.calls[0][1]).toContain('length');
  showWorkroomFailure(popup,'取消',new DOMException('cancelled','AbortError'));expect(popup).toHaveBeenCalledTimes(1);
 });
+
+it('accepts complete single-line or same-line-closing JSON fences',()=>{
+ for(const raw of ['```json\n{"question":"题目"}```','```json {"question":"题目"}```','这里是结果：\n```json\r\n{"question":"题目"}\r\n```\n完成。'])expect(parseCompleteJson(raw)).toEqual({question:'题目'});
+ for(const raw of ['```json {"ok":true}```\n```json {"bad":true}```','```json {"ok":true}```\n```json {"bad":','[{"ok":true}'])expect(()=>parseCompleteJson(raw)).toThrow();
+});
+it('diagnostic previews redact credentials and reasoning before truncating, without altering the model response',async()=>{
+ const {responsePreview}=await import('../features/workroom/response');
+ const raw='<think>private reasoning</think>{"apiKey":"unusual-secret","password":"private","text":"Bearer credential sk-abc123 configured-key"}';
+ const preview=responsePreview(raw,['configured-key']);
+ for(const secret of ['private reasoning','unusual-secret','private"','credential','sk-abc123','configured-key'])expect(preview).not.toContain(secret);
+ expect(raw).toContain('configured-key');
+ expect(responsePreview('x'.repeat(9000))).toContain('中间内容省略');
+ const error=new WorkroomResponseError('格式失败',{stage:'游戏',preview});expect(error.details).toContain(preview);
+});

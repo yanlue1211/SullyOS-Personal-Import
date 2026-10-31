@@ -8,7 +8,7 @@ import { WorkroomStorage as W } from './storage';
 import { assertCode, validText, type WorkroomCode } from './schema';
 import { drainWorkroomOutbox } from './delivery';
 
-import {assertResponseComplete,WorkroomResponseError,type WorkroomCallPhase} from './response';
+import {responsePreview,assertResponseComplete,WorkroomResponseError,type WorkroomCallPhase} from './response';
 import {parseWorkroomReply} from './reply';
 export {parseWorkroomReply} from './reply';
 
@@ -71,7 +71,7 @@ export async function generateWorkroomReply(input: {
             }, 0, 0, { appName: '造物间', charId: char.id, charName: char.name, purpose: '创作交流' });
             input.signal.throwIfAborted();
             stage='解析创作回复';input.onPhase?.('parse');
-            const raw=extractContent(data),info={stage,model:api.model,maxTokens:dialogueMaxTokens(api),finishReason:data?.choices?.[0]?.finish_reason,characters:raw.length};assertResponseComplete(data,info);
+            const raw=extractContent(data),info={stage,model:api.model,maxTokens:dialogueMaxTokens(api),finishReason:data?.choices?.[0]?.finish_reason,characters:raw.length,preview:responsePreview(raw,[api.apiKey||''])};assertResponseComplete(data,info);
             try{return parseWorkroomReply(raw);}catch(error){throw new WorkroomResponseError(error instanceof Error?error.message:'创作回复格式不完整',info,error);}
         };
         let result = await call();

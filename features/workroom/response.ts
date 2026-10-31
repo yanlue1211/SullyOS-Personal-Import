@@ -1,8 +1,16 @@
 export type WorkroomCallPhase='context'|'request'|'parse';
-export interface ResponseInfo{stage:string;model?:string;maxTokens?:number;finishReason?:string|null;characters?:number}
+export interface ResponseInfo{stage:string;model?:string;maxTokens?:number;finishReason?:string|null;characters?:number;preview?:string}
+/** Only the visible response, never request context, reasoning or credentials. */
+export function responsePreview(raw:string,secrets:string[]=[]):string{
+ let text=raw.replace(/<(think|thinking|thought)>[\s\S]*?(?:<\/\1>|$)/gi,'');
+ for(const secret of secrets.filter(Boolean).sort((a,b)=>b.length-a.length))text=text.split(secret).join('[已隐藏凭据]');
+ text=text.replace(/\bBearer\s+[^\s"'<>]+/gi,'Bearer [已隐藏凭据]').replace(/\bsk-[\w-]+/g,'[已隐藏凭据]')
+  .replace(/("(?:api[_-]?key|access[_-]?token|authorization|password|secret)"\s*:\s*")[^"\r\n]*("|$)/gi,'$1[已隐藏凭据]$2');
+ return text.length>6000?text.slice(0,3000)+'\n…（中间内容省略）…\n'+text.slice(-3000):text;
+}
 export class WorkroomResponseError extends Error{
  readonly details:string;
- constructor(message:string,info:ResponseInfo,reason?:unknown){super(message);this.name='WorkroomResponseError';this.details=[message,`阶段：${info.stage}`,info.model&&`模型：${info.model}`,info.maxTokens!==undefined&&`输出额度：${info.maxTokens} Token`,info.finishReason&&`响应结束原因：${info.finishReason}`,info.characters!==undefined&&`收到内容：${info.characters} 字符`,reason&&`格式详情：${reason instanceof Error?reason.message:String(reason)}`,'旧草稿和游戏进度均未被本次失败覆盖。'].filter(Boolean).join('\n');}
+ constructor(message:string,info:ResponseInfo,reason?:unknown){super(message);this.name='WorkroomResponseError';this.details=[message,`阶段：${info.stage}`,info.model&&`模型：${info.model}`,info.maxTokens!==undefined&&`输出额度：${info.maxTokens} Token`,info.finishReason&&`响应结束原因：${info.finishReason}`,info.characters!==undefined&&`收到内容：${info.characters} 字符`,reason&&`格式详情：${reason instanceof Error?reason.message:String(reason)}`,'旧草稿和游戏进度均未被本次失败覆盖。',info.preview!==undefined&&`模型返回正文（已脱敏，可能包含本轮题面或答案）：\n${info.preview}`].filter(Boolean).join('\n');}
 }
 export function assertResponseComplete(response:any,info:ResponseInfo){
  const reason=response?.choices?.[0]?.finish_reason??response?.stop_reason;
@@ -19,7 +27,8 @@ function normalizePresentation(text:string):string{
 export function parseCompleteJson(raw:string):unknown{
  let text=raw.replace(/^\uFEFF/,'').trim();
  try{return JSON.parse(text);}catch{/* Try complete wrappers, not truncated data. */}
- const fences=[...text.matchAll(/```(?:json)?\s*\n([\s\S]*?)\n```/gi)];
+ // Providers sometimes put the closing fence on the same line as the JSON.
+ const fences=[...text.matchAll(/```(?:json)?[ \t]*(?:\r?\n)?([\s\S]*?)```/gi)];
  if(fences.length===1){if(text.replace(fences[0][0],'').includes('```'))throw Error('包含不完整或多个JSON代码块');text=fences[0][1].trim();}
  else if(text.startsWith('```'))throw Error('JSON代码围栏不完整或包含多个数据块');
  try{return JSON.parse(text);}catch{/* Complete object/array with harmless presentation differences. */}

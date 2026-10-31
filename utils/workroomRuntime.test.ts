@@ -59,3 +59,11 @@ it('complete fenced code is accepted but partial code never becomes a draft',()=
  expect(parseWorkroomReply('<WORKROOM-TEXT>好了</WORKROOM-TEXT>').text).toBe('好了');
  expect(()=>parseWorkroomReply('```html\n<button>开始')).toThrow();
 });
+it('format errors include the redacted response while preserving state and never making an automatic paid retry',async()=>{
+ const raw='{"answer":"a"}{"apiKey":"private-key"}',calls=model(raw);
+ let error:any;try{await generateRuntimeTurn(args({instruction:'返回一份answer对象',format:'json'}));}catch(e){error=e;}
+ expect(error.details).toContain('模型返回正文');expect(error.details).toContain('"answer":"a"');expect(error.details).not.toContain('private-key');
+ expect((await W.loadState('a',workId,versionId)).data).toEqual({chapter:3,hiddenSolution:'秘密汤底'});
+ expect(calls).toHaveLength(1);expect(JSON.stringify(calls[0].body.messages)).toContain('只输出一份完整 JSON');
+ expect(JSON.stringify(await DB.getMessagesByCharId('a',true))).not.toContain('"answer":"a"');
+});
