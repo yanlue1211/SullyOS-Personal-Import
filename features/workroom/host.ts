@@ -6,7 +6,7 @@ import { readWorkroomRpc } from './runner';
 
 /** Revocable capability: identity comes from the host, never from RPC arguments. */
 export function createWorkroomHost(charId: string, workId: string, versionId: string, session: string,
-    callbacks: { onNotify?: (text: string) => void; onError?: (text: string) => void; onStop?: () => void; onReady?: () => void; onEvent?: (text:string) => void; onGenerate?: (request:unknown,requestId:string,signal:AbortSignal)=>Promise<unknown> } = {}, preview = false) {
+    callbacks: { onNotify?: (text: string) => void; onError?: (text: string) => void; onStop?: () => void; onReady?: () => void; onGenerateError?: (error:unknown)=>void; onEvent?: (text:string) => void; onGenerate?: (request:unknown,requestId:string,signal:AbortSignal)=>Promise<unknown> } = {}, preview = false) {
     const generationAbort=new AbortController();
     let previewData:unknown = {};
     let previewRevision = 1;
@@ -86,6 +86,7 @@ export function createWorkroomHost(charId: string, workId: string, versionId: st
                         }
                         respond(request.id, { id: request.id, ok: true, value: result });
                     } catch (error) {
+                        if(active&&request.method==='generate'&&!generationAbort.signal.aborted)callbacks.onGenerateError?.(error);
                         respond(request.id, { id: request.id, ok: false, error: error instanceof Error ? error.message : '组件操作失败' });
                     }
                 });

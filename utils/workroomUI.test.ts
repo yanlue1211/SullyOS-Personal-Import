@@ -28,7 +28,8 @@ beforeEach(async () => {
 });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals(); });
 const click = async (label: string) => {
-    const button = [...container.querySelectorAll('button')].find(b => b.textContent?.trim() === label || b.querySelector('strong')?.textContent===label);
+    let button = [...container.querySelectorAll('button')].find(b => b.textContent?.trim() === label || b.querySelector('strong')?.textContent===label);
+    if(!button){const menu=container.querySelector('[aria-label="功能菜单"]') as HTMLButtonElement; if(menu)await act(async()=>menu.click());button=[...container.querySelectorAll('button')].find(b=>b.textContent?.trim()===label);}
     expect(button, label).toBeTruthy(); await act(async () => button!.click());
 };
 const fill = async (label: string, text: string) => {
@@ -39,7 +40,7 @@ const fill = async (label: string, text: string) => {
 const choose = async (value: string) => {
     await act(async () => { const select = container.querySelector('select')!; select.value = value; select.dispatchEvent(new Event('change', { bubbles: true })); });
 };
-const waitText = async (text: string) => vi.waitFor(async () => { await act(async () => {}); expect(container.textContent).toContain(text); });
+const waitText = async (text: string) => vi.waitFor(async () => { await act(async () => {}); if(text==='创作交流')expect(container.querySelector('[aria-label="创作交流"]')).not.toBeNull();else expect(container.textContent).toContain(text); });
 
 describe('造物间 App 与真实消息组件', () => {
     it('从角色选择创建作品并进入创作交流，角色切换后作品库独立', async () => {
@@ -110,9 +111,9 @@ describe('造物间 App 与真实消息组件', () => {
         const work=await W.create('a','动态场景','每轮生成');await W.saveDraft('a',work.id,{html:'<p>GAME</p>',css:'',js:''},0,null);await W.publish('a',work.id,1);
         vi.stubGlobal('MessageChannel',class {port1={onmessage:null,postMessage:()=>{},close:()=>{}};port2={};});
         await act(async()=>root.render(React.createElement(WorkroomApp)));await choose('a');await waitText('阿源 的造物间');await click('游戏库');await waitText('动态场景');
-        const entry=[...container.querySelectorAll('button')].find(b=>b.textContent?.includes('动态场景'))!;await act(async()=>entry.click());await waitText('运行时AI');
-        expect(container.querySelector('iframe')?.getAttribute('srcdoc')).toContain('GAME');const toggle=container.querySelector('[aria-label="角色互动"] input') as HTMLInputElement;
-        await vi.waitFor(()=>expect(toggle.disabled).toBe(false));await act(async()=>toggle.click());await waitText('运行时AI已开启');expect((await W.getWork('a',work.id)).runtimeAiEnabled).toBe(true);
+        const entry=[...container.querySelectorAll('button')].find(b=>b.textContent?.includes('动态场景'))!;await act(async()=>entry.click());await vi.waitFor(()=>expect(container.querySelector('iframe')).not.toBeNull());await click('⚙ 设置 ▾');await waitText('允许本游戏调用 API');
+        expect(container.querySelector('iframe')?.getAttribute('srcdoc')).toContain('GAME');const toggle=container.querySelector('[aria-label="游戏设置"] input') as HTMLInputElement;
+        await vi.waitFor(()=>expect(toggle.disabled).toBe(false));await act(async()=>toggle.click());await vi.waitFor(()=>expect((container.querySelector('[aria-label="游戏设置"] input') as HTMLInputElement).checked).toBe(true));expect((await W.getWork('a',work.id)).runtimeAiEnabled).toBe(true);expect(container.querySelector('nav')?.contains(container.querySelector('[aria-label="游戏设置"]'))).toBe(true);await act(async()=>(container.querySelector('[aria-label="收起功能菜单"]') as HTMLButtonElement).click());expect(container.querySelector('nav')).toBeNull();
     });
     it('系统角色的完成卡实际渲染且只有一层卡面，隐藏系统日志也不会隐藏它', async () => {
         const message = { id: 42, ...createWorkroomMessage({ version: 1, eventId: 'card', charId: 'a', charName: '阿源', kind: 'completed',

@@ -1,3 +1,4 @@
+import {stripResponseStatus} from '../features/personal/responseStatus/protocol';
 import { drainWorkroomOutbox, WORKROOM_HISTORY_UPDATED } from '../features/workroom/delivery';
 import { reconcileCommerce } from '../utils/personalCommerce';
 import { isEmotionFeatureOn } from '../utils/scheduleFeature';
@@ -1876,6 +1877,11 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
               markAmsgStateDirty({ char, userProfile: dbUser ?? defaultUserProfile, groups: dbGroups, realtimeConfig: restoredRealtime });
             }
           }
+          // Refresh existing scheduled packs once so old read/busy instructions do not linger in cloud state.
+          if(localStorage.getItem('os_proactive_status_policy_v1')!=='done'){
+            markAmsgStateDirtyForAll({characters:finalChars,userProfile:dbUser??defaultUserProfile,groups:dbGroups,realtimeConfig:restoredRealtime});
+            localStorage.setItem('os_proactive_status_policy_v1','done');
+          }
           resumePendingAmsgStateSync({
             characters: finalChars,
             userProfile: dbUser ?? defaultUserProfile,
@@ -2598,7 +2604,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
               }, 2, 0, { appName: '消息', charId, charName: char.name, purpose: '主动消息' });
 
               // 5. Process & save response
-              let aiContent = data.choices?.[0]?.message?.content || '';
+              let aiContent = stripResponseStatus(data.choices?.[0]?.message?.content || '');
               aiContent = await consumeFriendFeedMainReply(charId, aiContent, [], friendFeedTask?.id);
               // 思考链抽取 — 与 useChatAI 保持一致:reasoning_content 字段 + 主 content 里的 <think>/<thinking>/<thought> 块,
               // 拼接后挂到本回合首条 assistant 消息的 metadata.thinkingChain

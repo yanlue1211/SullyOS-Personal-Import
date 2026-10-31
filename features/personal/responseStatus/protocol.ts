@@ -36,3 +36,13 @@ export function responseStatusContext(card: ResponseStatus, name = '角色'): st
     ? `[已读不回] ${name}看到了消息，选择暂时不回复。状态：${card.footer}。[未说出口的内情，不能当成已告知对方] ${card.reason}`
     : `[忙碌状态，不能据此视为已读] ${name}暂时不方便查看或回复。状态：${card.footer}。预计有空：${card.eta}（仅预估，不是定时回复承诺）。[状态内情，非聊天台词] ${card.reason}`;
 }
+
+/** Scheduled outreach is not a response to a freshly received user message. Instant chat remains ordinary chat. */
+export function isProactiveStatusDelivery(message:{messageType?:string;messageSubtype?:string}):boolean{
+ return message.messageType!=='instant'&&message.messageSubtype!=='instant-chat';
+}
+export function stripResponseStatus(raw:string):string{
+ const text=raw.replace(/<回应状态\s*>[\s\S]*?(?:<\/回应状态\s*>|$)/g,'').trim();
+ try{const value=JSON.parse(text);if(value?.type==='response_status'&&normalizeResponseStatus(value))return '';}catch{/* ordinary prose */}
+ return text;
+}

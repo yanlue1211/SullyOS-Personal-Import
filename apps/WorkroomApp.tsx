@@ -2,6 +2,8 @@ import { exportPortableWork, importPortableWork } from '../features/workroom/por
 import React, { useEffect, useRef, useState } from 'react';
 import { useOS } from '../context/OSContext';
 import { useLocalBackHandler } from '../hooks/useLocalBackHandler';
+import WorkroomSummary from '../components/WorkroomSummary';
+import {showWorkroomFailure,type WorkroomCallPhase} from '../features/workroom/response';
 import WorkroomPlay from '../components/WorkroomPlay';
 import './WorkroomApp.css';
 import WorkroomRunner from '../components/WorkroomRunner';
@@ -44,6 +46,7 @@ export default function WorkroomApp() {
     const [testNotes,setTestNotes]=useState('');
     const [notice, setNotice] = useState('');
     const [busy, setBusy] = useState(false);
+    const [creationPhase,setCreationPhase]=useState<WorkroomCallPhase|null>(null);
     const [retry, setRetry] = useState<{ id: string; text: string } | null>(null);
     const [deleteCandidate, setDeleteCandidate] = useState(false);
     const [toolsExpanded, setToolsExpanded] = useState(false);
@@ -84,7 +87,7 @@ export default function WorkroomApp() {
         if(owner!==charId)setShelf('home');
         cancel(); setTestVersion(null); setTestErrors([]); setTestNotes(''); setPreviewShare(null); setRecipient(''); shareRequest.current=crypto.randomUUID(); dirty.current = false; setCodeDirty(false); scope.current = JSON.stringify([owner, selected]);
         setCharId(owner); setWorkId(selected); setWorks([]); setShares([]); setDetail(null); setTurns([]);
-        setNotice(''); setBusy(false); setRetry(null); setPage(preferred); setDeleteCandidate(false); setToolsExpanded(false); setInput('');
+        setNotice(''); setBusy(false);setCreationPhase(null); setRetry(null); setPage(preferred); setDeleteCandidate(false); setToolsExpanded(false); setInput('');
         if (owner) void refresh(owner, selected).catch(error => {
             if (scope.current === JSON.stringify([owner, selected])) setNotice(String(error));
         });
@@ -118,7 +121,7 @@ export default function WorkroomApp() {
         if (busy) return;
         const expected = scope.current; setBusy(true); setNotice('');
         try { await task(); }
-        catch (error) { if (scope.current === expected) setNotice(error instanceof Error ? error.message : String(error)); }
+        catch (error) { if (scope.current === expected) {setNotice(error instanceof Error ? error.message : String(error));showWorkroomFailure(os.showError,'造物间操作失败',error);} }
         finally { if (scope.current === expected) setBusy(false); }
     };
     const create = () => operate(async () => {
@@ -132,7 +135,7 @@ export default function WorkroomApp() {
         const controller = new AbortController(); abort.current = controller; setRetry(null); setInput('');
         try {
             const result = await generateWorkroomReply({ charId: owner, workId: selected, text, retryTurnId: previous?.id,
-                api: os.apiConfig, user: os.userProfile, signal: controller.signal,
+                api: os.apiConfig, user: os.userProfile, signal: controller.signal,onPhase:phase=>{if(scope.current===expected)setCreationPhase(phase);},
                 context: { realtimeConfig: os.realtimeConfig, groups: os.groups, emojis: [], categories: [] } });
             if (scope.current === expected) setNotice(result.savedDraft ? '新代码已保存为草稿，可以查看后保存版本运行。' : '交流已保存。');
         } catch (error) {
@@ -143,7 +146,7 @@ export default function WorkroomApp() {
             }
             throw error;
         } finally {
-            if (scope.current === expected) { abort.current = null; await refresh(owner, selected); }
+            if (scope.current === expected) { abort.current = null;setCreationPhase(null); await refresh(owner, selected); }
         }
     });
     const saveDraft = () => operate(async () => {
@@ -160,6 +163,7 @@ export default function WorkroomApp() {
         if (scope.current === JSON.stringify([owner, selected])) { setPage('run'); setNotice(''); }
     });
     return <div className="wr-root h-full flex flex-col text-stone-700" style={{ paddingTop: 'var(--chrome-top, 24px)' }}>
+        {toolsExpanded&&<button type="button" className="wr-menu-backdrop" aria-label="收起功能菜单" onClick={()=>{setToolsExpanded(false);setSettingsOpen(false);}}/>}
         <header className="px-5 py-4 border-b border-amber-100 flex items-center gap-3">
             <button type="button" aria-label="返回" onClick={() => previewShare ? setPreviewShare(null) : workId ? select(charId) : shelf!=='home'?setShelf('home'):os.closeApp()} className="text-xl">‹</button>
             <div className="flex-1"><h1 className="text-lg font-semibold">🧸 造物间</h1><p className="text-xs text-stone-400">把小小的想法，慢慢做出来</p></div>
@@ -183,21 +187,21 @@ export default function WorkroomApp() {
                 </>}
             </main> : !detail ? <div className="p-6 text-sm">正在读取作品…</div> : <>
                 <div className="wr-work-toolbar">
-                    <div className="wr-work-heading"><h2>{detail.work.title}</h2><p>{detail.work.summary}</p></div>
+                    <div className="wr-work-heading"><h2>{detail.work.title}</h2><WorkroomSummary key={detail.work.id} text={detail.work.summary}/></div>
                     <div className="wr-tools" ref={toolsRef}>
                         <button type="button" aria-label="功能菜单" aria-expanded={toolsExpanded} onClick={()=>{setToolsExpanded(value=>!value);setSettingsOpen(false);}}>☰ <span>菜单</span> ▾</button>
                         {toolsExpanded && <nav className="wr-tools-menu" aria-label="作品页面">
                             {([['talk','创作交流'],['run','体验作品'],['versions','版本管理'],['code','代码草稿']] as const).map(([id,label])=><button key={id} className={page===id?'selected':''} onClick={()=>{setDeleteCandidate(false);setPage(id);setToolsExpanded(false);setSettingsOpen(false);}}>{label}</button>)}
-                            {page==='run'&&<button type="button" onClick={()=>{setSettingsOpen(v=>!v);}}>⚙ 设置 →</button>}
+                            {page==='run'&&<button type="button" aria-expanded={settingsOpen} onClick={()=>{setSettingsOpen(v=>!v);}}>⚙ 设置 {settingsOpen?'▴':'▾'}</button>}
+                            <div className="wr-tools-submenu-host" ref={setSettingsHost}/>
                         </nav>}
-                        <div className="wr-tools-submenu-host" ref={setSettingsHost}/>
                     </div>
                 </div>
                 {page === 'test' && testVersion ? <main className="flex-1 min-h-0 flex flex-col"><p className="px-4 text-xs">草稿试运行：使用临时进度，不产生聊天互动；请实际点击验证玩法。没有报错不代表所有功能正确。</p><div className="flex-1 min-h-0"><WorkroomRunner key={testVersion.id} charId={charId} version={testVersion} preview onNotify={setNotice} onError={text=>setTestErrors(old=>[...old,text.slice(0,2000)].slice(-20))}/></div><div className="p-3 max-h-48 overflow-auto"><p className="text-xs">已捕获错误：{testErrors.length}</p>{testErrors.map((e,i)=><p key={i} className="text-xs text-red-700">{e}</p>)}<textarea aria-label="测试反馈" value={testNotes} maxLength={2000} onChange={e=>setTestNotes(e.target.value)} placeholder="按钮、进度、布局等实际体验反馈" className="w-full text-sm"/><button className={button} disabled={busy} onClick={()=>operate(async()=>{const owner=charId,selected=workId,expected=scope.current;await W.saveTestReport(owner,selected,Number(testVersion.number),testErrors,testNotes);await refresh(owner,selected);if(scope.current===expected){setPage('talk');setTestVersion(null);setNotice('试运行记录已保存，继续交流时 TA 可以读取并修改。');}})}>结束测试并保存记录</button></div></main> : page === 'run' ? <div className="flex-1 min-h-0 bg-white">{version ? <WorkroomPlay key={`${charId}:${version.id}`} charId={charId} version={version} settingsOpen={toolsExpanded&&settingsOpen} settingsHost={settingsHost} onNotify={setNotice} onError={error=>setNotice('作品运行错误：'+error)}/> : <p className="p-5 text-sm">还没有正式版本，先和 TA 一起制作吧。</p>}</div>
                     : page === 'talk' ? <main className="flex-1 min-h-0 flex flex-col"><div className="flex-1 overflow-y-auto px-5 space-y-4 pb-4">
                         {!turns.length && <p className="text-xs text-stone-400 py-5">和 {character.name} 聊聊玩法、颜色，或者直接请 TA 开始制作。</p>}
                         {turns.map(turn => <div key={turn.id} className={`rounded-2xl p-3 text-sm whitespace-pre-wrap ${turn.role === 'user' ? 'bg-amber-100 ml-8' : 'bg-white mr-5'}`}><small className="block text-xs opacity-50 mb-1">{turn.role === 'user' ? os.userProfile.name : character.name}</small>{turn.text}</div>)}
-                        {busy && <p className="text-xs opacity-50">正在一起想办法…</p>}
+                        {creationPhase&&<p role="status" aria-live="polite" className="wr-creation-status"><span/>{character.name} 正在想回复…{creationPhase==='context'?'（准备上下文）':creationPhase==='parse'?'（整理返回内容）':''}</p>}
                     </div><div className="p-4 border-t border-amber-100 space-y-2">
                         {retry && <button className={button} disabled={busy} onClick={() => send(retry)}>重试上一条</button>}
                         <textarea aria-label="创作交流" value={input} onChange={e => setInput(e.target.value)} maxLength={12000} placeholder="想做什么，或者哪里想再改改？" className="w-full rounded-xl bg-white p-3 text-sm"/>

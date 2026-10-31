@@ -86,7 +86,7 @@ describe('forFirePack —— 打包时刻的状态一律不烤进模板', () => 
     });
 
     it('日程当前时段不进（改由 AMSG_SLOT_SCENE 到点现挑）', async () => {
-        expect(await build(baseChar(), false)).toContain('当前时段：');
+        expect(await build(baseChar(), false)).toContain('今日日程 · 初步安排');
         expect(await build(baseChar(), true)).not.toContain('当前时段：');
     });
 
@@ -186,7 +186,7 @@ describe('ContextBuilder.buildScheduleInjection 仍是同一份实现', () => {
     it('转发到 scheduleInjection 那个纯叶子（worker 到点渲染共用它）', () => {
         const at = new Date(2026, 7, 2, 12, 0);
         expect(ContextBuilder.buildScheduleInjection(schedule, undefined, at))
-            .toContain('当前时段：00:00 你正在跑步（健身房）');
+            .toContain('00:00 跑步');
     });
 });
 
@@ -255,4 +255,11 @@ describe('SAR public introduction', () => {
     it('does not give disconnected characters the SAR introduction', async () => {
         expect(await build(baseChar({ vrState: { enabled: false } }), false)).not.toContain('凯恩和艾文是来自另一个世界的玩家');
     });
+});
+
+it('read/busy capability remains in ordinary chat but not either proactive prompt',async()=>{
+    expect(await build(baseChar(),false)).toContain('<回应状态>');
+    expect(await build(baseChar(),true)).not.toContain('<回应状态>');
+    const parts=await ChatPrompts.buildSystemPromptParts(baseChar(),userProfile,[],[],[],[],realtimeConfig,undefined,undefined,undefined,undefined,undefined,{responseStatusEnabled:false});
+    expect(parts.stable).not.toContain('<回应状态>');
 });

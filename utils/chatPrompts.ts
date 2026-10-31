@@ -165,6 +165,8 @@ export const detectChatModeTransition = (messages: readonly Message[]): ChatMode
 export interface PromptBuildOptions {
     /** Other conversation surfaces replace only app rules; shared context and recency stay identical. */
     appRules?: string;
+    /** Proactive outreach never teaches optional read/busy response cards. */
+    responseStatusEnabled?: boolean;
     /** 已完成清洗的实际消息，由公共上下文管线统一处理世界书。 */
     history?: import('./context').ContextMessage[];
     forFirePack?: boolean;
@@ -1090,7 +1092,7 @@ ${voiceActingGuide()}`;
             .join(' ');
         console.log(`⏱ [buildSystemPrompt] total=${perfTotal}ms | stable=${baseSystemPrompt.length}ch volatile=${volatileState.length}ch | ${timingStr}`);
 
-        return { stable: baseSystemPrompt + (promptOptions?.appRules !== undefined ? '' : VIRTUAL_MEDIA_GUIDE + RECORDING_HISTORY_GUIDE + INNER_VOICE_SYSTEM + RESPONSE_STATUS_SYSTEM), volatileState, recencyTail, history: context.history };
+        return { stable: baseSystemPrompt + (promptOptions?.appRules !== undefined ? '' : VIRTUAL_MEDIA_GUIDE + RECORDING_HISTORY_GUIDE + INNER_VOICE_SYSTEM + (!forFirePack&&promptOptions?.responseStatusEnabled!==false?RESPONSE_STATUS_SYSTEM:'')), volatileState, recencyTail, history: context.history };
     },
 
     // 格式化消息历史

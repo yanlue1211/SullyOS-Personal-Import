@@ -23,7 +23,7 @@ it('作品可按任意任务动态生成新题目，使用正常角色上下文�
  expect(prompt).not.toContain('SOURCE_NOT_FOR_RUNTIME');expect(prompt).not.toContain('另一角色隐私');expect(JSON.stringify(data)).not.toContain('private-key');expect(await W.playTurns('a',workId)).toEqual([]);expect(JSON.stringify(await DB.getMessagesByCharId('a',true))).not.toContain('新的隐藏答案');
 });
 it('公开逐轮对话保存为独立游戏交流，进入聊天与记忆可读文本并随备份恢复',async()=>{
- model('是的，但这不是全部原因。');await generateRuntimeTurn(args({instruction:'作为海龟汤主持人回答本轮问题',context:{question:'他认识这个人吗？'},format:'text',publicEvent:'我问：他认识这个人吗？',shareReply:true}));
+ model('是的，但这不是全部原因。');await generateRuntimeTurn(args({instruction:'作为海龟汤主持人回答本轮问题',context:{question:'他认识这个人吗？'},format:'text',publicEvent:'我问：他认识这个人吗？',shareReply:true,companion:true}));
  const turns=await W.playTurns('a',workId);expect(turns.map(t=>t.role)).toEqual(['user','assistant']);expect(await W.turns('a',workId)).toEqual([]);
  const messages=await DB.getMessagesByCharId('a',true);const text=messages.map(m=>formatMessageForPrompt(m,'阿源','User')).join('\n');expect(text).toContain('游戏互动');expect(text).toContain('是的，但这不是全部原因。');
  const backup=await DB.exportFullData();expect(validateWorkroomBackup(backup as any)?.workroomTurns.every(t=>t.kind==='play')).toBe(true);await DB.importFullData(backup as any);expect((await W.playTurns('a',workId)).map(t=>t.text)).toEqual(turns.map(t=>t.text));
@@ -47,4 +47,15 @@ it('联动关闭时公开运行互动只保存在作品内，恢复后仍可读�
  expect((await W.playTurns('a',workId)).every(t=>t.delivery==='local')).toBe(true);
  expect(JSON.stringify(await DB.getMessagesByCharId('a',true))).not.toContain('发现了新的线索');
  const backup=await DB.exportFullData();await DB.importFullData(backup as any);expect((await W.playTurns('a',workId))).toHaveLength(2);
+});
+it('runtime uses the configured dialogue output budget and reports call phases',async()=>{
+ const calls=model('```json\n{"question":"新问题",}\n```'),phases:string[]=[];
+ const char=await DB.getCharacter('a');await DB.saveCharacter({...char,dialogueApi:{...char!.dialogueApi,maxTokens:12000}} as any);
+ expect(await generateRuntimeTurn({...args({instruction:'生成新题',format:'json'}),onPhase:p=>phases.push(p)})).toEqual({question:'新问题'});
+ expect(calls[0].body.max_tokens).toBe(12000);expect(phases).toEqual(['context','request','parse']);expect(calls).toHaveLength(1);
+});
+it('complete fenced code is accepted but partial code never becomes a draft',()=>{
+ expect(parseWorkroomReply('做好了\n```html\n<button>开始</button>\n```\n```js\nconst x = [1,];\n```').code?.js).toBe('const x = [1,];');
+ expect(parseWorkroomReply('<WORKROOM-TEXT>好了</WORKROOM-TEXT>').text).toBe('好了');
+ expect(()=>parseWorkroomReply('```html\n<button>开始')).toThrow();
 });
