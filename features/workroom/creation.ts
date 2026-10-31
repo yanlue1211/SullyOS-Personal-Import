@@ -8,13 +8,14 @@ import { WorkroomStorage as W } from './storage';
 import { assertCode, validText, type WorkroomCode } from './schema';
 import { drainWorkroomOutbox } from './delivery';
 
+import {assertResponseComplete,WorkroomResponseError,type WorkroomCallPhase} from './response';
 import {parseWorkroomReply} from './reply';
 export {parseWorkroomReply} from './reply';
 
 const locks = new Set<string>();
 export async function generateWorkroomReply(input: {
     charId: string; workId: string; text: string; retryTurnId?: string;
-    api: APIConfig; user: UserProfile; signal: AbortSignal;
+    api: APIConfig; user: UserProfile; signal: AbortSignal; onPhase?:(phase:WorkroomCallPhase)=>void;
     context?: Pick<BuildChatPayloadInput, 'realtimeConfig' | 'groups' | 'emojis' | 'categories'>;
 }) {
     const key = JSON.stringify([input.charId, input.workId]);
@@ -22,6 +23,7 @@ export async function generateWorkroomReply(input: {
     if (!validText(input.text, 12000)) throw Error('请填写创作要求');
     locks.add(key);
     let stage='准备创作';
+    input.onPhase?.('context');
     try {
         input.signal.throwIfAborted();
         const char = await DB.getCharacter(input.charId);
@@ -61,15 +63,16 @@ export async function generateWorkroomReply(input: {
         let messages = payload.fullMessages;
         const call = async () => {
             input.signal.throwIfAborted();
-            stage='调用创作API';
+            stage='调用创作API';input.onPhase?.('request');
             const data = await safeFetchJson(`${api.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
                 method: 'POST', signal: input.signal,
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${api.apiKey || 'sk-none'}` },
                 body: JSON.stringify({ model: api.model, messages, temperature: api.temperature ?? .8, max_tokens: dialogueMaxTokens(api), stream: false }),
             }, 0, 0, { appName: '造物间', charId: char.id, charName: char.name, purpose: '创作交流' });
             input.signal.throwIfAborted();
-            stage='解析创作回复';
-            return parseWorkroomReply(extractContent(data));
+            stage='解析创作回复';input.onPhase?.('parse');
+            const raw=extractContent(data),info={stage,model:api.model,maxTokens:dialogueMaxTokens(api),finishReason:data?.choices?.[0]?.finish_reason,characters:raw.length};assertResponseComplete(data,info);
+            try{return parseWorkroomReply(raw);}catch(error){throw new WorkroomResponseError(error instanceof Error?error.message:'创作回复格式不完整',info,error);}
         };
         let result = await call();
         const used=new Set<string>();

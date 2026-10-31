@@ -1,3 +1,4 @@
+import {stripResponseStatus,isProactiveStatusDelivery} from '../features/personal/responseStatus/protocol';
 import { createReplyRun, isReplyStopped, withReplyCancellation, type ReplyRun } from './chatReplyCancellation';
 import { loadCharacterContextMessages } from './chatContextRange';
 import { ActiveMsg2InboxMessage, ActiveMsg2TaskRecord, APIConfig, RealtimeConfig, UserProfile } from '../types';
@@ -657,6 +658,7 @@ const processInboxMessageWithPostProcessing = async (
   ));
 
   await replyStep(async () => applyAssistantPostProcessing(message.body || '', {
+    isProactive: isProactiveStatusDelivery(message),
     replyRun,
     char,
     userProfile,
@@ -1735,9 +1737,9 @@ const flushInboxToChatImpl = async (trigger: FlushTrigger, charId?: string): Pro
       if (!routed) {
         // 2.0 fallback: even when the rich post-processing pipeline fails, never
         // persist the raw inner-voice protocol as a public chat bubble.
-        const recoveredVoice = extractInnerVoice(message.body || '');
+        const recoveredVoice = extractInnerVoice(isProactiveStatusDelivery(message)?stripResponseStatus(message.body||''):(message.body||''));
         try {
-          await replyStep(async () => (replyRun?.saveMessage ?? DB.saveMessage)({
+          if(recoveredVoice.text.trim())await replyStep(async () => (replyRun?.saveMessage ?? DB.saveMessage)({
             charId: message.charId,
             role: 'assistant',
             type: 'text',

@@ -1,5 +1,5 @@
 import { consumeWorkroomActions } from '../features/workroom/bridge';
-import { extractResponseStatus } from '../features/personal/responseStatus/protocol';
+import { extractResponseStatus,stripResponseStatus,isProactiveStatusDelivery } from '../features/personal/responseStatus/protocol';
 import { consumeCommerceAction } from './personalCommerce';
 import { extractInnerVoice, type InnerVoice } from '../features/personal/innerVoice/protocol';
 import { withReplyCancellation, type ReplyRun } from './chatReplyCancellation';
@@ -540,6 +540,8 @@ export interface PostProcessCtx {
     historyMsgCount: number;
     /** 当 MCD MiniApp 打开时附加到每条 assistant message 的 metadata patch */
     mcdInheritMeta?: any;
+    /** Scheduled proactive delivery excludes read/busy cards; instant chat is not proactive. */
+    isProactive?: boolean;
     /** XHS 跨消息缓存 (调用方持有的 ref) */
     xhsCaches: XhsCaches;
     /**
@@ -631,6 +633,8 @@ export async function applyAssistantPostProcessing(
         messageTimestamp,
         sarModuleSurface,
     } = ctx;
+    const responseStatusAllowed=ctx.isProactive!==true&&!(mcdInheritMeta?.source==='active_msg_2'&&isProactiveStatusDelivery(mcdInheritMeta.activeMsg2||{}));
+    if(!responseStatusAllowed)rawAiContent=stripResponseStatus(rawAiContent);
     const { baseUrl, headers, effectiveApi } = api;
     // 拟人打字延迟：流式预览已实时展示过气泡时（instantRender）跳过，避免二次慢放
     const typingPause = (ms: number): Promise<void> => {
@@ -782,7 +786,7 @@ export async function applyAssistantPostProcessing(
     };
 
     // A status is the entire response. Resolve before actions, tools or speech.
-    const responseStatus = extractResponseStatus(rawAiContent);
+    const responseStatus = responseStatusAllowed?extractResponseStatus(rawAiContent):undefined;
     if (responseStatus) {
         await replyStep(() => persistMessage({ charId: char.id, role: 'assistant', type: 'score_card',
             content: JSON.stringify(responseStatus), metadata: { ...(mcdInheritMeta || {}), responseStatus } }));
@@ -861,7 +865,8 @@ export async function applyAssistantPostProcessing(
     // 与原 inline 末尾逻辑一致。抽出来是为了让"执行功能前的本轮正文 A"能在二轮前先展示, 二轮结果 B 复用同一套。
     let sarSurfaceClaimed = false;
     const renderAndPersist = async (rawContent: string, firstThinkingChain: string | null): Promise<void> => {
-        const status = extractResponseStatus(rawContent);
+        if(!responseStatusAllowed)rawContent=stripResponseStatus(rawContent);
+        const status = responseStatusAllowed?extractResponseStatus(rawContent):undefined;
         if (status) {
             pendingInnerVoice = undefined;
             await replyStep(() => persistMessage({ charId: char.id, role: 'assistant', type: 'score_card',

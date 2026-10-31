@@ -29,3 +29,18 @@ it('suppresses partial status JSON and all extra speech in streaming and notific
   for(const raw of ['<回应','<回应状','<回应状态>',tag,`多余台词\n${tag}\n另一句`]) expect(computeStreamPreviewBubbles(raw)).toEqual([]);
   expect(sanitizeForNotification(`${tag}不应该出现的台词`)).toBe('消息已读，暂时不回复');
 });
+
+it('strips read and busy protocols from proactive delivery without dropping actual speech', async () => {
+  const {stripResponseStatus,isProactiveStatusDelivery}=await import('../features/personal/responseStatus/protocol');
+  for(const kind of ['read','busy']){
+    const value={...card,kind};const status=`<回应状态>${JSON.stringify(value)}</回应状态>`;
+    expect(stripResponseStatus(status)).toBe('');
+    expect(stripResponseStatus(`想和你聊聊。${status}`)).toBe('想和你聊聊。');
+    expect(stripResponseStatus(JSON.stringify(value))).toBe('');
+    expect(stripResponseStatus('<回应状态>{"kind":')).toBe('');
+  }
+  expect(isProactiveStatusDelivery({messageType:'scheduled'})).toBe(true);
+  expect(isProactiveStatusDelivery({})).toBe(true);
+  expect(isProactiveStatusDelivery({messageType:'instant'})).toBe(false);
+  expect(isProactiveStatusDelivery({messageSubtype:'instant-chat'})).toBe(false);
+});

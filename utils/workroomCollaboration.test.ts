@@ -40,13 +40,13 @@ it('分享不是接收；明确接收后独立复制、保留来源且不复制�
     const text=(await DB.getMessagesByCharId('a',true)).map(m=>formatMessageForPrompt(m,'阿源','User')).join('\n');expect(text).toContain('作品分享');expect(text).toContain('作品收藏');expect(text).toContain('Claude');
     expect(own.versions).toHaveLength(1);
 });
-it('联动关闭不注入新能力、不允许接收；历史分享仍保留语义',async()=>{
+it('联动关闭不注入新能力、不能自动接收；App手动收藏仍可使用',async()=>{
     const {work}=await original(),share=await shareWork('c',work.id,'a');
     await DB.saveCharacter({...await DB.getCharacter('a'),workroomLinkEnabled:false} as any);
-    expect(await buildWorkroomGuide('a')).toBe('');await expect(acceptShare('a',share.id)).rejects.toThrow('关闭');
+    expect(await buildWorkroomGuide('a')).toBe('');await consumeWorkroomActions('<造物间>'+JSON.stringify({action:'accept',shareId:share.id})+'</造物间>','a');
     await consumeWorkroomActions('<造物间>{"action":"idea","title":"不应创建","summary":"关闭"}</造物间>','a');
     expect(await W.list('a')).toEqual([]);expect((await DB.getMessagesByCharId('a',true)).every(isMessageSemanticallyRelevant)).toBe(true);
-    await expect(acceptShare('c',share.id)).rejects.toThrow('不属于');
+    await expect(acceptShare('c',share.id)).rejects.toThrow('不属于');const copy=await acceptShare('a',share.id);expect(copy.charId).toBe('a');
 });
 it('原作品删除后冻结分享仍能接收，完整 ZIP 保留灵感、来源、分享与接收消息',async()=>{
     const {work}=await original(),share=await shareWork('c',work.id,'a');await W.delete('c',work.id);

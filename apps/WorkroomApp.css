@@ -33,13 +33,15 @@
 .wr-companion form input{min-width:0;flex:1;padding:8px;font-size:12px}
 .wr-companion form button{padding:7px 8px;font-size:11px;white-space:nowrap}
 
-.wr-nested-settings{position:absolute;right:8px;top:4px;z-index:10;min-width:220px;max-width:calc(100% - 16px);padding:12px;display:flex;flex-direction:column;gap:11px;border-radius:15px;border:1px solid #e8d9c8;background:#fffaf5;box-shadow:0 8px 24px #5d403022;font-size:12px}
-.wr-nested-settings label{display:flex;align-items:center;gap:7px}
-.wr-nested-settings input{accent-color:#d9a55c}
-.wr-nested-settings small{font-size:10px;opacity:.7}
 
-/* The settings submenu is anchored to the main menu, not the game canvas. */
-.wr-tools-submenu-host{position:absolute;right:calc(100% + 7px);top:calc(100% + 5px);z-index:22}
-.wr-tools-submenu-host:empty{display:none}
-.wr-tools-submenu-host .wr-nested-settings{position:relative;right:auto;top:auto;min-width:220px;width:min(245px,calc(100vw - 180px));max-width:none}
-@media(max-width:380px){.wr-tools-submenu-host{right:calc(100% + 4px)}.wr-tools-submenu-host .wr-nested-settings{min-width:175px;width:calc(100vw - 188px);padding:9px}}
+/* Settings stay inside the same expanding menu; backdrop also intercepts iframe clicks. */
+.wr-root{position:relative;isolation:isolate}.wr-menu-backdrop{position:absolute;inset:0;z-index:7;background:transparent;border:0;border-radius:0!important;width:100%;height:100%;cursor:default}
+.wr-tools-menu{width:min(260px,calc(100vw - 32px));max-height:min(70dvh,440px);overflow-y:auto;overscroll-behavior:contain}
+.wr-tools-submenu-host{position:static}.wr-tools-submenu-host:empty{display:none}
+.wr-nested-settings{position:static;display:flex;flex-direction:column;gap:12px;padding:12px 5px 5px;border:0;border-top:1px solid #eadfd2;background:transparent;box-shadow:none;border-radius:0;font-size:12px;min-width:0;max-width:100%;width:auto}
+.wr-nested-settings label{display:flex;align-items:flex-start;gap:8px;line-height:1.6}.wr-nested-settings input{accent-color:#b88d55;margin-top:3px;flex:none}.wr-nested-settings small{font-size:10px;line-height:1.7;color:#a18e7d}
+.wr-summary{display:flex;align-items:flex-start;gap:4px;min-width:0}.wr-work-heading .wr-summary p{min-width:0;flex:1;margin:0}.wr-work-heading .wr-summary.expanded p{white-space:normal;overflow:visible;text-overflow:clip;word-break:break-word;line-height:1.6;max-height:160px;overflow-y:auto}
+.wr-summary-toggle{flex:none;font-size:11px;color:#a48c76;border:0;background:transparent;padding:0 3px;min-width:20px;min-height:20px;line-height:20px}.wr-work-toolbar:has(.wr-summary.expanded){align-items:flex-start}
+.wr-play-stage{position:relative}.wr-call-status{position:absolute;right:8px;bottom:8px;z-index:3;display:flex;align-items:center;gap:5px;padding:5px 8px;border-radius:20px;background:#fffaf2ec;color:#8b705a;font-size:10px;line-height:1.4;box-shadow:0 2px 12px #49382014;pointer-events:none;max-width:90%}
+.wr-call-status span,.wr-creation-status span{width:6px;height:6px;border-radius:50%;background:#c6a575;flex:none;animation:wr-pulse 1.2s ease-in-out infinite}.wr-creation-status{display:flex;align-items:center;justify-content:flex-end;gap:6px;padding:6px 0;font-size:10px;color:#a18b78}.wr-stop-call{text-align:right;font-size:10px;padding:3px}.wr-stop-call button{background:none!important;color:#9a806b}
+@keyframes wr-pulse{50%{opacity:.3}}@media(prefers-reduced-motion:reduce){.wr-call-status span,.wr-creation-status span{animation:none}}

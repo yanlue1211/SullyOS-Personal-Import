@@ -64,7 +64,7 @@ describe('沙盒宿主与真实 IndexedDB 联通', () => {
         expect(rows.filter(r => r.event.kind === 'completed')).toHaveLength(1);
         expect(rows.every(r => r.charId === 'runner-char' && r.workId === h.work.id)).toBe(true);
         expect(rows.find(r => r.event.kind === 'completed').delivery).toBe('delivered');
-        expect(rows.filter(r => r.event.kind === 'progress').every(r => r.delivery === 'local')).toBe(true);
+        expect(rows.filter(r => r.event.kind === 'progress').every(r => r.delivery === 'delivered')).toBe(true);
         h.host.close();
     });
 });

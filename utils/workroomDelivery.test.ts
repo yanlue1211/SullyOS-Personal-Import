@@ -50,7 +50,7 @@ describe('造物间事件真实聊天投递', () => {
         expect(text).not.toContain('PRIVATE_CODE_ONLY');
         expect(await DB.getMessagesByCharId('b', true)).toEqual([]);
     });
-    it('联动关闭后不补发尚未投递的互动，已保存卡片不被删除', async () => {
+    it('聊天能力联动关闭不丢失作品主动上报的实际互动，旧卡片保留', async () => {
         const { work, version } = await build();
         await drainWorkroomOutbox('a');
         const char = await DB.getCharacter('a');
@@ -58,8 +58,8 @@ describe('造物间事件真实聊天投递', () => {
         await W.recordEvent('a', work.id, version.id, 'walk', '又散步一次');
         await drainWorkroomOutbox('a');
         const rows = await DB.getMessagesByCharId('a', true);
-        expect(rows).toHaveLength(4);
-        expect(rows.map(m => m.content).join('\n')).not.toContain('又散步一次');
+        expect(rows).toHaveLength(5);
+        expect(rows.map(m => m.content).join('\n')).toContain('又散步一次');
         expect(rows.map(m => m.content).join('\n')).toContain('小狗升到三级');
     });
     it('错误角色不能投递；用户删除已投递卡片后不自动复活', async () => {

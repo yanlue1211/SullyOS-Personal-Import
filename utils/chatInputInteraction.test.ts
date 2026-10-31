@@ -254,3 +254,17 @@ describe('private chat input controls', () => {
         expect(box.checked).toBe(true);
     });
 });
+
+
+it.each(['actions','emojis','chars'] as const)('closes %s when typing starts without changing the draft',showPanel=>{
+ renderInput({showPanel,input:'保留草稿'});
+ act(()=>textarea().focus());
+ expect(props.setShowPanel).toHaveBeenCalledWith('none');
+ expect(textarea().value).toBe('保留草稿');
+ expect(props.onSend).not.toHaveBeenCalled();
+ vi.mocked(props.setShowPanel).mockClear();
+ // Mobile keyboards may keep the textarea focused while another panel opens.
+ renderInput({showPanel});pointerdown(textarea());
+ expect(props.setShowPanel).toHaveBeenCalledWith('none');
+ expect(document.activeElement).toBe(textarea());
+});

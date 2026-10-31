@@ -390,6 +390,7 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
             includeUserLocation: isChatConversationEntry(input.recallEntryPoint),
             returningFromMode: returningFromMode || undefined,
             appRules: input.appPrompt?.rules,
+            responseStatusEnabled: input.recallEntryPoint!=='proactive_chat',
         },
     ));
     input.signal?.throwIfAborted();
