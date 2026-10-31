@@ -148,7 +148,7 @@ export const WorkroomStorage = {
         await idbResult(tx.objectStore('workroom_works').put({ ...work, currentVersionId: versionId, updatedAt: Date.now() }));
     }),
     recordEvent: (charId: string, workId: string, versionId: string, actionId: string, detail: string) => {
-        if (!validText(actionId, 100) || !validText(detail, 2000)) throw Error('互动事件无效');
+        if (!validText(actionId, 100) || !validText(detail, 8000)) throw Error('互动事件无效');
         return transact(charId, 'readwrite', async tx => {
             const work = await owned(tx, charId, workId);
             if (work.currentVersionId !== versionId) throw Error('运行版本已变化');
@@ -160,7 +160,7 @@ export const WorkroomStorage = {
             const char = await idbResult(tx.objectStore('characters').get(charId));
             const event = readWorkroomEvent({ version: 1, eventId: workroomId(), charId, charName: char.name || '角色',
                 kind: 'progress', subjectId: workId, title: work.title, summary: work.summary,
-                detail: `组件内互动（由作品报告）：${detail}`, timestamp: Date.now() }, charId)!;
+                detail: detail, timestamp: Date.now() }, charId)!;
             const row: WorkroomStoredEvent = { id, charId, workId, event, delivery: 'pending' };
             await idbResult(store.add(row));
             return row;
