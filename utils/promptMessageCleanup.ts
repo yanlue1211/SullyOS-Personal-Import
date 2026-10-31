@@ -45,3 +45,27 @@ export function flattenImageContentParts(
         return { ...msg, content: flattenContentPartsToText(msg.content) };
     });
 }
+
+/**
+ * Keep only the latest user image-bearing turn as live visual input.
+ * Older image_url parts are historical context, not new vision requests:
+ * retaining their accompanying text prevents a stale remote cover from
+ * making every subsequent chat completion fail with upstream file 403.
+ * Does not mutate stored messages or remove the latest image upload.
+ */
+export function flattenHistoricalImageParts(
+    messages: Array<{role:string;content:any}>,
+): Array<{role:string;content:any}> {
+    let latestImageTurn = -1;
+    for (let i=0;i<messages.length;i++) {
+        const m=messages[i];
+        if (m.role==='user' && Array.isArray(m.content) &&
+            m.content.some((p:any)=>p?.type==='image_url')) latestImageTurn=i;
+    }
+    return messages.map((m,i)=>{
+        if (i===latestImageTurn || !Array.isArray(m.content)) return m;
+        if (!m.content.some((p:any)=>p?.type==='image_url')) return m;
+        const content=m.content.filter((p:any)=>p?.type!=='image_url');
+        return {...m,content:content.length?content:[{type:'text',text:'[历史图片]'}]};
+    });
+}
