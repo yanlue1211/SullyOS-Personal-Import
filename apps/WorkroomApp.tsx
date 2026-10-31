@@ -1,3 +1,4 @@
+import { exportPortableWork, importPortableWork } from '../features/workroom/portable';
 import React, { useEffect, useRef, useState } from 'react';
 import { useOS } from '../context/OSContext';
 import { useLocalBackHandler } from '../hooks/useLocalBackHandler';
@@ -26,7 +27,7 @@ export default function WorkroomApp() {
     const [workId, setWorkId] = useState('');
     const [detail, setDetail] = useState<Detail | null>(null);
     const [turns, setTurns] = useState<WorkroomTurn[]>([]);
-    const [page, setPage] = useState<'talk' | 'run' | 'versions' | 'code'>('talk');
+    const [page, setPage] = useState<'talk' | 'run' | 'versions' | 'code' | 'test'>('talk');
     const [input, setInput] = useState('');
     const [code, setCode] = useState<WorkroomCode>(blank);
     const [codeDirty, setCodeDirty] = useState(false);
@@ -34,6 +35,9 @@ export default function WorkroomApp() {
     const codeBase = useRef<{revision: number; versionId: string | null}>({revision: 0, versionId: null});
     const [title, setTitle] = useState('');
     const [summary, setSummary] = useState('');
+    const [testVersion,setTestVersion]=useState<import('../features/workroom/schema').WorkroomVersion|null>(null);
+    const [testErrors,setTestErrors]=useState<string[]>([]);
+    const [testNotes,setTestNotes]=useState('');
     const [notice, setNotice] = useState('');
     const [busy, setBusy] = useState(false);
     const [retry, setRetry] = useState<{ id: string; text: string } | null>(null);
@@ -61,7 +65,7 @@ export default function WorkroomApp() {
         }
     };
     const select = (owner: string, selected = '') => {
-        cancel(); setPreviewShare(null); setRecipient(''); shareRequest.current=crypto.randomUUID(); dirty.current = false; setCodeDirty(false); scope.current = JSON.stringify([owner, selected]);
+        cancel(); setTestVersion(null); setTestErrors([]); setTestNotes(''); setPreviewShare(null); setRecipient(''); shareRequest.current=crypto.randomUUID(); dirty.current = false; setCodeDirty(false); scope.current = JSON.stringify([owner, selected]);
         setCharId(owner); setWorkId(selected); setWorks([]); setShares([]); setDetail(null); setTurns([]);
         setNotice(''); setBusy(false); setRetry(null); setPage('talk'); setDeleteCandidate(false); setInput('');
         if (owner) void refresh(owner, selected).catch(error => {
@@ -152,7 +156,7 @@ export default function WorkroomApp() {
         {notice && <p role="status" className="mx-4 my-2 rounded-xl bg-amber-100/60 p-3 text-xs whitespace-pre-wrap">{notice}</p>}
         {!character ? <div className="m-auto p-8 text-center text-sm text-stone-400">选一位创作者，看看你们能一起做出什么。</div>
             : previewShare ? <main className="flex-1 min-h-0 flex flex-col"><div className="p-4 text-xs"><strong>{previewShare.snapshot.title}</strong><p>分享预览 · 原作者：{previewShare.snapshot.authorName}。预览进度仅保留本次，不产生聊天互动记录。</p></div><WorkroomRunner key={previewShare.id} charId={charId} preview version={{...previewShare.snapshot,id:'preview-'+previewShare.id,charId,workId:previewShare.id,number:1,createdAt:previewShare.createdAt}} onNotify={setNotice} onError={setNotice}/></main> : !workId ? <main className="flex-1 overflow-y-auto p-5 space-y-5">
-                <section className="rounded-2xl bg-white p-4 border border-amber-100 space-y-3"><h2 className="font-medium">一个新的小想法</h2>
+                <section className="rounded-2xl bg-white p-4 border border-amber-100 space-y-3"><h2 className="font-medium">一个新的小想法</h2><label className="block text-xs">导入组件（代码以隔离沙盒运行，进度重新开始）<input aria-label="导入组件" type="file" accept=".json,application/json" disabled={busy} onChange={event=>{const file=event.target.files?.[0];event.target.value='';if(!file)return;const owner=charId,expected=scope.current;void operate(async()=>{if(file.size>4_600_000)throw Error('组件文件过大');const text=await file.text();if(scope.current!==expected)return;const work=await importPortableWork(owner,text);if(scope.current===expected)select(owner,work.id);});}}/></label>
                     <input aria-label="作品名称" placeholder="给作品取个名字" value={title} onChange={e => setTitle(e.target.value)} maxLength={300} className="w-full bg-amber-50/60 rounded-xl p-3 text-sm"/>
                     <textarea aria-label="作品简介" placeholder="它可以做什么？写一句就好" value={summary} onChange={e => setSummary(e.target.value)} maxLength={2000} className="w-full bg-amber-50/60 rounded-xl p-3 text-sm"/>
                     <button className={button} disabled={busy || !title.trim() || !summary.trim()} onClick={create}>创建作品</button>
@@ -171,7 +175,7 @@ export default function WorkroomApp() {
                     {([['talk', '创作交流'], ['run', '体验作品'], ['versions', '版本管理'], ['code', '代码草稿']] as const).map(([id, label]) =>
                         <button key={id} className={`${button} whitespace-nowrap ${page === id ? 'bg-amber-100' : ''}`} onClick={() => { setDeleteCandidate(false); setPage(id); }}>{label}</button>)}
                 </nav>
-                {page === 'run' ? <div className="flex-1 min-h-0 bg-white">{version ? <WorkroomRunner key={`${charId}:${version.id}`} charId={charId} version={version} onNotify={setNotice} onError={error => setNotice('作品运行错误：' + error)}/> : <p className="p-5 text-sm">还没有正式版本，先和 TA 一起制作吧。</p>}</div>
+                {page === 'test' && testVersion ? <main className="flex-1 min-h-0 flex flex-col"><p className="px-4 text-xs">草稿试运行：使用临时进度，不产生聊天互动；请实际点击验证玩法。没有报错不代表所有功能正确。</p><div className="flex-1 min-h-0"><WorkroomRunner key={testVersion.id} charId={charId} version={testVersion} preview onNotify={setNotice} onError={text=>setTestErrors(old=>[...old,text.slice(0,2000)].slice(-20))}/></div><div className="p-3 max-h-48 overflow-auto"><p className="text-xs">已捕获错误：{testErrors.length}</p>{testErrors.map((e,i)=><p key={i} className="text-xs text-red-700">{e}</p>)}<textarea aria-label="测试反馈" value={testNotes} maxLength={2000} onChange={e=>setTestNotes(e.target.value)} placeholder="按钮、进度、布局等实际体验反馈" className="w-full text-sm"/><button className={button} disabled={busy} onClick={()=>operate(async()=>{const owner=charId,selected=workId,expected=scope.current;await W.saveTestReport(owner,selected,Number(testVersion.number),testErrors,testNotes);await refresh(owner,selected);if(scope.current===expected){setPage('talk');setTestVersion(null);setNotice('试运行记录已保存，继续交流时 TA 可以读取并修改。');}})}>结束测试并保存记录</button></div></main> : page === 'run' ? <div className="flex-1 min-h-0 bg-white">{version ? <WorkroomRunner key={`${charId}:${version.id}`} charId={charId} version={version} onNotify={setNotice} onError={error => setNotice('作品运行错误：' + error)}/> : <p className="p-5 text-sm">还没有正式版本，先和 TA 一起制作吧。</p>}</div>
                     : page === 'talk' ? <main className="flex-1 min-h-0 flex flex-col"><div className="flex-1 overflow-y-auto px-5 space-y-4 pb-4">
                         {!turns.length && <p className="text-xs text-stone-400 py-5">和 {character.name} 聊聊玩法、颜色，或者直接请 TA 开始制作。</p>}
                         {turns.map(turn => <div key={turn.id} className={`rounded-2xl p-3 text-sm whitespace-pre-wrap ${turn.role === 'user' ? 'bg-amber-100 ml-8' : 'bg-white mr-5'}`}><small className="block text-xs opacity-50 mb-1">{turn.role === 'user' ? os.userProfile.name : character.name}</small>{turn.text}</div>)}
@@ -184,11 +188,13 @@ export default function WorkroomApp() {
                         : page === 'code' ? <main className="flex-1 overflow-y-auto p-4 space-y-3">
                             <p className="text-xs opacity-60">草稿和正式版本分开保存。生成代码尚未经过实际运行验收。{codeDirty && ' 当前编辑尚未保存。'}</p><button className={button} disabled={busy} onClick={() => { dirty.current = false; setCodeDirty(false); void refresh(charId, workId).catch(error => setNotice(String(error))); }}>重新读取已保存草稿</button>
                             {(['html', 'css', 'js'] as const).map(key => <label key={key} className="block text-xs uppercase">{key}<textarea aria-label={`${key}源码`} value={code[key]} onChange={e => { dirty.current = true; setCodeDirty(true); setCode(old => ({ ...old, [key]: e.target.value })); }} className="block w-full h-40 font-mono rounded-xl p-3 mt-1 bg-white normal-case" spellCheck={false}/></label>)}
-                            <div className="flex flex-wrap gap-2"><button className={button} disabled={busy} onClick={saveDraft}>保存草稿</button><button className={button} disabled={busy || !detail.draft || codeDirty} onClick={publish}>保存版本并打开</button></div>
+                            <div className="flex flex-wrap gap-2"><button className={button} disabled={busy} onClick={saveDraft}>保存草稿</button><button className={button} disabled={busy || !detail.draft || codeDirty} onClick={()=>{if(!detail.draft)return;setTestErrors([]);setTestNotes('');setTestVersion({...detail.draft,id:'test-'+crypto.randomUUID(),number:detail.draft.revision,schemaVersion:version?.schemaVersion||1,createdAt:Date.now()});setPage('test');}}>试运行已保存草稿</button><button className={button} disabled={busy || !detail.draft || codeDirty} onClick={publish}>保存版本并打开</button></div>
                         </main> : <main className="flex-1 overflow-y-auto p-5 space-y-3">
                             {detail.draft && <p className="rounded-xl bg-amber-100 p-3 text-xs">有尚未发布的草稿 · 修订 {detail.draft.revision}</p>}
                             {detail.versions.map(item => <div key={item.id} className="rounded-xl bg-white p-4 flex items-center justify-between"><span className="text-sm">第 {item.number} 版{item.id === version?.id && ' · 当前版本'}</span>{version && item.id !== version.id && <button className={button} disabled={busy} onClick={() => operate(async () => { await W.rollback(charId, workId, item.id, version.id); await refresh(charId, workId); setNotice('已回退，兼容的游戏进度保留。'); })}>回退</button>}</div>)}
                             {version && <div className="flex flex-wrap gap-2"><select aria-label="分享给哪位角色" value={recipient} onChange={e=>setRecipient(e.target.value)} className={button}><option value="">分享给…</option>{os.characters.filter(c=>c.id!==charId).map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select><button className={button} disabled={busy || !recipient} onClick={()=>operate(async()=>{const key=shareRequest.current;await shareWork(charId,workId,recipient,key);shareRequest.current=crypto.randomUUID();setNotice('分享卡已发送；是否收藏由接收角色决定。');})}>分享作品</button></div>}
+                            {version && <button className={button} disabled={busy} onClick={()=>operate(async()=>{const expected=scope.current;const file=await exportPortableWork(charId,workId);if(scope.current!==expected)return;const url=URL.createObjectURL(new Blob([JSON.stringify(file,null,2)],{type:'application/json'}));const link=document.createElement('a');link.href=url;link.download='造物间-'+file.title.replace(/[\\/:*?"<>|]/g,'_')+'.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);})}>导出组件（不含进度）</button>}
+                            {version&&<button className={button} disabled={busy} onClick={()=>operate(async()=>{const owner=charId,expected=scope.current;const file=await exportPortableWork(owner,workId);if(scope.current!==expected)return;const copy=await importPortableWork(owner,JSON.stringify(file));if(scope.current===expected)select(owner,copy.id);})}>复制为新作品</button>}
                             <button className={`${button} text-red-700`} onClick={() => setDeleteCandidate(true)}>删除作品…</button>
                             {deleteCandidate && <div role="alert" className="rounded-xl bg-red-50 p-4 space-y-3 text-sm"><p>删除这个作品的代码、版本和进度？聊天里已经保存的经历会保留。</p><button disabled={busy} className={button} onClick={() => operate(async () => { const owner = charId, expected = scope.current; await W.delete(owner, workId); if (scope.current === expected) select(owner); })}>确认删除作品</button><button className={button} onClick={() => setDeleteCandidate(false)}>取消</button></div>}
                         </main>}

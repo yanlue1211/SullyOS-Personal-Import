@@ -54,7 +54,8 @@ const DB_NAME = 'AetherOS_Data';
 // v75: per-character workroom works, immutable versions, drafts, state and events.
 // v76: persistent workroom creative discussion, included in both backup paths.
 // v77: frozen user-initiated workroom shares. Ideas reuse work metadata.
-const DB_VERSION = 77;
+// v78: indexed, independently dismissible workroom completion notices.
+const DB_VERSION = 78;
 
 const STORE_CHARACTERS = 'characters';
 const STORE_CHAR_GROUPS = 'character_groups'; // 角色分组定义（角色通过 groupId 指向；与群聊 groups 无关）

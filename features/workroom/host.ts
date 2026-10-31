@@ -5,7 +5,7 @@ import { readWorkroomRpc } from './runner';
 
 /** Revocable capability: identity comes from the host, never from RPC arguments. */
 export function createWorkroomHost(charId: string, workId: string, versionId: string, session: string,
-    callbacks: { onNotify?: (text: string) => void; onError?: (text: string) => void; onStop?: () => void } = {}, preview = false) {
+    callbacks: { onNotify?: (text: string) => void; onError?: (text: string) => void; onStop?: () => void; onReady?: () => void } = {}, preview = false) {
     let previewData:unknown = {};
     let previewRevision = 1;
     let active = true;
@@ -58,14 +58,20 @@ export function createWorkroomHost(charId: string, workId: string, versionId: st
                             if(!preview) await drainWorkroomOutbox(charId);
                         } else {
                             if (!validText(args[0], 2000)) throw Error('组件说明无效');
-                            if (request.method === 'requestUpdate') {
+                            if(request.method==='reportReady'){
+                                if(active)callbacks.onReady?.();
+                            } else if (request.method === 'requestUpdate') {
                                 if(preview)throw Error('预览不创建开发任务，请先收藏独立副本');
+                                await WorkroomStorage.recordDiagnostic(charId,workId,versionId,'update',args[0]);
                                 result = (await WorkroomStorage.recordEvent(charId, workId, versionId, `update-${request.id}-${session}`,
                                     `作品提出修改请求（尚未执行）：${args[0]}`)).id;
                                 await drainWorkroomOutbox(charId);
                             } else if (request.method === 'notify') {
                                 if (active) callbacks.onNotify?.(args[0]);
-                            } else if (active) callbacks.onError?.(args[0]);
+                            } else {
+                                if(!preview)await WorkroomStorage.recordDiagnostic(charId,workId,versionId,'error',args[0]);
+                                if(active)callbacks.onError?.(args[0]);
+                            }
                         }
                         respond(request.id, { id: request.id, ok: true, value: result });
                     } catch (error) {

@@ -25,18 +25,19 @@ async function seedLegacy(factory:IDBFactory,version:number){
  });
 }
 
-it.each([72,73,74,75,76])('upgrades v%s without losing records and installs both branches of message indexes',async version=>{
+it.each([72,73,74,75,76,77])('upgrades v%s without losing records and installs both branches of message indexes',async version=>{
  vi.resetModules();
  const factory=new IDBFactory();vi.stubGlobal('indexedDB',factory);
  await seedLegacy(factory,version);
  const {openDB,DB}=await import('./db');const db=await openDB();
  try {
-  expect(db.version).toBe(77);
+  expect(db.version).toBe(78);
   for(const store of ['workroom_works','workroom_versions','workroom_drafts','workroom_states','workroom_events','workroom_turns']) {
    expect(db.objectStoreNames.contains(store)).toBe(true);
    expect(Array.from(db.transaction(store).objectStore(store).indexNames)).toContain('charId');
   }
   expect(Array.from(db.transaction('workroom_events').objectStore('workroom_events').indexNames)).toContain('charId_delivery');
+  expect(Array.from(db.transaction('workroom_events').objectStore('workroom_events').indexNames)).toContain('notice');
   if(version===75)expect((await DB.getRawStoreData('workroom_events'))[0].id).toBe('old-event');
   const names=Array.from(db.transaction('messages').objectStore('messages').indexNames);
   expect(names).toEqual(expect.arrayContaining(['charId_source','charId_homeTurn','charId_deliveryId']));
@@ -82,10 +83,13 @@ it('rolls back an interrupted v72 home-index upgrade, preserves the archive and 
  } finally {old.close();}
  const {databaseOpenDiagnostic}=await import('./databaseOpenDiagnostics');
  expect(databaseOpenDiagnostic()).toContain('upgrade-aborted');
- expect(databaseOpenDiagnostic()).not.toContain('upgrade-committed');
+ const diagnostic=databaseOpenDiagnostic();
+ const abortedLine=diagnostic.split('\n').find(line=>line.includes('upgrade-aborted'))!;
+ const page=abortedLine.match(/页面 ([^，]+)/)?.[1];expect(page).toBeTruthy();
+ expect(diagnostic.split('\n').filter(line=>line.includes(`页面 ${page}，`)).join('\n')).not.toContain('upgrade-committed');
  const retried=await openDB();
  try {
-  expect(retried.version).toBe(77);
+  expect(retried.version).toBe(78);
   expect((await DB.getAllCharacters())[0].name).toBe('旧角色');
   expect(await DB.getAsset('old-wallpaper')).toBe('原图片');
   expect((await DB.getMessagesByCharId('c',true)).map(row=>row.id)).toEqual([1,2]);

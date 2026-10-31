@@ -17,6 +17,7 @@ export function validateWorkroomBackup(input: Partial<WorkroomBackup>): Workroom
     for (const field of fields) {
         const ids = new Set<string>();
         for (const row of data[field]) {
+            if ('notice' in row && row.notice !== undefined && (field !== 'workroomEvents' || !['pending','dismissed'].includes(row.notice as string) || !('event' in row) || row.event.kind !== 'completed')) throw Error('作品通知状态无效');
             if (!row || !validText(row.id, 1000) || ids.has(row.id) || !validText(row.charId, 200)) throw Error('造物间备份主键或角色归属无效');
             ids.add(row.id);
         }
@@ -25,6 +26,10 @@ export function validateWorkroomBackup(input: Partial<WorkroomBackup>): Workroom
     const versions = new Map(data.workroomVersions.map(v => [v.id, v]));
     const numbers = new Set<string>();
     for (const work of works.values()) {
+        if(work.lastError!==undefined&&!validText(work.lastError,2000))throw Error('运行错误记录无效');
+        if(work.maintenanceRequests!==undefined&&(!Array.isArray(work.maintenanceRequests)||work.maintenanceRequests.length>20||work.maintenanceRequests.some(t=>!validText(t,2000))))throw Error('维护任务无效');
+        const report=work.testReport;
+        if(report&&(!validInteger(report.draftRevision)||!Number.isFinite(report.createdAt)||report.createdAt<=0||!Array.isArray(report.errors)||report.errors.length>20||report.errors.some(e=>!validText(e,2000))||typeof report.notes!=='string'||report.notes.length>2000))throw Error('测试记录无效');
         if (work.idea && (!['open','shelved','done'].includes(work.idea.status) || !validText(work.idea.invitationId,200))) throw Error('灵感状态无效');
         if (work.source && ['authorId','authorName','workId','versionId','shareId'].some(key => !validText((work.source as unknown as Record<string,unknown>)[key],200))) throw Error('作品来源无效');
         if (!validText(work.title, 300) || !validText(work.summary, 2000) || !Number.isFinite(work.createdAt) || work.createdAt <= 0

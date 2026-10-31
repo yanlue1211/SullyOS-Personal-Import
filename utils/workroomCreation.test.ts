@@ -4,6 +4,8 @@ import { WorkroomStorage as W } from '../features/workroom/storage';
 import { generateWorkroomReply, parseWorkroomReply } from '../features/workroom/creation';
 import { WORKROOM_STORES, transactionDone } from '../features/workroom/schema';
 import * as palace from './memoryPalace/pipeline';
+const smoke=vi.hoisted(()=>vi.fn(async()=>({errors:['按钮报错'],notes:'短时启动观察'})));
+vi.mock('../features/workroom/smokeTest',()=>({smokeTestWorkroom:smoke}));
 vi.mock('./activeMsgRuntime', () => ({ prepareInboxBeforeChat: vi.fn(async () => {}) }));
 let workId: string;
 const api = { baseUrl: 'https://global.invalid/v1', model: 'global', apiKey: 'global-key' };
@@ -90,4 +92,11 @@ it('输出协议不接受缺失字段、临时资源或重复读代码后的伪�
     expect(() => parseWorkroomReply('{"text":"","code":{}}')).toThrow();
     expect(() => parseWorkroomReply('{"text":"好","code":{"html":"blob:temp","css":"","js":""}}')).toThrow();
     expect(parseWorkroomReply('```json\n{"text":"先讨论一下"}\n```')).toEqual({ text: '先讨论一下' });
+});
+
+it('角色明确请求测试已保存草稿时才启动隔离观察，并将错误交给后续模型和维护记录',async()=>{
+    await W.saveDraft('a',workId,{html:'<button>测试</button>',css:'',js:''},0,null);
+    const calls=model([JSON.stringify({action:'test_code'}),JSON.stringify({text:'按钮报错了，我来修改。'})]);
+    await generateWorkroomReply(args());expect(calls).toHaveLength(2);expect(smoke).toHaveBeenCalled();
+    expect(JSON.stringify(calls[1].body.messages)).toContain('按钮报错');expect((await W.get('a',workId)).work.testReport?.errors).toEqual(['按钮报错']);
 });
