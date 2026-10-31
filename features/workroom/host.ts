@@ -51,7 +51,7 @@ export function createWorkroomHost(charId: string, workId: string, versionId: st
                     try {
                         let result: unknown;
                         const args = request.args;
-                        if(request.method==='registerActions'){if(preview)throw Error('预览不开放角色操作');callbacks.onActions?.(readGameActions(args[0]));result=true;
+                        if(request.method==='registerActions'){const actions=readGameActions(args[0]);if(!preview)callbacks.onActions?.(actions);result=true;
                         } else if(request.method==='generate'){
                             if(preview||!callbacks.onGenerate)throw Error('请在正式作品中开启运行时AI后使用');
                             const task=readRuntimeRequest(args[0]);result=await callbacks.onGenerate(task,session+'-'+request.id,generationAbort.signal);

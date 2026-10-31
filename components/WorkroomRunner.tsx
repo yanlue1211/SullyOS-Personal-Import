@@ -33,13 +33,13 @@ export default function WorkroomRunner({ charId, version, onNotify, onError, onE
             onActions: actions=>callbacks.current.onActions?.(actions),
             onNotify: text => callbacks.current.onNotify?.(text),
             onError: text => callbacks.current.onError?.(text),
-            onStop: () => setStopped(true),
+            onStop: () => {callbacks.current.onActions?.([]);callbacks.current.onController?.(null);setStopped(true);},
             onGenerateError: error=>callbacks.current.onGenerateError?.(error),
             onEvent: text=>callbacks.current.onEvent?.(text),
             onGenerate: (request,id,signal)=>{const fn=callbacks.current.onGenerate;if(!fn)return Promise.reject(Error('该作品未开启运行时AI'));return fn(request,id,signal);},
         }, preview);
         callbacks.current.onController?.(()=>host.characterPlay());
-        const dispose = () => { callbacks.current.onController?.(null);active = false; port?.close(); host.close(); };
+        const dispose = () => { callbacks.current.onController?.(null);callbacks.current.onActions?.([]);active = false; port?.close(); host.close(); };
         stop.current = dispose;
         setup.current = () => {
             if (!active) return;

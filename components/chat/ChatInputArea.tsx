@@ -761,7 +761,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                             value={input}
                             onChange={(e) => setInput(e.target.value)}
                             onKeyDown={handleKeyDown}
-                            onPointerDown={e=>{if(e.button!==0)return;e.preventDefault();textareaRef.current?.focus({preventScroll:true});setShowPanel('none');}}
+                            onPointerDown={e=>{if(e.button!==0||showPanel==='none')return;e.preventDefault();textareaRef.current?.focus({preventScroll:true});setShowPanel('none');}}
                             onFocus={handleInputFocus}
                             onBlur={() => setIsInputFocused(false)}
                             onCompositionStart={() => setIsComposing(true)}
