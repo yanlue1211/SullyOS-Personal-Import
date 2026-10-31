@@ -147,7 +147,7 @@ export default function WorkroomApp() {
         const owner = charId, selected = workId;
         await W.publish(owner, selected, detail.draft.revision, version?.schemaVersion || 1);
         await drainWorkroomOutbox(owner); await refresh(owner, selected);
-        if (scope.current === JSON.stringify([owner, selected])) { setPage('run'); setNotice('版本已保存，完成卡已写入聊天；现在可以实际体验。'); }
+        if (scope.current === JSON.stringify([owner, selected])) { setPage('run'); setNotice(''); }
     });
     return <div className="wr-root h-full flex flex-col text-stone-700" style={{ paddingTop: 'var(--chrome-top, 24px)' }}>
         <header className="px-5 py-4 border-b border-amber-100 flex items-center gap-3">
@@ -160,7 +160,7 @@ export default function WorkroomApp() {
                 <option value="">选择一位 Char</option>{os.characters.map(char => <option key={char.id} value={char.id}>{char.name}</option>)}
             </select>
         </div>
-        {notice && <p role="status" className="mx-4 my-2 rounded-xl bg-amber-100/60 p-3 text-xs whitespace-pre-wrap">{notice}</p>}
+        {notice && page !== 'run' && <p role="status" className="mx-4 my-2 rounded-xl bg-amber-100/60 p-3 text-xs whitespace-pre-wrap">{notice}</p>}
         {!character ? <div className="m-auto p-8 text-center text-sm text-stone-400">选一位创作者，看看你们能一起做出什么。</div>
             : previewShare ? <main className="flex-1 min-h-0 flex flex-col"><div className="p-4 text-xs"><strong>{previewShare.snapshot.title}</strong><p>分享预览 · 原作者：{previewShare.snapshot.authorName}。预览进度仅保留本次，不产生聊天互动记录。</p></div><WorkroomRunner key={previewShare.id} charId={charId} preview version={{...previewShare.snapshot,id:'preview-'+previewShare.id,charId,workId:previewShare.id,number:1,createdAt:previewShare.createdAt}} onNotify={setNotice} onError={setNotice}/></main> : !workId ? <main className="wr-shelf flex-1 min-h-0 overflow-y-auto">
                 {shelf==='home'?<><section className="wr-welcome"><div className="wr-creator-badge">{character.name.slice(0,1)}</div><p>CREATIVE SPACE</p><h2>{character.name} 的造物间</h2><span>一起把想象变成可以体验的小世界</span></section><div className="wr-app-grid" aria-label="造物间应用">
@@ -172,12 +172,14 @@ export default function WorkroomApp() {
                 {shelf==='shares'&&<div className="wr-idea-list">{shares.map(share=><article key={share.id}><span>💌</span><h3>{share.snapshot.title}</h3><p>{share.snapshot.summary}</p><small>原作者：{share.snapshot.authorName}</small><div><button disabled={busy} onClick={()=>operate(async()=>{const expected=scope.current;const row=await readSharedWork(charId,share.id);if(scope.current===expected)setPreviewShare(row);})}>打开看看</button>{share.acceptedWorkId?<button onClick={()=>select(charId,share.acceptedWorkId!,'run')}>打开已收藏副本</button>:<button onClick={()=>requestWorkroomCollection(charId,share.id)}>询问 TA 是否收藏</button>}<button className="text-red-700" disabled={busy} onClick={()=>{if(!window.confirm('从收到的分享中删除「'+share.snapshot.title+'」？已保存的聊天记录及已收藏副本不会被删除。'))return;void operate(async()=>{const owner=charId,expected=scope.current;await deleteReceivedShare(owner,share.id);if(scope.current===expected){setShares(rows=>rows.filter(row=>row.id!==share.id));setNotice('已从收到的分享中删除。');}});}}>删除分享</button></div></article>)}</div>}
                 </>}
             </main> : !detail ? <div className="p-6 text-sm">正在读取作品…</div> : <>
-                <div className="px-5 pt-3"><h2 className="font-medium truncate">{detail.work.title}</h2><p className="text-xs opacity-60">{detail.work.summary}{detail.work.source && ` · 原作者：${detail.work.source.authorName}`}</p></div>
-                <div className="shrink-0 px-4 py-2 border-b border-amber-100">
-                    <button type="button" className={button} aria-expanded={toolsExpanded} onClick={()=>setToolsExpanded(value=>!value)}>{toolsExpanded?'收起功能菜单 ▴':'☰ 功能菜单 · '+({talk:'创作交流',run:'体验作品',versions:'版本管理',code:'代码草稿',test:'草稿测试'} as const)[page]+' ▾'}</button>
-                    {toolsExpanded && <nav className="flex gap-2 py-2 overflow-x-auto" aria-label="作品页面">
-                        {([['talk', '创作交流'], ['run', '体验作品'], ['versions', '版本管理'], ['code', '代码草稿']] as const).map(([id,label])=><button key={id} className={button + ' whitespace-nowrap ' + (page===id?'bg-amber-100':'')} onClick={()=>{setDeleteCandidate(false);setPage(id);setToolsExpanded(false);}}>{label}</button>)}
-                    </nav>}
+                <div className="wr-work-toolbar">
+                    <div className="wr-work-heading"><h2>{detail.work.title}</h2><p>{detail.work.summary}</p></div>
+                    <div className="wr-tools">
+                        <button type="button" aria-label="功能菜单" aria-expanded={toolsExpanded} onClick={()=>setToolsExpanded(value=>!value)}>☰ <span>菜单</span> ▾</button>
+                        {toolsExpanded && <nav className="wr-tools-menu" aria-label="作品页面">
+                            {([['talk','创作交流'],['run','体验作品'],['versions','版本管理'],['code','代码草稿']] as const).map(([id,label])=><button key={id} className={page===id?'selected':''} onClick={()=>{setDeleteCandidate(false);setPage(id);setToolsExpanded(false);}}>{label}</button>)}
+                        </nav>}
+                    </div>
                 </div>
                 {page === 'test' && testVersion ? <main className="flex-1 min-h-0 flex flex-col"><p className="px-4 text-xs">草稿试运行：使用临时进度，不产生聊天互动；请实际点击验证玩法。没有报错不代表所有功能正确。</p><div className="flex-1 min-h-0"><WorkroomRunner key={testVersion.id} charId={charId} version={testVersion} preview onNotify={setNotice} onError={text=>setTestErrors(old=>[...old,text.slice(0,2000)].slice(-20))}/></div><div className="p-3 max-h-48 overflow-auto"><p className="text-xs">已捕获错误：{testErrors.length}</p>{testErrors.map((e,i)=><p key={i} className="text-xs text-red-700">{e}</p>)}<textarea aria-label="测试反馈" value={testNotes} maxLength={2000} onChange={e=>setTestNotes(e.target.value)} placeholder="按钮、进度、布局等实际体验反馈" className="w-full text-sm"/><button className={button} disabled={busy} onClick={()=>operate(async()=>{const owner=charId,selected=workId,expected=scope.current;await W.saveTestReport(owner,selected,Number(testVersion.number),testErrors,testNotes);await refresh(owner,selected);if(scope.current===expected){setPage('talk');setTestVersion(null);setNotice('试运行记录已保存，继续交流时 TA 可以读取并修改。');}})}>结束测试并保存记录</button></div></main> : page === 'run' ? <div className="flex-1 min-h-0 bg-white">{version ? <WorkroomPlay key={`${charId}:${version.id}`} charId={charId} version={version} onNotify={setNotice} onError={error=>setNotice('作品运行错误：'+error)}/> : <p className="p-5 text-sm">还没有正式版本，先和 TA 一起制作吧。</p>}</div>
                     : page === 'talk' ? <main className="flex-1 min-h-0 flex flex-col"><div className="flex-1 overflow-y-auto px-5 space-y-4 pb-4">
