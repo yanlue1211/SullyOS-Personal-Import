@@ -25,7 +25,7 @@ export default function WorkroomPlay({charId,version,onNotify,onError,settingsRe
  const speak=async(text:string)=>{try{await generate({instruction:'与用户一起体验当前作品，根据本轮互动及保存状态自然回应。需要采取动作时只提出建议，不谎称已执行；不泄露题目隐藏答案。',context:{userMessage:text},format:'text',publicEvent:text,shareReply:true,companion:true},crypto.randomUUID());}catch{/* visible error retained */}};
  const toggle=async(value:boolean)=>{const previous=allow.current;setEnabled(value);setPermissionBusy(true);if(!value){allow.current=false;controller.current?.abort();clearTimeout(timer.current);events.current=[];}try{await W.setRuntimeAi(charId,version.workId,value);if(alive.current)allow.current=value;}catch(e){if(alive.current){allow.current=previous;setEnabled(previous);setError(String(e));}}finally{if(alive.current)setPermissionBusy(false);}};
  const [settingsOpen,setSettingsOpen]=useState(false);
- useEffect(()=>{const el=settingsRef?.current;if(!el)return;const handle=()=>setSettingsOpen(v=>!v);el.addEventListener('workroom-toggle-settings',handle);return()=>el.removeEventListener('workroom-toggle-settings',handle);},[settingsRef]);
+ useEffect(()=>{const handle=()=>setSettingsOpen(v=>!v);window.addEventListener('workroom-toggle-settings',handle);return()=>window.removeEventListener('workroom-toggle-settings',handle);},[settingsRef]);
  return <div className="wr-play">
  {settingsOpen&&<div className="wr-nested-settings" role="group" aria-label="游戏设置">
    <label><input type="checkbox" disabled={permissionBusy} checked={enabled} onChange={e=>void toggle(e.target.checked)}/> 允许本游戏调用 API</label>
