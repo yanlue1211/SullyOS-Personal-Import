@@ -77,3 +77,13 @@ export async function acceptShare(charId:string,shareId:string){
 }
 
 export const readSharedWork = (charId:string,id:string):Promise<WorkroomShare> => transact(charId,'readonly',async tx=>{const row=await idbResult<WorkroomShare|undefined>(tx.objectStore('workroom_shares').get(id));if(!row||row.charId!==charId)throw Error('分享不存在或不属于当前角色');return row;});
+
+/** Remove an incoming share from this character's inbox without removing its chat history or accepted copy. */
+export async function deleteReceivedShare(charId:string,shareId:string){
+    return transact(charId,'readwrite',async tx=>{
+        const store=tx.objectStore('workroom_shares');
+        const share=await idbResult<WorkroomShare|undefined>(store.get(shareId));
+        if(!share||share.charId!==charId)throw Error('分享不存在或不属于当前角色');
+        await idbResult(store.delete(shareId));
+    });
+}
