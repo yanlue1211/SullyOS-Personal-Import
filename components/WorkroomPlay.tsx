@@ -4,6 +4,13 @@ import WorkroomRunner from './WorkroomRunner';
 import {WorkroomStorage as W} from '../features/workroom/storage';
 import {generateRuntimeTurn} from '../features/workroom/runtime';
 import type {WorkroomVersion,WorkroomTurn} from '../features/workroom/schema';
+/** The companion pane shows spoken replies only, never raw private-heart markup. */
+function publicCompanionText(raw:string):string{
+ return raw.replace(/<心声(?:\\s[^>]*)?>[\\s\\S]*?(?:<\\/心声\\s*>|$)/g,'')
+   .replace(/(?:\\n|^)\\s*\\[角色当时的心声[^\\n]*\\][\\s\\S]*$/,'')
+   .replace(/(?:\\n|^)\\s*【(?:此刻心声|角色心声)】[\\s\\S]*$/,'')
+   .trim();
+}
 export default function WorkroomPlay({charId,version,onNotify,onError}:{charId:string;version:WorkroomVersion;onNotify:(s:string)=>void;onError:(s:string)=>void}){
  const os=useOS(),[expanded,setExpanded]=useState(false),[enabled,setEnabled]=useState(false),[permissionBusy,setPermissionBusy]=useState(true),[auto,setAuto]=useState(false),[turns,setTurns]=useState<WorkroomTurn[]>([]),[input,setInput]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState('');
  const alive=useRef(true),allow=useRef(false),running=useRef(false),controller=useRef<AbortController|null>(null),timer=useRef<ReturnType<typeof setTimeout>>(),events=useRef<string[]>([]);
@@ -22,7 +29,7 @@ export default function WorkroomPlay({charId,version,onNotify,onError}:{charId:s
  <button type="button" className="wr-companion-toggle" aria-expanded={expanded} onClick={()=>setExpanded(v=>!v)}>{expanded?'收起 '+(os.characters.find(c=>c.id===charId)?.name||'TA')+' 互动 ▾':'💬 '+(os.characters.find(c=>c.id===charId)?.name||'TA')+' 互动与设置 ▴'}{busy?' · 回应中…':''}</button>
  {expanded && <div className="wr-companion-body">
  <label><input type="checkbox" disabled={permissionBusy} checked={enabled} onChange={e=>void toggle(e.target.checked)}/> 允许本游戏调用 API</label><small>{permissionBusy?'正在保存设置…':enabled?'游戏 API 已开启 · ':''}允许游戏按需使用当前角色的 API 生成内容，不会自动每次操作都调用。</small>
- {enabled&&<><label className="wr-auto"><input type="checkbox" checked={auto} onChange={e=>setAuto(e.target.checked)}/> 操作后让 {os.characters.find(c=>c.id===charId)?.name||'TA'} 回应</label><small>连续操作会合并，约 2.2 秒后回应一次。</small><div className="wr-play-history">{turns.map(t=><p key={t.id}><b>{t.role==='user'?'你':'TA'}</b> {t.text}</p>)}</div><form onSubmit={e=>{e.preventDefault();const text=input.trim();if(!text||busy)return;setInput('');void speak(text);}}><input aria-label="一起玩消息" value={input} maxLength={1500} onChange={e=>setInput(e.target.value)} placeholder="和 TA 讨论当前局面…"/><button disabled={busy||permissionBusy||!input.trim()}>发送</button><button type="button" disabled={busy||permissionBusy} onClick={()=>void speak('看看当前游戏状态，你有什么反应或想法？')}>让 TA 看看</button></form>{busy&&<p role="status">TA 正在参与… <button onClick={()=>controller.current?.abort()}>停止</button></p>}</>}{error&&<p role="alert">{error}</p>}
+ {enabled&&<><label className="wr-auto"><input type="checkbox" checked={auto} onChange={e=>setAuto(e.target.checked)}/> 操作后让 {os.characters.find(c=>c.id===charId)?.name||'TA'} 回应</label><small>连续操作会合并，约 2.2 秒后回应一次。</small><div className="wr-play-history">{turns.map(t=><p key={t.id}><b>{t.role==='user'?'你':'TA'}</b> {t.role==='assistant'?publicCompanionText(t.text):t.text}</p>)}</div><form onSubmit={e=>{e.preventDefault();const text=input.trim();if(!text||busy)return;setInput('');void speak(text);}}><input aria-label="一起玩消息" value={input} maxLength={1500} onChange={e=>setInput(e.target.value)} placeholder="和 TA 讨论当前局面…"/><button disabled={busy||permissionBusy||!input.trim()}>发送</button><button type="button" disabled={busy||permissionBusy} onClick={()=>void speak('看看当前游戏状态，你有什么反应或想法？')}>让 TA 看看</button></form>{busy&&<p role="status">TA 正在参与… <button onClick={()=>controller.current?.abort()}>停止</button></p>}</>}{error&&<p role="alert">{error}</p>}
  </div>}
  </section></div>;
 }
