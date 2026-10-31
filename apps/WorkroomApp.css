@@ -37,3 +37,9 @@
 .wr-nested-settings label{display:flex;align-items:center;gap:7px}
 .wr-nested-settings input{accent-color:#d9a55c}
 .wr-nested-settings small{font-size:10px;opacity:.7}
+
+/* The settings submenu is anchored to the main menu, not the game canvas. */
+.wr-tools-submenu-host{position:absolute;right:calc(100% + 7px);top:calc(100% + 5px);z-index:22}
+.wr-tools-submenu-host:empty{display:none}
+.wr-tools-submenu-host .wr-nested-settings{position:relative;right:auto;top:auto;min-width:220px;width:min(245px,calc(100vw - 180px));max-width:none}
+@media(max-width:380px){.wr-tools-submenu-host{right:calc(100% + 4px)}.wr-tools-submenu-host .wr-nested-settings{min-width:175px;width:calc(100vw - 188px);padding:9px}}
