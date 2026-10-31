@@ -1050,6 +1050,7 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
         return () => window.removeEventListener(VOICE_FAVORITES_CHANGED_EVENT, syncFavoriteFlags);
     }, [messages]);
 
+    useEffect(()=>{const refresh=(event:Event)=>{const ids=new Set<number>((event as CustomEvent).detail?.ids||[]),owner=charRef.current?.id,visible=messages.filter(m=>ids.has(m.id));if(!visible.length)return;void Promise.all(visible.map(m=>DB.getMessageById(m.id))).then(rows=>{if(charRef.current?.id!==owner)return;const updates=new Map(rows.filter((m):m is Message=>!!m).map(m=>[m.id,m]));setMessages(previous=>previous.map(m=>updates.get(m.id)||m));});};window.addEventListener('archived-media-cleaned',refresh);return()=>window.removeEventListener('archived-media-cleaned',refresh);},[activeCharacterId,messages]);
     // Revoke blob URLs when switching characters / unmounting to avoid leaks.
     useEffect(() => {
         voiceMountedRef.current = true;
