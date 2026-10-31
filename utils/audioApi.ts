@@ -381,6 +381,10 @@ export function registerRecordingRecognition(ref: string, pending: Promise<Recor
   inFlightAudio.set(ref, pending);
   void pending.catch(() => { if (inFlightAudio.get(ref) === pending) inFlightAudio.delete(ref); });
 }
+export function recordingMetadata(recognition: RecordingRecognition, edited = false): Record<string, any> {
+  return { audioDescription: recordingContext(recognition), audioTranscript: recognition.transcript,
+    audioAnalysis: recognition.analysis, audioRecognizedAt: Date.now(), ...(edited ? { audioTextEdited: true } : {}) };
+}
 const inFlightAudio = new Map<string, Promise<RecordingRecognition>>();
 
 /** 聊天里的音频消息先转成文字说明，写回 metadata；同一条只识别一次。 */
@@ -389,6 +393,9 @@ export async function materializeAudioDescriptions(messages: Message[], config?:
   const prepared: Message[] = [];
   for (const message of messages) {
     if (message.type !== 'audio' || readAudioDescription(message)) { prepared.push(message); continue; }
+    // A background recognizer may have completed since this history snapshot was loaded.
+    const latest = await DB.getMessageById(message.id);
+    if (latest?.content === message.content && readAudioDescription(latest)) { prepared.push(latest); continue; }
     const ref = typeof message.content === 'string' ? message.content : '';
     if (!isBlobRef(ref)) { prepared.push(message); continue; }
     let pending = inFlightAudio.get(ref);
@@ -406,7 +413,9 @@ export async function materializeAudioDescriptions(messages: Message[], config?:
       const metadata = { ...(message.metadata || {}), [AUDIO_DESCRIPTION_METADATA_KEY]: description, audioTranscript: recognition.transcript, audioAnalysis: recognition.analysis, audioRecognizedAt: Date.now(), audioModel: config.model.trim() };
       let saved = metadata;
       await DB.updateMessageMetadata(message.id, prev => { saved = prev?.audioTextEdited ? prev : { ...(prev || {}), ...metadata }; return saved; });
-      prepared.push({ ...message, metadata: saved });
+      const updated = { ...message, metadata: saved };
+      if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('personal-recording-edited', { detail: updated }));
+      prepared.push(updated);
     } catch (error) {
       console.warn('[audioApi] 音频识别失败，这条按占位发送', error);
       prepared.push(message);

@@ -1,3 +1,4 @@
+import { readResponseStatus, responseStatusContext } from '../features/personal/responseStatus/protocol';
 import { orderText } from './personalCommerce';
 import { getShareCardImageUrls } from './shareCardImages';
 /**
@@ -150,6 +151,8 @@ export function normalizeMessageContent(
 
     // 结算卡：几种 app 产生，用字段逐一翻成自然文本
     if (type === 'score_card') {
+        const responseStatus = readResponseStatus(msg.content, msg.metadata);
+        if (responseStatus) return responseStatusContext(responseStatus, charName);
         try {
             const card = msg.metadata?.scoreCard || JSON.parse(msg.content);
             if (card?.type === 'lifesim_reset_card') {

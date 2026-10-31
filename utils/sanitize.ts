@@ -1,3 +1,4 @@
+import { extractResponseStatus } from '../features/personal/responseStatus/protocol';
 import { deduplicateVoiceText } from './voiceTextDedup';
 import {extractFriendFeedReplyTags} from './friendFeedReplyFormat';
 /**
@@ -376,6 +377,8 @@ const extractTranslationOriginal = (t: string): string => {
  * 顺序很重要 — 见处理顺序注释.
  */
 export function sanitizeForNotification(text: string): string {
+  const status = extractResponseStatus(text);
+  if (status) return status.kind === 'read' ? '消息已读，暂时不回复' : `暂时不方便看手机 · 预计有空：${status.eta}`;
   let result = text.replace(/<购物>[\s\S]*?(?:<\/购物>|$)/g, '');
   // 1. 字面 \n 还原 — 否则后续 ^ 锚定失效
   result = stripLiteralBackslashN(result);

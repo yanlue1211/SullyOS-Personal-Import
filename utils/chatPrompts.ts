@@ -1,3 +1,4 @@
+import { RESPONSE_STATUS_SYSTEM } from '../features/personal/responseStatus/protocol';
 import { commerceContext } from './personalCommerce';
 import { getShareCardImageUrls } from './shareCardImages';
 import { INNER_VOICE_SYSTEM, innerVoiceContext } from '../features/personal/innerVoice/protocol';
@@ -1089,7 +1090,7 @@ ${voiceActingGuide()}`;
             .join(' ');
         console.log(`⏱ [buildSystemPrompt] total=${perfTotal}ms | stable=${baseSystemPrompt.length}ch volatile=${volatileState.length}ch | ${timingStr}`);
 
-        return { stable: baseSystemPrompt + VIRTUAL_MEDIA_GUIDE + RECORDING_HISTORY_GUIDE + (promptOptions?.appRules ? '' : INNER_VOICE_SYSTEM), volatileState, recencyTail, history: context.history };
+        return { stable: baseSystemPrompt + VIRTUAL_MEDIA_GUIDE + RECORDING_HISTORY_GUIDE + (promptOptions?.appRules ? '' : INNER_VOICE_SYSTEM + RESPONSE_STATUS_SYSTEM), volatileState, recencyTail, history: context.history };
     },
 
     // 格式化消息历史
@@ -1421,7 +1422,7 @@ ${voiceActingGuide()}`;
                             content = `${timeStr} ${formatLifeSimResetCardForContext(card, char?.name)}`;
                         } else if (qixiCard) {
                             content = `${timeStr} ${formatQixiEventCardForContext(qixiCard, 'char')}`;
-                        } else if (card?.type === 'commerce_order' || (card?.type === 'diary_card' && card.diaryKind === 'character')) {
+                        } else if (card?.type === 'response_status' || card?.type === 'commerce_order' || (card?.type === 'diary_card' && card.diaryKind === 'character')) {
                             content = `${timeStr} ${normalizeMessageContent(m, char?.name || '你', userProfile?.name || '用户')}`;
                         } else if (card?.type === 'diary_card') {
                             const uName = card.userName || userProfile?.name || '用户';

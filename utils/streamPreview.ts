@@ -49,6 +49,9 @@ function isLinePreviewable(line: string): boolean {
  * 这类控制标记前截断，避免半截指令或标签泄漏到聊天气泡。
  */
 export function computeStreamPreviewBubbles(fullText: string): string[] {
+    // A status replaces the entire response; never preview its JSON or trailing speech.
+    const withoutThinking = fullText.replace(/<(think|thinking|thought)>[\s\S]*?(?:<\/\1>|$)/gi, '');
+    if (/<回应(?:状(?:态)?)?(?:>|$)/.test(withoutThinking)) return [];
     if (!fullText) return [];
     fullText = extractFriendFeedReplyTags(extractFriendFeedReplyTags(fullText).text,'HOME_VISIT_REPLY').text;
     const lastNl = fullText.lastIndexOf('\n');

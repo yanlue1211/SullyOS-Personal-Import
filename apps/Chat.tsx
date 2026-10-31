@@ -1,4 +1,4 @@
-import { isAudioApiReady, audioBlobToPayload, recognizeUserRecording, registerRecordingRecognition } from '../utils/audioApi';
+import { isAudioApiReady, audioBlobToPayload, recognizeUserRecording, registerRecordingRecognition, recordingMetadata, materializeAudioDescriptions } from '../utils/audioApi';
 import { isEmotionFeatureOn } from '../utils/scheduleFeature';
 import { recordingToWav } from '../features/personal/chatMedia/recording';
 import PersonalMediaComposer from '../features/personal/chatMedia/Composer';
@@ -1515,6 +1515,11 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
         }
 
         const savedUserMsgId = await DB.saveMessage(msgPayload);
+        // Recognition belongs to the saved recording, independent of a later AI reply.
+        if (type === 'audio' && !metadata?.audioDescription) {
+            void materializeAudioDescriptions([{ ...msgPayload, id: savedUserMsgId, timestamp: Date.now() }], apiConfig.audioApi)
+                .catch(error => console.warn('[recording] 无法更新语音字幕', error));
+        }
 
         if (type === 'image') {
             // 相册是消息的附带记录：保留来源消息引用供收藏/去重使用，但相册写入失败
@@ -3595,6 +3600,7 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
     const handleCharSelectCallback = useCallback((id: string) => { setActiveCharacterId(id); setShowPanel('none'); }, []);
     const autoReply = useChatAutoReply({
         enabled: inputPreferences.autoReply,
+        mediaComposerOpen: !!personalMediaPanel,
         conversationId: activeCharacterId || null,
         active: (activeApp === AppID.Chat || !!homePhone) && !!char,
         blocked: isInputFocused || !!input.trim() || showPanel !== 'none' || modalType !== 'none'
@@ -4492,13 +4498,13 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
                 {/* 开关写着「已开启」、这一轮却在本地生成时，把原因说给用户听 */}
                 <InstantChatRouteNotice charId={activeCharacterId} />
 
-                {!selectionMode && personalMediaPanel && <PersonalMediaComposer key={`${char.id}:${personalMediaPanel}`} sheet visualOnly={personalMediaPanel === 'visual'} onClose={() => setPersonalMediaPanel(null)} conversationId={char.id} onRecognize={isAudioApiReady(apiConfig.audioApi) ? async blob => recognizeUserRecording(await audioBlobToPayload(await prepareRecording(blob), 'voice.wav'), apiConfig.audioApi!) : undefined} onSend={async (content, blob, duration, signal, recognition) => {
+                {!selectionMode && personalMediaPanel && <PersonalMediaComposer key={`${char.id}:${personalMediaPanel}`} sheet visualOnly={personalMediaPanel === 'visual'} onClose={() => setPersonalMediaPanel(null)} conversationId={char.id} onRecognize={isAudioApiReady(apiConfig.audioApi) ? async blob => recognizeUserRecording(await audioBlobToPayload(await prepareRecording(blob), 'voice.wav'), apiConfig.audioApi!) : undefined} onSend={async (content, blob, duration, signal, recognition, completedRecognition) => {
                     if (blob) {
                         const wav = await prepareRecording(blob);
                         signal?.throwIfAborted();
                         const ref = await putImageBlob(wav);
-                        if (recognition) registerRecordingRecognition(ref, recognition);
-                        await handleSendText(ref, 'audio', { duration, fileName: 'voice.wav' });
+                        if (recognition && !completedRecognition) registerRecordingRecognition(ref, recognition);
+                        await handleSendText(ref, 'audio', { duration, fileName: 'voice.wav', ...(completedRecognition ? recordingMetadata(completedRecognition, true) : {}) });
                     } else await handleSendText(content, 'text');
                 }} />}
                 <ChatInputArea
