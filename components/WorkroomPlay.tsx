@@ -6,9 +6,9 @@ import {generateRuntimeTurn} from '../features/workroom/runtime';
 import type {WorkroomVersion,WorkroomTurn} from '../features/workroom/schema';
 /** The companion pane shows spoken replies only, never raw private-heart markup. */
 function publicCompanionText(raw:string):string{
- return raw.replace(/<心声(?:\\s[^>]*)?>[\\s\\S]*?(?:<\\/心声\\s*>|$)/g,'')
-   .replace(/(?:\\n|^)\\s*\\[角色当时的心声[^\\n]*\\][\\s\\S]*$/,'')
-   .replace(/(?:\\n|^)\\s*【(?:此刻心声|角色心声)】[\\s\\S]*$/,'')
+ return raw.replace(/<心声(?:\s[^>]*)?>[\s\S]*?(?:<\/心声\s*>|$)/g,'')
+   .replace(/(?:\n|^)\s*\[角色当时的心声[^\n]*\][\s\S]*$/,'')
+   .replace(/(?:\n|^)\s*【(?:此刻心声|角色心声)】[\s\S]*$/,'')
    .trim();
 }
 export default function WorkroomPlay({charId,version,onNotify,onError}:{charId:string;version:WorkroomVersion;onNotify:(s:string)=>void;onError:(s:string)=>void}){
