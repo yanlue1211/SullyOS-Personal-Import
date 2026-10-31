@@ -1,3 +1,4 @@
+import {oracleContext} from '../features/experience/oracle';
 import { materializeAudioDescriptions } from './audioApi';
 import { loadAudioApiConfig } from './songListening';
 import { buildListenSongGuide, collectListenCandidates, isListenSongEnabled, isSongListeningAvailable, isRealSongListeningEnabled, getOrAnalyzeSongSound, buildCurrentSongSoundBlock } from './songListening';
@@ -515,6 +516,7 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
 
     // 「关于对方的表达」+「回到你自己」必须是易变尾段的最后内容：修复旧版把双语/HTML/
     // 思考链/点单块拼在钢印之后、模型开口前最后读到的是格式说明书的问题。
+    if(!input.appPrompt&&(!input.recallEntryPoint||['chat_app','chat_payload','proactive_chat'].includes(input.recallEntryPoint)))volatileTail+=await oracleContext(char.id);
     if (input.appPrompt) volatileTail += input.appPrompt.scene;
     volatileTail += parts.recencyTail;
     if (sarModuleBlock) volatileTail += sarModuleBlock;

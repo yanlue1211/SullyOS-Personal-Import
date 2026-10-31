@@ -6,6 +6,8 @@ import { buildWorkroomDocument, WORKROOM_SANDBOX } from '../features/workroom/ru
 export interface WorkroomRunnerProps {
     charId: string;
     version: WorkroomVersion;
+    onActions?: (actions:import('../features/workroom/actions').GameAction[])=>void;
+    onController?: (play:(()=>void)|null)=>void;
     onNotify?: (text: string) => void;
     onError?: (text: string) => void;
     onGenerateError?: (error:unknown)=>void;
@@ -14,11 +16,11 @@ export interface WorkroomRunnerProps {
     preview?: boolean;
 }
 /** Each mount/version owns a fresh iframe and capability port; teardown revokes old work. */
-export default function WorkroomRunner({ charId, version, onNotify, onError, onEvent, onGenerate, onGenerateError, preview = false }: WorkroomRunnerProps) {
+export default function WorkroomRunner({ charId, version, onNotify, onError, onEvent, onGenerate, onGenerateError, onActions, onController, preview = false }: WorkroomRunnerProps) {
     const iframe = useRef<HTMLIFrameElement>(null);
     const [stopped, setStopped] = useState(false);
-    const callbacks = useRef({ onNotify, onError, onEvent, onGenerate, onGenerateError });
-    callbacks.current = { onNotify, onError, onEvent, onGenerate, onGenerateError };
+    const callbacks = useRef({ onNotify, onError, onEvent, onGenerate, onGenerateError, onActions, onController });
+    callbacks.current = { onNotify, onError, onEvent, onGenerate, onGenerateError, onActions, onController };
     const [doc, setDoc] = useState('');
     const setup = useRef<(() => void) | undefined>();
     const stop = useRef<(() => void) | undefined>();
@@ -28,14 +30,16 @@ export default function WorkroomRunner({ charId, version, onNotify, onError, onE
         let port: MessagePort | undefined;
         const session = crypto.randomUUID();
         const host = createWorkroomHost(charId, version.workId, version.id, session, {
+            onActions: actions=>callbacks.current.onActions?.(actions),
             onNotify: text => callbacks.current.onNotify?.(text),
             onError: text => callbacks.current.onError?.(text),
-            onStop: () => setStopped(true),
+            onStop: () => {callbacks.current.onActions?.([]);callbacks.current.onController?.(null);setStopped(true);},
             onGenerateError: error=>callbacks.current.onGenerateError?.(error),
             onEvent: text=>callbacks.current.onEvent?.(text),
             onGenerate: (request,id,signal)=>{const fn=callbacks.current.onGenerate;if(!fn)return Promise.reject(Error('该作品未开启运行时AI'));return fn(request,id,signal);},
         }, preview);
-        const dispose = () => { active = false; port?.close(); host.close(); };
+        callbacks.current.onController?.(()=>host.characterPlay());
+        const dispose = () => { callbacks.current.onController?.(null);callbacks.current.onActions?.([]);active = false; port?.close(); host.close(); };
         stop.current = dispose;
         setup.current = () => {
             if (!active) return;

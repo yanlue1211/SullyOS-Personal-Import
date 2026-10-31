@@ -8,7 +8,7 @@ export interface VideoFrame { timeSeconds: number; image: string }
 export async function extractVideoFrames(videoUrl: string, options: {
   count?: number; width?: number; timeoutMs?: number;
 } = {}): Promise<VideoFrame[]> {
-  if (!/^https?:\/\//i.test(videoUrl)) return [];
+  if (!/^(?:https?:\/\/|blob:)/i.test(videoUrl)) return [];
   const count = Math.min(8, Math.max(1, Math.floor(options.count ?? 6)));
   const width = Math.min(640, Math.max(160, Math.floor(options.width ?? 480)));
   const timeoutMs = Math.min(30000, Math.max(1000, options.timeoutMs ?? 12000));
@@ -36,7 +36,9 @@ export async function extractVideoFrames(videoUrl: string, options: {
     video.src = videoUrl;
     video.load();
     await loaded;
-    if (!Number.isFinite(video.duration) || video.duration <= 0 || !video.videoWidth || !video.videoHeight) return [];
+    let duration=video.duration;
+    if(!Number.isFinite(duration)){const sought=wait('seeked');video.currentTime=1e9;await sought;duration=Number.isFinite(video.duration)?video.duration:video.currentTime;}
+    if (!Number.isFinite(duration) || duration <= 0 || !video.videoWidth || !video.videoHeight) return [];
     const canvas = document.createElement('canvas');
     canvas.width = Math.min(width, video.videoWidth);
     canvas.height = Math.max(1, Math.round(canvas.width * video.videoHeight / video.videoWidth));
@@ -45,7 +47,7 @@ export async function extractVideoFrames(videoUrl: string, options: {
     const frames: VideoFrame[] = [];
     for (let i = 0; i < count; i++) {
       try {
-      const timeSeconds = Math.min(Math.max(0, video.duration - 0.1), (i + 0.5) * video.duration / count);
+      const timeSeconds = Math.min(Math.max(0, duration - 0.1), (i + 0.5) * duration / count);
       const seeked = wait('seeked');
       video.currentTime = timeSeconds;
       await seeked;

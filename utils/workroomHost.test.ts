@@ -95,3 +95,7 @@ it('动态生成接口传递纯数据并在销毁时取消，预览不能触发�
  await vi.waitFor(()=>expect(generate).toHaveBeenCalledOnce());host.close();expect(signal?.aborted).toBe(true);
  const previewPort={...port,onmessage:undefined as any};const preview=createWorkroomHost('runner-char','w','v','s',{onGenerate:generate},true);preview.bind(previewPort as unknown as MessagePort);previewPort.onmessage({data:{id:'1',method:'generate',args:[{instruction:'新题'}]}});await vi.waitFor(()=>expect(replies.some(r=>r.ok===false)).toBe(true));expect(generate).toHaveBeenCalledOnce();preview.close();
 });
+it('preview accepts action declarations without exposing character execution or calling the model',async()=>{
+ const replies:any[]=[],onActions=vi.fn(),onGenerate=vi.fn();const port={onmessage:undefined as any,postMessage:(r:unknown)=>replies.push(r),close:vi.fn()};const host=createWorkroomHost('a','w','v','s',{onActions,onGenerate},true);host.bind(port as any);
+ port.onmessage({data:{id:'1',method:'registerActions',args:[[{id:'feed',label:'喂食'}]]}});await vi.waitFor(()=>expect(replies[0]?.ok).toBe(true));host.characterPlay();expect(onActions).not.toHaveBeenCalled();expect(onGenerate).not.toHaveBeenCalled();expect(replies).toHaveLength(1);host.close();
+});

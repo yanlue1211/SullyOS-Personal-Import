@@ -1,3 +1,4 @@
+import {readRealMedia,mediaText} from '../features/experience/format';
 import { innerVoiceMemoryContext } from '../features/personal/innerVoice/protocol';
 import { workroomMessageText } from './workroomEvent';
 import { readResponseStatus, responseStatusContext } from '../features/personal/responseStatus/protocol';
@@ -119,6 +120,7 @@ export function normalizeMessageContent(
     charName: string,
     userName: string,
 ): string {
+    const media=readRealMedia(msg.metadata?.realMedia);if(media)return mediaText(media)+(typeof msg.metadata?.visionDescription==='string'?'\n画面描述：'+msg.metadata.visionDescription:'');
     const type = msg.type as string;
     if (type === 'workroom_card') return workroomMessageText(msg);
     if (type === 'secret_note') return secretNoteContext(msg.content);

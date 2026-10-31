@@ -67,3 +67,9 @@ it('format errors include the redacted response while preserving state and never
  expect(calls).toHaveLength(1);expect(JSON.stringify(calls[0].body.messages)).toContain('只输出一份完整 JSON');
  expect(JSON.stringify(await DB.getMessagesByCharId('a',true))).not.toContain('"answer":"a"');
 });
+it('ends every runtime request with its actual task rather than leaving creation history as the pending turn',async()=>{
+ await DB.saveMessage({charId:'a',role:'assistant',type:'text',content:'【造物间·创作交流】再来一版，带心声。'});
+ const calls=model('{"correct":false,"reply":"还没猜中","newHint":"温暖"}');
+ await generateRuntimeTurn(args({instruction:'判断本轮猜词，只返回correct、reply、newHint',context:{guess:'太阳'},format:'json'}));
+ const last=calls[0].body.messages.at(-1);expect(last.role).toBe('user');expect(last.content).toContain('本次作品运行请求');expect(last.content).toContain('太阳');expect(last.content).toContain('correct');expect(last.content).not.toContain('再来一版');
+});

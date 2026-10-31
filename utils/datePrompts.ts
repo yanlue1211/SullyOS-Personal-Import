@@ -1,3 +1,5 @@
+import {realMediaContent} from '../features/experience/format';
+import {oracleContext} from '../features/experience/oracle';
 /**
  * 见面（DateApp）提示词统一构造器
  *
@@ -758,7 +760,8 @@ ${extraBlock ? `\n${extraBlock}` : ''}${isObserveOn(char) ? `\n${buildObserveBlo
             input.useVisionDescriptions === true,
         );
 
-        const conversation = [...historyMsgs, { role: 'user', content: userText }];
+        const pending=allMsgs[allMsgs.length-1];const pendingContent=pending?.role==='user'&&pending.content===userText?realMediaContent(pending,input.useVisionDescriptions):userText;
+        const conversation = [...historyMsgs, { role: 'user', content: pendingContent }];
 
         // 向量召回挂到 char.memoryPalaceInjection，buildCoreContext 会读取
         await injectMemoryPalace(char, allMsgs, undefined, userProfile?.name);
@@ -766,7 +769,7 @@ ${extraBlock ? `\n${extraBlock}` : ''}${isObserveOn(char) ? `\n${buildObserveBlo
             char, user: userProfile, history: conversation,
             timeOptions: { skipTimeAwareness: !isDateTimeAwarenessOn(char), conversational: true, includeUserLocation: true },
         }));
-        const systemPrompt = context.coreContext
+        const systemPrompt = context.coreContext + await oracleContext(char.id)
             + buildVNModeBlock(char, userProfile?.name || '')
             + ContextBuilder.buildSARModuleContext(char, userProfile, 'date');
 
@@ -783,7 +786,7 @@ ${extraBlock ? `\n${extraBlock}` : ''}${isObserveOn(char) ? `\n${buildObserveBlo
             messages: [
                 { role: 'system', content: systemPrompt },
                 ...messagesWithWorldbooks.map(message => message === pendingMessage
-                    ? { ...message, content: `${userText}\n\n${note}` }
+                    ? { ...message, content: Array.isArray(pendingContent)?[...pendingContent,{type:'text',text:note}]:`${pendingContent}\n\n${note}` }
                     : message),
                 { role: 'system', content: buildDateInteractionPrinciples(char.name, userProfile?.name || '对方') },
             ],
