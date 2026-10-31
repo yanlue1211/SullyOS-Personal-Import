@@ -1,0 +1,24 @@
+name: Inner voice memory verification
+on:
+  push:
+    branches: [personal/inner-voice-memory]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NODE_OPTIONS: '--max-old-space-size=4096'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec vitest run utils/memoryPalace/innerVoiceMemory.test.ts utils/personalInnerVoice.test.ts utils/memoryPalace/longMemoryInput.test.ts utils/memoryPalace/bufferCount.test.ts utils/messageFormat.cards.test.ts utils/chatPrompts.test.ts utils/memoryPalace/relativeTime.test.ts utils/memoryPalace/extractionFeatureFlag.test.ts
+      - run: pnpm run build

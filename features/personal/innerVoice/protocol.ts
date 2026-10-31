@@ -24,3 +24,13 @@ export function innerVoiceContext(value: unknown): string {
   if (!item || typeof item.state !== 'string' || typeof item.thoughts !== 'string') return '';
   return `\n[角色当时的心声，未说出口、用户未必知情]\n状态：${item.state}\n内心：${item.thoughts}${item.undercurrent ? `\n暗流：${item.undercurrent}` : ''}`;
 }
+
+/** Archive/extraction material: feelings are experiences, not speech or completed actions. */
+export function innerVoiceMemoryContext(value: unknown): string {
+  const item = value as Partial<InnerVoice> | undefined;
+  if (!item || typeof item.state !== 'string' || typeof item.thoughts !== 'string') return '';
+  const normalized = { state: item.state.trim(), thoughts: item.thoughts.trim(), undercurrent: typeof item.undercurrent === 'string' ? item.undercurrent.trim() : '' };
+  if (!normalized.state && !normalized.thoughts && !normalized.undercurrent) return '';
+  const context = innerVoiceContext(normalized);
+  return `${context}\n[心声记忆边界] 可提取重要的当时感受、心理变化和内心矛盾，写成“我当时心里……”；不能记成已经向用户说过、用户已经知情或双方已达成共识。念头、愿望与暗流不等于实际行动，也不能凭一轮情绪推断永久性格或既定关系。只根据明确内容提取，不为凑记忆逐轮照抄。`;
+}

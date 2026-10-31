@@ -1,3 +1,4 @@
+import { innerVoiceMemoryContext } from '../features/personal/innerVoice/protocol';
 import { readResponseStatus, responseStatusContext } from '../features/personal/responseStatus/protocol';
 import { orderText } from './personalCommerce';
 import { getShareCardImageUrls } from './shareCardImages';
@@ -416,7 +417,7 @@ export function formatMessageForPrompt(
         : msg.role === 'user' ? userName
         : msg.role === 'system' ? '[系统]'
         : charName;
-    return `[${sender}]: ${normalizeMessageContent(msg, charName, userName)}`;
+    return `[${sender}]: ${normalizeMessageContent(msg, charName, userName)}${msg.role === 'assistant' ? innerVoiceMemoryContext(msg.metadata?.innerVoice) : ''}`;
 }
 
 /** 带时间戳的版本（归档常用）：`[HH:MM] 发送者: 内容` */
@@ -433,7 +434,7 @@ export function formatMessageWithTime(
         : charName;
     const time = msg.timestamp > 0 ? timeFormatter(msg.timestamp) : '';
     const prefix = time ? `[${time}] ` : '';
-    return `${prefix}${sender}: ${normalizeMessageContent(msg, charName, userName)}`;
+    return `${prefix}${sender}: ${normalizeMessageContent(msg, charName, userName)}${msg.role === 'assistant' ? innerVoiceMemoryContext(msg.metadata?.innerVoice) : ''}`;
 }
 
 /**
@@ -444,6 +445,7 @@ export function formatMessageWithTime(
  * voice 只要带转写文字就属于语义上下文，应该与文字和卡片一起参与统计与总结。
  */
 export function isMessageSemanticallyRelevant(msg: Message): boolean {
+    if (msg.role === 'assistant' && innerVoiceMemoryContext(msg.metadata?.innerVoice)) return true;
     const type = msg.type as string;
     if (type === 'image' || type === 'emoji') return false;
     if (type === 'voice') return !!getVoiceTranscript(msg);
