@@ -1,3 +1,4 @@
+import CleanupManager from '../features/experience/CleanupManager';
 import AudioApiFields from '../components/settings/AudioApiFields';
 import RecordingManager from '../features/personal/chatMedia/RecordingManager';
 import AudioApiTestButton from '../components/settings/AudioApiTestButton';
@@ -492,6 +493,7 @@ const McpServersCard: React.FC<{
 };
 
 const Settings: React.FC = () => {
+  const [archivedMediaCleanupOpen,setArchivedMediaCleanupOpen]=useState(false);
   const [recordingManagerOpen, setRecordingManagerOpen] = useState(false);
   const {
       apiConfig, updateApiConfig, closeApp, availableModels, setAvailableModels,
@@ -2555,6 +2557,8 @@ const Settings: React.FC = () => {
             </p>
         </SettingsSection>
 
+        <SettingsSection title="图片与视频存储" icon={<span className="text-xl">🎬</span>}><button onClick={()=>setArchivedMediaCleanupOpen(true)} className="w-full rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-700">清理已归档的图片与视频 ›</button></SettingsSection>
+        {archivedMediaCleanupOpen&&<CleanupManager onClose={()=>setArchivedMediaCleanupOpen(false)}/>}
         <SettingsSection title="录音存储" icon={<span className="text-xl">🎙</span>}>
           <button type="button" onClick={() => setRecordingManagerOpen(true)} className="w-full flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-700"><span>管理用户录音</span><span className="text-slate-400">批量清理 ›</span></button>
         </SettingsSection>
