@@ -1,0 +1,41 @@
+name: Workroom browser verification
+on:
+  push:
+    branches: [personal/workroom-foundation]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NODE_OPTIONS: '--max-old-space-size=6144'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Install isolated browser test runtime
+        run: |
+          mkdir -p "$RUNNER_TEMP/workroom-browser"
+          pnpm --dir "$RUNNER_TEMP/workroom-browser" add playwright@1.56.1
+          pnpm --dir "$RUNNER_TEMP/workroom-browser" exec playwright install --with-deps chromium
+      - name: Start local test server
+        run: |
+          pnpm exec vite --host 127.0.0.1 --port 4179 > /tmp/workroom-vite.log 2>&1 &
+          for i in $(seq 1 30); do curl --fail --silent http://127.0.0.1:4179/test/fixtures/workroom-browser.html > /dev/null && exit 0; sleep 1; done
+          cat /tmp/workroom-vite.log
+          exit 1
+      - name: Verify mobile sandbox and restore flow
+        run: WORKROOM_PLAYWRIGHT_MODULE="$RUNNER_TEMP/workroom-browser/node_modules/playwright/index.mjs" node scripts/workroom-browser-check.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: workroom-browser-results
+          path: test-results/workroom
