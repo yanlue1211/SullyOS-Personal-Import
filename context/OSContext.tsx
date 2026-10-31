@@ -25,7 +25,8 @@ import { FEEDBACK_INVITATION_KEY, hasPriorFeedbackInstallEvidence, initializeFee
 import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react';
 import type { VRSARActivity } from '../types';
 import { APIConfig, AppID, OSTheme, VirtualTime, CharacterProfile, CharacterGroup, ChatTheme, Toast, FullBackupData, UserProfile, ApiPreset, GroupProfile, SystemLog, Worldbook, NovelBook, SongSheet, Message, RealtimeConfig, AppearancePreset, CloudBackupConfig, CloudBackupFile, MemoryPalaceFeatureFlags } from '../types';
-import { DB } from '../utils/db';
+import { DB, openDB } from '../utils/db';
+import { streamWorkroomBackup } from '../features/workroom/backup';
 import { reportDatabaseFailure } from '../utils/databaseHealth';
 import type { AvatarTouchRecord } from '../utils/avatarTouch';
 import { clampClaudeTemperature, modelRejectsSamplingParams, stripSamplingParams } from '../utils/samplingParamCompat';
@@ -4601,7 +4602,10 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
               med_plans: 'medPlans',
               life_record_settings: 'lifeRecordSettings',
           };
-          const prewrittenStores: BackupManifest['stores'] = {};
+          const workroomOwnerIds = new Set<string>();
+          const exportedCharacterIds = new Set<string>();
+          const prewrittenStores: BackupManifest['stores'] = mode === 'full' || mode === 'text_only'
+              ? await streamWorkroomBackup(await openDB(), zip as unknown as ZipFileWriter, collectSerialized, id => workroomOwnerIds.add(id)) : {};
           // Vectors retain the existing binary format, read one record at a time.
           let vectorPayload: Awaited<ReturnType<typeof encodeVectorsForBackupChunked>> | undefined;
           // Only voice Blobs reachable from the exported Live2D settings are portable.
@@ -4632,6 +4636,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                       onSerialized: collectSerialized,
                       transform: (item, index) => {
                           if (storeName === 'characters') {
+                              exportedCharacterIds.add(item.id);
                               normalizeCharacterRoomAssetsInPlace(item);
                               if (mode !== 'text_only') {
                                   collectCharacterCompanionVoiceAssetIds([item])
@@ -4723,6 +4728,10 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                   default: throw new Error(`未配置备份字段：${storeName}`);
               }
               await new Promise(resolve => setTimeout(resolve, 10));
+          }
+
+          if ([...workroomOwnerIds].some(id => !exportedCharacterIds.has(id))) {
+              throw new Error('备份期间角色资料发生变化，请重新导出，以保持造物间归属完整');
           }
 
           // 进度条停在 70% 让用户看到接下来的"压缩中 X%"实际推进，而不是卡在 95% 干等。

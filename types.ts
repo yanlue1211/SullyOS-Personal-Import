@@ -1,3 +1,4 @@
+import type { WorkroomBackup } from './features/workroom/schema';
 
 export enum AppID {
   Launcher = 'launcher',
@@ -3944,7 +3945,7 @@ export interface Emoji {
     categoryId?: string; 
 }
 
-export interface FullBackupData {
+export interface FullBackupData extends Partial<WorkroomBackup> {
     /** 好友圈正文；文字备份单列，完整备份随 assets 保存。 */
     friendFeed?: import('./utils/friendFeed').FriendFeedState;
     /** Media-only patches never replace feed text or settings. */

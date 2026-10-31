@@ -1,3 +1,5 @@
+import { createWorkroomStores, WORKROOM_STORES } from '../features/workroom/schema';
+import { exportWorkroomBackup, restoreWorkroomBackup, validateWorkroomBackup } from '../features/workroom/backup';
 import { readLocalCursor } from './localRead';
 import { applyFriendFeedMedia, collectFriendFeedMedia, isActivityTextAsset } from './activityBackup';
 import { compactMemoryLink } from './memoryPalace/linkPrecision';
@@ -48,7 +50,8 @@ const DB_NAME = 'AetherOS_Data';
 // v72: home projection reads only home-source rows, never scans private-chat history.
 // v73: direct home-turn lookups for incremental journal writes.
 // v74: merge master delivery lookup with both home indexes, including existing v73 databases.
-const DB_VERSION = 74;
+// v75: per-character workroom works, immutable versions, drafts, state and events.
+const DB_VERSION = 75;
 
 const STORE_CHARACTERS = 'characters';
 const STORE_CHAR_GROUPS = 'character_groups'; // 角色分组定义（角色通过 groupId 指向；与群聊 groups 无关）
@@ -287,6 +290,7 @@ export const openDB = (): Promise<IDBDatabase> => {
           }
       };
 
+      createWorkroomStores(db);
       createStore(STORE_CHARACTERS, { keyPath: 'id' });
       createStore(STORE_CHAR_GROUPS, { keyPath: 'id' }); // v68: 角色分组
 
@@ -650,8 +654,19 @@ export const DB = {
 
   deleteCharacter: async (id: string): Promise<void> => {
     const db = await openDB();
-    const transaction = db.transaction(STORE_CHARACTERS, 'readwrite');
+    const transaction = db.transaction([STORE_CHARACTERS, ...WORKROOM_STORES], 'readwrite');
+    const done = new Promise<void>((resolve, reject) => {
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error || new Error('角色删除失败'));
+    });
     transaction.objectStore(STORE_CHARACTERS).delete(id);
+    for (const name of WORKROOM_STORES) {
+      const store = transaction.objectStore(name);
+      const request = store.index('charId').openCursor(IDBKeyRange.only(id));
+      request.onsuccess = () => { const cursor = request.result; if (cursor) { cursor.delete(); cursor.continue(); } };
+    }
+    await done;
   },
 
   // ---- 角色分组（神经链接"文件夹"，与群聊 groups 无关）----
@@ -3667,7 +3682,11 @@ export const DB = {
       const mainState = bankData.find((d: any) => d.id === 'main_state');
       const dollhouseRecord = bankData.find((d: any) => d.id === 'dollhouse_state');
 
+      const workroomBackup = await exportWorkroomBackup(db);
+      const exportedOwners = new Set(characters.map((c: CharacterProfile) => c.id));
+      if (workroomBackup.workroomWorks.some(w => !exportedOwners.has(w.charId))) throw new Error('备份期间角色资料发生变化，请重试');
       return {
+          ...workroomBackup,
           characters, characterGroups, messages, customThemes: themes, savedEmojis: emojis, emojiCategories, assets, galleryImages, userProfile, diaries, tasks, anniversaries, roomTodos, roomNotes, groups, savedJournalStickers: journalStickers, socialPosts, courses, games, worldbooks, storyTheaters, storyTheaterPresets, storyTheaterMasks, novels,
           bankState: mainState ? { ...mainState, id: undefined } : undefined,
           bankDollhouse: dollhouseRecord?.data || undefined,
@@ -3734,6 +3753,11 @@ export const DB = {
       } = {}
   ): Promise<void> => {
       const db = await openDB();
+      const workroomBackup = data.collaborationBackupMode === 'media_only' ? undefined : validateWorkroomBackup(data);
+      if (workroomBackup) {
+          const owners = new Set((data.characters ?? await DB.getAllCharacters()).map(c => c.id));
+          if (workroomBackup.workroomWorks.some(w => !owners.has(w.charId))) throw new Error('造物间备份的角色不存在');
+      }
       invalidateStoryTimelineRepair(db);
       
       const availableStores = [
@@ -3805,6 +3829,7 @@ export const DB = {
           }
       }
       const plannedSections = [
+          workroomBackup !== undefined,
           data.characters !== undefined || data.mediaAssets !== undefined,
           data.characterGroups !== undefined,
           data.messages !== undefined,
@@ -3998,6 +4023,10 @@ export const DB = {
       };
 
       const hasCharacterBackup = Array.isArray(data.characters);
+
+      await runSection('造物间', workroomBackup !== undefined, async () => {
+          await restoreWorkroomBackup(db, workroomBackup!);
+      });
 
       await runSection('角色资料', data.characters !== undefined || data.mediaAssets !== undefined, async () => {
           if (data.characters) {
