@@ -11,7 +11,7 @@ function publicCompanionText(raw:string):string{
    .replace(/(?:\n|^)\s*【(?:此刻心声|角色心声)】[\s\S]*$/,'')
    .trim();
 }
-export default function WorkroomPlay({charId,version,onNotify,onError}:{charId:string;version:WorkroomVersion;onNotify:(s:string)=>void;onError:(s:string)=>void}){
+export default function WorkroomPlay({charId,version,onNotify,onError,settingsRef}:{charId:string;version:WorkroomVersion;onNotify:(s:string)=>void;onError:(s:string)=>void;settingsRef?:React.MutableRefObject<HTMLElement|null>}){
  const os=useOS(),[expanded,setExpanded]=useState(false),[enabled,setEnabled]=useState(false),[permissionBusy,setPermissionBusy]=useState(true),[auto,setAuto]=useState(false),[turns,setTurns]=useState<WorkroomTurn[]>([]),[input,setInput]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState('');
  const alive=useRef(true),allow=useRef(false),running=useRef(false),controller=useRef<AbortController|null>(null),timer=useRef<ReturnType<typeof setTimeout>>(),events=useRef<string[]>([]);
  const refresh=async()=>{const rows=await W.playTurns(charId,version.workId);if(alive.current)setTurns(rows.slice(-12));};
@@ -24,7 +24,14 @@ export default function WorkroomPlay({charId,version,onNotify,onError}:{charId:s
  };
  const speak=async(text:string)=>{try{await generate({instruction:'与用户一起体验当前作品，根据本轮互动及保存状态自然回应。需要采取动作时只提出建议，不谎称已执行；不泄露题目隐藏答案。',context:{userMessage:text},format:'text',publicEvent:text,shareReply:true,companion:true},crypto.randomUUID());}catch{/* visible error retained */}};
  const toggle=async(value:boolean)=>{const previous=allow.current;setEnabled(value);setPermissionBusy(true);if(!value){allow.current=false;controller.current?.abort();clearTimeout(timer.current);events.current=[];}try{await W.setRuntimeAi(charId,version.workId,value);if(alive.current)allow.current=value;}catch(e){if(alive.current){allow.current=previous;setEnabled(previous);setError(String(e));}}finally{if(alive.current)setPermissionBusy(false);}};
+ const [settingsOpen,setSettingsOpen]=useState(false);
+ useEffect(()=>{const el=settingsRef?.current;if(!el)return;const handle=()=>setSettingsOpen(v=>!v);el.addEventListener('workroom-toggle-settings',handle);return()=>el.removeEventListener('workroom-toggle-settings',handle);},[settingsRef]);
  return <div className="wr-play">
+ {settingsOpen&&<div className="wr-nested-settings" role="group" aria-label="游戏设置">
+   <label><input type="checkbox" disabled={permissionBusy} checked={enabled} onChange={e=>void toggle(e.target.checked)}/> 允许本游戏调用 API</label>
+   <label><input type="checkbox" disabled={permissionBusy||!enabled} checked={auto} onChange={e=>setAuto(e.target.checked)}/> 操作后让 {os.characters.find(c=>c.id===charId)?.name||'TA'} 回应</label>
+   <small>游戏生成和独立回应使用当前角色 API。</small>
+ </div>}
  <div className="wr-play-stage"><WorkroomRunner charId={charId} version={version} onNotify={onNotify} onError={onError} onGenerate={generate} onEvent={text=>{if(!allow.current||!auto)return;events.current=[...events.current,text].slice(-20);clearTimeout(timer.current);const flush=()=>{if(!alive.current||!allow.current)return;if(running.current){timer.current=setTimeout(flush,2200);return;}const text=events.current.splice(0).slice(-5).join('；').slice(0,1500);if(text)void speak(text);};timer.current=setTimeout(flush,2200);}}/></div>
  <section className="wr-companion" aria-label="角色互动">
   <button type="button" className="wr-companion-toggle" aria-expanded={expanded} onClick={()=>setExpanded(v=>!v)}>{expanded?'▾ 收起聊天记录':'▸ 展开聊天记录'}{busy?' · 回应中…':''}</button>
