@@ -1057,9 +1057,6 @@ export const DB = {
         charRequest.onsuccess = () => {
           const char = charRequest.result;
           if (!char) { fail(new Error('角色已不存在')); return; }
-          if (((name === 'workroom_events' && row.event?.kind === 'progress') || (name === 'workroom_turns' && row.kind === 'play')) && char.workroomLinkEnabled !== true) {
-            source.put({ ...row, delivery: 'local' }); return;
-          }
           try {
             const deliveryId = `workroom:${name}:${id}`;
             const message = name === 'workroom_events' ? createWorkroomMessage(row.event) : {
