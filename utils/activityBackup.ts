@@ -3,15 +3,19 @@ import type { FriendFeedImage } from './friendFeedSource';
 import { isLocalFriendImage } from './friendFeedImages';
 import { stripBackupImages } from './backupExport';
 
+export const isPersonalTextAsset = (id:string):boolean => id === 'personal_commerce_v1' || id.startsWith('personal_schedule_once:');
+
 /** These records live in assets for historical reasons, but contain user history/settings. */
 export const isActivityTextAsset = (id: string): boolean =>
-    ['friend_feed_v1', 'friend_feed_api', 'home_visits_v1'].includes(id)
-    || id.startsWith('friend_feed_eval_v1_') || id.startsWith('home_secrets_v1_');
+    ['friend_feed_v1', 'friend_feed_api', 'home_visits_v1', 'personal_commerce_v1'].includes(id)
+    || id.startsWith('personal_schedule_once:') || id.startsWith('friend_feed_eval_v1_') || id.startsWith('home_secrets_v1_');
 
 export type ActivityTextAsset = { id: string; data: string };
 export function exportActivityTextAsset(item: { id: string; data: unknown }): ActivityTextAsset | undefined {
     // The feed has its own typed section, including its text-only image stripping.
     if (!isActivityTextAsset(item.id) || item.id === 'friend_feed_v1') return undefined;
+    if (item.id.startsWith('personal_schedule_once:') && typeof item.data === 'object' && item.data !== null) return {id: item.id, data: JSON.stringify(item.data)};
+    if (item.id === 'personal_commerce_v1' && typeof item.data === 'object' && item.data !== null) return {id: item.id, data: JSON.stringify(stripBackupImages(item.data))};
     if (typeof item.data !== 'string') throw new Error('活动文字存档格式不正确，请保留原存档');
     return { id: item.id, data: JSON.stringify(stripBackupImages(JSON.parse(item.data))) };
 }

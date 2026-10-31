@@ -1,3 +1,9 @@
+import {readRealMedia,realMediaContent} from '../features/experience/format';
+import { RESPONSE_STATUS_SYSTEM } from '../features/personal/responseStatus/protocol';
+import { commerceContext } from './personalCommerce';
+import { getShareCardImageUrls } from './shareCardImages';
+import { INNER_VOICE_SYSTEM, innerVoiceContext } from '../features/personal/innerVoice/protocol';
+import { VIRTUAL_MEDIA_GUIDE, RECORDING_HISTORY_GUIDE } from '../features/personal/chatMedia/format';
 import {secretNoteContext} from './secretNote';
 import { buildCharacterResponsePrinciples } from './characterResponsePrinciples';
 import { expandHomeContextHistory } from './homeContextSegments';
@@ -160,6 +166,8 @@ export const detectChatModeTransition = (messages: readonly Message[]): ChatMode
 export interface PromptBuildOptions {
     /** Other conversation surfaces replace only app rules; shared context and recency stay identical. */
     appRules?: string;
+    /** Proactive outreach never teaches optional read/busy response cards. */
+    responseStatusEnabled?: boolean;
     /** 已完成清洗的实际消息，由公共上下文管线统一处理世界书。 */
     history?: import('./context').ContextMessage[];
     forFirePack?: boolean;
@@ -668,7 +676,7 @@ ${uname} 的化身正挂在《彼方》的【${roomName}】${act ? `，状态写
             && !(timelyByWorker && isAmsg2EnabledForChar(char));
 
         baseSystemPrompt += `### 聊天 App 行为规范 (Chat App Rules)
-**TOP 1｜ChatApp 格式（本节最高优先级）**：你是发消息的真实存在，以自然短句、短气泡为主；一个气泡一行，气泡间直接另起一行（实际换行，不要输出“\\n”字样）。
+**TOP 1｜ChatApp 格式（本节最高优先级）**：你是发消息的真实存在，以自然短句、短气泡为主；一个气泡一行，气泡间直接另起一行（实际换行，不要输出“\n”字样）。
             **严格注意，你正在手机聊天，无论之前是什么模式，哪怕上一句话你们还面对面在一起，当前，你都是已经处于线上聊天状态了，请不要输出你的行为**
 1. **沉浸感**: 保持角色扮演。使用适合即时通讯(IM)的口语化风格。
 2. **行为模式**: 不要总是围绕用户转。分享你自己的生活、想法或随意的观察。有时候要”任性”或”以自我为中心”一点，这更像真人，具体的程度视你的性格而定。
@@ -1070,6 +1078,11 @@ ${voiceActingGuide()}`;
 
         }
 
+        if (!forFirePack && promptOptions?.appRules === undefined) {
+            const shopping = await commerceContext(char.id);
+            volatileState += shopping.pending + shopping.guide;
+        }
+
         // Shared with in-person interaction; keep this after chat-specific mode instructions.
         const recencyTail = buildCharacterResponsePrinciples(char.name, userProfile.name);
 
@@ -1080,7 +1093,7 @@ ${voiceActingGuide()}`;
             .join(' ');
         console.log(`⏱ [buildSystemPrompt] total=${perfTotal}ms | stable=${baseSystemPrompt.length}ch volatile=${volatileState.length}ch | ${timingStr}`);
 
-        return { stable: baseSystemPrompt, volatileState, recencyTail, history: context.history };
+        return { stable: baseSystemPrompt + (promptOptions?.appRules !== undefined ? '' : VIRTUAL_MEDIA_GUIDE + RECORDING_HISTORY_GUIDE + INNER_VOICE_SYSTEM + (!forFirePack&&promptOptions?.responseStatusEnabled!==false?RESPONSE_STATUS_SYSTEM:'')), volatileState, recencyTail, history: context.history };
     },
 
     // 格式化消息历史
@@ -1132,6 +1145,7 @@ ${voiceActingGuide()}`;
 
         return {
             apiMessages: historySlice.map((m, index) => {
+                if(readRealMedia(m.metadata?.realMedia))return {role:m.role,content:realMediaContent(m,options?.useVisionDescriptions)};
                 if (m.type === 'secret_note') return {role: m.role, content: secretNoteContext(m.content)};
                 if (m.type === 'friend_feed_card') return {role: 'system', content: m.content};
                 if (m.type === 'friend_feed_share_card') {
@@ -1183,6 +1197,8 @@ ${voiceActingGuide()}`;
                     content = '[' + speaker + '引用了' + whose + '「' + quoted + '」，并回复了 ↓]\n' + content;
                 }
                 
+                if (m.type === 'audio') return { role: m.role, content: `${timeStr} [真实语音：${m.metadata?.audioDescription || (m.metadata?.audioCleared ? '录音已清理，未保留转写，不能推测原话' : '尚未识别，不能推测用户说了什么')}]` };
+
                 if (m.type === 'image') {
                      const visionDescription = options?.useVisionDescriptions
                          && typeof m.metadata?.visionDescription === 'string'
@@ -1273,7 +1289,31 @@ ${voiceActingGuide()}`;
                     content = `${timeStr} [用户分享了 Spark 笔记]\n楼主: ${postAuthorTag}\n标题: ${post.title}\n内容: ${post.content}\n热评: ${commentsSample}${identityHint}${authorshipLine}\n(请根据你的性格对这个帖子发表看法，比如吐槽、感兴趣或者不屑)`;
                 }
                 else if ((m.type as string) === 'xhs_card' || (m.type as string) === 'webpage_card') {
-                    content = `${timeStr} ${normalizeMessageContent(m, char?.name || '你', userProfile?.name || '用户')}`;
+                    const text = `${timeStr} ${normalizeMessageContent(m, char?.name || '你', userProfile?.name || '用户')}`;
+                    // Old third-party share covers may expire (403) and otherwise poison every
+                    // later completion. Preserve the card's textual context; only attach
+                    // live images for a recently shared card. Ordinary image messages
+                    // retain their original historical vision behavior.
+                    const recentlyShared = Date.now() - Number(m.timestamp) < 10 * 60 * 1000;
+                    const images = recentlyShared ? getShareCardImageUrls(m) : [];
+                    const frames = (m.type as string) === 'xhs_card'
+                        ? ((m.metadata as any)?.xhsNote?.videoFrames || [])
+                        : m.metadata?.webpage?.video?.contentType === 'video'
+                            ? (m.metadata.webpage.video.frames || []) : [];
+                    const frameTimes = Array.isArray(frames) ? frames.map((f: any) => Number(f.timeSeconds).toFixed(1) + '秒').join('、') : '';
+                    const description = options?.useVisionDescriptions && typeof m.metadata?.visionDescription === 'string'
+                        ? m.metadata.visionDescription.trim() : '';
+                    if (description) return { role: m.role, content: text + '\n配图视觉内容：\n' + description };
+                    if (options?.useVisionDescriptions || !images.length) {
+                        content = text;
+                    } else {
+                        return { role: m.role, content: [
+                            { type: 'text', text: text + (frameTimes
+                                ? '\n以下包含视频实际截取的关键帧（时间点：' + frameTimes + '），以及封面；只根据可见画面判断，不推测未截取部分或声音：'
+                                : '\n以下为分享卡片的实际配图：') },
+                            ...images.map(url => ({ type: 'image_url', image_url: { url } })),
+                        ] };
+                    }
                 }
                 else if ((m.type as string) === 'vr_card') {
                     // vr_card：你自己进入 VR 社交游戏《彼方》时留下的动态。
@@ -1391,6 +1431,8 @@ ${voiceActingGuide()}`;
                             content = `${timeStr} ${formatLifeSimResetCardForContext(card, char?.name)}`;
                         } else if (qixiCard) {
                             content = `${timeStr} ${formatQixiEventCardForContext(qixiCard, 'char')}`;
+                        } else if (card?.type === 'response_status' || card?.type === 'commerce_order' || (card?.type === 'diary_card' && card.diaryKind === 'character')) {
+                            content = `${timeStr} ${normalizeMessageContent(m, char?.name || '你', userProfile?.name || '用户')}`;
                         } else if (card?.type === 'diary_card') {
                             const uName = card.userName || userProfile?.name || '用户';
                             const userText = (card.userText || '').trim();
@@ -1425,14 +1467,14 @@ ${voiceActingGuide()}`;
                         content = `${timeStr} [系统卡片]`;
                     }
                 }
-                else if ((m.type as string) === 'trpg_card' || (m.type as string) === 'novel_card') {
+                else if ((m.type as string) === 'workroom_card' || (m.type as string) === 'trpg_card' || (m.type as string) === 'novel_card') {
                     // TRPG 跑团片段 / 笔友会小说章节：从对应 app 多选转发进来的内容。
                     // 复用 normalizeMessageContent 翻成完整文本，让角色"记得"一起玩过/写过什么。
                     content = `${timeStr} ${normalizeMessageContent(m, char?.name || '你', userProfile?.name || '用户')}`;
                 }
                 else content = `${timeStr} ${sourceTag} ${content}`;
 
-                return { role: m.role, content: typeof content === 'string' ? content.trimStart() : content };
+                return { role: m.role, content: typeof content === 'string' ? (content + (m.role === 'assistant' ? innerVoiceContext(m.metadata?.innerVoice) : '')).trimStart() : content };
             }),
             historySlice // Return original slice for Quote lookup
         };

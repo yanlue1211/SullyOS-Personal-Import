@@ -37,11 +37,14 @@ const Appearance = lazyApp(() => import('../apps/Appearance'));
 const Gallery = lazyApp(() => import('../apps/Gallery'));
 const DateApp = lazyApp(() => import('../apps/DateApp'));
 const UserApp = lazyApp(() => import('../apps/UserApp'));
+const TaobaoApp = lazyApp(() => import('../apps/CommerceApp'));
+const MeituanApp = lazyApp(() => import('../apps/MeituanApp'));
 const JournalApp = lazyApp(() => import('../apps/JournalApp'));
 const ScheduleApp = lazyApp(() => import('../apps/ScheduleApp'));
 const RoomApp = lazyApp(() => import('../apps/RoomApp'));
 const CheckPhone = lazyApp(() => import('../apps/CheckPhone'));
 const FriendFeedApp = lazyApp(() => import('../apps/FriendFeedApp'));
+const WorkroomNotification = React.lazy(() => import('./os/WorkroomNotification'));
 const FriendFeedNotification = React.lazy(() => import('./os/FriendFeedNotification'));
 const SocialApp = lazyApp(() => import('../apps/SocialApp'));
 const StudyApp = lazyApp(() => import('../apps/StudyApp'));
@@ -55,6 +58,8 @@ const XhsFreeRoamApp = lazyApp(() => import('../apps/XhsFreeRoamApp'));
 const BrowserApp = lazyApp(() => import('../apps/BrowserApp'));
 const SongwritingApp = lazyApp(() => import('../apps/SongwritingApp'));
 const MusicApp = lazyApp(() => import('../apps/MusicApp'));
+const SongArchiveApp = lazyApp(() => import('../apps/SongArchiveApp'));
+const WorkroomApp = lazyApp(() => import('../apps/WorkroomApp'));
 const CallApp = lazyApp(() => import('../apps/CallApp'));
 const VoiceDesignerApp = lazyApp(() => import('../apps/VoiceDesignerApp'));
 const GuidebookApp = lazyApp(() => import('../apps/GuidebookApp'));
@@ -89,13 +94,13 @@ const APP_BY_ID: Partial<Record<AppID, PreloadableLazy>> = {
   [AppID.Settings]: Settings, [AppID.Character]: Character, [AppID.Chat]: Chat,
   [AppID.GroupChat]: GroupChat, [AppID.ThemeMaker]: ThemeMaker, [AppID.Appearance]: Appearance,
   [AppID.Gallery]: Gallery, [AppID.Date]: DateApp, [AppID.User]: UserApp,
-  [AppID.Journal]: JournalApp, [AppID.Schedule]: ScheduleApp, [AppID.Room]: RoomApp,
+  [AppID.Taobao]: TaobaoApp, [AppID.Meituan]: MeituanApp, [AppID.Journal]: JournalApp, [AppID.Schedule]: ScheduleApp, [AppID.Room]: RoomApp,
   [AppID.CheckPhone]: CheckPhone, [AppID.Social]: SocialApp, [AppID.Study]: StudyApp,
   [AppID.FriendFeed]: FriendFeedApp,
   [AppID.FAQ]: FAQApp, [AppID.Game]: GameApp, [AppID.Worldbook]: WorldbookApp,
   [AppID.Novel]: NovelApp, [AppID.Bank]: BankApp, [AppID.XhsStock]: XhsStockApp,
   [AppID.XhsFreeRoam]: XhsFreeRoamApp, [AppID.Browser]: BrowserApp, [AppID.Songwriting]: SongwritingApp,
-  [AppID.Music]: MusicApp, [AppID.Call]: CallApp, [AppID.VoiceDesigner]: VoiceDesignerApp,
+  [AppID.Music]: MusicApp, [AppID.SongArchive]: SongArchiveApp, [AppID.Workroom]: WorkroomApp, [AppID.Call]: CallApp, [AppID.VoiceDesigner]: VoiceDesignerApp,
   [AppID.Guidebook]: GuidebookApp, [AppID.LifeSim]: LifeSimApp, [AppID.MemoryPalace]: MemoryPalaceApp,
   [AppID.Handbook]: HandbookApp, [AppID.QQBridge]: QQBridge, [AppID.HotNews]: HotNewsApp,
   [AppID.VRWorld]: VRWorldApp, [AppID.CharCreatorDev]: CharCreatorDevApp, [AppID.SpecialMoments]: SpecialMomentsApp,
@@ -971,6 +976,8 @@ const PhoneShell: React.FC = () => {
       case AppID.Gallery: return <Gallery />;
       case AppID.Date: return <DateApp />; 
       case AppID.User: return <UserApp />;
+      case AppID.Taobao: return <TaobaoApp />;
+      case AppID.Meituan: return <MeituanApp />;
       case AppID.Journal: return <JournalApp />; 
       case AppID.Schedule: return <ScheduleApp />;
       case AppID.Room: return <RoomApp />; 
@@ -988,6 +995,8 @@ const PhoneShell: React.FC = () => {
       case AppID.Browser: return <BrowserApp />;
       case AppID.Songwriting: return <SongwritingApp />;
       case AppID.Music: return <MusicApp />;
+      case AppID.SongArchive: return <SongArchiveApp />;
+      case AppID.Workroom: return <WorkroomApp />;
       case AppID.Call: return <CallApp />;
       case AppID.VoiceDesigner: return <VoiceDesignerApp />;
       case AppID.Guidebook: return <GuidebookApp />;
@@ -1080,7 +1089,7 @@ const PhoneShell: React.FC = () => {
           {/* Overlays: Global Mini Player (when music is playing in background) */}
           <GlobalMiniPlayer />
           <NavigationBall />
-          {isDataLoaded&&!isLocked&&<Suspense fallback={null}><FriendFeedNotification/></Suspense>}
+          {isDataLoaded&&!isLocked&&<Suspense fallback={null}><FriendFeedNotification/>{activeApp===AppID.Launcher&&<WorkroomNotification/>}</Suspense>}
           {!isLocked && <SARModuleMonitor />}
 
           {/* Overlays: 人格模拟生成全局指示条 */}

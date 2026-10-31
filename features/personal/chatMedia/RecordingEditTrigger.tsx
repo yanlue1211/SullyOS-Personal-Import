@@ -1,0 +1,14 @@
+import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { editRecordingText } from './editRecording';
+export default function RecordingEditTrigger({ id, transcript, analysis, children }: { id?: number; transcript: string; analysis: string; children: React.ReactNode }) {
+  const [open, setOpen] = useState(false); const [words, setWords] = useState(''); const [details, setDetails] = useState(''); const [busy, setBusy] = useState(false); const [error, setError] = useState('');
+  const timer = useRef<ReturnType<typeof setTimeout>>(); const point = useRef({ x: 0, y: 0 });
+  const cancel = () => clearTimeout(timer.current);
+  const show = () => { if (!id) return; setWords(transcript); setDetails(analysis); setError(''); setOpen(true); };
+  useEffect(() => () => cancel(), []);
+  return <div onContextMenu={event => { if (open) { event.stopPropagation(); return; } if (!id) return; event.preventDefault(); event.stopPropagation(); show(); }} onTouchStart={event => { if (open) { event.stopPropagation(); return; } if (!id || (event.target as HTMLElement).closest('audio,button')) return; event.stopPropagation(); point.current = { x: event.touches[0].clientX, y: event.touches[0].clientY }; cancel(); timer.current = setTimeout(show, 450); }} onTouchMove={event => { if (Math.abs(event.touches[0].clientX - point.current.x) + Math.abs(event.touches[0].clientY - point.current.y) > 12) cancel(); }} onTouchEnd={cancel} onTouchCancel={cancel}>
+    {children}
+    {open && createPortal(<div role="dialog" aria-modal="true" aria-label="修改语音识别" className="fixed inset-0 z-[600] bg-black/30 flex items-end justify-center p-3" onClick={event => { event.stopPropagation(); if (event.target === event.currentTarget && !busy) setOpen(false); }}><section className="bg-white text-slate-700 rounded-3xl p-5 w-full max-w-md max-h-[80dvh] overflow-y-auto space-y-4"><h3 className="font-medium">修改语音识别</h3><label className="block text-xs text-slate-500">原文字幕<textarea value={words} onChange={event => setWords(event.target.value)} rows={3} className="block w-full mt-2 p-3 bg-slate-50 rounded-xl text-sm resize-none" /></label><label className="block text-xs text-slate-500">语气、背景声等说明<textarea value={details} onChange={event => setDetails(event.target.value)} rows={3} className="block w-full mt-2 p-3 bg-slate-50 rounded-xl text-sm resize-none" /></label>{error && <p role="alert" className="text-xs text-rose-500">{error}</p>}<div className="flex gap-3 justify-end"><button disabled={busy} onClick={() => setOpen(false)}>取消</button><button disabled={busy} className="rounded-full bg-slate-800 text-white px-4 py-2 text-sm" onClick={async () => { if (!id) return; setBusy(true); try { await editRecordingText(id, words, details); setOpen(false); } catch (e) { setError(e instanceof Error ? e.message : '保存失败'); } finally { setBusy(false); } }}>保存</button></div></section></div>, document.body)}
+  </div>;
+}

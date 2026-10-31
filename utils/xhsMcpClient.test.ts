@@ -8,6 +8,35 @@ import {
     parseXhsCount,
 } from './xhsMcpClient';
 
+describe('XHS share image gallery normalization', () => {
+    it('keeps every image from image_list and deduplicates them', () => {
+        const result = normalizeNote({ note_id: 'abc', image_list: [
+            { url_default: 'http://cdn.example/1.jpg' },
+            { urlDefault: 'https://cdn.example/2.jpg' },
+            { url: 'https://cdn.example/2.jpg' },
+        ] });
+        expect(result.images).toEqual(['https://cdn.example/1.jpg', 'https://cdn.example/2.jpg']);
+    });
+});
+
+describe('XHS video URL normalization', () => {
+    it.each(['masterUrl', 'master_url'])('preserves %s from detail video streams', key => {
+        const result = normalizeXhsLiteDetail({ data: { note: {
+            type: 'video', video: { media: { stream: { h264: [{ [key]: 'https://cdn.example/movie.mp4' }] } } },
+        } } });
+        expect(result.videoUrl).toBe('https://cdn.example/movie.mp4');
+    });
+    it('supports nested note cards and skips invalid stream candidates', () => {
+        const result = normalizeNote({ note_card: { video: { media: { stream: {
+            h264: [{ masterUrl: 'javascript:no', backupUrls: ['https://cdn.example/backup.mp4'] }],
+        } } } } });
+        expect(result.videoUrl).toBe('https://cdn.example/backup.mp4');
+    });
+    it('does not mistake the cover for a video URL', () => {
+        expect(normalizeNote({ type: 'video', cover: { url: 'https://cdn.example/cover.jpg' } }).videoUrl).toBeUndefined();
+    });
+});
+
 describe('XHS Lite response normalization', () => {
     it('parses compact counters without turning 1.2万 into 1', () => {
         expect(parseXhsCount('1.2万')).toBe(12_000);

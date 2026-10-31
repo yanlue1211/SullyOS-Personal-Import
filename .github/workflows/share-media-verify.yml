@@ -1,0 +1,28 @@
+name: Share media feature verification
+on:
+  push:
+    branches:
+      - personal/share-multimedia-gallery-frames
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NODE_OPTIONS: '--max-old-space-size=4096'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Focused share regression tests
+        run: pnpm exec vitest run utils/shareCardImages.test.ts utils/videoParser.test.ts utils/xhsMcpClient.test.ts utils/personalInnerVoice.test.ts
+      - name: Production build
+        run: pnpm run build

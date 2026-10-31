@@ -1,3 +1,7 @@
+import { consumeWorkroomActions } from '../features/workroom/bridge';
+import { extractResponseStatus,stripResponseStatus,isProactiveStatusDelivery } from '../features/personal/responseStatus/protocol';
+import { consumeCommerceAction } from './personalCommerce';
+import { extractInnerVoice, type InnerVoice } from '../features/personal/innerVoice/protocol';
 import { withReplyCancellation, type ReplyRun } from './chatReplyCancellation';
 import { dialogueMaxTokens } from './characterApi';
 /**
@@ -83,7 +87,9 @@ export function buildReplySnapshotContent(msg: { type?: string; content: string 
 
 /** 第一遍粗洗 — 剥 <think> / 时间戳 / 历史里漏出的 [聊天]/[通话]/[约会] / 表情包反向 tag */
 const normalizeAiContent = (raw: string): string => {
-    let cleaned = normalizeAssistantActionFormatting(raw || '');
+    const status = extractResponseStatus(raw || '');
+    if (status) return `<回应状态>${JSON.stringify(status)}</回应状态>`;
+    let cleaned = normalizeAssistantActionFormatting(extractInnerVoice(raw || '').text.replace(/<回应状态\s*>[\s\S]*?(?:<\/回应状态\s*>|$)/g, ''));
     // Strip hidden chain-of-thought blocks: <think> / <thinking> / <thought>
     cleaned = cleaned.replace(/<(think|thinking|thought)>[\s\S]*?<\/\1>/gi, '');
     cleaned = cleaned.replace(/<(?:think|thinking|thought)>[\s\S]*$/gi, '');
@@ -534,6 +540,8 @@ export interface PostProcessCtx {
     historyMsgCount: number;
     /** 当 MCD MiniApp 打开时附加到每条 assistant message 的 metadata patch */
     mcdInheritMeta?: any;
+    /** Scheduled proactive delivery excludes read/busy cards; instant chat is not proactive. */
+    isProactive?: boolean;
     /** XHS 跨消息缓存 (调用方持有的 ref) */
     xhsCaches: XhsCaches;
     /**
@@ -625,6 +633,8 @@ export async function applyAssistantPostProcessing(
         messageTimestamp,
         sarModuleSurface,
     } = ctx;
+    const responseStatusAllowed=ctx.isProactive!==true&&!(mcdInheritMeta?.source==='active_msg_2'&&isProactiveStatusDelivery(mcdInheritMeta.activeMsg2||{}));
+    if(!responseStatusAllowed)rawAiContent=stripResponseStatus(rawAiContent);
     const { baseUrl, headers, effectiveApi } = api;
     // 拟人打字延迟：流式预览已实时展示过气泡时（instantRender）跳过，避免二次慢放
     const typingPause = (ms: number): Promise<void> => {
@@ -643,8 +653,13 @@ export async function applyAssistantPostProcessing(
     // 统一落库入口：ctx.messageTimestamp（若有）盖到每条消息上，保证同一轮拆出的
     // 正文 / 表情 / 卡片 / 系统提示时间戳一致；没传则维持 DB.saveMessage 默认（写库当刻）。
     // 全函数落库一律走这里，别直接调 DB.saveMessage——漏一处就会出现气泡时间戳互相打架。
-    const persistMessage: typeof DB.saveMessage = (msg) =>
-        (ctx.replyRun?.saveMessage ?? DB.saveMessage)(messageTimestamp != null ? { ...msg, timestamp: messageTimestamp } : msg);
+    let pendingInnerVoice: InnerVoice | undefined;
+    let lastAssistantMessageId: number | undefined;
+    const persistMessage: typeof DB.saveMessage = async (msg) => {
+        const id = await (ctx.replyRun?.saveMessage ?? DB.saveMessage)(messageTimestamp != null ? { ...msg, timestamp: messageTimestamp } : msg);
+        if (msg.role === 'assistant') lastAssistantMessageId = id;
+        return id;
+    };
     const {
         setMessages,
         addToast,
@@ -770,12 +785,36 @@ export async function applyAssistantPostProcessing(
         return result.cleanedText;
     };
 
+    // A status is the entire response. Resolve before actions, tools or speech.
+    const responseStatus = responseStatusAllowed?extractResponseStatus(rawAiContent):undefined;
+    if (responseStatus) {
+        await replyStep(() => persistMessage({ charId: char.id, role: 'assistant', type: 'score_card',
+            content: JSON.stringify(responseStatus), metadata: { ...(mcdInheritMeta || {}), responseStatus } }));
+        setMessages(await replyStep(() => DB.getRecentMessagesByCharId(char.id, 200)));
+        return;
+    }
+
+    // Simulated purchases execute at most once per persisted reply/source round.
+    if (rawAiContent.includes('<购物>')) {
+        const original = rawAiContent;
+        try {
+            rawAiContent = await replyStep(() => consumeCommerceAction(char.id, char.name, userProfile.name, original,
+                ctx.replyRun?.uuid || `reply:${char.id}:${contextMsgs.filter(m=>m.role==='user').at(-1)?.id || spokenAt}`));
+        } catch (error: any) {
+            rawAiContent = original.replace(/<购物>[\s\S]*?<\/购物>/g, '');
+            hooks.addToast?.(`订单未创建：${error.message}`, 'info');
+            await persistMessage({charId:char.id,role:'system',type:'text',content:`购物未成功：${error.message}。未创建这次订单，不能视为已经购买。`,metadata:{source:'personal-commerce'}});
+        }
+    }
+
     // ─── Step 1: 初次粗洗 ───
     rawAiContent = await replyStep(() => consumeHomeVisitReply(char.id, rawAiContent,
         (directives || []).flatMap(d=>d.type==='home_visit_reply'?[d.action]:[])));
     rawAiContent = await replyStep(() => consumeFriendFeedMainReply(char.id, rawAiContent,
         (directives || []).flatMap(d => d.type === 'friend_feed_reply' ? [d.action] : [])));
     let aiContent = replayedTagPrefix ? `${replayedTagPrefix}${rawAiContent}` : rawAiContent;
+    const heart = extractInnerVoice(aiContent); pendingInnerVoice = heart.innerVoice;
+    aiContent = await replyStep(() => consumeWorkroomActions(heart.text, char.id, message => addToast('造物间操作未完成：'+message,'info'), ctx.replyRun?.signal));
     aiContent = normalizeAiContent(aiContent);
     // 先于 lead-in / 二轮渲染消费：否则控制标签会作为普通气泡短暂闪给用户看。
     aiContent = await replyStep(async () => consumeScheduleChanges(aiContent, utteranceAt));
@@ -826,6 +865,16 @@ export async function applyAssistantPostProcessing(
     // 与原 inline 末尾逻辑一致。抽出来是为了让"执行功能前的本轮正文 A"能在二轮前先展示, 二轮结果 B 复用同一套。
     let sarSurfaceClaimed = false;
     const renderAndPersist = async (rawContent: string, firstThinkingChain: string | null): Promise<void> => {
+        if(!responseStatusAllowed)rawContent=stripResponseStatus(rawContent);
+        const status = responseStatusAllowed?extractResponseStatus(rawContent):undefined;
+        if (status) {
+            pendingInnerVoice = undefined;
+            await replyStep(() => persistMessage({ charId: char.id, role: 'assistant', type: 'score_card',
+                content: JSON.stringify(status), metadata: { ...(mcdInheritMeta || {}), responseStatus: status } }));
+            setMessages(await replyStep(() => DB.getRecentMessagesByCharId(char.id, 200)));
+            return;
+        }
+
         let firstMeta: any = firstThinkingChain ? { thinkingChain: firstThinkingChain } : null;
         const surfaceChunks = !sarSurfaceClaimed && sarModuleSurface?.surface
             ? splitSARChatSurfaceBubbles(sarModuleSurface.surface)
@@ -2381,5 +2430,10 @@ export async function applyAssistantPostProcessing(
         } else {
             setMessages(await replyStep(async () => DB.getRecentMessagesByCharId(char.id, 200)));
         }
+    }
+    // Attach one heart to the final assistant message of this response, not its first bubble.
+    if (pendingInnerVoice && lastAssistantMessageId != null) {
+        await replyStep(async () => DB.updateMessageMetadata(lastAssistantMessageId!, previous => ({ ...(previous || {}), innerVoice: pendingInnerVoice })));
+        setMessages(await replyStep(async () => DB.getRecentMessagesByCharId(char.id, 200)));
     }
 }

@@ -245,6 +245,27 @@ describe('XHS Lite session-risk headers', () => {
     expect(body.data.comments_error.code).toBe('COMMENT_PROVIDER_NOT_CONFIGURED');
   });
 
+  it.each(['video', 'normal'])('preserves %s detail media without changing existing fields', async type => {
+    const video = { media: { stream: { h264: [{ masterUrl: 'https://cdn.example/movie.mp4' }] } } };
+    const images = [{ url_default: 'https://cdn.example/cover.jpg' }];
+    const upstream = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      success: true, data: { items: [{ note_card: {
+        type, ...(type === 'video' ? { video } : {}), title: '标题', desc: '正文',
+        user: { nickname: '作者' }, image_list: images, interact_info: { liked_count: '3' },
+      } }] },
+    })));
+    const response = await callLite('get-feed-detail', { feed_id: 'note-id', xsec_token: 'token' });
+    const body = await response.json();
+    expect(body.success).toBe(true);
+    expect(body.data.note).toMatchObject({
+      note_id: 'note-id', type, title: '标题', content: '正文', desc: '正文',
+      user: { nickname: '作者' }, image_list: images, interact_info: { liked_count: '3' }, xsec_token: 'token',
+    });
+    if (type === 'video') expect(body.data.note.video).toEqual(video);
+    else expect(body.data.note).not.toHaveProperty('video');
+    expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
   it('loads real comments through the managed provider without forwarding the user cookie', async () => {
     const upstream = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
       const url = String(input);

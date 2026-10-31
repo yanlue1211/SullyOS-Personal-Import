@@ -254,3 +254,28 @@ describe('private chat input controls', () => {
         expect(box.checked).toBe(true);
     });
 });
+
+
+it.each(['actions','emojis','chars'] as const)('closes %s when typing starts without changing the draft',showPanel=>{
+ renderInput({showPanel,input:'保留草稿'});
+ act(()=>textarea().focus());
+ expect(props.setShowPanel).toHaveBeenCalledWith('none');
+ expect(textarea().value).toBe('保留草稿');
+ expect(props.onSend).not.toHaveBeenCalled();
+ vi.mocked(props.setShowPanel).mockClear();
+ // Mobile keyboards may keep the textarea focused while another panel opens.
+ renderInput({showPanel});pointerdown(textarea());
+ expect(props.setShowPanel).toHaveBeenCalledWith('none');
+ expect(document.activeElement).toBe(textarea());
+});
+
+it.each(['聊天功能','表情包'])('switches keyboard and %s on pointerdown before the target can move',label=>{
+ renderInput({showPanel:'none'});act(()=>textarea().focus());
+ const toggle=container.querySelector(`[aria-label="${label}"]`)!;
+ const event=pointerdown(toggle);expect(event.defaultPrevented).toBe(true);
+ expect(document.activeElement).not.toBe(textarea());
+ expect(props.setShowPanel).toHaveBeenLastCalledWith(label==='聊天功能'?'actions':'emojis');
+ renderInput({showPanel:label==='聊天功能'?'actions':'emojis'});
+ const press=pointerdown(textarea());expect(press.defaultPrevented).toBe(true);
+ expect(document.activeElement).toBe(textarea());expect(props.setShowPanel).toHaveBeenLastCalledWith('none');
+});

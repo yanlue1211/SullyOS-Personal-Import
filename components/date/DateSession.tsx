@@ -1,3 +1,6 @@
+import ExperienceTools from '../../features/experience/Tools';
+import RealMediaView from '../../features/experience/RealMediaView';
+import type {ExperienceMessage} from '../../features/experience/media';
 import {meetingAppearance, MEETING_READING_CSS, meetingCustomCss} from '../../utils/meetingAppearance';
 import React, { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
 import { CharacterProfile, Message, DateState, DialogueItem, UserProfile, DateObservation } from '../../types';
@@ -119,6 +122,7 @@ interface DateSessionProps {
     peekStatus: string;  // Initial text from the Peek phase
     initialState?: DateState; // Resume state
     encounterId?: string;
+    onExperienceSend?: (message:ExperienceMessage)=>Promise<string>;
     onSendMessage: (text: string, kind?: 'continue') => Promise<string>; // Returns AI content
     onReroll: () => Promise<string>;
     onExit: () => void;
@@ -188,7 +192,7 @@ const DateSession: React.FC<DateSessionProps> = ({
     peekStatus, 
     initialState,
     encounterId,
-    onSendMessage, 
+    onSendMessage, onExperienceSend,
     onReroll, 
     onExit,
     onEditMessage,
@@ -1139,7 +1143,7 @@ const DateSession: React.FC<DateSessionProps> = ({
                                         <div className="flex min-w-0 items-start justify-end gap-3">
                                             <p
                                                 className={`meeting-prose min-w-0 flex-1 whitespace-pre-wrap font-serif text-[16px] text-right leading-loose tracking-wide italic pr-4 ${lightReading ? 'text-stone-400 border-r-2 border-stone-300/50' : 'text-slate-400 border-r-2 border-slate-600/50'}`}
-                                            >{cleanTextForDisplay(shown)} <span className="meeting-user-label text-[10px] uppercase font-sans not-italic ml-2 opacity-50">{userProfile.name}</span></p>
+                                            >{msg.metadata?.realMedia?<RealMediaView value={msg.metadata.realMedia}/>:cleanTextForDisplay(shown)} <span className="meeting-user-label text-[10px] uppercase font-sans not-italic ml-2 opacity-50">{userProfile.name}</span></p>
                                             {!decoratedReading && char.dateReadingShowAvatars && (
                                                 <ReadingAvatar
                                                     src={userProfile.perCharAvatars?.[char.id] || userProfile.avatar}
@@ -1319,6 +1323,7 @@ const DateSession: React.FC<DateSessionProps> = ({
                 )}
                 {showInputBox && (
                     <div className={`w-[90%] min-w-0 max-w-lg backdrop-blur-xl rounded-2xl p-2 flex gap-2 shadow-2xl animate-fade-in mb-8 pointer-events-auto ${lightReading ? 'bg-stone-100 border border-stone-300' : 'bg-white/10 border border-white/20'}`} onClick={(e) => e.stopPropagation()}>
+                        {onExperienceSend&&<ExperienceTools key={char.id} scopeId={char.id} inPerson disabled={isTyping} onSend={async message=>{setIsTyping(true);try{const reply=await onExperienceSend(message);const {observation:obs,rest}=extractObservation(reply,{lenient:observeEnabled,custom:char.dateObserve?.custom});if(hasObservation(obs))setObservation(obs);const items=parseDialogue(rest,'normal');setDialogueBatch(items);setDialogueQueue(items);if(items.length)processNextDialogue(items[0],items.slice(1));setPendingRetryText('');setIsShowingOpening(false);}catch(error){setPendingRetryText(message.content);throw error;}finally{setIsTyping(false);}}}/>}
                         <textarea value={input} onChange={(e) => setInput(e.target.value)} placeholder={isTyping ? "等待回应..." : "输入对话..."} disabled={isTyping} className={`min-w-0 flex-1 bg-transparent px-3 sm:px-4 py-3 outline-none font-light resize-none h-14 overflow-y-auto overscroll-contain touch-pan-y no-scrollbar leading-tight ${lightReading ? 'text-stone-800 placeholder:text-stone-400' : 'text-white placeholder:text-white/30'}`} autoFocus />
                         {(() => {
                             const retryText = pendingRetryText || getPendingReplyText(messages);

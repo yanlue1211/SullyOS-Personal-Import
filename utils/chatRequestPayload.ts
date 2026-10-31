@@ -1,3 +1,7 @@
+import {oracleContext} from '../features/experience/oracle';
+import { materializeAudioDescriptions } from './audioApi';
+import { loadAudioApiConfig } from './songListening';
+import { buildListenSongGuide, collectListenCandidates, isListenSongEnabled, isSongListeningAvailable, isRealSongListeningEnabled, getOrAnalyzeSongSound, buildCurrentSongSoundBlock } from './songListening';
 import { getMemoryPalaceHighWaterMarkForContext, selectCharacterContextMessages } from './chatContextRange';
 import { expandHomeContextHistory } from './homeContextSegments';
 import { protectPendingChatTurn } from './storyTheaterTimeline';
@@ -281,6 +285,11 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
         recentMsgsHint = rawRecentMsgsHint.map(message => preparedById.get(message.id) || message);
     }
 
+    historyMsgsForPrompt = await materializeAudioDescriptions(historyMsgsForPrompt, loadAudioApiConfig());
+    const audioById = new Map(historyMsgsForPrompt.map(message => [message.id, message]));
+    recentMsgsHint = recentMsgsHint.map(message => audioById.get(message.id) || message);
+    input.signal?.throwIfAborted();
+
     // Range/vision processing must retain database IDs. Only after those steps may
     // legacy home rows expand into their actual speakers and chronological events.
     // Recall and live context must see the same timeline as buildMessageHistory.
@@ -382,11 +391,16 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
             includeUserLocation: isChatConversationEntry(input.recallEntryPoint),
             returningFromMode: returningFromMode || undefined,
             appRules: input.appPrompt?.rules,
+            responseStatusEnabled: input.recallEntryPoint!=='proactive_chat',
         },
     ));
     input.signal?.throwIfAborted();
     let systemPrompt = parts.stable;
     let volatileTail = parts.volatileState;
+    if (!input.appPrompt && char.workroomLinkEnabled === true && (!input.recallEntryPoint || ['chat_app','proactive_chat','chat_payload'].includes(input.recallEntryPoint))) {
+        const { buildWorkroomGuide } = await import('../features/workroom/bridge');
+        volatileTail += await buildWorkroomGuide(char.id);
+    }
     const sarModulePlan = input.recallEntryPoint === 'chat_app' && !input.appPrompt
         ? getSARModuleRuntimePlan(char, userProfile)
         : undefined;
@@ -401,8 +415,39 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
         ...(!input.appPrompt ? { translationConfig, htmlMode, thinkingChain, sarEnvelopeActive } : {}),
     });
     systemPrompt += outputStylePrompt;
+    if (isRealSongListeningEnabled(char)) {
+      systemPrompt += `\n### 【真实听歌说明】
+当你与用户一起听音乐时，系统可能在本轮动态上下文提供歌曲的客观声音分析。它是歌曲本身的声音资料，不是你写的日记，也不是你已经发表的评价。你可以基于真实声音信息和当下情境形成自己的感受，但绝不必每轮都谈论音乐；优先自然回应用户。不要照搬分析报告，不要编造没有分析到的乐器或旋律。没有分析结果时，不要假装听清了曲调。听歌日记不是自动任务，只有用户明确要求时才写。\n`;
+    }
 
     const messagesWithWorldbookDepth = parts.history;
+
+
+    // 用户在聊天功能菜单独立启用；不依赖模型是否生成音乐卡片。
+    // 未分析过时等待客观音频分析完成，命中缓存则直接提供给主模型。
+    if (isRealSongListeningEnabled(char) && isSongListeningAvailable() && (input.musicSnapshot?.playing ?? !!userListeningContext)) {
+      const currentSong = input.musicSnapshot?.current;
+      if (currentSong) {
+        try {
+          const record = await getOrAnalyzeSongSound(currentSong);
+          const { DB } = await import('./db');
+          const liveChar = await DB.getCharacter(char.id);
+          if (isRealSongListeningEnabled(liveChar)) {
+            volatileTail += buildCurrentSongSoundBlock(currentSong, record);
+          }
+        } catch (error) {
+          console.warn('[audio-listening] 获取歌曲声音分析失败，保持原版回复', error);
+        }
+      }
+    }
+    if (input.recallEntryPoint === 'chat_app' && isSongListeningAvailable() && isListenSongEnabled(char)) {
+      try {
+        const choices = await collectListenCandidates(char, userProfile?.name || '用户');
+        const guide = buildListenSongGuide(choices, userProfile?.name || '用户');
+        if (guide) volatileTail += `\n${guide}`;
+      } catch (error) { console.warn('[audio-listening] 候选歌曲加载失败', error); }
+    }
+
 
     // ── 9. 麦当劳小程序上下文（购物车/菜单实时快照 → 易变尾段） ──
     const mcdActive = !!mcdMiniSnap?.open;
@@ -471,6 +516,7 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
 
     // 「关于对方的表达」+「回到你自己」必须是易变尾段的最后内容：修复旧版把双语/HTML/
     // 思考链/点单块拼在钢印之后、模型开口前最后读到的是格式说明书的问题。
+    if(!input.appPrompt&&(!input.recallEntryPoint||['chat_app','chat_payload','proactive_chat'].includes(input.recallEntryPoint)))volatileTail+=await oracleContext(char.id);
     if (input.appPrompt) volatileTail += input.appPrompt.scene;
     volatileTail += parts.recencyTail;
     if (sarModuleBlock) volatileTail += sarModuleBlock;

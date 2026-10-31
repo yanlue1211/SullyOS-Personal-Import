@@ -1,3 +1,4 @@
+import { extractResponseStatus } from '../features/personal/responseStatus/protocol';
 import { deduplicateVoiceText } from './voiceTextDedup';
 import {extractFriendFeedReplyTags} from './friendFeedReplyFormat';
 /**
@@ -61,6 +62,7 @@ const stripRoleNamePrefix = (t: string): string => t.replace(/^[\w一-龥]+:\s*/
  */
 const stripBusinessTagsForBubble = (t: string): string =>
   extractFriendFeedReplyTags(extractFriendFeedReplyTags(t).text,'HOME_VISIT_REPLY').text
+    .replace(/<造物间\s*>[\s\S]*?(?:<\/造物间\s*>|$)/g, '')
     .replace(/\[\[(?:ACTION|RECALL|SEARCH|DIARY|READ_DIARY|FS_DIARY|FS_READ_DIARY|DIARY_START|DIARY_END|FS_DIARY_START|FS_DIARY_END|MUSIC_ACTION)[:\s][\s\S]*?\]\]/g, '')
     // `[[记录:...]]` 整个命名空间 —— 历史渲染形态 (utils/transferFormat.ts:formatTransferRecord),
     // 模型复读历史会抄出来。能还原成动作的 (记录:TRANSFER) 在上游 chatParser / worker classifier
@@ -376,7 +378,9 @@ const extractTranslationOriginal = (t: string): string => {
  * 顺序很重要 — 见处理顺序注释.
  */
 export function sanitizeForNotification(text: string): string {
-  let result = text;
+  const status = extractResponseStatus(text);
+  if (status) return status.kind === 'read' ? '消息已读，暂时不回复' : `暂时不方便看手机 · 预计有空：${status.eta}`;
+  let result = text.replace(/<购物>[\s\S]*?(?:<\/购物>|$)/g, '');
   // 1. 字面 \n 还原 — 否则后续 ^ 锚定失效
   result = stripLiteralBackslashN(result);
   // 2. think 块最早剥 — 里面可能含其他 tag 影响后续匹配

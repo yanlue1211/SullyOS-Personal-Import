@@ -1,3 +1,10 @@
+import ExperienceTools from '../../../features/experience/Tools';
+import RealMediaView from '../../../features/experience/RealMediaView';
+import {realMediaContent} from '../../../features/experience/format';
+import type {ExperienceMessage} from '../../../features/experience/media';
+import {oracleContext} from '../../../features/experience/oracle';
+import {materializeVisionDescriptions} from '../../../utils/visionApi';
+import {resolveBlobRefsInRequestBody} from '../../../utils/apiBlobRefs';
 import {meetingAppearance} from '../../../utils/meetingAppearance';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { loadStoryActorContext, replaceStoryTheaterReply, STORY_REROLL_INSTRUCTION } from '../../../utils/storyTheaterReply';
@@ -470,7 +477,7 @@ const StoryTheaterSession: React.FC<Props> = ({ entry, preset, masks, onBack, on
         const response = await fetch(`${apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiConfig.apiKey}` },
-            body: JSON.stringify({ model: apiConfig.model, messages: payload, stream: false, ...generationSettings }),
+            body: await resolveBlobRefsInRequestBody(JSON.stringify({ model: apiConfig.model, messages: payload, stream: false, ...generationSettings })) as string,
             __sullyMeta: { appId: 'date', appName: '见面', purpose: '剧情见面生成' },
         } as RequestInit & { __sullyMeta: { appId: string; appName: string; purpose: string } });
         const data = await safeResponseJson(response);
@@ -632,7 +639,7 @@ const StoryTheaterSession: React.FC<Props> = ({ entry, preset, masks, onBack, on
         }
     }, [addToast, apiConfig, entry, loadMessages, mask.name, memoryPalaceConfig, onEntryChange, threadId]);
 
-    const send = useCallback(async (rerollTarget?: Message, continueRequested = false) => {
+    const send = useCallback(async (rerollTarget?: Message, continueRequested = false, externalMessage?:ExperienceMessage) => {
         if (sendLock.current || !canStart) return;
         sendLock.current = true;
         setSending(true);
@@ -645,7 +652,7 @@ const StoryTheaterSession: React.FC<Props> = ({ entry, preset, masks, onBack, on
             const isReroll = Boolean(rerollTarget && latest?.id === rerollTarget.id && latest.role === 'assistant' && !mirrorArchived(latest, entry));
             if (rerollTarget && !isReroll) return;
             const openingPrompt = `请直接写出「${entry.title}」的第一幕。${entry.premise ? `剧情介绍：${entry.premise}` : '没有额外剧情介绍，请根据角色、世界与预设自然建立场景。'}直接开始，不要求补充信息，也不要替当前由你执笔的身份做重大决定。`;
-            const typedText = input.trim();
+            const typedText = externalMessage?.content || input.trim();
             const rerollIndex = isReroll ? before.findIndex(message => message.id === rerollTarget?.id) : -1;
             const previousUser = rerollIndex > 0 ? [...before.slice(0, rerollIndex)].reverse().find(message => message.role === 'user') : undefined;
             const assistantOpening = !isReroll && !continueRequested && before.length === 0 && entry.openingMode === 'assistant' && !typedText;
@@ -674,6 +681,7 @@ const StoryTheaterSession: React.FC<Props> = ({ entry, preset, masks, onBack, on
                     : retry
                         ? latest.id
                         : await saveCentralAndMirrors('user', text, {
+                            ...(externalMessage?.metadata||{}),
                             ...(affinityInputs.length > 0 ? { theaterAffinityInputs: affinityInputs } : {}),
                             ...(isContinueTurn ? { theaterContinue: true } : {}),
                         });
@@ -705,6 +713,7 @@ const StoryTheaterSession: React.FC<Props> = ({ entry, preset, masks, onBack, on
             const multiAffinityGuide = affinityEnabled ? buildStoryMultiAffinityGuide(actors.map(actor => ({ id: actor.id, name: actor.name }))) : '';
             const affinityAwarenessReminder = affinityInputs.map(item => buildStoryAffinityAwarenessReminder(item, item.characterName || '当前角色')).filter(Boolean).join('\n\n');
             const identityGuard = buildStoryIdentityGuard(effectivePreset.document, promptIdentityName, actors.map(actor => actor.name));
+            const oracleBlock=await oracleContext(threadId);
             const modelInput = appendStoryAffinityInputs(modelText, affinityInputs);
             const historyMessages = buildStoryHistory(visibleHistory).map(message => ({
                 ...message,
@@ -733,6 +742,7 @@ const StoryTheaterSession: React.FC<Props> = ({ entry, preset, masks, onBack, on
                     ...(multiAffinityGuide ? [{ role: 'system' as const, content: multiAffinityGuide }] : []),
                     ...(affinityEnabled ? [{ role: 'system' as const, content: RELATIONSHIP_TEXTURE_GUIDE }] : []),
                     ...(affinityAwarenessReminder ? [{ role: 'system' as const, content: affinityAwarenessReminder }] : []),
+                    ...(oracleBlock?[{role:'system' as const,content:oracleBlock}]:[]),
                     { role: 'system' as const, content: identityGuard },
                     ...(isReroll ? [{ role: 'system' as const, content: STORY_REROLL_INSTRUCTION }] : []),
                 ];
@@ -747,6 +757,8 @@ const StoryTheaterSession: React.FC<Props> = ({ entry, preset, masks, onBack, on
             if (promptEntry.forceUserLastMessage && payload[payload.length - 1]?.role !== 'user') {
                 payload.push({ role: 'user', content: '请按以上要求继续本轮剧情。' });
             }
+            const latestMedia=[...current].reverse().find(m=>m.metadata?.realMedia);
+            if(latestMedia){const prepared=(await materializeVisionDescriptions([latestMedia],apiConfig.visionApi))[0];const evidence={role:'user',content:realMediaContent(prepared,apiConfig.visionApi?.enabled===true)};const index=compiled.assistantPrefill&&!promptEntry.forceUserLastMessage?payload.length-1:payload.length;payload.splice(index,0,evidence as any);}
             let promptTokenCount = estimateStoryTokens(payload.map(message => `${message.role}\n${message.content}`).join('\n'));
             let promptTokenCountExact = false;
             setContextTokens(promptTokenCount);
@@ -877,12 +889,12 @@ const StoryTheaterSession: React.FC<Props> = ({ entry, preset, masks, onBack, on
                                 </summary>
                                 {isExpanded && <div className='pb-5 pl-7'>
                                     {message.role === 'user'
-                                        ? <p className='text-sm leading-7 text-slate-600 whitespace-pre-wrap'>{message.content}</p>
+                                        ? <p className='text-sm leading-7 text-slate-600 whitespace-pre-wrap'>{message.metadata?.realMedia?<RealMediaView value={message.metadata.realMedia}/>:message.content}</p>
                                         : <StoryOutput content={message.content} affinityInputs={affinityInputsFromMessage(message, actors)} />}
                                 </div>}
                             </details>;
                         }
-                        if (message.role === 'user') return <section key={message.id} {...pressHandlersFor(message)} className='meeting-user-turn pl-4 border-l-2 border-violet-300'><div className='meeting-user-label text-[9px] tracking-[.16em] font-bold text-violet-500'>你写下</div><p className='meeting-prose mt-2 text-sm leading-7 text-slate-600 whitespace-pre-wrap'>{message.content}</p></section>;
+                        if (message.role === 'user') return <section key={message.id} {...pressHandlersFor(message)} className='meeting-user-turn pl-4 border-l-2 border-violet-300'><div className='meeting-user-label text-[9px] tracking-[.16em] font-bold text-violet-500'>你写下</div><p className='meeting-prose mt-2 text-sm leading-7 text-slate-600 whitespace-pre-wrap'>{message.metadata?.realMedia?<RealMediaView value={message.metadata.realMedia}/>:message.content}</p></section>;
                         const isLatest = message.id === messages[messages.length - 1]?.id;
                         return <article key={message.id} {...pressHandlersFor(message)}><StoryOutput content={message.content} onChoose={choice => setInput(choice)} affinityInputs={affinityInputsFromMessage(message, actors)} />{isLatest && <div className='mt-4 flex items-center justify-end gap-2'><span className='w-1.5 h-1.5 rounded-full bg-violet-400' /><button disabled={sending} onClick={() => void send(message)} className='inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-slate-200 bg-white text-[10px] font-bold text-slate-500 disabled:opacity-40'>{rerollingId === message.id ? <SpinnerGap size={12} className='animate-spin' /> : <ArrowClockwise size={12} />}换一种写法</button></div>}</article>;
                     })}
@@ -923,6 +935,7 @@ const StoryTheaterSession: React.FC<Props> = ({ entry, preset, masks, onBack, on
                 </div>}
                 <div className='flex items-end gap-2 p-2 rounded-2xl bg-white border border-slate-200 shadow-sm'>
                     <button type='button' onClick={() => void send(undefined, true)} disabled={sending || !canStart} className='self-end h-11 shrink-0 px-3 rounded-xl border border-violet-200 bg-violet-50 text-violet-700 text-xs font-bold active:scale-95 transition-transform disabled:opacity-30' title='本轮不主动行动，让剧情按当前预设继续' aria-label='继续当前剧情'>继续</button>
+                    <ExperienceTools key={threadId} scopeId={threadId} inPerson disabled={sending} onSend={message=>send(undefined,false,message)}/>
                     <textarea value={input} onChange={event => setInput(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) { event.preventDefault(); void send(); } }} disabled={sending} rows={2} placeholder={pendingRetryInput ? '留空并点击推进，可继续上次中断' : canWriteOpening ? '也可以先写一句；留空推进则由故事开场' : '写下动作、对白、时间跳转，或你希望故事发生的事……'} className='min-w-0 min-h-12 max-h-36 flex-1 px-2 py-2 bg-transparent text-sm leading-6 resize-none outline-none disabled:opacity-50' />
                     <button onClick={() => void send()} disabled={sending || (!input.trim() && !pendingRetryInput && !canWriteOpening)} title={!input.trim() && pendingRetryInput ? '继续上次中断' : canWriteOpening && !input.trim() ? '让故事先开场' : '推进'} className='story-send-button self-end w-11 h-11 shrink-0 rounded-xl bg-slate-900 text-white grid place-items-center disabled:opacity-30'>{sending ? <SpinnerGap size={18} className='animate-spin' /> : <PaperPlaneTilt size={18} weight='fill' />}</button>
                 </div>

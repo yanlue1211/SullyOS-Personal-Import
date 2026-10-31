@@ -392,6 +392,32 @@ export const ChatParser = {
             content = content.replace(MUSIC_TAG_GLOBAL_RE, '').trim();
         }
 
+        // Character-selected music: control actual player and analyze song audio.
+        const listenMatch = /\[\[LISTEN_SONG:\s*([^\]]+?)\s*\]\]/.exec(content);
+        if (listenMatch) {
+            content = content.replace(/\[\[LISTEN_SONG:\s*[^\]]+?\s*\]\]/g, '').trim();
+            const query = listenMatch[1];
+            void (async () => {
+                const listening = await import('./songListening');
+                if (!listening.isSongListeningAvailable()) return;
+                const [target, user] = await Promise.all([DB.getCharacter(charId), DB.getUserProfile()]);
+                if (!target || !listening.isListenSongEnabled(target)) return;
+                const options = await listening.collectListenCandidates(target, user?.name || '用户');
+                const picked = listening.resolveListenCandidate(options, query);
+                if (!picked) { console.warn('[audio-listening] 歌单里找不到歌曲', query); return; }
+                const { loadMusicControl } = await import('../context/MusicContext');
+                const control = loadMusicControl();
+                if (!control) { console.warn('[audio-listening] 播放器尚未初始化'); return; }
+                await control.playSong(picked.song);
+                // 角色自主点歌只负责播放；不要自动写个人听歌日记。
+                // 音频分析只由用户开启的真实听歌功能控制。
+                if (listening.isRealSongListeningEnabled(target)) {
+                  try { await listening.getOrAnalyzeSongSound(picked.song); }
+                  catch (error) { console.warn('[audio-listening] 自主点歌分析失败', error); }
+                }
+            })().catch(error => console.warn('[audio-listening] 执行失败', error));
+        }
+
         // NEWS_CARD — char 主动把某条热点当作新闻卡片分享（来源 + 标题）
         //   [[NEWS_CARD: 来源|标题]]    （来源可省略 → [[NEWS_CARD: 标题]]）
         const NEWS_CARD_RE = /\[\[NEWS_CARD:\s*([^\]]*?)\s*\]\]/;
@@ -535,6 +561,8 @@ export const ChatParser = {
      * Used to decide whether a chunk is worth saving as a message.
      */
     hasDisplayContent: (text: string): boolean => {
+        // Virtual media markers are complete visible cards, not disposable control tags.
+        if (/\[\[虚拟(?:图片|视频|语音)[:：][\s\S]+?\]\]/.test(text)) return true;
         const stripped = text
             .replace(/%%BILINGUAL%%/gi, '')
             .replace(/%%TRANS%%[\s\S]*/gi, '')
@@ -593,7 +621,12 @@ export const ChatParser = {
         const voiceBlocks: string[] = [];
         // 语音块 + 紧邻 <字幕> 块是一个原子单元 (字幕是该语音的中文对照, 拆开就配不上)。
         // 闭合标签容许空格 / 简繁互换 (normalizeVoiceTags 在 sanitize 阶段已修, 这里是保险)
-        const guardedText = text.replace(/(?:<字幕>[\s\S]*?<\/字幕>\s*)?<[语語]音[^>]*>[\s\S]*?<\/\s*[语語]音\s*>(?:\s*<字幕>[\s\S]*?<\/字幕>)?/g, m => {
+        const virtualGuarded = text.replace(/\[\[虚拟(?:图片|视频|语音)[:：][\s\S]*?\]\]/g, m => {
+            const idx = voiceBlocks.length;
+            voiceBlocks.push(m);
+            return `\n${ATOM}${idx}${ATOM}\n`;
+        });
+        const guardedText = virtualGuarded.replace(/(?:<字幕>[\s\S]*?<\/字幕>\s*)?<[语語]音[^>]*>[\s\S]*?<\/\s*[语語]音\s*>(?:\s*<字幕>[\s\S]*?<\/字幕>)?/g, m => {
             const idx = voiceBlocks.length;
             voiceBlocks.push(m);
             return `\n${ATOM}${idx}${ATOM}\n`;

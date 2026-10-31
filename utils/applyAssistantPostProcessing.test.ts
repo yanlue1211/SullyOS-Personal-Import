@@ -861,3 +861,32 @@ describe('停止上屏', () => {
         expect((await DB.getRecentMessagesByCharId(charId, 20)).map(m => m.content)).toEqual(['第一句']);
     });
 });
+
+describe('exclusive response status cards', () => {
+    it.each(['read','busy'])('persists exactly one %s card without speech, heart, emoji or side effects', async kind => {
+        const charId = `status-${kind}-${Date.now()}`;
+        const raw = `多余的台词\n<购物>{"productId":"bad"}</购物>[[POKE]][[SEND_EMOJI:坏笑]]\n<回应状态>${JSON.stringify({kind,reason:'他正在处理眼前的事情。',footer:'稍候',eta:'二十分钟'})}</回应状态>\n另一句\n<心声>{"state":"不应附加","thoughts":"不应附加","undercurrent":""}</心声>`;
+        const ctx=makeCtx(charId,[]);
+        await applyAssistantPostProcessing(raw, ctx);
+        const rows=await DB.getRecentMessagesByCharId(charId,50);
+        expect(rows).toHaveLength(1);
+        expect(rows[0]).toMatchObject({role:'assistant',type:'score_card',metadata:{responseStatus:{kind}}});
+        expect(rows[0].metadata?.innerVoice).toBeUndefined();
+        expect(ctx.hooks.addToast).not.toHaveBeenCalled();
+    });
+});
+
+it('proactive deliveries suppress both statuses, while user-triggered instant chat retains them',async()=>{
+ for(const kind of ['read','busy']){
+  const raw=`<回应状态>${JSON.stringify({kind,reason:'暂时不说话',footer:'稍后',eta:'一会儿'})}</回应状态>`;
+  for(const route of ['v1','v2','instant']){
+   const id=`status-${kind}-${route}-${crypto.randomUUID()}`,ctx=makeCtx(id,[]);
+   if(route==='v1')ctx.isProactive=true;
+   else ctx.mcdInheritMeta={source:'active_msg_2',activeMsg2:{messageType:route==='instant'?'instant':'scheduled'}};
+   await applyAssistantPostProcessing(raw,{...ctx,instantRender:true});
+   const rows=await DB.getRecentMessagesByCharId(id,50);
+   expect(rows.filter(m=>m.type==='score_card')).toHaveLength(route==='instant'?1:0);
+   expect(rows.filter(m=>m.type==='text')).toHaveLength(0);
+  }
+ }
+},20000);

@@ -58,24 +58,27 @@ const EmotionSettingsPanel: React.FC<EmotionSettingsPanelProps> = ({
         setShowSavePreset(false);
     };
 
+    const [enabled, setEnabled] = useState(char.emotionConfig?.enabled === true);
+    useEffect(() => setEnabled(char.emotionConfig?.enabled === true), [char.id, char.emotionConfig?.enabled]);
     const handleSave = () => {
         const api = url ? { baseUrl: url, apiKey: key, model } : undefined;
-        // 与日程强制同步：日程/情绪总开关开启时情绪必跑。
-        // 注意 scheduleFeatureEnabled=true 时即使还没选 scheduleStyle，也应保持情绪开启。
-        onSave({ enabled: isScheduleFeatureOn(char), api });
+        // 情绪独立保存，不改日程开关。
+
+        onSave({ enabled, api });
         setDirty(false);
     };
 
     const buffs: CharacterBuff[] = char.activeBuffs || [];
-    const scheduleOn = isScheduleFeatureOn(char);
+    const scheduleOn = enabled;
 
     return (
         <div className="space-y-4 pt-4 border-t border-slate-100">
+            <label className="flex gap-2 items-center text-sm"><input type="checkbox" checked={enabled} onChange={event => { setEnabled(event.target.checked); setDirty(true); }} />开启情绪评估</label>
             <div>
                 <div className="text-xs font-bold text-slate-700 mb-1">🎭 情绪 / 意识流 API</div>
                 <div className="text-[11px] text-slate-500 leading-relaxed space-y-1">
                     <p>
-                        原版情绪 buff 就在这里。与日程<b>强制同步</b>：日程开 → 自动启用；日程关 → 一起停。
+                        情绪独立于日程。只有主动开启后才进行情绪评估，不会为了生成日程自动开启。
                     </p>
                     <p className="text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5">
                         ⚙️ 下方不填 = 自动用主 API。想细腻点就填个 <b>Claude 系列</b>模型。
@@ -85,7 +88,7 @@ const EmotionSettingsPanel: React.FC<EmotionSettingsPanelProps> = ({
 
             {!scheduleOn && (
                 <div className="text-[11px] text-slate-400 bg-slate-50 border border-dashed border-slate-200 rounded-lg px-3 py-2">
-                    尚未选择日程风格。选择「生活系」或「意识系」后，情绪/意识流会自动启用。
+                    情绪当前关闭。可以独立开启并保存，不需要开启日程。
                 </div>
             )}
 

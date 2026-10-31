@@ -1,3 +1,4 @@
+import type { WorkroomBackup } from './features/workroom/schema';
 
 export enum AppID {
   Launcher = 'launcher',
@@ -7,12 +8,16 @@ export enum AppID {
   GroupChat = 'group_chat', 
   Gallery = 'gallery',
   Music = 'music',
+  SongArchive = 'song_archive',
+  Workroom = 'workroom',
   Browser = 'browser',
   ThemeMaker = 'thememaker', // Legacy shortcut ID; opens the embedded bubble maker, not an installed App.
   Appearance = 'appearance',
   Date = 'date',
   User = 'user',
   Journal = 'journal',
+  Taobao = 'taobao',
+  Meituan = 'meituan',
   Schedule = 'schedule',
   Room = 'room',
   CheckPhone = 'check_phone',
@@ -279,6 +284,15 @@ export interface VisionApiConfig {
 /** A complete dialogue endpoint, separate from TTS/vision configuration. */
 export type DialogueApiConfig = Pick<APIConfig, 'baseUrl' | 'apiKey' | 'model' | 'stream' | 'temperature' | 'maxTokens' | 'apiType'>;
 
+export type AudioApiSongQuality = 'standard' | 'exhigh' | 'lossless';
+export interface AudioApiConfig {
+  enabled: boolean;
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  songQuality?: AudioApiSongQuality;
+}
+
 export interface APIConfig {
   apiType?: 'openai' | 'anthropic';
   /** 私聊单次生成上限；未设置沿用 8000，不改变历史范围。 */
@@ -287,6 +301,7 @@ export interface APIConfig {
   apiKey: string;
   // 可选识图中转：给不支持 image_url 的主模型补视觉能力。
   visionApi?: VisionApiConfig;
+  audioApi?: AudioApiConfig;
   minimaxApiKey?: string;
   minimaxGroupId?: string;
   // 'domestic' → https://api.minimaxi.com (国内站)
@@ -2730,6 +2745,8 @@ export interface MemoryPalaceWaterlineConfig {
 }
 
 export interface CharacterProfile {
+  /** Controls new workroom chat abilities; historical events remain readable. */
+  workroomLinkEnabled?: boolean;
   /** Local default for this character's dialogue; absent means follow Settings. Never shared in cards. */
   dialogueApi?: DialogueApiConfig;
   id: string;
@@ -3086,6 +3103,7 @@ export interface CharacterProfile {
   activeMsg2Config?: ActiveMsg2CharacterConfig;
   activeBuffs?: CharacterBuff[];
   buffInjection?: string;   // 注入到systemPrompt的叙事型情绪底色描述
+  emotionIndependent?: boolean;
   emotionConfig?: {
     enabled: boolean;
     api?: {
@@ -3130,6 +3148,7 @@ export interface CharacterProfile {
   // 音乐人格 — 角色自己的网易云式歌单 / 品味 / 正在听
   // 在音乐 App 里以"拜访"形式访问
   musicProfile?: CharMusicProfile;
+  listenSongConfig?: { enabled?: boolean; sources?: string[] };
 
   /**
    * 日程风格：
@@ -3380,6 +3399,7 @@ export interface DiaryPage {
 }
 
 export interface DiaryEntry {
+    kind?: 'exchange' | 'character';
     id: string;
     charId: string;
     date: string;
@@ -3897,7 +3917,7 @@ export interface GameSession {
     lastPlayedAt: number;
 }
 
-export type MessageType = 'friend_feed_share_card' | 'friend_feed_card' | 'secret_note' | 'text' | 'image' | 'emoji' | 'voice' | 'collaboration_file' | 'interaction' | 'transfer' | 'system' | 'social_card' | 'chat_forward' | 'xhs_card' | 'score_card' | 'music_card' | 'mcd_card' | 'luckin_card' | 'html_card' | 'news_card' | 'vr_card' | 'trpg_card' | 'novel_card' | 'world_card' | 'sim_card' | 'phone_card' | 'webpage_card' | 'theater_card' | 'room_card' | 'life_card' | 'group_topic_card';
+export type MessageType = 'workroom_card' | 'audio' | 'friend_feed_share_card' | 'friend_feed_card' | 'secret_note' | 'text' | 'image' | 'emoji' | 'voice' | 'collaboration_file' | 'interaction' | 'transfer' | 'system' | 'social_card' | 'chat_forward' | 'xhs_card' | 'score_card' | 'music_card' | 'mcd_card' | 'luckin_card' | 'html_card' | 'news_card' | 'vr_card' | 'trpg_card' | 'novel_card' | 'world_card' | 'sim_card' | 'phone_card' | 'webpage_card' | 'theater_card' | 'room_card' | 'life_card' | 'group_topic_card';
 
 export interface Message {
     id: number;
@@ -3928,7 +3948,7 @@ export interface Emoji {
     categoryId?: string; 
 }
 
-export interface FullBackupData {
+export interface FullBackupData extends Partial<WorkroomBackup> {
     /** 好友圈正文；文字备份单列，完整备份随 assets 保存。 */
     friendFeed?: import('./utils/friendFeed').FriendFeedState;
     /** Media-only patches never replace feed text or settings. */
@@ -3968,6 +3988,8 @@ export interface FullBackupData {
     emojiCategories?: EmojiCategory[]; 
     savedJournalStickers?: {name: string, url: string}[]; 
     assets?: { id: string, data: string }[];
+    /** 个人扩展「音迹」歌曲客观分析；全角色共享，随完整备份携带。 */
+    songSoundArchive?: { id: string; data: string }[];
     galleryImages?: GalleryImage[];
     userProfile?: UserProfile;
     diaries?: DiaryEntry[];

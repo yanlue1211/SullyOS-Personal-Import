@@ -2,7 +2,7 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [main, master]
+    branches: [personal/audio-listening]
   workflow_dispatch:
 
 permissions:
@@ -18,13 +18,15 @@ concurrency:
 jobs:
   deploy:
     # main/master can both exist, but one production site must have one history.
-    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    if: github.ref == 'refs/heads/personal/audio-listening'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     env:
       GITHUB_PAGES: 'true'
+      NODE_OPTIONS: '--max-old-space-size=4096'
+      VITE_HIDE_BUILD_BADGE: '1'
       # 使用统计。值存在仓库的 Variables 里，不写死在这份 YAML——
       # fork 出去的仓库继承得到工作流、继承不到 Variables，构建出来就是零统计的版本
       # （两个变量缺任何一个，统计脚本压根不会加载）。详见 docs/analytics.md。
@@ -42,11 +44,14 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: pnpm
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Verify personal chat and call media
+        run: pnpm vitest run utils/personalChatMedia.test.ts utils/personalChatMediaComposer.test.ts utils/personalRecordingCleanup.test.ts utils/personalCallMedia.test.ts utils/personalAudioProtocol.test.ts utils/personalRecordingTranscript.test.ts utils/personalMediaMenu.test.ts utils/personalRecordingEdit.test.ts utils/personalInnerVoice.test.ts utils/personalInnerVoiceUI.test.ts utils/personalScheduleOnce.test.ts utils/personalScheduleGeneration.test.ts utils/scheduleInjection.test.ts utils/incrementalCallSpeech.test.ts utils/callReplyFormat.test.ts
 
       - name: Build
         run: pnpm run build

@@ -1,3 +1,7 @@
+import CleanupManager from '../features/experience/CleanupManager';
+import AudioApiFields from '../components/settings/AudioApiFields';
+import RecordingManager from '../features/personal/chatMedia/RecordingManager';
+import AudioApiTestButton from '../components/settings/AudioApiTestButton';
 import NavigationBallSettings from '../components/settings/NavigationBallSettings';
 import { useSettingsFocus } from '../utils/settingsNavigation';
 import ApiPresetGroups from '../components/settings/ApiPresetGroups';
@@ -489,6 +493,8 @@ const McpServersCard: React.FC<{
 };
 
 const Settings: React.FC = () => {
+  const [archivedMediaCleanupOpen,setArchivedMediaCleanupOpen]=useState(false);
+  const [recordingManagerOpen, setRecordingManagerOpen] = useState(false);
   const {
       apiConfig, updateApiConfig, closeApp, availableModels, setAvailableModels,
       theme, updateTheme, resetAppearance,
@@ -2551,6 +2557,12 @@ const Settings: React.FC = () => {
             </p>
         </SettingsSection>
 
+        <SettingsSection title="图片与视频存储" icon={<span className="text-xl">🎬</span>}><button onClick={()=>setArchivedMediaCleanupOpen(true)} className="w-full rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-700">清理已归档的图片与视频 ›</button></SettingsSection>
+        {archivedMediaCleanupOpen&&<CleanupManager onClose={()=>setArchivedMediaCleanupOpen(false)}/>}
+        <SettingsSection title="录音存储" icon={<span className="text-xl">🎙</span>}>
+          <button type="button" onClick={() => setRecordingManagerOpen(true)} className="w-full flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-700"><span>管理用户录音</span><span className="text-slate-400">批量清理 ›</span></button>
+        </SettingsSection>
+        {recordingManagerOpen && <RecordingManager onClose={() => setRecordingManagerOpen(false)} onChanged={() => {}} />}
         {/* AI 连接设置区域 */}
         <SettingsSection
             title="API 配置"
@@ -2691,6 +2703,21 @@ const Settings: React.FC = () => {
                         {testApiResult}
                     </div>
                 )}
+            </div>
+        </SettingsSection>
+
+        {/* Dedicated audio-analysis API; does not change the main dialogue model. */}
+        <SettingsSection title="真实听歌 · 音频 API" icon={<span className="text-xl">🎧</span>}>
+            <div className="space-y-3 text-sm">
+                <p className="text-xs text-slate-500">使用支持 input_audio 的 OpenAI 兼容音频模型。角色听歌时会发送歌曲音频，并把听后感写入音乐档案。</p>
+                <label className="flex items-center gap-2"><input type="checkbox" checked={apiConfig.audioApi?.enabled === true} onChange={e => updateApiConfig({ audioApi: { baseUrl: '', apiKey: '', model: '', ...apiConfig.audioApi, enabled: e.target.checked } })} />开启真实听歌</label>
+                <AudioApiFields config={apiConfig.audioApi} presets={apiPresets} onChange={audioApi => updateApiConfig({audioApi})} />
+                <label className="block text-xs">音质
+                    <select className="w-full mt-1 p-2 border rounded-lg" value={apiConfig.audioApi?.songQuality || 'exhigh'} onChange={e => updateApiConfig({ audioApi: { enabled: false, baseUrl: '', apiKey: '', model: '', ...apiConfig.audioApi, songQuality: e.target.value as 'standard' | 'exhigh' | 'lossless' } })}>
+                        <option value="standard">标准 · 更省流量</option><option value="exhigh">极高 · 推荐</option><option value="lossless">无损 · 可能超出 API 限制</option>
+                    </select>
+                </label>
+                <AudioApiTestButton config={apiConfig.audioApi} />
             </div>
         </SettingsSection>
 

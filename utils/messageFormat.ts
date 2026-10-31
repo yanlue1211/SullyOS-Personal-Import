@@ -1,3 +1,9 @@
+import {readRealMedia,mediaText} from '../features/experience/format';
+import { innerVoiceMemoryContext } from '../features/personal/innerVoice/protocol';
+import { workroomMessageText } from './workroomEvent';
+import { readResponseStatus, responseStatusContext } from '../features/personal/responseStatus/protocol';
+import { orderText } from './personalCommerce';
+import { getShareCardImageUrls } from './shareCardImages';
 /**
  * 消息内容规范化：把带特殊 type / metadata 的消息转成可读的单行文本。
  *
@@ -114,13 +120,16 @@ export function normalizeMessageContent(
     charName: string,
     userName: string,
 ): string {
+    const media=readRealMedia(msg.metadata?.realMedia);if(media)return mediaText(media)+(typeof msg.metadata?.visionDescription==='string'?'\n画面描述：'+msg.metadata.visionDescription:'');
     const type = msg.type as string;
+    if (type === 'workroom_card') return workroomMessageText(msg);
     if (type === 'secret_note') return secretNoteContext(msg.content);
     if (type === 'friend_feed_share_card') return msg.metadata?.friendFeedShare
         ? friendFeedShareContext(msg.metadata.friendFeedShare,msg.charId)+(msg.metadata.friendFeedShare.imagesEnabled&&typeof msg.metadata.visionDescription==='string'?'\n配图描述（仅材料）：'+msg.metadata.visionDescription:'')
         : msg.content || '[分享的帖子内容不可用]';
 
     // 纯视觉类给占位；语音优先使用配套转写，避免把音频资源地址送进上下文。
+    if (type === 'audio') return msg.metadata?.audioDescription ? `[真实语音] ${msg.metadata.audioDescription}` : msg.metadata?.audioCleared ? '[真实语音文件已清理，未保留转写]' : '[真实语音，尚未识别]';
     if (type === 'image') return '[图片]';
     if (type === 'emoji') return '[表情包]';
     if (type === 'voice') {
@@ -147,6 +156,8 @@ export function normalizeMessageContent(
 
     // 结算卡：几种 app 产生，用字段逐一翻成自然文本
     if (type === 'score_card') {
+        const responseStatus = readResponseStatus(msg.content, msg.metadata);
+        if (responseStatus) return responseStatusContext(responseStatus, charName);
         try {
             const card = msg.metadata?.scoreCard || JSON.parse(msg.content);
             if (card?.type === 'lifesim_reset_card') {
@@ -165,10 +176,12 @@ export function normalizeMessageContent(
                 ).join('；') || '';
                 return `[白色情人节默契测验] ${userName}完成了${charName}出的白色情人节测验，答对${card.score}/${card.total}题，${passedStr}。${questionsText}${card.finalDialogue ? `。${charName}最终评价：${card.finalDialogue}` : ''}`;
             }
+            if (card?.type === 'commerce_order' && card.order) return orderText(card.order, card.delivered);
             if (card?.type === 'diary_card') {
                 const uName = card.userName || userName;
                 const userTextPart = (card.userText || '').trim();
                 const charTextPart = (card.charText || '').trim();
+                if (card.diaryKind === 'character') return `[${charName}的个人日记 ${card.date || ''}] ${charTextPart}`;
                 const userBlock = userTextPart ? `${uName}写道：「${userTextPart}」` : `${uName}那页是空的`;
                 const charBlock = charTextPart ? `${charName}回道：「${charTextPart}」` : `${charName}那页是空的`;
                 return `[交换日记 ${card.date || ''}] ${uName}和${charName}今天通过【交换日记】交换了一篇日记。${userBlock} ${charBlock}`;
@@ -299,7 +312,7 @@ export function normalizeMessageContent(
         const details = (stats ? '\n互动：' + stats : '') + commentsPart;
         if (desc) return `${head}\n笔记正文：\n${desc}${details}`;
         // 只有标题（没部署 MCP / 没抓到正文）：角色至少知道是哪篇笔记，但别假装读过正文。
-        if (title) return `${head}${details}\n（注：只拿到了笔记标题，正文/图片没抓到；可用原链接调用已配置的解析工具。别假装读过正文。）`;
+        if (title) return `${head}${details}\n（注：只拿到了笔记标题，正文没抓到；不要推测未获取的正文。）`;
         return `${head}${details}\n（注：这篇笔记的内容没能获取到。）`;
     }
 
@@ -326,7 +339,13 @@ export function normalizeMessageContent(
                 v.commentCount ? `评论 ${formatStatCount(v.commentCount)}` : '',
                 v.collectCount ? `收藏 ${formatStatCount(v.collectCount)}` : '',
             ].filter(Boolean);
-            const note = isImage
+            const hasImages = getShareCardImageUrls(msg as Message).length > 0;
+            const frameCount = Array.isArray(v.frames) ? v.frames.length : 0;
+            const note = !isImage && frameCount > 0
+                ? `（已提取 ${frameCount} 张视频关键帧，可理解这些时间点的画面，但不能据此推断完整视频或声音。）`
+                : !isImage
+                ? '（注：目前只有视频封面及标题等元数据，尚未获得实际视频关键帧；不要假装看过视频内容或听过声音。）'
+                : hasImages ? '' : isImage
                 ? '（注：你能看到的是这个图文的标题、作者和热度数据，看不到图片内容本身，别假装看过图。）'
                 : '（注：你能看到的是这个视频的标题、作者和热度数据，看不到视频画面和声音，别假装看过视频内容。）';
             return [
@@ -402,7 +421,7 @@ export function formatMessageForPrompt(
         : msg.role === 'user' ? userName
         : msg.role === 'system' ? '[系统]'
         : charName;
-    return `[${sender}]: ${normalizeMessageContent(msg, charName, userName)}`;
+    return `[${sender}]: ${normalizeMessageContent(msg, charName, userName)}${msg.role === 'assistant' ? innerVoiceMemoryContext(msg.metadata?.innerVoice) : ''}`;
 }
 
 /** 带时间戳的版本（归档常用）：`[HH:MM] 发送者: 内容` */
@@ -419,7 +438,7 @@ export function formatMessageWithTime(
         : charName;
     const time = msg.timestamp > 0 ? timeFormatter(msg.timestamp) : '';
     const prefix = time ? `[${time}] ` : '';
-    return `${prefix}${sender}: ${normalizeMessageContent(msg, charName, userName)}`;
+    return `${prefix}${sender}: ${normalizeMessageContent(msg, charName, userName)}${msg.role === 'assistant' ? innerVoiceMemoryContext(msg.metadata?.innerVoice) : ''}`;
 }
 
 /**
@@ -430,6 +449,7 @@ export function formatMessageWithTime(
  * voice 只要带转写文字就属于语义上下文，应该与文字和卡片一起参与统计与总结。
  */
 export function isMessageSemanticallyRelevant(msg: Message): boolean {
+    if (msg.role === 'assistant' && innerVoiceMemoryContext(msg.metadata?.innerVoice)) return true;
     const type = msg.type as string;
     if (type === 'image' || type === 'emoji') return false;
     if (type === 'voice') return !!getVoiceTranscript(msg);

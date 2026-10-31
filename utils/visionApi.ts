@@ -1,3 +1,5 @@
+import {readRealMedia} from '../features/experience/format';
+import { getShareCardImageUrls } from './shareCardImages';
 import type { ApiPreset, Message, VisionApiConfig } from '../types';
 import { DB } from './db';
 import { extractContent, safeFetchJson } from './safeApi';
@@ -122,6 +124,11 @@ export async function materializeVisionDescriptions(
   const prepared: Message[] = [];
 
   for (const message of messages) {
+    if(readRealMedia(message.metadata?.realMedia)){
+      if(readVisionDescription(message)){prepared.push(message);continue;}
+      const media=readRealMedia(message.metadata!.realMedia)!;const descriptions:string[]=[];for(const f of media.frames){const description=descriptionByImage.get(f.image)||await describeImageWithVisionApi(f.image,config);descriptionByImage.set(f.image,description);descriptions.push(`${f.timeSeconds.toFixed(1)}秒：${description}`);}
+      const metadata={...message.metadata,visionDescription:descriptions.join('\n'),visionRecognizedAt:Date.now(),visionModel:config.model.trim()};await DB.updateMessageMetadata(message.id,prev=>({...prev,...metadata}));prepared.push({...message,metadata});continue;
+    }
     if(message.type==='friend_feed_share_card') {
       const share=message.metadata?.friendFeedShare;
       if(!share?.imagesEnabled || !Array.isArray(share.imageRefs) || readVisionDescription(message)) {prepared.push(message);continue;}
@@ -134,6 +141,26 @@ export async function materializeVisionDescriptions(
       if(!descriptions.length){prepared.push(message);continue;}
       const metadata={...message.metadata,visionDescription:descriptions.join('\n'),visionRecognizedAt:Date.now(),visionModel:config.model.trim()};
       await DB.updateMessageMetadata(message.id,prev=>({...prev,...metadata}));prepared.push({...message,metadata});continue;
+    }
+    if (message.type === 'xhs_card' || message.type === 'webpage_card') {
+      if (readVisionDescription(message)) { prepared.push(message); continue; }
+      const refs = getShareCardImageUrls(message);
+      if (!refs.length) { prepared.push(message); continue; }
+      const descriptions: string[] = [];
+      for (const [index, ref] of refs.entries()) {
+        try {
+          const description = descriptionByImage.get(ref) || await describeImageWithVisionApi(ref, config);
+          descriptionByImage.set(ref, description);
+          descriptions.push(`配图 ${index + 1}：${description}`);
+        } catch (error) {
+          console.warn('[share vision] Unable to describe shared image', index + 1, error);
+        }
+      }
+      if (!descriptions.length) { prepared.push(message); continue; }
+      const metadata = { ...message.metadata, visionDescription: descriptions.join('\n'), visionRecognizedAt: Date.now(), visionModel: config.model.trim() };
+      await DB.updateMessageMetadata(message.id, prev => ({ ...(prev || {}), ...metadata }));
+      prepared.push({ ...message, metadata });
+      continue;
     }
     if (message.type !== 'image') {
       prepared.push(message);

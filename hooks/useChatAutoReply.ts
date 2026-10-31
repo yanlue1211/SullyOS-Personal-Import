@@ -7,6 +7,7 @@ interface Options {
     conversationId: string | null;
     active: boolean;
     blocked: boolean;
+    mediaComposerOpen?: boolean;
     generating: boolean;
     onGenerate: () => void;
 }
@@ -72,7 +73,7 @@ export function useChatAutoReply(options: Options) {
         const ready = () => {
             const latest = current.current;
             return workRef.current === work && work.pending && work.sends.size === 0
-                && latest.enabled && latest.active && !latest.blocked && !latest.generating
+                && latest.enabled && latest.active && !latest.blocked && !latest.mediaComposerOpen && !latest.generating
                 && !document.hidden;
         };
         if (!visible || !ready()) {
@@ -87,7 +88,7 @@ export function useChatAutoReply(options: Options) {
             current.current.onGenerate();
         }, CHAT_AUTO_REPLY_DELAY_MS);
         return () => { window.clearTimeout(tick); window.clearTimeout(timer); };
-    }, [revision, visible, options.enabled, options.active, options.blocked, options.generating, options.conversationId, cancel]);
+    }, [revision, visible, options.enabled, options.active, options.blocked, options.mediaComposerOpen, options.generating, options.conversationId, cancel]);
 
     return { seconds, beginSend, cancel };
 }

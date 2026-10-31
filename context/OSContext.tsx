@@ -1,3 +1,7 @@
+import {stripResponseStatus} from '../features/personal/responseStatus/protocol';
+import { drainWorkroomOutbox, WORKROOM_HISTORY_UPDATED } from '../features/workroom/delivery';
+import { reconcileCommerce } from '../utils/personalCommerce';
+import { isEmotionFeatureOn } from '../utils/scheduleFeature';
 import { handleLocalBack } from '../utils/localBackHandlers';
 import {isHomeAssetDisposal} from '../utils/homeAssetCancellation';
 import { processHomeMemoryAfterSave } from '../utils/homeMemoryPostHook';
@@ -23,7 +27,8 @@ import { FEEDBACK_INVITATION_KEY, hasPriorFeedbackInstallEvidence, initializeFee
 import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react';
 import type { VRSARActivity } from '../types';
 import { APIConfig, AppID, OSTheme, VirtualTime, CharacterProfile, CharacterGroup, ChatTheme, Toast, FullBackupData, UserProfile, ApiPreset, GroupProfile, SystemLog, Worldbook, NovelBook, SongSheet, Message, RealtimeConfig, AppearancePreset, CloudBackupConfig, CloudBackupFile, MemoryPalaceFeatureFlags } from '../types';
-import { DB } from '../utils/db';
+import { DB, openDB } from '../utils/db';
+import { streamWorkroomBackup } from '../features/workroom/backup';
 import { reportDatabaseFailure } from '../utils/databaseHealth';
 import type { AvatarTouchRecord } from '../utils/avatarTouch';
 import { clampClaudeTemperature, modelRejectsSamplingParams, stripSamplingParams } from '../utils/samplingParamCompat';
@@ -45,6 +50,7 @@ import { encodeVectorsForBackupChunked } from '../utils/memoryPalace/db';
 import { createBackupArchive } from '../utils/backupArchive';
 import { streamBackupArrayStore } from '../utils/backupStoreStreaming';
 import { ProactiveChat } from '../utils/proactiveChat';
+import { extractInnerVoice } from '../features/personal/innerVoice/protocol';
 import { VRScheduler, type VRSessionOutcome } from '../utils/vrWorld/scheduler';
 import { runVRSession } from '../utils/vrWorld/runSession';
 import { allowsAutomaticVR } from '../utils/vrWorld/participation';
@@ -924,6 +930,14 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
   const [virtualTime, setVirtualTime] = useState<VirtualTime>(getRealTime());
   
+  useEffect(() => {
+    const scan = () => { void reconcileCommerce().catch(e => console.warn('[commerce] Pending delivery retained for retry', e)); };
+    scan(); const timer = setInterval(scan, 30000);
+    const onVisible = () => { if (document.visibilityState === 'visible') scan(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { clearInterval(timer); document.removeEventListener('visibilitychange', onVisible); };
+  }, []);
+
   // Real-time Clock Sync
   useEffect(() => {
       const timer = setInterval(() => {
@@ -1863,6 +1877,11 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
               markAmsgStateDirty({ char, userProfile: dbUser ?? defaultUserProfile, groups: dbGroups, realtimeConfig: restoredRealtime });
             }
           }
+          // Refresh existing scheduled packs once so old read/busy instructions do not linger in cloud state.
+          if(localStorage.getItem('os_proactive_status_policy_v1')!=='done'){
+            markAmsgStateDirtyForAll({characters:finalChars,userProfile:dbUser??defaultUserProfile,groups:dbGroups,realtimeConfig:restoredRealtime});
+            localStorage.setItem('os_proactive_status_policy_v1','done');
+          }
           resumePendingAmsgStateSync({
             characters: finalChars,
             userProfile: dbUser ?? defaultUserProfile,
@@ -2353,6 +2372,39 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
   useEffect(() => {
       if (!isDataLoaded) return;
+      const memoryChains = new Map<string, Promise<void>>();
+      const historyChanged = (event: Event) => {
+          const charId = (event as CustomEvent).detail?.charId;
+          if (typeof charId !== 'string') return;
+          setLastMsgTimestamp(Date.now());
+          const task = (memoryChains.get(charId) || Promise.resolve()).catch(() => {}).then(async () => {
+              const char = await DB.getCharacter(charId), config = memoryPalaceConfigRef.current;
+              const llm = config.lightLLM?.baseUrl ? config.lightLLM : apiConfigRef.current;
+              if (!char?.memoryPalaceEnabled || !config.embedding?.baseUrl || !config.embedding.apiKey || !llm.baseUrl) return;
+              const { processNewMessagesWithAutoArchive } = await import('../utils/memoryPalace/autoArchive');
+              await processNewMessagesWithAutoArchive([], char.id, char.name, config.embedding, llm, userProfileRef.current.name, false);
+          });
+          memoryChains.set(charId, task);
+          void task.catch(error => console.warn('[Workroom] Memory buffer retained for retry', error)).finally(() => {
+              if (memoryChains.get(charId) === task) memoryChains.delete(charId);
+          });
+      };
+      const drain = () => { if (document.hidden) return; void DB.getAllCharacters().then(async rows => {
+          for (const char of rows) await drainWorkroomOutbox(char.id);
+      }).catch(error => console.warn('[Workroom] Chat outbox retained for retry', error)); };
+      const openWorkroom = () => setActiveApp(AppID.Workroom);
+      const askWorkroom = (event:Event) => { const id=(event as CustomEvent).detail?.charId; if(typeof id==='string'){setActiveCharacterId(id);setActiveApp(AppID.Chat);} };
+      window.addEventListener('workroom-chat-requested', askWorkroom);
+      window.addEventListener('workroom-open-requested', openWorkroom);
+      window.addEventListener(WORKROOM_HISTORY_UPDATED, historyChanged);
+      document.addEventListener('visibilitychange', drain);
+      drain();
+      return () => { window.removeEventListener('workroom-chat-requested', askWorkroom); window.removeEventListener('workroom-open-requested', openWorkroom); window.removeEventListener(WORKROOM_HISTORY_UPDATED, historyChanged); document.removeEventListener('visibilitychange', drain); };
+  }, [isDataLoaded]);
+
+
+  useEffect(() => {
+      if (!isDataLoaded) return;
 
       const drainQueuedProactive = () => {
           const next = proactiveQueueRef.current.shift();
@@ -2514,7 +2566,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
               // 3c. 情绪评估 fire-and-forget — 与主 API 并行，沿用 useChatAI 的 API 选择逻辑：
               //     角色专属情绪 API > 主 apiConfig（与记忆宫殿副 API 完全独立）
-              if (!payload.flags.promptBuildSkipped && !isEmotionEvalSkipped() && isScheduleFeatureOn(char) && char.emotionConfig?.enabled) {
+              if (!payload.flags.promptBuildSkipped && !isEmotionEvalSkipped() && isEmotionFeatureOn(char)) {
                   const emotionApi = (char.emotionConfig.api?.baseUrl)
                       ? char.emotionConfig.api
                       : { baseUrl: apiConfigRef.current.baseUrl, apiKey: apiConfigRef.current.apiKey, model: apiConfigRef.current.model };
@@ -2552,7 +2604,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
               }, 2, 0, { appName: '消息', charId, charName: char.name, purpose: '主动消息' });
 
               // 5. Process & save response
-              let aiContent = data.choices?.[0]?.message?.content || '';
+              let aiContent = stripResponseStatus(data.choices?.[0]?.message?.content || '');
               aiContent = await consumeFriendFeedMainReply(charId, aiContent, [], friendFeedTask?.id);
               // 思考链抽取 — 与 useChatAI 保持一致:reasoning_content 字段 + 主 content 里的 <think>/<thinking>/<thought> 块,
               // 拼接后挂到本回合首条 assistant 消息的 metadata.thinkingChain
@@ -2579,7 +2631,17 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
               aiContent = aiContent.replace(/\s*\[(?:聊天|通话|约会)\]\s*/g, '\n').trim();
 
               aiContent = normalizeProactiveAiContent(aiContent);
+              // Proactive 1.0 is an online chat reply: use the same heart parser
+              // before chunking or HTML rendering, never expose raw <心声> tags.
+              const proactiveHeart = extractInnerVoice(aiContent);
+              aiContent = proactiveHeart.text;
 
+              let lastProactiveAssistantId: number | undefined;
+              const saveProactiveMessage: typeof DB.saveMessage = async msg => {
+                  const id = await DB.saveMessage(msg);
+                  if (msg.role === 'assistant') lastProactiveAssistantId = id;
+                  return id;
+              };
               const savedPreviewChunks: string[] = [];
               const baseTimestamp = Date.now();
               let offset = 0;
@@ -2598,7 +2660,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                   for (const blk of blocks) {
                       try {
                           const meta = consumeThinkingMeta();
-                          await DB.saveMessage({
+                          await saveProactiveMessage({
                               charId,
                               role: 'assistant',
                               type: 'html_card',
@@ -2634,7 +2696,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                           const foundEmoji = emojis.find(e => e.name === name);
                           if (!foundEmoji?.url) return;
                           const meta = consumeThinkingMeta();
-                          await DB.saveMessage({
+                          await saveProactiveMessage({
                               charId,
                               role: 'assistant',
                               type: 'emoji',
@@ -2656,7 +2718,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                               for (const chunk of ChatParser.chunkText(cleaned)) {
                                   if (!chunk) continue;
                                   const meta = consumeThinkingMeta();
-                                  await DB.saveMessage({
+                                  await saveProactiveMessage({
                                       charId,
                                       role: 'assistant',
                                       type: 'text',
@@ -2688,7 +2750,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                                   ? `${originalText}\n%%BILINGUAL%%\n${translatedText}`
                                   : (originalText || translatedText);
                               const meta = consumeThinkingMeta();
-                              await DB.saveMessage({
+                              await saveProactiveMessage({
                                   charId,
                                   role: 'assistant',
                                   type: 'text',
@@ -2714,7 +2776,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                               const foundEmoji = emojis.find(e => e.name === part.content);
                               if (foundEmoji?.url) {
                                   const meta = consumeThinkingMeta();
-                                  await DB.saveMessage({
+                                  await saveProactiveMessage({
                                       charId,
                                       role: 'assistant',
                                       type: 'emoji',
@@ -2725,7 +2787,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                               } else {
                                   const fallbackText = `发送了表情包：${part.content}`;
                                   const meta = consumeThinkingMeta();
-                                  await DB.saveMessage({
+                                  await saveProactiveMessage({
                                       charId,
                                       role: 'assistant',
                                       type: 'text',
@@ -2745,7 +2807,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
                           for (const chunk of textChunks) {
                               const meta = consumeThinkingMeta();
-                              await DB.saveMessage({
+                              await saveProactiveMessage({
                                   charId,
                                   role: 'assistant',
                                   type: 'text',
@@ -2758,6 +2820,10 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                           }
                       }
                   }
+              }
+
+              if (proactiveHeart.innerVoice && lastProactiveAssistantId != null) {
+                  await DB.updateMessageMetadata(lastProactiveAssistantId, previous => ({ ...(previous || {}), innerVoice: proactiveHeart.innerVoice }));
               }
 
               if (offset > 0) {
@@ -3385,9 +3451,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   const savePresets = (presets: ApiPreset[]) => { const normalized = presets.map(normalizeApiPreset); setApiPresets(normalized); localStorage.setItem('os_api_presets', JSON.stringify(normalized)); };
   const addCharacter = async () => {
     const name = 'New Character';
-    // 默认开启 emotionConfig.enabled，让"开日程 = 开情绪"这条隐含约定对新角色也成立。
-    // 真正的闸门是 (isScheduleFeatureOn && emotionConfig.enabled)，schedule 没开
-    // 时副 API 不会触发，所以这里默认 true 安全。
+    // 新角色的情绪独立配置，默认关闭，由用户明确开启。
     // 注意：memoryPalaceEnabled 不在这里默认开 —— 那是用户在记忆宫殿 App 显式 opt-in
     // 的功能，自动开会替用户决策。
     const newChar: CharacterProfile = {
@@ -3400,7 +3464,8 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       contextLimit: DEFAULT_MANUAL_CONTEXT_LIMIT,
       contextRangeMode: 'manual',
       contextRangePolicyVersion: CONTEXT_RANGE_POLICY_VERSION,
-      emotionConfig: { enabled: true },
+      emotionIndependent: true,
+      emotionConfig: { enabled: false },
     };
     setCharacters(prev => [...prev, newChar]);
     setActiveCharacterId(newChar.id);
@@ -4221,9 +4286,16 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           // 可能多达数 MB（壁纸 base64）的克隆。
           const cloneForInPlace = <T,>(v: T): T => (mode === 'text_only' ? v : deepCloneForExport(v));
 
+          if (mode === 'full' || mode === 'text_only') {
+              const { listSongSoundRecords } = await import('../features/personal/songArchive/storage');
+              await listSongSoundRecords();
+          }
           const backupData: Partial<FullBackupData> = {
               friendFeed: mode === 'text_only' ? stripBackupImages(await readFriendFeed()) : undefined,
               friendFeedMedia: mode === 'media_only' ? collectFriendFeedMedia(await readFriendFeed()) : undefined,
+              songSoundArchive: (mode === 'text_only' || mode === 'full')
+                  ? (await DB.getAllAssets()).filter(a => a.id.startsWith('personal_song_sound_v1_'))
+                  : undefined,
               contentFavoritesIndex: mode === 'text_only'
                   ? stripBackupImages(await DB.getAssetRaw('content_favorites_index_v1')) : undefined,
               timestamp: Date.now(),
@@ -4574,7 +4646,10 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
               med_plans: 'medPlans',
               life_record_settings: 'lifeRecordSettings',
           };
-          const prewrittenStores: BackupManifest['stores'] = {};
+          const workroomOwnerIds = new Set<string>();
+          const exportedCharacterIds = new Set<string>();
+          const prewrittenStores: BackupManifest['stores'] = mode === 'full' || mode === 'text_only'
+              ? await streamWorkroomBackup(await openDB(), zip as unknown as ZipFileWriter, collectSerialized, id => workroomOwnerIds.add(id)) : {};
           // Vectors retain the existing binary format, read one record at a time.
           let vectorPayload: Awaited<ReturnType<typeof encodeVectorsForBackupChunked>> | undefined;
           // Only voice Blobs reachable from the exported Live2D settings are portable.
@@ -4605,6 +4680,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                       onSerialized: collectSerialized,
                       transform: (item, index) => {
                           if (storeName === 'characters') {
+                              exportedCharacterIds.add(item.id);
                               normalizeCharacterRoomAssetsInPlace(item);
                               if (mode !== 'text_only') {
                                   collectCharacterCompanionVoiceAssetIds([item])
@@ -4696,6 +4772,10 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                   default: throw new Error(`未配置备份字段：${storeName}`);
               }
               await new Promise(resolve => setTimeout(resolve, 10));
+          }
+
+          if ([...workroomOwnerIds].some(id => !exportedCharacterIds.has(id))) {
+              throw new Error('备份期间角色资料发生变化，请重新导出，以保持造物间归属完整');
           }
 
           // 进度条停在 70% 让用户看到接下来的"压缩中 X%"实际推进，而不是卡在 95% 干等。

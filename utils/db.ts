@@ -1,5 +1,8 @@
+import { createWorkroomMessage } from './workroomEvent';
+import { createWorkroomStores, WORKROOM_STORES } from '../features/workroom/schema';
+import { exportWorkroomBackup, restoreWorkroomBackup, validateWorkroomBackup } from '../features/workroom/backup';
 import { readLocalCursor } from './localRead';
-import { applyFriendFeedMedia, collectFriendFeedMedia, isActivityTextAsset } from './activityBackup';
+import { applyFriendFeedMedia, collectFriendFeedMedia, isActivityTextAsset, isPersonalTextAsset } from './activityBackup';
 import { compactMemoryLink } from './memoryPalace/linkPrecision';
 import { reportDatabaseFailure } from './databaseHealth';
 import { associateDatabaseOpen, beginDatabaseOpen, recordDatabaseOpen } from './databaseOpenDiagnostics';
@@ -36,6 +39,7 @@ import { exportAmsg2GlobalConfig, importAmsg2GlobalConfig } from './activeMsgSto
 import { exportWorldHomeLocal, importWorldHomeLocal } from './worldHome/localBackup';
 import { exportDesktopSkinLocal, importDesktopSkinLocal } from './desktopSkinBackup';
 import { editLibrary, VR_LIBRARY_RECORD, type LibraryEdit } from './vrWorld/library';
+import { SOUND_ARCHIVE_PREFIX } from '../features/personal/songArchive/storage';
 
 const DB_NAME = 'AetherOS_Data';
 // v67：两条并行线各自用掉了 v65/v66（A线: blob_assets + 生活记录；B线: room_plates 门牌 + digest_reports 消化日志），
@@ -47,7 +51,11 @@ const DB_NAME = 'AetherOS_Data';
 // v72: home projection reads only home-source rows, never scans private-chat history.
 // v73: direct home-turn lookups for incremental journal writes.
 // v74: merge master delivery lookup with both home indexes, including existing v73 databases.
-const DB_VERSION = 74;
+// v75: per-character workroom works, immutable versions, drafts, state and events.
+// v76: persistent workroom creative discussion, included in both backup paths.
+// v77: frozen user-initiated workroom shares. Ideas reuse work metadata.
+// v78: indexed, independently dismissible workroom completion notices.
+const DB_VERSION = 78;
 
 const STORE_CHARACTERS = 'characters';
 const STORE_CHAR_GROUPS = 'character_groups'; // 角色分组定义（角色通过 groupId 指向；与群聊 groups 无关）
@@ -286,6 +294,7 @@ export const openDB = (): Promise<IDBDatabase> => {
           }
       };
 
+      createWorkroomStores(db, upgradeTransaction);
       createStore(STORE_CHARACTERS, { keyPath: 'id' });
       createStore(STORE_CHAR_GROUPS, { keyPath: 'id' }); // v68: 角色分组
 
@@ -649,8 +658,19 @@ export const DB = {
 
   deleteCharacter: async (id: string): Promise<void> => {
     const db = await openDB();
-    const transaction = db.transaction(STORE_CHARACTERS, 'readwrite');
+    const transaction = db.transaction([STORE_CHARACTERS, ...WORKROOM_STORES], 'readwrite');
+    const done = new Promise<void>((resolve, reject) => {
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error || new Error('角色删除失败'));
+    });
     transaction.objectStore(STORE_CHARACTERS).delete(id);
+    for (const name of WORKROOM_STORES) {
+      const store = transaction.objectStore(name);
+      const request = store.index('charId').openCursor(IDBKeyRange.only(id));
+      request.onsuccess = () => { const cursor = request.result; if (cursor) { cursor.delete(); cursor.continue(); } };
+    }
+    await done;
   },
 
   // ---- 角色分组（神经链接"文件夹"，与群聊 groups 无关）----
@@ -1017,6 +1037,55 @@ export const DB = {
       };
       tx.onerror = () => reject(tx.error);
       tx.onabort = () => reject(tx.error || new Error('消息未能保存'));
+    });
+  },
+
+  /** Commit a durable workroom outbox row and its chat projection atomically. */
+  deliverWorkroomPending: async (charId: string, name: 'workroom_events' | 'workroom_turns', id: string): Promise<number | null> => {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(['characters', 'messages', 'assets', name], 'readwrite');
+      let result: number | null = null;
+      let failure: unknown;
+      const fail = (error: unknown) => { failure = error; try { tx.abort(); } catch {} };
+      const source = tx.objectStore(name), messages = tx.objectStore('messages');
+      const rowRequest = source.get(id);
+      rowRequest.onsuccess = () => {
+        const row = rowRequest.result;
+        if (!row || row.charId !== charId || row.delivery !== 'pending') return;
+        const charRequest = tx.objectStore('characters').get(charId);
+        charRequest.onsuccess = () => {
+          const char = charRequest.result;
+          if (!char) { fail(new Error('角色已不存在')); return; }
+          try {
+            const deliveryId = `workroom:${name}:${id}`;
+            const message = name === 'workroom_events' ? createWorkroomMessage(row.event) : {
+              charId, role: row.role, type: 'text', timestamp: row.createdAt,
+              content: `【造物间·${row.kind === 'play' ? '游戏互动' : '创作交流'}】《${row.workTitle}》\n${row.text}`,
+              metadata: { source: 'workroom', workroomTurnId: row.id, workroomWorkId: row.workId },
+            };
+            if (message.charId !== charId) throw new Error('造物间事件归属不符');
+            const lookup = messages.index('charId_deliveryId').get([charId, deliveryId]);
+            lookup.onsuccess = () => {
+              if (lookup.result) {
+                result = lookup.result.id; source.put({ ...row, delivery: 'delivered', messageId: result }); return;
+              }
+              const request = messages.add({ ...message, metadata: { ...message.metadata, deliveryId } });
+              request.onsuccess = () => {
+                result = request.result as number;
+                clearStaleMemoryMirror(tx, charId, result);
+                source.put({ ...row, delivery: 'delivered', messageId: result });
+              };
+            };
+          } catch (error) { fail(error); }
+        };
+      };
+      tx.oncomplete = () => {
+        if (result !== null) { try { const key = `mp_lastMsgId_${charId}`; if (Number(localStorage.getItem(key)) >= result) localStorage.removeItem(key); } catch {} }
+        resolve(result);
+      };
+      tx.onerror = () => reject(failure || tx.error);
+      tx.onabort = () => reject(failure || tx.error || new Error('造物间聊天记录未能保存'));
     });
   },
 
@@ -3586,6 +3655,8 @@ export const DB = {
       options: { includeBackendConnection?: boolean } = {},
   ): Promise<Partial<FullBackupData>> => {
       await migrateLegacyWhiteboxPresets(DB);
+      const { listSongSoundRecords } = await import('../features/personal/songArchive/storage');
+      await listSongSoundRecords();
       const db = await openDB();
       await ensureStoryTimelineRepair(db);
       
@@ -3666,7 +3737,11 @@ export const DB = {
       const mainState = bankData.find((d: any) => d.id === 'main_state');
       const dollhouseRecord = bankData.find((d: any) => d.id === 'dollhouse_state');
 
+      const workroomBackup = await exportWorkroomBackup(db);
+      const exportedOwners = new Set(characters.map((c: CharacterProfile) => c.id));
+      if ([...workroomBackup.workroomWorks, ...workroomBackup.workroomShares].some(w => !exportedOwners.has(w.charId))) throw new Error('备份期间角色资料发生变化，请重试');
       return {
+          ...workroomBackup,
           characters, characterGroups, messages, customThemes: themes, savedEmojis: emojis, emojiCategories, assets, galleryImages, userProfile, diaries, tasks, anniversaries, roomTodos, roomNotes, groups, savedJournalStickers: journalStickers, socialPosts, courses, games, worldbooks, storyTheaters, storyTheaterPresets, storyTheaterMasks, novels,
           bankState: mainState ? { ...mainState, id: undefined } : undefined,
           bankDollhouse: dollhouseRecord?.data || undefined,
@@ -3700,6 +3775,7 @@ export const DB = {
           vrSignal: exportSignalLocal(),         // 信号坠落处本机记录（句子归属「你·角色」+ 反复用清单，存 localStorage）
           worlds,
           worldEpisodes,
+          songSoundArchive: assets.filter(a => a.id.startsWith(SOUND_ARCHIVE_PREFIX)).map(a => ({ ...a })),
           worldHomeLocal: exportWorldHomeLocal(), // 家园本机配置：全局 API + 文风收藏（存 localStorage）
           luckinLocal: exportLuckinLocal(),       // 瑞幸 token + 启用状态（存 localStorage）
           mcdLocal: exportMcdLocal(),             // 麦当劳 token + 启用状态（存 localStorage）
@@ -3732,6 +3808,11 @@ export const DB = {
       } = {}
   ): Promise<void> => {
       const db = await openDB();
+      const workroomBackup = data.collaborationBackupMode === 'media_only' ? undefined : validateWorkroomBackup(data);
+      if (workroomBackup) {
+          const owners = new Set((data.characters ?? await DB.getAllCharacters()).map(c => c.id));
+          if ([...workroomBackup.workroomWorks, ...workroomBackup.workroomShares].some(w => !owners.has(w.charId))) throw new Error('造物间备份的角色不存在');
+      }
       invalidateStoryTimelineRepair(db);
       
       const availableStores = [
@@ -3803,6 +3884,7 @@ export const DB = {
           }
       }
       const plannedSections = [
+          workroomBackup !== undefined,
           data.characters !== undefined || data.mediaAssets !== undefined,
           data.characterGroups !== undefined,
           data.messages !== undefined,
@@ -3810,6 +3892,7 @@ export const DB = {
           data.savedEmojis !== undefined,
           data.emojiCategories !== undefined,
           data.assets !== undefined,
+          data.songSoundArchive !== undefined,
           data.friendFeed !== undefined && !mediaOnly,
           data.activityTextAssets !== undefined && !mediaOnly,
           data.friendFeedMedia !== undefined,
@@ -3996,6 +4079,10 @@ export const DB = {
 
       const hasCharacterBackup = Array.isArray(data.characters);
 
+      await runSection('造物间', workroomBackup !== undefined, async () => {
+          await restoreWorkroomBackup(db, workroomBackup!);
+      });
+
       await runSection('角色资料', data.characters !== undefined || data.mediaAssets !== undefined, async () => {
           if (data.characters) {
               if (data.mediaAssets) {
@@ -4061,6 +4148,19 @@ export const DB = {
           } else await clearAndAdd(STORE_ASSETS, data.assets || [], '系统资源', true);
           data.assets = undefined as any;
       }, data.assets?.length || 0);
+      // 独立的个人音迹档案随完整备份恢复。旧备份没有此字段，不清空现有档案。
+      await runSection('音迹歌曲档案', data.songSoundArchive !== undefined && data.assets === undefined && !mediaOnly, async () => {
+          const records = data.songSoundArchive || [];
+          if (!Array.isArray(records) || records.some(a => !a || typeof a.id !== 'string' || !a.id.startsWith(SOUND_ARCHIVE_PREFIX) || typeof a.data !== 'string')) {
+              throw new Error('音迹备份内容不正确');
+          }
+          const existing = await DB.getAllAssets();
+          for (const asset of existing) {
+              if (asset.id.startsWith(SOUND_ARCHIVE_PREFIX)) await DB.deleteAsset(asset.id);
+          }
+          if (records.length) await DB.saveAssetBatch(records);
+          data.songSoundArchive = undefined;
+      }, data.songSoundArchive?.length || 0);
       await runSection('活动文字记录', data.activityTextAssets !== undefined && !mediaOnly, async () => {
           const records = data.activityTextAssets!;
           if (!Array.isArray(records) || records.some(a => !a || typeof a.id !== 'string'
@@ -4072,7 +4172,9 @@ export const DB = {
           await withStore(STORE_ASSETS, store => {
               const keys = store.getAllKeys();
               keys.onsuccess = () => {
-                  for (const key of keys.result) if (typeof key === 'string' && key !== 'friend_feed_v1' && isActivityTextAsset(key)) store.delete(key);
+                  const incomingPersonal = new Set(records.filter(a=>isPersonalTextAsset(a.id)).map(a=>a.id));
+                  // Older text archives do not know these new records; missing must not mean delete.
+                  for (const key of keys.result) if (typeof key === 'string' && key !== 'friend_feed_v1' && isActivityTextAsset(key) && (!isPersonalTextAsset(key) || incomingPersonal.has(key))) store.delete(key);
                   for (const item of records) store.put(item);
               };
           });

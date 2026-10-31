@@ -1,3 +1,4 @@
+import { isEmotionFeatureOn } from './scheduleFeature';
 import {getDailyScheduleForChar} from './dailySchedule';
 import {getLastInnerState} from './emotionState';
 import { readableContextMemories } from './contextMemories';
@@ -43,7 +44,7 @@ export const ContextBuilder = {
         });
     },
     buildEmotionContext: (char: CharacterProfile, options?: EmotionContextOptions): string => {
-        if ((options?.surface !== 'chat' && options?.surface !== 'home') || !isScheduleFeatureOn(char) || !char.emotionConfig?.enabled) return '';
+        if ((options?.surface !== 'chat' && options?.surface !== 'home') || !isEmotionFeatureOn(char)) return '';
         const inner = options.innerState ?? getLastInnerState(char.id);
         return (char.buffInjection ? char.buffInjection + '\n\n' : '')
             + (inner.trim() ? '### 当前内心想法\n' + inner.trim() + '\n（这是你的内心状态，不是台词，不必说出口；让它自然影响你的回应。）\n\n' : '');

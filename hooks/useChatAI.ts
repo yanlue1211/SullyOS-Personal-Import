@@ -1,3 +1,4 @@
+import { isEmotionFeatureOn } from '../utils/scheduleFeature';
 import { resolveDialogueApi, dialogueMaxTokens } from '../utils/characterApi';
 import { createReplyRun, withReplyCancellation } from '../utils/chatReplyCancellation';
 
@@ -989,7 +990,7 @@ export const useChatAI = ({
             //      双跑双扣费. 见下方即时对话分支 + activeMsgRuntime.
             //    走哪条跟着 instantChatRoute（构建 payload 前冻结的同一回合终值）走，这里绝不自己
             //    再判一次，否则可能「按上云把评估打包走了，实际却走本地」，情绪底色悄悄停更。
-            const emotionEvalEnabled = !!(!promptBuildSkipped && !isEmotionEvalSkipped() && isScheduleFeatureOn(char) && char.emotionConfig?.enabled);
+            const emotionEvalEnabled = !!(!promptBuildSkipped && !isEmotionEvalSkipped() && isEmotionFeatureOn(char));
             // 评估跟随全局流式开关（专用情绪 API 自带 stream 字段时以它为准）
             const evalStream: boolean = !!(apiConfig.stream ?? false);
             const emotionApi = emotionEvalEnabled

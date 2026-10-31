@@ -1,0 +1,5 @@
+import React from 'react';
+import TokenImg from '../../components/os/TokenImg';
+import {useBlobRefUrl} from '../../utils/blobRef';
+import {readRealMedia} from './format';
+export default function RealMediaView({value}:{value:unknown}){const media=readRealMedia(value),url=useBlobRefUrl(media?.originalRef||'');if(!media)return null;return <section className="rounded-2xl overflow-hidden max-w-sm p-2 bg-stone-50 text-stone-700"><small>{media.kind==='video'?'真实视频':'现场照片'}</small>{media.kind==='video'?<video controls playsInline preload="metadata" src={url||undefined} className="w-full max-h-64"/>:<TokenImg value={media.originalRef} className="max-h-64 max-w-full rounded-xl"/>}{media.kind==='video'&&<details><summary className="text-xs p-2">模型读取的 {media.frames.length} 帧画面 ▾</summary><div className="grid grid-cols-3 gap-1">{media.frames.map((f,i)=><figure key={i}><TokenImg value={f.image} className="w-full"/><figcaption className="text-xs">{f.timeSeconds.toFixed(1)}秒</figcaption></figure>)}</div></details>}</section>}
