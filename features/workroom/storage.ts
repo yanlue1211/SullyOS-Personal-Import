@@ -35,9 +35,7 @@ async function versionFor(tx: IDBTransaction, work: WorkroomWork, versionId: str
     return version;
 }
 async function lastTurn(tx: IDBTransaction, workId: string): Promise<WorkroomTurn | undefined> {
-    const cursor = await idbResult(tx.objectStore('workroom_turns').index('workId_createdAt').openCursor(
-        IDBKeyRange.bound([workId, 0], [workId, Number.MAX_SAFE_INTEGER]), 'prev'));
-    return cursor?.value;
+ return new Promise((resolve,reject)=>{const request=tx.objectStore('workroom_turns').index('workId_createdAt').openCursor(IDBKeyRange.bound([workId,0],[workId,Number.MAX_SAFE_INTEGER]),'prev');request.onerror=()=>reject(request.error);request.onsuccess=()=>{const cursor=request.result;if(!cursor)return resolve(undefined);if(cursor.value.kind==='play'){cursor.continue();return;}resolve(cursor.value);};});
 }
 const codeOnly = (code: WorkroomCode): WorkroomCode => ({ html: code.html, css: code.css, js: code.js });
 
@@ -53,6 +51,8 @@ export const WorkroomStorage = {
     },
     list: (charId: string): Promise<WorkroomWork[]> => transact(charId, 'readonly', tx =>
         idbResult(tx.objectStore('workroom_works').index('charId').getAll(charId))),
+    getWork: (charId:string,workId:string) => transact(charId,'readonly',tx=>owned(tx,charId,workId)),
+    draftIds: (charId:string):Promise<IDBValidKey[]> => transact(charId,'readonly',tx=>idbResult(tx.objectStore('workroom_drafts').index('charId').getAllKeys(charId))),
     get: (charId: string, workId: string) => transact(charId, 'readonly', async tx => {
         const work = await owned(tx, charId, workId);
         const versions = await idbResult<WorkroomVersion[]>(tx.objectStore('workroom_versions').index('workId').getAll(workId));
@@ -169,8 +169,16 @@ export const WorkroomStorage = {
     turns: (charId: string, workId: string): Promise<WorkroomTurn[]> => transact(charId, 'readonly', async tx => {
         await owned(tx, charId, workId);
         const rows = await idbResult<WorkroomTurn[]>(tx.objectStore('workroom_turns').index('workId').getAll(workId));
-        return rows.sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+        return rows.filter(row=>row.kind!=='play').sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
     }),
+    setRuntimeAi: (charId:string,workId:string,enabled:boolean) => transact(charId,'readwrite',async tx=>{const work=await owned(tx,charId,workId);await idbResult(tx.objectStore('workroom_works').put({...work,runtimeAiEnabled:enabled===true}));}),
+    playTurns: (charId:string,workId:string):Promise<WorkroomTurn[]>=>transact(charId,'readonly',async tx=>{await owned(tx,charId,workId);const rows=await idbResult<WorkroomTurn[]>(tx.objectStore('workroom_turns').index('workId').getAll(workId));return rows.filter(row=>row.kind==='play').sort((a,b)=>a.createdAt-b.createdAt||a.id.localeCompare(b.id));}),
+    appendPlayTurn: (charId:string,workId:string,versionId:string,role:'user'|'assistant',text:string,id:string) => {
+        if(!validText(text,8000)||!validText(id,200)||!['user','assistant'].includes(role))throw Error('互动内容无效');
+        return transact(charId,'readwrite',async tx=>{const work=await owned(tx,charId,workId);if(work.currentVersionId!==versionId||!work.runtimeAiEnabled)throw Error('作品或运行时AI设置已变化');
+            const store=tx.objectStore('workroom_turns'),previous=await idbResult<WorkroomTurn|undefined>(store.get(id));if(previous){if(previous.charId!==charId||previous.workId!==workId||previous.role!==role||previous.kind!=='play'||previous.text!==text)throw Error('互动标识冲突');return previous;}
+            const char=await idbResult(tx.objectStore('characters').get(charId));const recent=await idbResult(store.index('workId_createdAt').openCursor(IDBKeyRange.bound([workId,0],[workId,Number.MAX_SAFE_INTEGER]),'prev'));const turn:WorkroomTurn={id,charId,workId,workTitle:work.title,kind:'play',role,text,createdAt:Math.max(Date.now(),(recent?.value?.createdAt||0)+1),delivery:char.workroomLinkEnabled===true?'pending':'local'};await idbResult(store.add(turn));return turn;});
+    },
     appendTurn: (charId: string, workId: string, role: 'user' | 'assistant', text: string, id = workroomId()) => {
         if (!['user', 'assistant'].includes(role) || !validText(text, 12000) || !validText(id, 200)) throw Error('创作交流内容无效');
         return transact(charId, 'readwrite', async tx => {

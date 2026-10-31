@@ -2,7 +2,7 @@ import { assertCode, type WorkroomCode } from './schema';
 
 export const WORKROOM_SANDBOX = 'allow-scripts';
 export const WORKROOM_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; media-src data:; font-src data:; connect-src 'none'; frame-src 'none'; child-src 'none'; worker-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
-export const WORKROOM_RPC_METHODS = ['loadState', 'saveState', 'emitEvent', 'notify', 'requestUpdate', 'reportError', 'reportReady'] as const;
+export const WORKROOM_RPC_METHODS = ['loadState', 'saveState', 'emitEvent', 'notify', 'requestUpdate', 'reportError', 'reportReady', 'generate'] as const;
 export type WorkroomMethod = typeof WORKROOM_RPC_METHODS[number];
 export interface WorkroomRpc { id: string; method: WorkroomMethod; args: unknown[] }
 export function readWorkroomRpc(value: unknown): WorkroomRpc | undefined {
@@ -26,7 +26,7 @@ export function buildWorkroomDocument(code: WorkroomCode, session: string): stri
             return new Promise((resolve, reject) => {
                 if(pending.size >= 60) return reject(new Error('请求过多'));
                 const id = String(++sequence);
-                const timer = setTimeout(() => {pending.delete(id); reject(new Error('组件接口超时'));}, 10000);
+                const timer = setTimeout(() => {pending.delete(id); reject(new Error('组件接口超时'));}, method==='generate'?180000:10000);
                 pending.set(id, {resolve, reject, timer});
                 const message = {id, method, args};
                 if(port) port.postMessage(message); else waiting.push(message);
@@ -35,6 +35,7 @@ export function buildWorkroomDocument(code: WorkroomCode, session: string): stri
         const api = Object.freeze({
             loadState: () => call('loadState'), saveState: state => call('saveState', state),
             emitEvent: (detail, actionId) => call('emitEvent', detail, actionId || 'event-'+(++sequence)),
+            generate: request => call('generate', request),
             notify: text => call('notify', text), requestUpdate: text => call('requestUpdate', text)
         });
         Object.defineProperty(window, 'workroom', {value: api, writable: false, configurable: false});

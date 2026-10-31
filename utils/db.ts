@@ -1057,14 +1057,14 @@ export const DB = {
         charRequest.onsuccess = () => {
           const char = charRequest.result;
           if (!char) { fail(new Error('角色已不存在')); return; }
-          if (name === 'workroom_events' && row.event?.kind === 'progress' && char.workroomLinkEnabled !== true) {
+          if (((name === 'workroom_events' && row.event?.kind === 'progress') || (name === 'workroom_turns' && row.kind === 'play')) && char.workroomLinkEnabled !== true) {
             source.put({ ...row, delivery: 'local' }); return;
           }
           try {
             const deliveryId = `workroom:${name}:${id}`;
             const message = name === 'workroom_events' ? createWorkroomMessage(row.event) : {
               charId, role: row.role, type: 'text', timestamp: row.createdAt,
-              content: `【造物间·创作交流】《${row.workTitle}》\n${row.text}`,
+              content: `【造物间·${row.kind === 'play' ? '游戏互动' : '创作交流'}】《${row.workTitle}》\n${row.text}`,
               metadata: { source: 'workroom', workroomTurnId: row.id, workroomWorkId: row.workId },
             };
             if (message.charId !== charId) throw new Error('造物间事件归属不符');

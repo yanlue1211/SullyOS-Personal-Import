@@ -8,14 +8,16 @@ export interface WorkroomRunnerProps {
     version: WorkroomVersion;
     onNotify?: (text: string) => void;
     onError?: (text: string) => void;
+    onEvent?: (text:string)=>void;
+    onGenerate?: (request:unknown,requestId:string,signal:AbortSignal)=>Promise<unknown>;
     preview?: boolean;
 }
 /** Each mount/version owns a fresh iframe and capability port; teardown revokes old work. */
-export default function WorkroomRunner({ charId, version, onNotify, onError, preview = false }: WorkroomRunnerProps) {
+export default function WorkroomRunner({ charId, version, onNotify, onError, onEvent, onGenerate, preview = false }: WorkroomRunnerProps) {
     const iframe = useRef<HTMLIFrameElement>(null);
     const [stopped, setStopped] = useState(false);
-    const callbacks = useRef({ onNotify, onError });
-    callbacks.current = { onNotify, onError };
+    const callbacks = useRef({ onNotify, onError, onEvent, onGenerate });
+    callbacks.current = { onNotify, onError, onEvent, onGenerate };
     const [doc, setDoc] = useState('');
     const setup = useRef<(() => void) | undefined>();
     const stop = useRef<(() => void) | undefined>();
@@ -28,6 +30,8 @@ export default function WorkroomRunner({ charId, version, onNotify, onError, pre
             onNotify: text => callbacks.current.onNotify?.(text),
             onError: text => callbacks.current.onError?.(text),
             onStop: () => setStopped(true),
+            onEvent: text=>callbacks.current.onEvent?.(text),
+            onGenerate: (request,id,signal)=>{const fn=callbacks.current.onGenerate;if(!fn)return Promise.reject(Error('该作品未开启运行时AI'));return fn(request,id,signal);},
         }, preview);
         const dispose = () => { active = false; port?.close(); host.close(); };
         stop.current = dispose;
