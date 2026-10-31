@@ -47,7 +47,8 @@ export default function WorkroomApp() {
     const [retry, setRetry] = useState<{ id: string; text: string } | null>(null);
     const [deleteCandidate, setDeleteCandidate] = useState(false);
     const [toolsExpanded, setToolsExpanded] = useState(false);
-    const gameSettingsTarget = useRef<HTMLElement|null>(null);
+    const [settingsOpen,setSettingsOpen] = useState(false);
+    const toolsRef = useRef<HTMLDivElement|null>(null);
     const abort = useRef<AbortController | null>(null);
     const scope = useRef('');
     const character = os.characters.find(char => char.id === charId);
@@ -175,12 +176,13 @@ export default function WorkroomApp() {
             </main> : !detail ? <div className="p-6 text-sm">正在读取作品…</div> : <>
                 <div className="wr-work-toolbar">
                     <div className="wr-work-heading"><h2>{detail.work.title}</h2><p>{detail.work.summary}</p></div>
-                    <div className="wr-tools">
+                    <div className="wr-tools" ref={toolsRef}>
                         <button type="button" aria-label="功能菜单" aria-expanded={toolsExpanded} onClick={()=>setToolsExpanded(value=>!value)}>☰ <span>菜单</span> ▾</button>
                         {toolsExpanded && <nav className="wr-tools-menu" aria-label="作品页面">
                             {([['talk','创作交流'],['run','体验作品'],['versions','版本管理'],['code','代码草稿']] as const).map(([id,label])=><button key={id} className={page===id?'selected':''} onClick={()=>{setDeleteCandidate(false);setPage(id);setToolsExpanded(false);}}>{label}</button>)}
-                            {page==='run'&&<button type="button" onClick={()=>{window.dispatchEvent(new Event('workroom-toggle-settings'));setToolsExpanded(false);}}>⚙ 设置 →</button>}
+                            {page==='run'&&<button type="button" onClick={()=>{setSettingsOpen(v=>!v);}}>⚙ 设置 →</button>}
                         </nav>}
+                        {toolsExpanded&&settingsOpen&&page==='run'&&<div className="wr-tools-submenu">游戏设置请在体验作品中调整</div>}
                     </div>
                 </div>
                 {page === 'test' && testVersion ? <main className="flex-1 min-h-0 flex flex-col"><p className="px-4 text-xs">草稿试运行：使用临时进度，不产生聊天互动；请实际点击验证玩法。没有报错不代表所有功能正确。</p><div className="flex-1 min-h-0"><WorkroomRunner key={testVersion.id} charId={charId} version={testVersion} preview onNotify={setNotice} onError={text=>setTestErrors(old=>[...old,text.slice(0,2000)].slice(-20))}/></div><div className="p-3 max-h-48 overflow-auto"><p className="text-xs">已捕获错误：{testErrors.length}</p>{testErrors.map((e,i)=><p key={i} className="text-xs text-red-700">{e}</p>)}<textarea aria-label="测试反馈" value={testNotes} maxLength={2000} onChange={e=>setTestNotes(e.target.value)} placeholder="按钮、进度、布局等实际体验反馈" className="w-full text-sm"/><button className={button} disabled={busy} onClick={()=>operate(async()=>{const owner=charId,selected=workId,expected=scope.current;await W.saveTestReport(owner,selected,Number(testVersion.number),testErrors,testNotes);await refresh(owner,selected);if(scope.current===expected){setPage('talk');setTestVersion(null);setNotice('试运行记录已保存，继续交流时 TA 可以读取并修改。');}})}>结束测试并保存记录</button></div></main> : page === 'run' ? <div className="flex-1 min-h-0 bg-white">{version ? <WorkroomPlay key={`${charId}:${version.id}`} charId={charId} version={version} onNotify={setNotice} onError={error=>setNotice('作品运行错误：'+error)}/> : <p className="p-5 text-sm">还没有正式版本，先和 TA 一起制作吧。</p>}</div>
