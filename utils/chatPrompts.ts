@@ -1286,7 +1286,12 @@ ${voiceActingGuide()}`;
                 }
                 else if ((m.type as string) === 'xhs_card' || (m.type as string) === 'webpage_card') {
                     const text = `${timeStr} ${normalizeMessageContent(m, char?.name || '你', userProfile?.name || '用户')}`;
-                    const images = getShareCardImageUrls(m);
+                    // Old third-party share covers may expire (403) and otherwise poison every
+                    // later completion. Preserve the card's textual context; only attach
+                    // live images for a recently shared card. Ordinary image messages
+                    // retain their original historical vision behavior.
+                    const recentlyShared = Date.now() - Number(m.timestamp) < 10 * 60 * 1000;
+                    const images = recentlyShared ? getShareCardImageUrls(m) : [];
                     const frames = (m.type as string) === 'xhs_card'
                         ? ((m.metadata as any)?.xhsNote?.videoFrames || [])
                         : m.metadata?.webpage?.video?.contentType === 'video'
