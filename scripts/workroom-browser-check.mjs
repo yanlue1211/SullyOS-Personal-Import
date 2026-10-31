@@ -18,7 +18,7 @@ try{
  await selectCreator();const frame=page.frameLocator('iframe[title="造物间作品"]');
  await frame.getByText('等级 1',{exact:true}).waitFor();await frame.getByRole('button',{name:'喂小狗'}).click();await frame.getByText('等级 2',{exact:true}).waitFor();
  await page.getByRole('button',{name:'重开造物间',exact:true}).click();await selectCreator();await frame.getByText('等级 2',{exact:true}).waitFor();
- await page.getByLabel(/运行时AI ·/).check();await page.getByRole('button',{name:'让 TA 看看',exact:true}).waitFor();await frame.getByRole('button',{name:'生成新题目',exact:true}).click();await frame.getByText('现场生成的第七扇门',{exact:true}).waitFor();
+ await page.getByLabel(/运行时AI ·/).check();await page.getByText(/运行时AI已开启/).waitFor();await frame.getByRole('button',{name:'生成新题目',exact:true}).click();await frame.getByText('现场生成的第七扇门',{exact:true}).waitFor();
  await page.screenshot({path:'test-results/workroom/mobile.png'});
  await page.getByRole('button',{name:'验证启动观察',exact:true}).click();await page.getByText('PASS: 真实浏览器启动观察',{exact:true}).waitFor();
  await page.getByRole('button',{name:'验证分享与备份整链',exact:true}).click();
