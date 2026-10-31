@@ -1,7 +1,7 @@
 name: Workroom browser verification
 on:
   push:
-    branches: [personal/workroom-foundation, personal/workroom-feedback]
+    branches: [personal/workroom-foundation, personal/workroom-feedback, personal/workroom-json-fix]
   workflow_dispatch:
 permissions:
   contents: read
