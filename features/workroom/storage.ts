@@ -161,7 +161,7 @@ export const WorkroomStorage = {
             const event = readWorkroomEvent({ version: 1, eventId: workroomId(), charId, charName: char.name || '角色',
                 kind: 'progress', subjectId: workId, title: work.title, summary: work.summary,
                 detail: `组件内互动（由作品报告）：${detail}`, timestamp: Date.now() }, charId)!;
-            const row: WorkroomStoredEvent = { id, charId, workId, event, delivery: char.workroomLinkEnabled === true ? 'pending' : 'local' };
+            const row: WorkroomStoredEvent = { id, charId, workId, event, delivery: 'pending' };
             await idbResult(store.add(row));
             return row;
         });
@@ -177,7 +177,7 @@ export const WorkroomStorage = {
         if(!validText(text,8000)||!validText(id,200)||!['user','assistant'].includes(role))throw Error('互动内容无效');
         return transact(charId,'readwrite',async tx=>{const work=await owned(tx,charId,workId);if(work.currentVersionId!==versionId||!work.runtimeAiEnabled)throw Error('作品或运行时AI设置已变化');
             const store=tx.objectStore('workroom_turns'),previous=await idbResult<WorkroomTurn|undefined>(store.get(id));if(previous){if(previous.charId!==charId||previous.workId!==workId||previous.role!==role||previous.kind!=='play'||previous.text!==text)throw Error('互动标识冲突');return previous;}
-            const char=await idbResult(tx.objectStore('characters').get(charId));const recent=await idbResult(store.index('workId_createdAt').openCursor(IDBKeyRange.bound([workId,0],[workId,Number.MAX_SAFE_INTEGER]),'prev'));const turn:WorkroomTurn={id,charId,workId,workTitle:work.title,kind:'play',role,text,createdAt:Math.max(Date.now(),(recent?.value?.createdAt||0)+1),delivery:char.workroomLinkEnabled===true?'pending':'local'};await idbResult(store.add(turn));return turn;});
+            const char=await idbResult(tx.objectStore('characters').get(charId));const recent=await idbResult(store.index('workId_createdAt').openCursor(IDBKeyRange.bound([workId,0],[workId,Number.MAX_SAFE_INTEGER]),'prev'));const turn:WorkroomTurn={id,charId,workId,workTitle:work.title,kind:'play',role,text,createdAt:Math.max(Date.now(),(recent?.value?.createdAt||0)+1),delivery:'local'};await idbResult(store.add(turn));return turn;});
     },
     appendTurn: (charId: string, workId: string, role: 'user' | 'assistant', text: string, id = workroomId()) => {
         if (!['user', 'assistant'].includes(role) || !validText(text, 12000) || !validText(id, 200)) throw Error('创作交流内容无效');
