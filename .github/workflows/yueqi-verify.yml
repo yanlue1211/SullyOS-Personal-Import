@@ -1,7 +1,7 @@
 name: Yueqi verification
 on:
   push:
-    branches: [personal/yueqi]
+    branches: [personal/yueqi, personal/yueqi-music]
   pull_request:
     branches: [personal/audio-listening]
     paths: ['features/yueqi/**', 'apps/YueqiApp*', 'components/chat/YueqiCard.tsx', 'utils/yueqi*', 'scripts/yueqi-browser-check.mjs', 'test/fixtures/yueqi-browser*', '.github/workflows/yueqi-verify.yml']
