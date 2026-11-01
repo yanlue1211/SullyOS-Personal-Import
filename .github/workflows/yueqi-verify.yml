@@ -24,7 +24,7 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm vitest run utils/yueqi.test.ts utils/yueqiRuntime.test.ts utils/yueqiContext.test.ts utils/yueqiUI.test.tsx utils/contextPipeline.test.ts utils/contextWorldbook.test.ts
+      - run: pnpm vitest run utils/yueqi.test.ts utils/yueqiRuntime.test.ts utils/yueqiContext.test.ts utils/yueqiUI.test.tsx utils/contextPipeline.test.ts utils/contextWorldbook.test.ts utils/experience.test.ts utils/chatInputInteraction.test.ts
       - run: pnpm build
       - name: Install isolated browser test runtime
         run: |

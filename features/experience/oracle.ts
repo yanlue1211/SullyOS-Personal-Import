@@ -15,7 +15,7 @@ export async function saveOracleItems(scope:string,items:OracleItem[]){if(items.
 export function oracleMessage(item:OracleItem):ExperienceMessage{validateOracle(item);return {content:`【我谕·${item.trigger==='now'?'入场':'等待入场'}】${item.emoji} ${item.name}\n${item.trigger==='now'?(item.entry||`用户递来了${item.name}。`):'等待用户设置的条件触发。'}`,metadata:{oracle:{runId:crypto.randomUUID(),item}}};}
 export function oracleState(rows:Message[],now=Date.now()){
  const ended=new Set(rows.map(m=>m.metadata?.oracleEndId).filter(Boolean));
- return rows.filter(m=>m.role==='user'&&m.metadata?.oracle).map(start=>{
+ return rows.filter(m=>(m.role==='user'||m.role==='system')&&m.metadata?.oracle).map(start=>{
   const run=start.metadata!.oracle;let item:OracleItem;try{item=validateOracle(run.item);}catch{return null;}
   if(typeof run.runId!=='string'||ended.has(run.runId))return null;
   const after=rows.filter(m=>m.id>start.id&&!m.metadata?.oracle&&!m.metadata?.oracleEndId);
@@ -39,4 +39,13 @@ export async function oracleContext(scope:string):Promise<string>{
   }catch(e){tx.abort();reject(e);}};
   tx.oncomplete=()=>resolve(result);tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error||Error('道具读取失败'));
  });
+}
+
+/** Oracle controls are backstage system records, never user speech or a generation trigger. */
+export function isOracleControl(message:ExperienceMessage):boolean{return !!message.metadata?.oracle||typeof message.metadata?.oracleEndId==='string';}
+export async function saveOracleControl(charId:string,message:ExperienceMessage):Promise<number>{
+ if(!isOracleControl(message))throw Error('不是我谕控制记录');
+ if(message.metadata.oracle){const run=message.metadata.oracle;validateOracle(run.item);if(typeof run.runId!=='string'||!run.runId)throw Error('道具入场编号无效');}
+ if(message.metadata.oracleEndId!==undefined&&!message.metadata.oracleEndId)throw Error('道具退场编号无效');
+ return DB.saveMessage({charId,role:'system',type:'text',content:message.content,metadata:message.metadata});
 }
