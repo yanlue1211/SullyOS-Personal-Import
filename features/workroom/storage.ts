@@ -147,7 +147,7 @@ export const WorkroomStorage = {
         if (!await idbResult(tx.objectStore('workroom_states').get(stateId(workId, target.schemaVersion)))) throw Error('旧版本进度缺失，不能安全回退');
         await idbResult(tx.objectStore('workroom_works').put({ ...work, currentVersionId: versionId, updatedAt: Date.now() }));
     }),
-    recordEvent: (charId: string, workId: string, versionId: string, actionId: string, detail: string, narration?:{kind?:'started'|'progress';actor:'user'|'char'|'game';userName:string}) => {
+    recordEvent: (charId: string, workId: string, versionId: string, actionId: string, detail: string, narration?:{kind?:'started'|'progress';actor:'user'|'char'|'game';userName:string;raw?:boolean}) => {
         if (!validText(actionId, 100) || !validText(detail, 8000)) throw Error('互动事件无效');
         return transact(charId, 'readwrite', async tx => {
             const work = await owned(tx, charId, workId);
@@ -162,12 +162,12 @@ export const WorkroomStorage = {
                 kind: narration?.kind||'progress', subjectId: workId, title: work.title, summary: narration&&narration.kind!=='started'?'游戏互动记录':work.summary,
                 ...(narration?{actor:narration.actor,actorName:narration.actor==='char'?char.name:narration.actor==='user'?narration.userName:'旁白'}:{}),
                 detail: detail, timestamp: Date.now() }, charId)!;
-            const row: WorkroomStoredEvent = { id, charId, workId, event, delivery: narration&&char.workroomLinkEnabled!==true?'local':'pending' };
+            const row: WorkroomStoredEvent = { id, charId, workId, event, ...(narration?.raw?{raw:true}:{}),delivery: narration&&(narration.raw||char.workroomLinkEnabled!==true)?'local':'pending' };
             await idbResult(store.add(row));
             return row;
         });
     },
-    playNarrations: (charId:string,workId:string):Promise<WorkroomStoredEvent[]>=>transact(charId,'readonly',async tx=>{await owned(tx,charId,workId);return (await idbResult<WorkroomStoredEvent[]>(tx.objectStore('workroom_events').index('workId').getAll(workId))).filter(r=>r.event.kind==='started'||r.event.kind==='progress').sort((a,b)=>a.event.timestamp-b.event.timestamp);}),
+    playNarrations: (charId:string,workId:string):Promise<WorkroomStoredEvent[]>=>transact(charId,'readonly',async tx=>{await owned(tx,charId,workId);return (await idbResult<WorkroomStoredEvent[]>(tx.objectStore('workroom_events').index('workId').getAll(workId))).filter(r=>!r.raw&&(r.event.kind==='started'||r.event.kind==='progress')).sort((a,b)=>a.event.timestamp-b.event.timestamp);}),
     turns: (charId: string, workId: string): Promise<WorkroomTurn[]> => transact(charId, 'readonly', async tx => {
         await owned(tx, charId, workId);
         const rows = await idbResult<WorkroomTurn[]>(tx.objectStore('workroom_turns').index('workId').getAll(workId));

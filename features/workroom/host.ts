@@ -25,8 +25,7 @@ export function createWorkroomHost(charId: string, workId: string, versionId: st
     let flushTimer:ReturnType<typeof setTimeout>|undefined;
     const persist=async(id:string,details:string[],actor:'user'|'char')=>{if(preview||!details.length)return;const char=await DB.getCharacter(charId);if(!char)return;const name=actor==='char'?char.name:(callbacks.userName||'用户');const text=gameNarration(name,details,char.name,callbacks.userName||'用户');await ensureGameStarted(charId,workId,versionId,callbacks.userName);await WorkroomStorage.recordEvent(charId,workId,versionId,id,text,{actor,userName:callbacks.userName||'用户'});await drainWorkroomOutbox(charId);if(active)callbacks.onEvent?.(text);};
     const flushUser=async()=>{clearTimeout(flushTimer);const batch=userEvents;userEvents=undefined;if(batch)await persist(batch.id,batch.details,'user');};
-    let lastPublicEvent = '';
-    let lastPublicAt = 0;
+    const seenEvents=new Set<string>();
     const inFlight = new Set<string>();
     const replies = new Map<string, unknown>();
     const respond = (id: string, reply: unknown) => {
@@ -81,9 +80,12 @@ export function createWorkroomHost(charId: string, workId: string, versionId: st
                         } else if (request.method === 'emitEvent') {
                             if (!validText(args[0], 2000) || !validText(args[1], 100)) throw Error('互动事件格式无效');
                             const description = String(args[0]);
-                            const isRepeat=description===lastPublicEvent&&Date.now()-lastPublicAt<1500;
-                            if(!isRepeat){lastPublicEvent=description;lastPublicAt=Date.now();}
+                            const eventKey=JSON.stringify([characterAction?.id||'user',args[1],description]);
+                            const isRepeat=seenEvents.has(eventKey);
+                            if(!isRepeat){seenEvents.add(eventKey);if(seenEvents.size>256)seenEvents.delete(seenEvents.values().next().value!);}
                             if(!preview&&!isRepeat){
+                                await WorkroomStorage.recordEvent(charId,workId,versionId,'raw-'+session+'-'+request.id,description,{actor:characterAction?'char':'user',userName:callbacks.userName||'用户',raw:true});
+                                if(!active){respond(request.id,{id:request.id,ok:true,value:'saved-local'});return;}
                                 if(characterAction)characterAction.events.push(description);
                                 else{if(!userEvents)userEvents={id:'user-'+session+'-'+(++batchSequence),details:[]};userEvents.details.push(description);clearTimeout(flushTimer);flushTimer=setTimeout(()=>{queue=queue.then(flushUser).catch(e=>callbacks.onError?.(String(e)));},250);}
                             }

@@ -15,6 +15,7 @@ export function ensureGameStarted(charId:string,workId:string,versionId:string,u
  });locks.set(key,task);void task.finally(()=>{if(locks.get(key)===task)locks.delete(key);}).catch(()=>{});return task;
 }
 export function gameNarration(actorName:string,details:string[],charName:string,userName:string):string{
- const clean=[...new Set(details.map(t=>t.trim()).filter(Boolean))].map(t=>t.replace(/\bchar\b/gi,charName).replace(/\buser\b/gi,userName));
+ const counts=new Map<string,number>();for(const detail of details){const text=detail.trim();if(text)counts.set(text,(counts.get(text)||0)+1);}
+ const clean=[...counts].map(([t,count])=>t.replace(/\bchar\b/gi,charName).replace(/\buser\b/gi,userName)+(count>1?'（连续 '+count+' 次）':''));
  return `【游戏旁白】\n操作者：${actorName}\n本轮行为与游戏变化：${clean.join('；').slice(0,7000)}`;
 }
