@@ -29,6 +29,7 @@ try{
   await page.getByRole('button',{name:/月光拾音/}).click();
   await snap('records');
   await page.getByRole('button',{name:/海边的小羊/}).click();
+  await page.locator('.yq-player').waitFor({state:'visible'});
   await snap('player');
   await page.getByRole('button',{name:'修改摘要',exact:true}).click();
   await page.getByRole('textbox',{name:'本场摘要',exact:true}).fill('修正摘要：这是虚构的小羊故事，用户没有回应。');
