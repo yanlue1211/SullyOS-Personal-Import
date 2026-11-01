@@ -63,7 +63,7 @@ try{
    await snap('audio-complete');
    await page.reload();
    await page.getByRole('button',{name:/月下听风/}).click();
-   const savedTrack=page.getByRole('button',{name:/测试背景音/});
+   const savedTrack=page.locator('.yq-playlist button[aria-pressed]').filter({hasText:'测试背景音'});
    await savedTrack.waitFor();
    await savedTrack.click();
    await page.waitForFunction(()=>{const m=window.__yueqiQA.moon;return m.music&&!m.music.paused;});
