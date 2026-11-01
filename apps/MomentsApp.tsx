@@ -773,11 +773,10 @@ export default function MomentsApp() {
                         (pair) =>
                           pair.includes(friendActor) && pair.includes(c.id),
                       )}
-                      onChange={(e) =>
-                        operate(() =>
-                          setFriend(friendActor, c.id, e.target.checked),
-                        )
-                      }
+                      onChange={(e) => {
+                        const checked = e.currentTarget.checked;
+                        void operate(() => setFriend(friendActor, c.id, checked));
+                      }}
                     />
                   </label>
                 ))}
@@ -819,11 +818,12 @@ export default function MomentsApp() {
                       busy || (key !== "enabled" && !participant.enabled)
                     }
                     checked={participant[key]}
-                    onChange={(e) =>
-                      updateParticipant((p) => {
-                        p[key] = e.target.checked;
-                      })
-                    }
+                    onChange={(e) => {
+                      const checked = e.currentTarget.checked;
+                      void updateParticipant((p) => {
+                        p[key] = checked;
+                      });
+                    }}
                   />
                 </label>
               ))}
@@ -858,9 +858,10 @@ export default function MomentsApp() {
                         <select
                           value={participant.habits[key]}
                           disabled={busy}
-                          onChange={(e) =>
-                            updateParticipant((p) => {
-                              const h = { ...p.habits, [key]: e.target.value };
+                          onChange={(e) => {
+                            const value = e.currentTarget.value;
+                            void updateParticipant((p) => {
+                              const h = { ...p.habits, [key]: value };
                               const d = habitDefaults(
                                 h.posting as Level,
                                 h.browsing as Level,
@@ -876,8 +877,8 @@ export default function MomentsApp() {
                                 preferences: h.preferences,
                                 reason: h.reason,
                               };
-                            })
-                          }
+                            });
+                          }}
                         >
                           {levels.map((l) => (
                             <option key={l.id} value={l.id}>
@@ -970,16 +971,17 @@ export default function MomentsApp() {
                           type="checkbox"
                           checked={participant.habits.hours.includes(h)}
                           disabled={busy}
-                          onChange={(e) =>
-                            updateParticipant((p) => {
+                          onChange={(e) => {
+                            const checked = e.currentTarget.checked;
+                            void updateParticipant((p) => {
                               p.habits = {
                                 ...p.habits,
-                                hours: e.target.checked
+                                hours: checked
                                   ? [...p.habits.hours, h].sort((a, b) => a - b)
                                   : p.habits.hours.filter((x) => x !== h),
                               };
-                            })
-                          }
+                            });
+                          }}
                         />
                         {h}时
                       </label>
