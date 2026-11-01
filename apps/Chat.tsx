@@ -1,4 +1,5 @@
 import ExperienceTools from '../features/experience/Tools';
+import {isOracleControl,saveOracleControl} from '../features/experience/oracle';
 import { consumeWorkroomCollection } from '../features/workroom/launch';
 import { isAudioApiReady, audioBlobToPayload, recognizeUserRecording, registerRecordingRecognition, recordingMetadata, materializeAudioDescriptions } from '../utils/audioApi';
 import { isEmotionFeatureOn } from '../utils/scheduleFeature';
@@ -4513,7 +4514,7 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
                 {/* 开关写着「已开启」、这一轮却在本地生成时，把原因说给用户听 */}
                 <InstantChatRouteNotice charId={activeCharacterId} />
 
-                {experienceOpen&&<ExperienceTools key={char.id} scopeId={char.id} disabled={isTyping} initialTool={experienceOpen||'menu'} initialOpen onClose={()=>setExperienceOpen(false)} onSend={async message=>{await handleSendText(message.content,'text',message.metadata);}}/>}
+                {experienceOpen&&<ExperienceTools key={char.id} scopeId={char.id} disabled={isTyping} initialTool={experienceOpen||'menu'} initialOpen onClose={()=>setExperienceOpen(false)} onSend={async message=>{if(isOracleControl(message)){autoReply.cancel();await saveOracleControl(char.id,message);await reloadMessages(visibleCountRef.current);setExperienceOpen(false);return;}await handleSendText(message.content,'text',message.metadata);}}/>}
                 {!selectionMode && personalMediaPanel && <PersonalMediaComposer key={`${char.id}:${personalMediaPanel}`} sheet visualOnly={personalMediaPanel === 'visual'} onClose={() => setPersonalMediaPanel(null)} conversationId={char.id} onRecognize={isAudioApiReady(apiConfig.audioApi) ? async blob => recognizeUserRecording(await audioBlobToPayload(await prepareRecording(blob), 'voice.wav'), apiConfig.audioApi!) : undefined} onSend={async (content, blob, duration, signal, recognition, completedRecognition) => {
                     if (blob) {
                         const wav = await prepareRecording(blob);

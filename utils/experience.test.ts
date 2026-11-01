@@ -50,3 +50,18 @@ it('rejects duplicate and excessive action descriptors; no arbitrary code goes t
 });
 
 it.each(['image','video'] as const)('keeps %s captions with image evidence in one request and in memory text',async kind=>{const media={kind,name:'现场',originalRef:'blobref:b_original',inPerson:true,frames:[{timeSeconds:0,image:'blobref:b_frame'}]};const prepared=composeMediaMessage({content:mediaText(media),metadata:{realMedia:media}},'看看这件蓝色外套');const row={id:99,charId:owner,role:'user',type:'text',timestamp:1,...prepared} as any;const payload=await DatePrompts.buildSessionPayload({char:{id:owner,name:'阿源'} as any,userProfile:{name:'略略'} as any,allMsgs:[row],emojis:[],userText:row.content,variant:'send'});const final=[...payload.messages].reverse().find(m=>m.role==='user')!;expect(final.role).toBe('user');expect(JSON.stringify(final.content)).toContain('看看这件蓝色外套');expect(JSON.stringify(final.content)).toContain('image_url');expect(normalizeMessageContent(row,'阿源','略略')).toContain('看看这件蓝色外套');expect(realMediaContent({...row,metadata:{...row.metadata,visionDescription:'蓝色外套'}},true)).toContain('看看这件蓝色外套');});
+it('online oracle controls are system records; original user records still keep their effects',async()=>{
+ const {saveOracleControl}=await import('../features/experience/oracle');
+ const m=oracleMessage(item());await saveOracleControl(owner,m);
+ let rows=await DB.getMessagesByCharId(owner,true);
+ expect(rows.filter(m=>m.role==='user')).toHaveLength(0);expect(rows.filter(m=>m.role==='assistant')).toHaveLength(0);
+ expect(rows.find(row=>row.metadata?.oracle)?.role).toBe('system');expect(await oracleContext(owner)).toContain('桂花糖');
+ await saveOracleControl(owner,{content:'【我谕·用户退场】',metadata:{oracleEndId:m.metadata.oracle.runId}});
+ expect(await oracleContext(owner)).toBe('');rows=await DB.getMessagesByCharId(owner,true);expect(rows.every(row=>row.role==='system')).toBe(true);
+});
+it('system oracle waits for real user keywords instead of treating setup as user speech',async()=>{
+ const {saveOracleControl}=await import('../features/experience/oracle');const v=item();v.trigger='keyword';v.triggerKeyword='吃糖';
+ await saveOracleControl(owner,oracleMessage(v));expect(await oracleContext(owner)).toBe('');
+ await DB.saveMessage({charId:owner,role:'system',type:'text',content:'吃糖'});expect(await oracleContext(owner)).toBe('');
+ await DB.saveMessage({charId:owner,role:'user',type:'text',content:'现在吃糖吧'});expect(await oracleContext(owner)).toContain('桂花糖');
+});

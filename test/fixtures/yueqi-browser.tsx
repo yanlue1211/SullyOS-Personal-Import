@@ -21,5 +21,5 @@ createRoot(document.getElementById('root')!).render(<OSPreviewProvider value={{c
  const audio=await blobData(encodeWavFromFloat32(samples,16000,16000));
  let session=addReply(newSession(chars[0].id,'story',{title:'真实播放器验收',status:'ready',targetMinutes:1}),'第一段。','story');
  session=addReply(session,'第二段。','story');session.clips=session.clips.map(c=>({...c,audio,seconds:2}));
- await storage.save(session);await moon.select(session);moon.playlist=[{id:'qa-music',name:'测试背景音',audio}];moon.musicMode='loop';moon.musicAfter='stop';return session.id;
+ await storage.save(session);await moon.select(session);moon.playlist=[{id:'qa-music',name:'测试背景音',audio}];moon.musicMode='loop';moon.musicAfter='stop';await DB.saveAssetRaw('yueqi:playlist',moon.playlist);return session.id;
  }};

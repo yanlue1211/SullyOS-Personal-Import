@@ -19,8 +19,14 @@ try{
    if(overflow)throw Error(`${width}px ${name} horizontal overflow`);
    await page.screenshot({path:`test-results/yueqi/${width}-${name}.png`});
   };
+  const cardColors=await page.locator('.yq-grid > button').evaluateAll(cards=>cards.map(card=>getComputedStyle(card).backgroundImage));
+  if(new Set(cardColors).size!==1)throw Error('Home card colors differ');
   await snap('home');
-  await page.getByRole('button',{name:/月下寻羊/}).click();
+  await page.getByRole('button',{name:/月下听风/}).click();
+  await page.getByRole('heading',{name:'月下听风',exact:true}).waitFor();
+  await snap('music');
+  await page.getByRole('button',{name:'返回',exact:true}).click();
+  await page.getByRole('button',{name:/选择一位熟悉的声音/}).click();
   await page.getByRole('button',{name:/阿源/}).click();
   await page.getByRole('button',{name:/枕月听书/}).click();
   await page.getByRole('button',{name:/月下相依/}).click();
@@ -55,6 +61,14 @@ try{
    const played=await page.evaluate(async()=>{const q=window.__yueqiQA;const s=await q.storage.get(q.moon.session.id);return {count:s.turns.filter(t=>t.played).length,audios:s.clips.filter(c=>c.audio).length,offset:s.offset};});
    if(played.count!==2||played.audios!==2||played.offset!==0)throw Error('Audio completion or persistence mismatch: '+JSON.stringify(played));
    await snap('audio-complete');
+   await page.reload();
+   await page.getByRole('button',{name:/月下听风/}).click();
+   const savedTrack=page.locator('.yq-playlist button[aria-pressed]').filter({hasText:'测试背景音'});
+   await savedTrack.waitFor();
+   await savedTrack.click();
+   await page.waitForFunction(()=>{const m=window.__yueqiQA.moon;return m.music&&!m.music.paused;});
+   await snap('saved-music');
+
    console.log('PASS: actual HTMLAudio playback, ordered two-clip completion, pause/resume, ducking, music fade-out and persisted audio.');
   }
   await context.close();
