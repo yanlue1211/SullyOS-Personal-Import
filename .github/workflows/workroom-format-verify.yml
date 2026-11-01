@@ -1,7 +1,7 @@
 name: Workroom output format verification
 on:
   push:
-    branches: [personal/library-autoplay]
+    branches: [personal/music-playlist-linkage]
   pull_request:
     branches: [personal/audio-listening]
     paths: ['apps/music/**', 'apps/MusicApp.tsx', 'apps/Gallery.tsx', 'utils/visionApi.ts', 'context/MusicContext.tsx', 'features/workroom/**', 'components/WorkroomRunner.tsx', 'apps/WorkroomApp.tsx', 'utils/workroom*.test.ts', 'test/fixtures/workroom-startup*', 'scripts/workroom-startup-check.mjs', '.github/workflows/workroom-format-verify.yml']
@@ -27,7 +27,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm vitest run utils/workroomCreation.test.ts utils/workroomResponse.test.ts utils/workroomChatBridge.test.ts utils/workroomPortable.test.ts utils/workroomRunner.test.ts utils/workroomHost.test.ts utils/workroomUI.test.ts utils/workroomStorage.test.ts utils/workroomDelivery.test.ts utils/workroomRuntime.test.ts utils/replyEditing.test.ts utils/contextPipeline.test.ts utils/contextWorldbook.test.ts --maxWorkers=2 --minWorkers=1
-      - run: pnpm vitest run utils/musicLibraryUI.test.tsx utils/galleryBatchDelete.test.ts utils/messageFormat.sticker.test.ts utils/visionApi.test.ts utils/importedLyrics.test.ts utils/charPlaylistEdit.test.ts --maxWorkers=2 --minWorkers=1
+      - run: pnpm vitest run utils/musicLibraryUI.test.tsx utils/galleryBatchDelete.test.ts utils/messageFormat.sticker.test.ts utils/visionApi.test.ts utils/importedLyrics.test.ts utils/charPlaylistEdit.test.ts utils/personalMusicLibrary.test.ts utils/musicProfileLinkageUI.test.tsx --maxWorkers=2 --minWorkers=1
       - run: pnpm build
       - name: Browser startup regression
         run: |
@@ -38,6 +38,7 @@ jobs:
           for i in $(seq 1 30); do curl --fail --silent http://127.0.0.1:4179/test/fixtures/workroom-startup.html > /dev/null && break; sleep 1; done
           WORKROOM_PLAYWRIGHT_MODULE="$RUNNER_TEMP/workroom-browser/node_modules/playwright/index.mjs" node scripts/workroom-startup-check.mjs
           WORKROOM_PLAYWRIGHT_MODULE="$RUNNER_TEMP/workroom-browser/node_modules/playwright/index.mjs" node scripts/personal-library-check.mjs
+          WORKROOM_PLAYWRIGHT_MODULE="$RUNNER_TEMP/workroom-browser/node_modules/playwright/index.mjs" node scripts/music-playlists-check.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:

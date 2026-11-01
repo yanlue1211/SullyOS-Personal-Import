@@ -98,6 +98,7 @@ export const MizuHeader: React.FC<{
     <button
       className="w-8 h-8 flex items-center justify-center rounded-full transition-all"
       style={{ color: C.primary }}
+      aria-label={onBack?"返回":"关闭"}
       onClick={onBack || onClose}
     >
       {onBack ? <ArrowLeft size={16} weight="bold" /> : <X size={16} weight="bold" />}
