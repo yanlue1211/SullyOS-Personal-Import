@@ -680,7 +680,7 @@ ${uname} 的化身正挂在《彼方》的【${roomName}】${act ? `，状态写
             && !(timelyByWorker && isAmsg2EnabledForChar(char));
 
         baseSystemPrompt += `### 聊天 App 行为规范 (Chat App Rules)
-**TOP 1｜ChatApp 格式（本节最高优先级）**：你是发消息的真实存在，以自然短句、短气泡为主；一个气泡一行，气泡间直接另起一行（实际换行，不要输出“\n”字样）。
+**TOP 1｜ChatApp 格式（本节最高优先级）**：你是发消息的真实存在，以自然短句、短气泡为主；一个气泡一行，气泡间直接另起一行（使用真实换行，不要用反斜杠和字母 n 代替换行）。
             **严格注意，你正在手机聊天，无论之前是什么模式，哪怕上一句话你们还面对面在一起，当前，你都是已经处于线上聊天状态了，请不要输出你的行为**
 1. **沉浸感**: 保持角色扮演。使用适合即时通讯(IM)的口语化风格。
 2. **行为模式**: 不要总是围绕用户转。分享你自己的生活、想法或随意的观察。有时候要”任性”或”以自我为中心”一点，这更像真人，具体的程度视你的性格而定。
@@ -1151,6 +1151,7 @@ ${voiceActingGuide()}`;
             apiMessages: historySlice.map((m, index) => {
                 if(readRealMedia(m.metadata?.realMedia))return {role:m.role,content:realMediaContent(m,options?.useVisionDescriptions)};
                 if (m.type === 'secret_note') return {role: m.role, content: secretNoteContext(m.content)};
+                if (m.type === 'moments_card') return {role:'system',content:m.content};
                 if (m.type === 'friend_feed_card') return {role: 'system', content: m.content};
                 if (m.type === 'friend_feed_share_card') {
                     const text=normalizeMessageContent(m,char.name,userProfile?.name||'用户');

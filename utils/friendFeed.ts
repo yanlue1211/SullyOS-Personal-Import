@@ -173,8 +173,15 @@ export async function saveFriendFeedSettings(settings: FriendFeedSettings) {
             ...state.posts.flatMap(p=>[p,...p.comments]).filter(c=>c.authorId==='user').map(c=>c.authorName)].map(normalizeFriendIdentityName).filter(Boolean));
         if(Object.values(next.identities).some(i=>[i.nickname,...i.accounts.map(a=>a.name)].some(n=>!!n&&reserved.has(normalizeFriendIdentityName(n)))))
             throw Error('角色账号不能使用你的姓名或网名，请换一个名字');
-        state.settings = next;
+        const policy=resolveFriendFeedSettings(state.settings);
+        state.settings = {...next,publicFigures:policy.publicFigures,publicPeers:policy.publicPeers};
     });
+}
+
+/** Separate policy writes keep stale appearance drafts from disabling account safety. */
+export async function savePublicFigureSettings(publicFigures:Record<string,boolean>,publicPeers:Record<string,boolean>){
+    if([publicFigures,publicPeers].some(map=>!map||Array.isArray(map)||Object.values(map).some(v=>typeof v!=='boolean')))throw Error('公众人物配置无效');
+    await mutate(state=>{state.settings={...resolveFriendFeedSettings(state.settings),publicFigures:{...publicFigures},publicPeers:{...publicPeers}};});
 }
 
 export async function updateFriendRelation(change:{kind:'follow';sourceId:string;targetId:string;value:boolean}|{kind:'known';viewerId:string;targetId:string;value:boolean}) {

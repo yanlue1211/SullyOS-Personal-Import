@@ -1,3 +1,4 @@
+import {publicFigureActionAllowed,publicFigureMayInteract} from './friendFeedPublicFigure';
 import {FRIEND_POST_TEXT_LIMIT, FRIEND_COMMENT_TEXT_LIMIT} from './friendFeedLimits';
 import type {CharacterProfile, UserProfile} from '../types';
 import {DB, openDB} from './db';
@@ -242,7 +243,7 @@ ${source === 'refresh' || forceJobId ? '仅输出 JSON，顶层字段' : '在原
 ${JSON.stringify({circle: {name: circle.name, description: excerpt(circle.description)}, posts: publicCandidates.map((p,i) => ({
     id: p.id, authorId:p.authorId,accountId:p.accountId,identity:identity(candidates[i]),author: p.authorName, text: excerpt(p.text), images:friendPostImageHint(p), own:p.authorId===charId, synced:p.synced===true,
     source: p.source ? sourceContext(p.source) : undefined,
-    canComment: p.comments.at(-1)?.authorId !== charId,
+    canComment: p.comments.at(-1)?.authorId !== charId && publicFigureMayInteract(feed,charId,candidates[i]),
     comments: publicComments(candidates[i]),
 })), trigger: job ? publicCandidates.find(p => p.id === job.postId)?.comments.find(c => c.id === job.triggerId) : undefined})}`};
     });
@@ -320,6 +321,9 @@ export async function landFriendFeedEmotionAction(charId: string, action: unknow
         }
         if(request.noticeIds?.some(id=>!feed.notices?.some(n=>n.id===id && !n.done && n.lease?.id===request.id
             && visible.some(p=>p.id===n.postId && (p.authorId===charId || followsFriendPost(feed,charId,p))))))return false;
+        const implicitReply=job&&feed.posts.find(p=>p.id===job.postId)?.comments.find(c=>c.id===job.triggerId);
+        if(kind==='comment'&&implicitReply&&!publicFigureMayInteract(feed,charId,implicitReply))return reject('公众人物模式：不能通过即时接话回复普通粉丝或用户');
+        if(!publicFigureActionAllowed(feed,charId,{...row,kind}))return reject('公众人物模式：目标账号未经确认或不适合公开互动');
         const rawFollowId=kind==='follow'||kind==='unfollow'?row.authorId:row.followAuthorId;
         const legacyTarget=typeof rawFollowId==='string'?friendAccountRef(feed,{authorId:rawFollowId}):undefined;
         const followId=legacyTarget&&knowsFriendAccount(feed,charId,legacyTarget)?legacyTarget.id:rawFollowId;

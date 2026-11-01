@@ -43,6 +43,8 @@ const JournalApp = lazyApp(() => import('../apps/JournalApp'));
 const ScheduleApp = lazyApp(() => import('../apps/ScheduleApp'));
 const RoomApp = lazyApp(() => import('../apps/RoomApp'));
 const CheckPhone = lazyApp(() => import('../apps/CheckPhone'));
+const MomentsApp = lazyApp(() => import('../apps/MomentsApp'));
+const MomentsRuntime = React.lazy(() => import('./os/MomentsRuntime'));
 const FriendFeedApp = lazyApp(() => import('../apps/FriendFeedApp'));
 const WorkroomNotification = React.lazy(() => import('./os/WorkroomNotification'));
 const FriendFeedNotification = React.lazy(() => import('./os/FriendFeedNotification'));
@@ -97,7 +99,7 @@ const APP_BY_ID: Partial<Record<AppID, PreloadableLazy>> = {
   [AppID.Gallery]: Gallery, [AppID.Date]: DateApp, [AppID.User]: UserApp,
   [AppID.Taobao]: TaobaoApp, [AppID.Meituan]: MeituanApp, [AppID.Journal]: JournalApp, [AppID.Schedule]: ScheduleApp, [AppID.Room]: RoomApp,
   [AppID.CheckPhone]: CheckPhone, [AppID.Social]: SocialApp, [AppID.Study]: StudyApp,
-  [AppID.FriendFeed]: FriendFeedApp,
+  [AppID.FriendFeed]: FriendFeedApp, [AppID.Moments]: MomentsApp,
   [AppID.FAQ]: FAQApp, [AppID.Game]: GameApp, [AppID.Worldbook]: WorldbookApp,
   [AppID.Novel]: NovelApp, [AppID.Bank]: BankApp, [AppID.XhsStock]: XhsStockApp,
   [AppID.XhsFreeRoam]: XhsFreeRoamApp, [AppID.Browser]: BrowserApp, [AppID.Songwriting]: SongwritingApp,
@@ -983,6 +985,7 @@ const PhoneShell: React.FC = () => {
       case AppID.Schedule: return <ScheduleApp />;
       case AppID.Room: return <RoomApp />; 
       case AppID.CheckPhone: return <CheckPhone />;
+      case AppID.Moments: return <MomentsApp />;
       case AppID.FriendFeed: return <FriendFeedApp />;
       case AppID.Social: return <SocialApp />;
       case AppID.Study: return <StudyApp />; 
@@ -1091,7 +1094,7 @@ const PhoneShell: React.FC = () => {
           {/* Overlays: Global Mini Player (when music is playing in background) */}
           <GlobalMiniPlayer />
           <NavigationBall />
-          {isDataLoaded&&!isLocked&&<Suspense fallback={null}><FriendFeedNotification/>{activeApp===AppID.Launcher&&<WorkroomNotification/>}</Suspense>}
+          {isDataLoaded&&!isLocked&&<Suspense fallback={null}><FriendFeedNotification/><MomentsRuntime/>{activeApp===AppID.Launcher&&<WorkroomNotification/>}</Suspense>}
           {!isLocked && <SARModuleMonitor />}
 
           {/* Overlays: 人格模拟生成全局指示条 */}

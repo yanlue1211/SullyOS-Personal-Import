@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>朋友圈 · 隔离验收</title>
+    <style>
+      html,
+      body,
+      #root {
+        margin: 0;
+        height: 100%;
+        width: 100%;
+      }
+      body {
+        background: #dce4dc;
+      }
+      #root {
+        max-width: 460px;
+        margin: auto;
+      }
+      button,
+      input,
+      select,
+      textarea {
+        font-family: inherit;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      :root {
+        --chrome-top: 0px;
+        --safe-bottom: 0px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./moments.tsx"></script>
+  </body>
+</html>

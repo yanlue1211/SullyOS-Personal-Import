@@ -5,6 +5,7 @@ import {BEAUTY_PREVIEW_AVATAR} from './beautyPreviewAssets';
 const base = {charId:'whitebox-preview',role:'assistant' as const,timestamp:1790386860000};
 const msg = (id:number,type:MessageType,content:string,metadata?:Record<string,unknown>,role:Message['role']='assistant'):Message => ({...base,id,type,content,metadata,role});
 export const CHAT_TYPE_SAMPLES = {
+ moments_card:msg(32,'moments_card','[私人朋友圈重要事件]\n一起分享了一次散步。',{source:'moments'},'system'),
  workroom_card:msg(31,'workroom_card','【造物间·作品完成】',{workroomEvent:{version:1,eventId:'preview-workroom',charId:'whitebox-preview',charName:'示例角色',kind:'completed',subjectId:'preview-work',title:'小狗饲养屋',summary:'可以喂食和散步的小游戏',detail:'一起完成了第一版小狗小游戏。',timestamp:1790386860000}},'system'),
  friend_feed_share_card:msg(30,'friend_feed_share_card','[分享好友圈帖子]',{friendFeedShare:{version:1,postId:'sample-share',authorId:'user',authorName:'小雨',text:'在小巷里找到一家很小的咖啡店。\n窗边的位置刚好留给两个人。',sharedAt:1790386860000,comments:[{id:'reply',authorId:'whitebox-preview',authorName:'小白',text:'靠窗的那个位置，先替我占着。',createdAt:1790386860000}],originalComments:[],imagesEnabled:false,imageRefs:[],imageCount:0}},'user'),
  text:msg(1,'text','欢迎回家。今天也有想和你分享的小事。'),

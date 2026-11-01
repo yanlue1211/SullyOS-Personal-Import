@@ -1212,6 +1212,8 @@ const MessageItem = React.memo(({
     // 于是气泡列底恒等于气泡尖角——头像贴 bottom-0 就始终对齐：
     // 组末/组中、时间戳开或关都一样，发新消息也不会因参考高度变化而位移。
     const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const longPressFired = useRef(false);
+    useEffect(()=>()=>{if(longPressTimer.current)clearTimeout(longPressTimer.current);},[]);
     const startPos = useRef({ x: 0, y: 0 });
     const activePointerId = useRef<number | null>(null);
     const activePointerType = useRef<string>('');
@@ -1245,6 +1247,7 @@ const MessageItem = React.memo(({
 
     const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
         if (selectionMode || e.button !== 0) return;
+        longPressFired.current=false;
         activePointerId.current = e.pointerId;
         activePointerType.current = e.pointerType;
         startPos.current = { x: e.clientX, y: e.clientY };
@@ -1256,6 +1259,7 @@ const MessageItem = React.memo(({
             activePointerId.current = null;
             activePointerType.current = '';
             resetReplyGesture();
+            longPressFired.current=true;
             onLongPress(m);
         }, 600);
     };
@@ -1322,6 +1326,7 @@ const MessageItem = React.memo(({
     };
 
     const interactionProps = {
+        onClickCapture:(e:React.MouseEvent)=>{if(longPressFired.current){longPressFired.current=false;e.preventDefault();e.stopPropagation();}},
         onPointerDown: handlePointerDown,
         onPointerUp: handlePointerEnd,
         onPointerMove: handlePointerMove,
@@ -1333,6 +1338,7 @@ const MessageItem = React.memo(({
             activePointerId.current = null;
             activePointerType.current = '';
             resetReplyGesture();
+            longPressFired.current=true;
             onLongPress(m);
         },
         onDragStart: (e: React.DragEvent) => e.preventDefault(),
@@ -1391,13 +1397,20 @@ const MessageItem = React.memo(({
         <div className="flex justify-center"><MessageDetailEditor message={m} kind="status" disabled={selectionMode}><ResponseStatusCard value={responseStatus} /></MessageDetailEditor></div>
     </div>;
 
-    if (m.metadata?.source === 'yueqi' && m.metadata?.yueqiSessionId) return <div className="w-full px-4 py-2 flex justify-center"><YueqiCard message={m}/></div>;
+    if (m.metadata?.source === 'yueqi' && m.metadata?.yueqiSessionId) return <div className={`w-full px-4 py-2 flex justify-center relative ${selectionMode?'pl-12':''}`} {...interactionProps}>
+        {selectionMode&&<button type="button" aria-label="选择月栖卡片" aria-pressed={isSelected} className="absolute left-2 top-4" onClick={e=>{e.stopPropagation();onToggleSelect(m.id);}}>{isSelected?'☑':'□'}</button>}
+        <YueqiCard message={m} disabled={selectionMode}/>
+    </div>;
 
     if (m.type === 'workroom_card') return <div className={`w-full px-4 py-2 flex justify-center relative ${selectionMode ? 'pl-12' : ''}`} {...interactionProps}>
         {selectionMode && <button type="button" className="absolute left-2 top-4" aria-label="选择造物间卡片" aria-pressed={isSelected} onClick={event => {event.stopPropagation(); onToggleSelect(m.id);}}>{isSelected ? '☑' : '□'}</button>}
         <div className={selectionMode ? 'pointer-events-none' : ''}><ChatCardSurface message={m}><WorkroomCard message={m}/></ChatCardSurface></div>
     </div>;
 
+    if (m.type === 'moments_card') return <div className="w-full px-4 py-2 relative" {...interactionProps}>
+        {selectionMode && <button type="button" aria-label="选择朋友圈记录" aria-pressed={isSelected} onClick={()=>onToggleSelect(m.id)}>{isSelected?'☑':'□'}</button>}
+        <ChatCardSurface message={m}><details className="p-3 text-sm"><summary className="cursor-pointer text-slate-600">朋友圈 · 一段新见闻</summary><p className="whitespace-pre-wrap mt-3">{m.content}</p></details></ChatCardSurface>
+    </div>;
     // --- SYSTEM MESSAGE RENDERING ---
     if (isSystem) {
         const isCallSummary = m.metadata?.source === 'call-end-popup';
@@ -3707,7 +3720,7 @@ const MessageItem = React.memo(({
 // System-authored diary/settlement/call cards bypass the normal bubble layout.
 // They still participate in the same whitebox styling contract.
 export default function ChatMessage(props:MessageItemProps){
- return props.msg.type==='workroom_card' ? <MessageItem {...props}/> : props.msg.role==='system'
+ return ['workroom_card','moments_card'].includes(props.msg.type) ? <MessageItem {...props}/> : props.msg.role==='system'
   ? <ChatCardSurface message={props.msg}><div className="sully-chat-system"> <MessageItem {...props}/> </div></ChatCardSurface>
   : props.msg.type==='interaction' ? <div className="sully-chat-interaction"><MessageItem {...props}/></div> : <MessageItem {...props}/>;
 }

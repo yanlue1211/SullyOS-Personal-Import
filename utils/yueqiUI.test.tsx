@@ -9,7 +9,7 @@ vi.mock('../features/yueqi/storage',()=>({storage:{list:vi.fn(async()=>[fake.ses
 vi.mock('./db',()=>({DB:{getEmojis:vi.fn(async()=>[]),getEmojiCategories:vi.fn(async()=>[]),getAssetRaw:vi.fn(async()=>null),saveAssetRaw:vi.fn(async()=>{})}}));
 vi.mock('../hooks/useLocalBackHandler',()=>({useLocalBackHandler:vi.fn()}));
 vi.mock('../components/os/TokenImg',()=>({default:()=>null}));
-vi.mock('./blobRef',()=>({isImageValue:()=>false}));
+vi.mock('./blobRef',async original=>({...await original<typeof import('./blobRef')>(),isImageValue:()=>false}));
 import YueqiApp from '../apps/YueqiApp';
 let host:HTMLDivElement,root:Root;
 async function click(text:string){const target=[...host.querySelectorAll('button')].find(x=>x.textContent?.includes(text));expect(target,`缺少按钮 ${text}`).toBeTruthy();await act(async()=>{target!.click();});}
