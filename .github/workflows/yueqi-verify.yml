@@ -1,7 +1,7 @@
 name: Yueqi verification
 on:
   push:
-    branches: [personal/yueqi]
+    branches: [personal/yueqi, personal/yueqi-music]
   pull_request:
     branches: [personal/audio-listening]
     paths: ['features/yueqi/**', 'apps/YueqiApp*', 'components/chat/YueqiCard.tsx', 'utils/yueqi*', 'scripts/yueqi-browser-check.mjs', 'test/fixtures/yueqi-browser*', '.github/workflows/yueqi-verify.yml']
@@ -10,7 +10,7 @@ permissions:
   contents: read
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
       NODE_OPTIONS: '--max-old-space-size=6144'

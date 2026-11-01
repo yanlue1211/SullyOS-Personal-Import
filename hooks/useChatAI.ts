@@ -1,3 +1,4 @@
+import {momentsEnabled} from '../features/moments/gate';
 import { isEmotionFeatureOn } from '../utils/scheduleFeature';
 import { resolveDialogueApi, dialogueMaxTokens } from '../utils/characterApi';
 import { createReplyRun, withReplyCancellation } from '../utils/chatReplyCancellation';
@@ -924,6 +925,7 @@ export const useChatAI = ({
                 reason: instantChatRoute ? null : (instantChatReadiness.reason ?? instantChatVeto),
             });
 
+            if(momentsEnabled())await replyStep(async()=>{const {prepareMomentsQuery}=await import('../features/moments/bridge');await prepareMomentsQuery(char.id,contextMsgs);});
             const payload = await replyStep(async () => stageT('payload', buildChatRequestPayload({
                 char: charForGen, userProfile, groups, emojis, categories,
                 homePhoneContext:homePhoneContext?.(),

@@ -95,6 +95,7 @@ export const INSTALLED_APPS: AppConfig[] = [
   // { id: AppID.WorldHome, name: '家园', icon: 'WorldHome', color: 'emerald' },
   { id: AppID.CheckPhone, name: '查手机', icon: 'CheckPhone', color: 'slate' },
   { id: AppID.FriendFeed, name: '哔哔', icon: 'FriendFeed', color: 'emerald' },
+  { id: AppID.Moments, name: '朋友圈', icon: 'Social', color: 'green' },
   // { id: AppID.Browser, name: '浏览器', icon: 'Browser', color: 'blue' }, // Hidden
   { id: AppID.Date, name: '见面', icon: 'Date', color: 'pink' },
   { id: AppID.User, name: '档案', icon: 'User', color: 'blue' },

@@ -1,3 +1,5 @@
+import {createMomentsStore} from '../features/moments/schema';
+import {exportMoments,restoreMoments,validateMomentsBackup} from '../features/moments/backup';
 import { createWorkroomMessage } from './workroomEvent';
 import { createWorkroomStores, WORKROOM_STORES } from '../features/workroom/schema';
 import { exportWorkroomBackup, restoreWorkroomBackup, validateWorkroomBackup } from '../features/workroom/backup';
@@ -55,7 +57,8 @@ const DB_NAME = 'AetherOS_Data';
 // v76: persistent workroom creative discussion, included in both backup paths.
 // v77: frozen user-initiated workroom shares. Ideas reuse work metadata.
 // v78: indexed, independently dismissible workroom completion notices.
-const DB_VERSION = 78;
+// v79: private Moments records and incremental activity indexes.
+const DB_VERSION = 79;
 
 const STORE_CHARACTERS = 'characters';
 const STORE_CHAR_GROUPS = 'character_groups'; // 角色分组定义（角色通过 groupId 指向；与群聊 groups 无关）
@@ -295,6 +298,7 @@ export const openDB = (): Promise<IDBDatabase> => {
       };
 
       createWorkroomStores(db, upgradeTransaction);
+      createMomentsStore(db, upgradeTransaction);
       createStore(STORE_CHARACTERS, { keyPath: 'id' });
       createStore(STORE_CHAR_GROUPS, { keyPath: 'id' }); // v68: 角色分组
 
@@ -3757,6 +3761,7 @@ export const DB = {
       if ([...workroomBackup.workroomWorks, ...workroomBackup.workroomShares].some(w => !exportedOwners.has(w.charId))) throw new Error('备份期间角色资料发生变化，请重试');
       return {
           ...workroomBackup,
+          momentsRecords: await exportMoments(db),
           characters, characterGroups, messages, customThemes: themes, savedEmojis: emojis, emojiCategories, assets, galleryImages, userProfile, diaries, tasks, anniversaries, roomTodos, roomNotes, groups, savedJournalStickers: journalStickers, socialPosts, courses, games, worldbooks, storyTheaters, storyTheaterPresets, storyTheaterMasks, novels,
           bankState: mainState ? { ...mainState, id: undefined } : undefined,
           bankDollhouse: dollhouseRecord?.data || undefined,
@@ -3823,6 +3828,7 @@ export const DB = {
       } = {}
   ): Promise<void> => {
       const db = await openDB();
+      const momentsBackup = data.collaborationBackupMode === 'media_only' ? undefined : data.momentsRecords !== undefined ? validateMomentsBackup(data.momentsRecords) : Array.isArray(data.characters) ? [] : undefined;
       const workroomBackup = data.collaborationBackupMode === 'media_only' ? undefined : validateWorkroomBackup(data);
       if (workroomBackup) {
           const owners = new Set((data.characters ?? await DB.getAllCharacters()).map(c => c.id));
@@ -4094,6 +4100,7 @@ export const DB = {
 
       const hasCharacterBackup = Array.isArray(data.characters);
 
+      await runSection('朋友圈', momentsBackup !== undefined, async () => {await restoreMoments(db, momentsBackup!);});
       await runSection('造物间', workroomBackup !== undefined, async () => {
           await restoreWorkroomBackup(db, workroomBackup!);
       });

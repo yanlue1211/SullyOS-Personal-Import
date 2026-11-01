@@ -1,3 +1,4 @@
+import {momentsEnabled} from '../features/moments/gate';
 import {oracleContext} from '../features/experience/oracle';
 import { materializeAudioDescriptions } from './audioApi';
 import { loadAudioApiConfig } from './songListening';
@@ -400,6 +401,11 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
     input.signal?.throwIfAborted();
     let systemPrompt = parts.stable;
     let volatileTail = parts.volatileState;
+    if(momentsEnabled() && !input.appPrompt && (!input.recallEntryPoint || ['chat_app','proactive_chat','chat_payload'].includes(input.recallEntryPoint))){
+        const {chatMomentsContext}=await import('../features/moments/bridge');
+        const moments=await chatMomentsContext(char.id,[...historyMsgsForPrompt].reverse().find(m=>m.role==='user')?.id);
+        systemPrompt+=moments.stable;volatileTail+=moments.dynamic;
+    }
     if (!input.appPrompt && char.workroomLinkEnabled === true && (!input.recallEntryPoint || ['chat_app','proactive_chat','chat_payload'].includes(input.recallEntryPoint))) {
         const { buildWorkroomGuide } = await import('../features/workroom/bridge');
         volatileTail += await buildWorkroomGuide(char.id);

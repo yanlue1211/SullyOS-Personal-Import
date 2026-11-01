@@ -50,7 +50,8 @@ it.each([false,true])('adds home phone background only to this request (worker=%
 });
 
 it('本地仅节假日感知可独立注入一句，云端生成不烤进本地提醒', async () => {
-    vi.useFakeTimers(); vi.setSystemTime(new Date(2026, 8, 27, 12));
+    // Only the wall clock is frozen; IndexedDB callbacks must keep real timers.
+    vi.useFakeTimers({toFake:['Date']}); vi.setSystemTime(new Date(2026, 8, 27, 12));
     const input = baseInput();
     input.realtimeConfig = { ...realtimeConfig, weatherEnabled: false, newsEnabled: false, userHolidays: { enabled: true, countryCode: 'CN' } };
     const reminder = '小明所在地中国 2026-09-27 为中秋节公共假期，实际休息与否以小明自己的日程和说明为准。';
@@ -113,7 +114,7 @@ describe('timelyByWorker —— 时效段交给 worker，前端这份不重复�
         const topRule = '**TOP 1｜ChatApp 格式（本节最高优先级）**';
         expect(systemPrompt).toContain(topRule);
         expect(systemPrompt.indexOf(topRule)).toBeLessThan(systemPrompt.indexOf('1. **沉浸感**'));
-        expect(systemPrompt).toContain('你是发消息的真实存在，以自然短句、短气泡为主；一个气泡一行，气泡间直接另起一行（实际换行，不要输出“\\n”字样）。');
+        expect(systemPrompt).toContain('你是发消息的真实存在，以自然短句、短气泡为主；一个气泡一行，气泡间直接另起一行（使用真实换行，不要用反斜杠和字母 n 代替换行）。');
         expect(systemPrompt).toContain('每行渲染为一个气泡；空格和标点不会拆泡');
     });
 

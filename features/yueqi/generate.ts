@@ -1,3 +1,5 @@
+import {yueqiDisplayText,yueqiSpeechText} from './text';
+import {resolveTtsProvider} from '../../utils/ttsProvider';
 import {DB} from '../../utils/db';
 import {loadCharacterContextRange} from '../../utils/chatContextRange';
 import {buildChatRequestPayload,type BuildChatPayloadInput} from '../../utils/chatRequestPayload';
@@ -8,7 +10,7 @@ import type {APIConfig,UserProfile} from '../../types';
 import {elapsed,sceneRules,splitSpeech,type Session,type Turn} from './model';
 import {blobData,storage} from './storage';
 export interface Environment {api:APIConfig;user:UserProfile;context:Pick<BuildChatPayloadInput,'groups'|'emojis'|'categories'|'realtimeConfig'>}
-const boundaries=`你在月栖进行睡前陪伴。沿用角色真实人设、关系和正常上下文。只输出适合朗读的自然口语正文，不输出聊天工具、HTML、心声或旁白标签。不得把虚构故事当真实经历，不得凭空编造今天已发生的重大事件，不得把用户沉默解释为睡着或同意。`;
+const boundaries=`你在月栖进行睡前陪伴。沿用角色真实人设、关系和正常上下文。你正在直接和user本人说话，user就是此刻与你相处、听你讲话的对象，不是供你向旁人介绍的第三人。陪伴、回应和对user的表达使用第二人称“你”或双方习惯的称呼，不要用“她”“他”“TA”来旁述当前听者；视线和话语始终朝向对方。故事里的其他人物仍可按故事正常使用第三人称。只输出适合朗读的自然口语正文，不输出聊天工具、HTML、心声或旁白标签。不要输出时间戳、[月栖·场景]、系统提示或语音包装标签。换行的两段正文之间加入一次内置 MiniMax 停顿标记 <#0.6#>；一段内的句子之间不要插入，段首段尾不要插入。该标记只供语音合成，不是正文。不得把虚构故事当真实经历，不得凭空编造今天已发生的重大事件，不得把用户沉默解释为睡着或同意。`;
 export async function generate(s:Session,env:Environment,task:string,signal:AbortSignal):Promise<string>{
  const char=await DB.getCharacter(s.charId);if(!char)throw Error('角色已不存在');
  const api=resolveDialogueApi(env.api,char);if(!api.baseUrl||!api.model)throw Error('请先配置聊天 API');
@@ -20,9 +22,10 @@ export async function generate(s:Session,env:Environment,task:string,signal:Abor
   appPrompt:{rules:boundaries+'\n'+sceneRules(s.scene),scene:`本场睡眠日固定为${s.sleepDay}（用户设备日期）；当日日度记忆：${JSON.stringify([...memories,...anchored])}。没有记录不等于没有经历，请依赖可见上下文，不编造事实。\n本场阶段摘要（仅本场材料）：${s.compactSummary||'无'}。\n模式：${s.mode}；已进行${Math.floor(elapsed(s)/60000)}分钟，总时长${s.targetMinutes}分钟。`,messages:[...s.turns.slice(s.compactedThrough||0).map(t=>({role:t.role,content:t.text})),{role:'user',content:task}]}});
  const data=await safeFetchJson(`${api.baseUrl.replace(/\/+$/,'')}/chat/completions`,{method:'POST',signal,headers:{'Content-Type':'application/json',Authorization:`Bearer ${api.apiKey||'sk-none'}`},body:JSON.stringify({model:api.model,messages:payload.fullMessages,max_tokens:dialogueMaxTokens(api),temperature:api.temperature??.8,stream:false})},0,0,{appName:'月栖',charId:char.id,charName:char.name,purpose:'睡前陪伴'});
  signal.throwIfAborted();if(data?.choices?.[0]?.finish_reason==='length')throw Error('内容被模型输出上限截断，原有记录已保留；请缩短时长或提高输出上限后重试');
- const text=extractContent(data).trim();if(!text)throw Error('模型没有返回有效文字');return text;
+ const raw=extractContent(data).trim();const text=raw==='<quiet/>'?raw:yueqiDisplayText(raw);if(!text)throw Error('模型没有返回有效文字');return text;
 }
 export function addReply(s:Session,text:string,source:Turn['source']):Session {
+ text=yueqiDisplayText(text);
  const turn:Turn={id:crypto.randomUUID(),role:'assistant',text,source,at:Date.now(),played:false};
  return {...s,turns:[...s.turns,turn],clips:[...s.clips,...splitSpeech(text).map(text=>({id:crypto.randomUUID(),turnId:turn.id,text}))]};
 }
@@ -30,7 +33,7 @@ export async function synthesize(s:Session,env:Environment,signal:AbortSignal,on
  const char=await DB.getCharacter(s.charId);if(!char||!canSynthesizeSpeech(char,env.api))throw Error('请先在原设置中配置 TTS，并为这个角色选择音色');
  for(let i=0;i<s.clips.length;i++){
   signal.throwIfAborted();if(s.clips[i].audio)continue;
-  try{const result=await synthesizeSpeechDetailed(s.clips[i].text,char,env.api);try{
+  try{const result=await synthesizeSpeechDetailed(yueqiSpeechText(s.clips[i].text,resolveTtsProvider(env.api)==='minimax'),char,env.api,{textAlreadyPrepared:true});try{
    signal.throwIfAborted();const blob=result.blob||await (await fetch(result.url,{signal})).blob();const audio=await blobData(blob);
    const seconds=await audioDuration(audio);signal.throwIfAborted();s={...s,clips:s.clips.map((c,n)=>n===i?{...c,audio,seconds,error:undefined}:c)};
   }finally{if(result.url.startsWith('blob:'))URL.revokeObjectURL(result.url);}}

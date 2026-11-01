@@ -129,5 +129,5 @@ export function friendPublicName(feed:FriendFeedState,viewerId:string,row:Pick<F
 }
 export function friendGraphStamp(feed:FriendFeedState) {
     const graph=feed.accountGraph,owners=new Set(['user',...feed.circles.flatMap(c=>c.memberIds)]);
-    return JSON.stringify([graph&&{...graph,accounts:graph.accounts.filter(a=>owners.has(a.ownerId))},resolveFriendFeedSettings(feed.settings).identities,resolveFriendFeedSettings(feed.settings).userNickname]);
+    return JSON.stringify([graph&&{...graph,accounts:graph.accounts.filter(a=>owners.has(a.ownerId))},resolveFriendFeedSettings(feed.settings).identities,resolveFriendFeedSettings(feed.settings).userNickname,resolveFriendFeedSettings(feed.settings).publicFigures,resolveFriendFeedSettings(feed.settings).publicPeers]);
 }

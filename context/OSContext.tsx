@@ -1,3 +1,4 @@
+import {streamMoments} from '../features/moments/backup';
 import {stripResponseStatus} from '../features/personal/responseStatus/protocol';
 import { drainWorkroomOutbox, WORKROOM_HISTORY_UPDATED } from '../features/workroom/delivery';
 import { reconcileCommerce } from '../utils/personalCommerce';
@@ -2397,9 +2398,10 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       window.addEventListener('workroom-chat-requested', askWorkroom);
       window.addEventListener('workroom-open-requested', openWorkroom);
       window.addEventListener(WORKROOM_HISTORY_UPDATED, historyChanged);
+      window.addEventListener('moments-history-updated', historyChanged);
       document.addEventListener('visibilitychange', drain);
       drain();
-      return () => { window.removeEventListener('workroom-chat-requested', askWorkroom); window.removeEventListener('workroom-open-requested', openWorkroom); window.removeEventListener(WORKROOM_HISTORY_UPDATED, historyChanged); document.removeEventListener('visibilitychange', drain); };
+      return () => { window.removeEventListener('workroom-chat-requested', askWorkroom); window.removeEventListener('workroom-open-requested', openWorkroom); window.removeEventListener(WORKROOM_HISTORY_UPDATED, historyChanged); window.removeEventListener('moments-history-updated', historyChanged); document.removeEventListener('visibilitychange', drain); };
   }, [isDataLoaded]);
 
 
@@ -4650,6 +4652,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           const exportedCharacterIds = new Set<string>();
           const prewrittenStores: BackupManifest['stores'] = mode === 'full' || mode === 'text_only'
               ? await streamWorkroomBackup(await openDB(), zip as unknown as ZipFileWriter, collectSerialized, id => workroomOwnerIds.add(id)) : {};
+          if(mode === 'full' || mode === 'text_only') Object.assign(prewrittenStores,await streamMoments(await openDB(),zip as unknown as ZipFileWriter,collectSerialized));
           // Vectors retain the existing binary format, read one record at a time.
           let vectorPayload: Awaited<ReturnType<typeof encodeVectorsForBackupChunked>> | undefined;
           // Only voice Blobs reachable from the exported Live2D settings are portable.
