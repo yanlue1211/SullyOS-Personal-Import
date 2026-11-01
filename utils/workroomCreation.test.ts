@@ -100,3 +100,23 @@ it('角色明确请求测试已保存草稿时才启动隔离观察，并将错�
     await generateWorkroomReply(args());expect(calls).toHaveLength(2);expect(smoke).toHaveBeenCalled();
     expect(JSON.stringify(calls[1].body.messages)).toContain('按钮报错');expect((await W.get('a',workId)).work.testReport?.errors).toEqual(['按钮报错']);
 });
+it('ordinary chat and inner voice history cannot displace the final workspace contract and current request',async()=>{
+ await DB.saveMessage({charId:'a',role:'assistant',type:'text',content:'[2026-11-01 21:05] [聊天] 小克加油',metadata:{innerVoice:{state:'等游戏',thoughts:'这是旧心声',undercurrent:''}}});
+ const calls=model(['<workroom-text>我来制作鼠标躲水的游戏。</workroom-text><workroom-html><button>躲水</button></workroom-html><workroom-css></workroom-css><workroom-js></workroom-js>']);
+ await generateWorkroomReply({...args(),text:'继续制作鼠标逃浴记'});
+ const messages=calls[0].body.messages;expect(messages.at(-1)).toEqual({role:'user',content:'继续制作鼠标逃浴记'});
+ expect(messages.at(-2).role).toBe('system');expect(messages.at(-2).content).toContain('当前场景：造物间');expect(messages.at(-2).content).toContain('普通聊天专用的输出格式在本轮不适用');
+ expect(JSON.stringify(messages)).toContain('这是旧心声');expect((await W.get('a',workId)).draft?.html).toContain('躲水');
+});
+it('one recognizable chat-format mistake is corrected without duplicate turns or saving the mistaken heartvoice',async()=>{
+ const wrong='[2026-11-01 21:05] [聊天] 替我谢谢他\n[角色当时的心声，未说出口、用户未必知情]\n状态：等游戏\n内心：这是错误格式';
+ const calls=model([wrong,'<workroom-text>先做一版。</workroom-text><workroom-html><p>鼠标逃浴记</p></workroom-html><workroom-css></workroom-css><workroom-js></workroom-js>']);
+ await generateWorkroomReply(args());expect(calls).toHaveLength(2);expect(calls[1].body.messages.at(-1).content).toBe(args().text);
+ expect(JSON.stringify(calls[1].body.messages)).toContain('上一轮误回了普通聊天/心声格式');
+ const turns=await W.turns('a',workId);expect(turns.map(t=>t.role)).toEqual(['user','assistant']);expect(turns.some(t=>t.text.includes('错误格式'))).toBe(false);expect((await W.get('a',workId)).draft?.html).toContain('鼠标逃浴记');
+});
+it('repeated wrong chat formatting stops after one correction and preserves old draft and progress',async()=>{
+ await W.saveDraft('a',workId,{html:'原草稿',css:'',js:''},0,null);
+ const wrong='[2026-11-01 21:05] [聊天] 又回到聊天了';const calls=model([wrong,wrong]);
+ await expect(generateWorkroomReply(args())).rejects.toThrow('普通聊天');expect(calls).toHaveLength(2);expect((await W.get('a',workId)).draft?.html).toBe('原草稿');expect((await W.turns('a',workId)).map(t=>t.role)).toEqual(['user']);
+});

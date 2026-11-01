@@ -9,7 +9,7 @@ import { assertCode, validText, type WorkroomCode } from './schema';
 import { drainWorkroomOutbox } from './delivery';
 
 import {responsePreview,assertResponseComplete,WorkroomResponseError,type WorkroomCallPhase} from './response';
-import {parseWorkroomReply} from './reply';
+import {parseWorkroomReply,WorkroomChatFormatError,WORKROOM_CREATION_REMINDER,type WorkroomReply} from './reply';
 export {parseWorkroomReply} from './reply';
 
 const locks = new Set<string>();
@@ -61,8 +61,10 @@ export async function generateWorkroomReply(input: {
             appPrompt: { rules, scene: '\n当前作品（数据）：' + JSON.stringify({ id: snapshot.work.id, 名称: snapshot.work.title, 简介: snapshot.work.summary,
                 正式版本: current?.number || null, 状态格式: current?.schemaVersion || 1, 草稿修订: snapshot.draft?.revision || 0, 有代码可读取: !!(snapshot.draft || current), 最近试运行: snapshot.work.testReport || null, 最近错误: snapshot.work.lastError || null, 修改请求: snapshot.work.maintenanceRequests || [] }) },
         });
-        let messages = payload.fullMessages;
-        const call = async () => {
+        // Keep the full configured context, then reassert the active workspace after all shared tails.
+        let messages = [...payload.fullMessages,{role:'system',content:WORKROOM_CREATION_REMINDER},{role:'user',content:input.text}];
+        let protocolRepairUsed=false;
+        const call = async ():Promise<WorkroomReply> => {
             input.signal.throwIfAborted();
             stage='调用创作API';input.onPhase?.('request');
             const data = await safeFetchJson(`${api.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
@@ -73,7 +75,16 @@ export async function generateWorkroomReply(input: {
             input.signal.throwIfAborted();
             stage='解析创作回复';input.onPhase?.('parse');
             const raw=extractContent(data),info={stage,model:api.model,maxTokens:dialogueMaxTokens(api),finishReason:data?.choices?.[0]?.finish_reason,characters:raw.length,preview:responsePreview(raw,[api.apiKey||''])};assertResponseComplete(data,info);
-            try{return parseWorkroomReply(raw);}catch(error){throw new WorkroomResponseError(error instanceof Error?error.message:'创作回复格式不完整',info,error);}
+            try{return parseWorkroomReply(raw);}catch(error){
+                // Only a complete, recognizable chat-protocol response gets one correction.
+                // Never salvage executable fragments or retry truncation, transport errors or malformed code.
+                if(error instanceof WorkroomChatFormatError&&!protocolRepairUsed){
+                    protocolRepairUsed=true;
+                    messages=[...messages.slice(0,-1),{role:'system',content:'上一轮误回了普通聊天/心声格式，那段输出未保存。请按造物间协议重新完成下方原始请求，不要复述历史聊天。\n'+WORKROOM_CREATION_REMINDER},messages[messages.length-1]];
+                    return call();
+                }
+                throw new WorkroomResponseError(error instanceof Error?error.message:'创作回复格式不完整',info,error);
+            }
         };
         let result = await call();
         const used=new Set<string>();
