@@ -8,7 +8,7 @@ export function readRealMedia(value:any):RealMedia|undefined{
 
 export function realMediaContent(message:{content:string;metadata?:any},useDescription=false):any{
  const media=readRealMedia(message.metadata?.realMedia);if(!media)return message.content;
- const text=mediaText(media);const description=typeof message.metadata?.visionDescription==='string'?message.metadata.visionDescription.trim():'';
+ const text=message.content.trim()||mediaText(media);const description=typeof message.metadata?.visionDescription==='string'?message.metadata.visionDescription.trim():'';
  if(description)return text+'\n画面描述：'+description;
  if(useDescription)return text+'\n画面尚未成功识别，不要编造具体内容。';
  return [{type:'text',text},...media.frames.map(f=>({type:'image_url',image_url:{url:f.image}}))];

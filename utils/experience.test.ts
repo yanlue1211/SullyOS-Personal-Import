@@ -1,3 +1,5 @@
+import {composeMediaMessage} from '../features/experience/media';
+import {DatePrompts} from './datePrompts';
 import {collectBlobRefs,writeBlobsToZip,readBlobsIndex,restoreBlobsFromZip} from './backupBlobs';
 import {it,expect,beforeEach} from 'vitest';
 import {DB,openDB} from './db';
@@ -46,3 +48,5 @@ it('rejects duplicate and excessive action descriptors; no arbitrary code goes t
  expect(readGameActions([{id:'feed',label:'喂食',run:'not forwarded'}])).toEqual([{id:'feed',label:'喂食'}]);
  expect(()=>readGameActions([{id:'feed',label:'喂食'},{id:'feed',label:'重复'}])).toThrow();expect(()=>readGameActions(Array(13).fill({id:'a',label:'b'}))).toThrow();
 });
+
+it.each(['image','video'] as const)('keeps %s captions with image evidence in one request and in memory text',async kind=>{const media={kind,name:'现场',originalRef:'blobref:b_original',inPerson:true,frames:[{timeSeconds:0,image:'blobref:b_frame'}]};const prepared=composeMediaMessage({content:mediaText(media),metadata:{realMedia:media}},'看看这件蓝色外套');const row={id:99,charId:owner,role:'user',type:'text',timestamp:1,...prepared} as any;const payload=await DatePrompts.buildSessionPayload({char:{id:owner,name:'阿源'} as any,userProfile:{name:'略略'} as any,allMsgs:[row],emojis:[],userText:row.content,variant:'send'});const final=[...payload.messages].reverse().find(m=>m.role==='user')!;expect(final.role).toBe('user');expect(JSON.stringify(final.content)).toContain('看看这件蓝色外套');expect(JSON.stringify(final.content)).toContain('image_url');expect(normalizeMessageContent(row,'阿源','略略')).toContain('看看这件蓝色外套');expect(realMediaContent({...row,metadata:{...row.metadata,visionDescription:'蓝色外套'}},true)).toContain('看看这件蓝色外套');});

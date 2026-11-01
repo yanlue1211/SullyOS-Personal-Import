@@ -31,6 +31,7 @@ export interface WorkroomStoredEvent {
     /** Closed-link interactions remain local; completions and enabled interactions enter the outbox. */
     delivery: 'local' | 'pending' | 'delivered';
     messageId?: number;
+    raw?:boolean;
     notice?: 'pending' | 'dismissed';
 }
 export interface WorkroomTurn {

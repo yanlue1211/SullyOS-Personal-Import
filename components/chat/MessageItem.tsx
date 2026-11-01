@@ -3150,7 +3150,7 @@ const MessageItem = React.memo(({
         );
     }
 
-    if(m.metadata?.realMedia)return commonLayout(<RealMediaView value={m.metadata.realMedia}/>);
+    if(m.metadata?.realMedia)return commonLayout(<RealMediaView text={m.content} value={m.metadata.realMedia}/>);
     if (m.type === 'audio' || parseVirtualMedia(m.content)) return commonLayout(<PersonalMediaMessage key={m.id} message={m} />);
 
     if (m.type === 'image') {

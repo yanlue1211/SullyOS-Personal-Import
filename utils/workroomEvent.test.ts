@@ -16,7 +16,7 @@ const sample = (kind: WorkroomEventKind): WorkroomEvent => ({
 const message = (event: WorkroomEvent): Message => ({ id: 1, ...createWorkroomMessage(event) });
 
 describe('造物间事件：聊天和记忆共享可读材料', () => {
-    it.each<WorkroomEventKind>(['inspiration', 'completed', 'progress', 'shared', 'accepted'])('%s 经 JSON 往返后进入聊天、宫殿及手动归档格式化入口', kind => {
+    it.each<WorkroomEventKind>(['inspiration', 'completed', 'progress', 'started', 'shared', 'accepted'])('%s 经 JSON 往返后进入聊天、宫殿及手动归档格式化入口', kind => {
         const m: Message = JSON.parse(JSON.stringify(message(sample(kind))));
         const expected = normalizeMessageContent(m, '阿源', 'User');
         const { apiMessages } = ChatPrompts.buildMessageHistory([m], 10,

@@ -1,3 +1,5 @@
+import MediaDraft from '../../features/experience/MediaDraft';
+import {composeMediaMessage} from '../../features/experience/media';
 import ExperienceTools from '../../features/experience/Tools';
 import RealMediaView from '../../features/experience/RealMediaView';
 import type {ExperienceMessage} from '../../features/experience/media';
@@ -234,6 +236,7 @@ const DateSession: React.FC<DateSessionProps> = ({
     const [isShowingOpening, setIsShowingOpening] = useState(!!peekStatus && !initialState); // True until first user interaction
     // API 失败时本地记住本轮输入，不依赖父组件的 DB 刷新是否已经完成；用户可直接点重试。
     const [pendingRetryText, setPendingRetryText] = useState('');
+    const [mediaDraft,setMediaDraft]=useState<ExperienceMessage|null>(null),[mediaPreparing,setMediaPreparing]=useState(false);
     const [sarTruthMessageIds, setSarTruthMessageIds] = useState<Set<number>>(new Set());
     const [sarVisualTruth, setSarVisualTruth] = useState(false);
 
@@ -794,14 +797,18 @@ const DateSession: React.FC<DateSessionProps> = ({
         }
     };
 
+    useEffect(()=>{setMediaDraft(null);setMediaPreparing(false);},[char.id]);
+    const submitLock=useRef(false);
     const submitTurn = async (kind?: 'continue') => {
-        if (isTyping) return;
+        if (submitLock.current||isTyping||mediaPreparing) return;
         const inputText = input.trim();
         // 本地失败输入优先，DB 时间线兜底。这样即使父组件刷新尚未落到这一帧，重试键也不会失效。
         const retryText = pendingRetryText || getPendingReplyText(messages);
-        if (kind !== 'continue' && !inputText && !retryText) return;
-        const text = kind === 'continue' ? MEETING_CONTINUE_DISPLAY_TEXT : (inputText || retryText);
-        if (kind !== 'continue' && inputText) {
+        if (kind !== 'continue' && !inputText && !retryText && !mediaDraft) return;
+        submitLock.current=true;
+        const attachment=kind!=='continue'&&mediaDraft?composeMediaMessage(mediaDraft,inputText):null;
+        const text = attachment?.content || (kind === 'continue' ? MEETING_CONTINUE_DISPLAY_TEXT : (inputText || retryText));
+        if (kind !== 'continue' && (inputText||attachment)) {
             setInput('');
             setShowInputBox(false);
         }
@@ -809,7 +816,8 @@ const DateSession: React.FC<DateSessionProps> = ({
         setIsShowingOpening(false); // First user interaction - opening phase is over
 
         try {
-            const aiContent = await onSendMessage(text, kind);
+            const aiContent = attachment&&onExperienceSend?await onExperienceSend(attachment):await onSendMessage(text, kind);
+            if(attachment)setMediaDraft(null);
             // 先剥出观测块更新 HUD，再解析剩余正文
             const { observation: obs, rest } = extractObservation(aiContent, { lenient: observeEnabled, custom: char.dateObserve?.custom });
             if (hasObservation(obs)) setObservation(obs);
@@ -823,10 +831,11 @@ const DateSession: React.FC<DateSessionProps> = ({
         } catch (e: any) {
             // onSendMessage 内部含 API 调用 + 回复后处理, 抛错不一定是网络。用中性文案, 不误导成"连接中断"。
             setPendingRetryText(text);
+            if(attachment)setInput(inputText);
             setCurrentText(`(出错了: ${e?.message || '未知错误'})`);
             setShowInputBox(true);
         } finally {
-            setIsTyping(false);
+            submitLock.current=false;setIsTyping(false);
         }
     };
 
@@ -1143,7 +1152,7 @@ const DateSession: React.FC<DateSessionProps> = ({
                                         <div className="flex min-w-0 items-start justify-end gap-3">
                                             <p
                                                 className={`meeting-prose min-w-0 flex-1 whitespace-pre-wrap font-serif text-[16px] text-right leading-loose tracking-wide italic pr-4 ${lightReading ? 'text-stone-400 border-r-2 border-stone-300/50' : 'text-slate-400 border-r-2 border-slate-600/50'}`}
-                                            >{msg.metadata?.realMedia?<RealMediaView value={msg.metadata.realMedia}/>:cleanTextForDisplay(shown)} <span className="meeting-user-label text-[10px] uppercase font-sans not-italic ml-2 opacity-50">{userProfile.name}</span></p>
+                                            >{msg.metadata?.realMedia?<RealMediaView text={msg.content} value={msg.metadata.realMedia}/>:cleanTextForDisplay(shown)} <span className="meeting-user-label text-[10px] uppercase font-sans not-italic ml-2 opacity-50">{userProfile.name}</span></p>
                                             {!decoratedReading && char.dateReadingShowAvatars && (
                                                 <ReadingAvatar
                                                     src={userProfile.perCharAvatars?.[char.id] || userProfile.avatar}
@@ -1322,8 +1331,9 @@ const DateSession: React.FC<DateSessionProps> = ({
                     </div>
                 )}
                 {showInputBox && (
-                    <div className={`w-[90%] min-w-0 max-w-lg backdrop-blur-xl rounded-2xl p-2 flex gap-2 shadow-2xl animate-fade-in mb-8 pointer-events-auto ${lightReading ? 'bg-stone-100 border border-stone-300' : 'bg-white/10 border border-white/20'}`} onClick={(e) => e.stopPropagation()}>
-                        {onExperienceSend&&<ExperienceTools key={char.id} scopeId={char.id} inPerson disabled={isTyping} onSend={async message=>{setIsTyping(true);try{const reply=await onExperienceSend(message);const {observation:obs,rest}=extractObservation(reply,{lenient:observeEnabled,custom:char.dateObserve?.custom});if(hasObservation(obs))setObservation(obs);const items=parseDialogue(rest,'normal');setDialogueBatch(items);setDialogueQueue(items);if(items.length)processNextDialogue(items[0],items.slice(1));setPendingRetryText('');setIsShowingOpening(false);}catch(error){setPendingRetryText(message.content);throw error;}finally{setIsTyping(false);}}}/>}
+                    <div className={`w-[90%] min-w-0 max-w-lg backdrop-blur-xl rounded-2xl p-2 flex flex-wrap gap-2 shadow-2xl animate-fade-in mb-8 pointer-events-auto ${lightReading ? 'bg-stone-100 border border-stone-300' : 'bg-white/10 border border-white/20'}`} onClick={(e) => e.stopPropagation()}>
+                        {mediaDraft&&<div className="w-full"><MediaDraft message={mediaDraft} disabled={isTyping} onRemove={()=>setMediaDraft(null)}/></div>}
+                        {onExperienceSend&&<ExperienceTools key={char.id} scopeId={char.id} inPerson disabled={isTyping} onStageMedia={message=>{setMediaDraft(message);setShowInputBox(true);}} onMediaPreparing={setMediaPreparing} onSend={async message=>{setIsTyping(true);try{const reply=await onExperienceSend(message);const {observation:obs,rest}=extractObservation(reply,{lenient:observeEnabled,custom:char.dateObserve?.custom});if(hasObservation(obs))setObservation(obs);const items=parseDialogue(rest,'normal');setDialogueBatch(items);setDialogueQueue(items);if(items.length)processNextDialogue(items[0],items.slice(1));setPendingRetryText('');setIsShowingOpening(false);}finally{setIsTyping(false);}}}/>}
                         <textarea value={input} onChange={(e) => setInput(e.target.value)} placeholder={isTyping ? "等待回应..." : "输入对话..."} disabled={isTyping} className={`min-w-0 flex-1 bg-transparent px-3 sm:px-4 py-3 outline-none font-light resize-none h-14 overflow-y-auto overscroll-contain touch-pan-y no-scrollbar leading-tight ${lightReading ? 'text-stone-800 placeholder:text-stone-400' : 'text-white placeholder:text-white/30'}`} autoFocus />
                         {(() => {
                             const retryText = pendingRetryText || getPendingReplyText(messages);
@@ -1331,7 +1341,7 @@ const DateSession: React.FC<DateSessionProps> = ({
                             return (
                                 <button
                                     onClick={handleSend}
-                                    disabled={(!input.trim() && !canRetry) || isTyping}
+                                    disabled={(!input.trim() && !canRetry && !mediaDraft) || isTyping || mediaPreparing}
                                     className="shrink-0 px-4 sm:px-6 bg-white text-black rounded-xl font-bold text-sm hover:bg-slate-200 disabled:opacity-50 transition-colors h-14 flex items-center justify-center"
                                 >
                                     {canRetry ? '重试' : '发送'}

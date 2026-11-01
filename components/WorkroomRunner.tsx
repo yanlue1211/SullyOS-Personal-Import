@@ -5,6 +5,7 @@ import { buildWorkroomDocument, WORKROOM_SANDBOX } from '../features/workroom/ru
 
 export interface WorkroomRunnerProps {
     charId: string;
+    userName?:string;
     version: WorkroomVersion;
     onActions?: (actions:import('../features/workroom/actions').GameAction[])=>void;
     onController?: (play:(()=>void)|null)=>void;
@@ -16,7 +17,7 @@ export interface WorkroomRunnerProps {
     preview?: boolean;
 }
 /** Each mount/version owns a fresh iframe and capability port; teardown revokes old work. */
-export default function WorkroomRunner({ charId, version, onNotify, onError, onEvent, onGenerate, onGenerateError, onActions, onController, preview = false }: WorkroomRunnerProps) {
+export default function WorkroomRunner({ charId, version, onNotify, onError, onEvent, onGenerate, onGenerateError, onActions, onController, userName, preview = false }: WorkroomRunnerProps) {
     const iframe = useRef<HTMLIFrameElement>(null);
     const [stopped, setStopped] = useState(false);
     const callbacks = useRef({ onNotify, onError, onEvent, onGenerate, onGenerateError, onActions, onController });
@@ -30,6 +31,7 @@ export default function WorkroomRunner({ charId, version, onNotify, onError, onE
         let port: MessagePort | undefined;
         const session = crypto.randomUUID();
         const host = createWorkroomHost(charId, version.workId, version.id, session, {
+            userName,
             onActions: actions=>callbacks.current.onActions?.(actions),
             onNotify: text => callbacks.current.onNotify?.(text),
             onError: text => callbacks.current.onError?.(text),

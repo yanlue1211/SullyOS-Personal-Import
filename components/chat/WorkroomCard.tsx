@@ -4,7 +4,7 @@ import { setIdeaStatus } from '../../features/workroom/collaboration';
 import type { Message } from '../../types';
 import { readWorkroomEvent } from '../../utils/workroomEvent';
 import { workroomLaunch } from '../../features/workroom/launch';
-const labels = { inspiration: '💡 灵感邀请', completed: '🎁 作品完成', progress: '🎮 互动进度', shared: '📤 用户分享', accepted: '📥 作品收藏' };
+const labels = { inspiration: '💡 灵感邀请', completed: '🎁 作品完成', progress: '🎮 互动进度', shared: '📤 用户分享', accepted: '📥 作品收藏', started:'🎮 开始游玩' };
 export default function WorkroomCard({ message }: { message: Message }) {
     const [notice,setNotice]=useState('');
     const event = readWorkroomEvent(message.metadata?.workroomEvent, message.charId);
@@ -12,9 +12,9 @@ export default function WorkroomCard({ message }: { message: Message }) {
     return <article className="w-64 max-w-full p-3 space-y-2 text-sm">
         <div className="text-xs opacity-60">🧸 造物间 · {event.charName}</div>
         <h3 className="font-semibold">{labels[event.kind]}</h3>
-        <p className="font-medium">{event.title}</p><p>{event.summary}</p>
+        <p className="font-medium">{event.title}</p>{event.kind!=='progress'&&<p>{event.summary}</p>}
         {event.sourceAuthorName && <p className="text-xs opacity-70">原作者：{event.sourceAuthorName}</p>}
-        <details><summary className="cursor-pointer text-xs">查看记录</summary><p className="whitespace-pre-wrap mt-2">{event.detail}</p></details>
+        {event.kind==='progress'?<p className="whitespace-pre-wrap text-xs">{event.detail}</p>:<details><summary className="cursor-pointer text-xs">查看记录</summary><p className="whitespace-pre-wrap mt-2">{event.detail}</p></details>}
         <button type="button" className="rounded-full px-4 py-2 border border-current/20 text-xs" onClick={() => {
             workroomLaunch.request({ charId: event.charId, workId: event.kind === 'shared' ? '' : event.subjectId, ...(event.kind === 'shared' ? {shareId:event.shareId}: {}) }); window.dispatchEvent(new Event('workroom-open-requested'));
         }}>去造物间看看 ↗</button>

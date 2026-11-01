@@ -14,3 +14,7 @@ export async function prepareRealMedia(file:File,inPerson:boolean,options:{signa
  options.signal?.throwIfAborted();
  const realMedia:RealMedia={kind:video?'video':'image',originalRef,frames,name:file.name.slice(0,150),inPerson};return {content:mediaText(realMedia),metadata:{realMedia}};
 }
+
+export function composeMediaMessage(message:ExperienceMessage,text:string):ExperienceMessage {
+ return {...message,content:[text.trim(),message.content].filter(Boolean).join("\n")};
+}

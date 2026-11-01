@@ -43,7 +43,7 @@ it('分段创作协议保留引号、换行和代码，不再要求JSON转义；
 });
 it('联动关闭时公开运行互动只保存在作品内，恢复后仍可读且不重新投递',async()=>{
  model('我注意到新的线索了。');await DB.saveCharacter({...await DB.getCharacter('a'),workroomLinkEnabled:false} as any);
- await generateRuntimeTurn(args({instruction:'参与推理',format:'text',publicEvent:'发现了新的线索',shareReply:true}));
+ await generateRuntimeTurn(args({instruction:'参与推理',format:'text',publicEvent:'发现了新的线索',shareReply:true,companion:true}));
  expect((await W.playTurns('a',workId)).every(t=>t.delivery==='local')).toBe(true);
  expect(JSON.stringify(await DB.getMessagesByCharId('a',true))).not.toContain('发现了新的线索');
  const backup=await DB.exportFullData();await DB.importFullData(backup as any);expect((await W.playTurns('a',workId))).toHaveLength(2);
@@ -73,3 +73,5 @@ it('ends every runtime request with its actual task rather than leaving creation
  await generateRuntimeTurn(args({instruction:'判断本轮猜词，只返回correct、reply、newHint',context:{guess:'太阳'},format:'json'}));
  const last=calls[0].body.messages.at(-1);expect(last.role).toBe('user');expect(last.content).toContain('本次作品运行请求');expect(last.content).toContain('太阳');expect(last.content).toContain('correct');expect(last.content).not.toContain('再来一版');
 });
+
+it('automatic reaction never impersonates a user turn, and game generation waits for a confirmed narration',async()=>{model('小狗精神好多了。');await generateRuntimeTurn(args({instruction:'回应已发生的游戏旁白',context:{eventNarration:'阿源喂了小狗'},format:'text',companion:true}));expect((await W.playTurns('a',workId)).map(t=>t.role)).toEqual(['assistant']);expect((await DB.getMessagesByCharId('a',true)).filter(m=>m.metadata?.workroomTurnId).every(m=>m.role==='assistant')).toBe(true);await generateRuntimeTurn(args({instruction:'生成游戏数据',format:'text',publicEvent:'char抽了盲盒'}));expect(await W.playTurns('a',workId)).toHaveLength(1);});
