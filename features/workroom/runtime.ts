@@ -31,12 +31,13 @@ export async function generateRuntimeTurn(input:{charId:string;workId:string;ver
   if(request.format==='json'){try{result=cloneWorkroomState(parseCompleteJson(text));}catch(error){throw new WorkroomResponseError('本轮游戏生成的数据格式不完整，原进度未修改，请重试。',responseInfo,error);}}
   const latest=await W.getWork(char.id,input.workId);input.signal.throwIfAborted();if(!latest.runtimeAiEnabled||latest.currentVersionId!==input.versionId)throw Error('作品或运行时AI设置已变化，本轮结果未应用');
   // Record the visible turn once; the component may also report its displayed result.
-  if(request.publicEvent){
+  if(request.companion&&request.publicEvent){
    await W.appendPlayTurn(char.id,input.workId,input.versionId,'user',request.publicEvent,'play-u-'+input.requestId,request.companion===true);
    const displayed=request.format==='text'?text:'游戏生成了新数据；具体界面变化由组件报告';
    await W.appendPlayTurn(char.id,input.workId,input.versionId,'assistant',displayed.slice(0,6000),'play-a-'+input.requestId,request.companion===true);
    if(request.companion)await drainWorkroomOutbox(char.id);
   }
+  if(request.companion&&!request.publicEvent){await W.appendPlayTurn(char.id,input.workId,input.versionId,'assistant',text.slice(0,6000),'play-a-'+input.requestId,true);await drainWorkroomOutbox(char.id);}
   return result;
  }finally{locks.delete(key);}
 }

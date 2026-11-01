@@ -383,7 +383,7 @@ const DateApp: React.FC = () => {
     }, [memoryPalaceConfig, apiConfig, userProfile?.name, updateCharacter, addToast]);
 
     // --- Session API Logic ---
-    const handleSendMessage = async (text: string, kind?: 'continue'): Promise<string> => {
+    const handleSendMessage = async (text: string, kind?: 'continue', attachmentMetadata?:Record<string,any>): Promise<string> => {
         const currentEncounterId = encounterIdRef.current;
         if (!char) throw new Error("No char");
         const sarModulePlan = getSARModuleRuntimePlan(char, userProfile);
@@ -395,6 +395,7 @@ const DateApp: React.FC = () => {
             && recentCheck[0].metadata?.dateEncounterId === currentEncounterId
             && recentCheck[0].role === 'user'
             && recentCheck[0].content === text
+            && (!attachmentMetadata?.realMedia || recentCheck[0].metadata?.realMedia?.originalRef===attachmentMetadata.realMedia.originalRef)
             && recentCheck[0].metadata?.source === 'date';
         // API 中断后的重试只会带回显示文本；从已落库标记恢复“继续”的完整语义。
         const isContinueTurn = kind === 'continue'
@@ -408,7 +409,7 @@ const DateApp: React.FC = () => {
                 role: 'user',
                 type: 'text',
                 content: text,
-                metadata: { source: 'date', dateEncounterId: currentEncounterId, ...(isContinueTurn ? { meetingContinue: true } : {}) },
+                metadata: { ...attachmentMetadata, source: 'date', dateEncounterId: currentEncounterId, ...(isContinueTurn ? { meetingContinue: true } : {}) },
             });
             markDateTurnDirty(char);
         }
@@ -1112,7 +1113,7 @@ const DateApp: React.FC = () => {
                     messages={dateMessages}
                     peekStatus={peekStatus}
                     encounterId={encounterIdRef.current}
-                    onExperienceSend={async(message:ExperienceMessage)=>{const owner=char.id,encounter=encounterIdRef.current;await DB.saveMessage({charId:owner,role:'user',type:'text',content:message.content,metadata:{...message.metadata,source:'date',dateEncounterId:encounter}});if(encounterIdRef.current!==encounter)throw Error('见面会话已切换，附件已保存在原会话');await loadDateMessages();return handleSendMessage(message.content);}}
+                    onExperienceSend={message=>handleSendMessage(message.content,undefined,message.metadata)}
                     onSendMessage={handleSendMessage}
                     onReroll={handleReroll}
                     onExit={onExitSession}

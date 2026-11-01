@@ -1,3 +1,5 @@
+import {DB} from '../../utils/db';
+import {gameNarration,ensureGameStarted} from './narration';
 import {readGameActions,type GameAction} from './actions';
 import { drainWorkroomOutbox } from './delivery';
 import { WorkroomStorage } from './storage';
@@ -7,7 +9,7 @@ import { readWorkroomRpc } from './runner';
 
 /** Revocable capability: identity comes from the host, never from RPC arguments. */
 export function createWorkroomHost(charId: string, workId: string, versionId: string, session: string,
-    callbacks: { onActions?: (actions:GameAction[])=>void; onNotify?: (text: string) => void; onError?: (text: string) => void; onStop?: () => void; onReady?: () => void; onGenerateError?: (error:unknown)=>void; onEvent?: (text:string) => void; onGenerate?: (request:unknown,requestId:string,signal:AbortSignal)=>Promise<unknown> } = {}, preview = false) {
+    callbacks: { userName?:string; onActions?: (actions:GameAction[])=>void; onNotify?: (text: string) => void; onError?: (text: string) => void; onStop?: () => void; onReady?: () => void; onGenerateError?: (error:unknown)=>void; onEvent?: (text:string) => void; onGenerate?: (request:unknown,requestId:string,signal:AbortSignal)=>Promise<unknown> } = {}, preview = false) {
     const generationAbort=new AbortController();
     let previewData:unknown = {};
     let previewRevision = 1;
@@ -16,6 +18,13 @@ export function createWorkroomHost(charId: string, workId: string, versionId: st
     let stateRevision: number | undefined;
     let queue = Promise.resolve();
     let highestRequest = 0;
+    let declaredActions:GameAction[]=[];
+    let characterAction:{id:string;events:string[]}|undefined;
+    let batchSequence=0;
+    let userEvents:{id:string;details:string[]}|undefined;
+    let flushTimer:ReturnType<typeof setTimeout>|undefined;
+    const persist=async(id:string,details:string[],actor:'user'|'char')=>{if(preview||!details.length)return;const char=await DB.getCharacter(charId);if(!char)return;const name=actor==='char'?char.name:(callbacks.userName||'用户');const text=gameNarration(name,details,char.name,callbacks.userName||'用户');await ensureGameStarted(charId,workId,versionId,callbacks.userName);await WorkroomStorage.recordEvent(charId,workId,versionId,id,text,{actor,userName:callbacks.userName||'用户'});await drainWorkroomOutbox(charId);if(active)callbacks.onEvent?.(text);};
+    const flushUser=async()=>{clearTimeout(flushTimer);const batch=userEvents;userEvents=undefined;if(batch)await persist(batch.id,batch.details,'user');};
     let lastPublicEvent = '';
     let lastPublicAt = 0;
     const inFlight = new Set<string>();
@@ -27,10 +36,10 @@ export function createWorkroomHost(charId: string, workId: string, versionId: st
     };
     let windowStart = performance.now();
     let count = 0;
-    const dispose = () => { active = false; generationAbort.abort(new DOMException('组件已关闭','AbortError'));port?.close(); };
+    const dispose = () => { clearTimeout(flushTimer);void flushUser().catch(()=>{});const action=characterAction;characterAction=undefined;if(action?.events.length)void persist(action.id,action.events,'char').catch(()=>{});active = false; generationAbort.abort(new DOMException('组件已关闭','AbortError'));port?.close(); };
     return {
         close: dispose,
-        characterPlay(){if(active&&!preview)port?.postMessage({event:'characterPlay'});},
+        characterPlay(){if(active&&!preview&&!characterAction&&declaredActions.length){void flushUser().catch(e=>callbacks.onError?.(String(e)));characterAction={id:'char-'+session+'-'+crypto.randomUUID(),events:[]};port?.postMessage({event:'characterPlay'});}},
         bind(nextPort: MessagePort) {
             if (!active || port) { nextPort.close(); return; }
             port = nextPort;
@@ -51,10 +60,17 @@ export function createWorkroomHost(charId: string, workId: string, versionId: st
                     try {
                         let result: unknown;
                         const args = request.args;
-                        if(request.method==='registerActions'){const actions=readGameActions(args[0]);if(!preview)callbacks.onActions?.(actions);result=true;
+                        if(request.method==='registerActions'){const actions=readGameActions(args[0]);declaredActions=actions;if(!preview)callbacks.onActions?.(actions);result=true;
+                        } else if(request.method==='finishCharacterAction'){
+                            const action=characterAction;if(!action)throw Error('没有待完成的角色动作');const value=args[0] as any;
+                            if(!value||typeof value.actionId!=='string'||typeof value.reply!=='string'||value.reply.length>1000)throw Error('角色动作结果无效');
+                            const selected=declaredActions.find(a=>a.id===value.actionId);if(value.actionId!=='none'&&!selected)throw Error('角色动作无效');
+                            if(selected&&!action.events.length&&value.failed!==true)action.events.push('执行了「'+selected.label+'」。');
+                            if(selected&&value.reply&&value.failed!==true)action.events.push('公开回应：'+value.reply);
+                            characterAction=undefined;await persist(action.id,action.events,'char');result=true;
                         } else if(request.method==='generate'){
                             if(preview||!callbacks.onGenerate)throw Error('请在正式作品中开启运行时AI后使用');
-                            const task=readRuntimeRequest(args[0]);result=await callbacks.onGenerate(task,session+'-'+request.id,generationAbort.signal);
+                            const task=readRuntimeRequest(args[0]);task.companion=false;if(characterAction){task.publicEvent=undefined;task.companion=false;}result=await callbacks.onGenerate(task,session+'-'+request.id,generationAbort.signal);
                         } else if (request.method === 'loadState') {
                             const state = preview ? {revision:previewRevision,data:previewData} : await WorkroomStorage.loadState(charId, workId, versionId);
                             stateRevision = state.revision; result = state.data;
@@ -65,11 +81,13 @@ export function createWorkroomHost(charId: string, workId: string, versionId: st
                         } else if (request.method === 'emitEvent') {
                             if (!validText(args[0], 2000) || !validText(args[1], 100)) throw Error('互动事件格式无效');
                             const description = String(args[0]);
-                            // A component may report the same visible interaction more than once.
-                            const isRepeat = description === lastPublicEvent && Date.now()-lastPublicAt < 1500;
+                            const isRepeat=description===lastPublicEvent&&Date.now()-lastPublicAt<1500;
                             if(!isRepeat){lastPublicEvent=description;lastPublicAt=Date.now();}
-                            result = preview ? 'preview-'+request.id : isRepeat ? 'duplicate-'+request.id : (await WorkroomStorage.recordEvent(charId, workId, versionId, args[1], description)).id;
-                            if(!preview && !isRepeat){await drainWorkroomOutbox(charId);if(active)callbacks.onEvent?.(description);}
+                            if(!preview&&!isRepeat){
+                                if(characterAction)characterAction.events.push(description);
+                                else{if(!userEvents)userEvents={id:'user-'+session+'-'+(++batchSequence),details:[]};userEvents.details.push(description);clearTimeout(flushTimer);flushTimer=setTimeout(()=>{queue=queue.then(flushUser).catch(e=>callbacks.onError?.(String(e)));},250);}
+                            }
+                            result=preview?'preview-'+request.id:isRepeat?'duplicate-'+request.id:'queued-'+request.id;
                         } else {
                             if (!validText(args[0], 2000)) throw Error('组件说明无效');
                             if(request.method==='reportReady'){

@@ -6,10 +6,10 @@ import { WORKROOM_STORES, transactionDone } from '../features/workroom/schema';
 
 beforeEach(async () => {
     const db = await openDB();
-    const tx = db.transaction(['characters', ...WORKROOM_STORES], 'readwrite');
+    const tx = db.transaction(['characters','messages', ...WORKROOM_STORES], 'readwrite');
     const done = transactionDone(tx);
-    for (const name of WORKROOM_STORES) tx.objectStore(name).clear();
-    tx.objectStore('characters').put({ id: 'runner-char', name: '阿源' });
+    for (const name of ['messages',...WORKROOM_STORES]) tx.objectStore(name).clear();
+    tx.objectStore('characters').put({ id: 'runner-char', name: '阿源',workroomLinkEnabled:true });
     await done;
 });
 async function harness() {
@@ -59,8 +59,9 @@ describe('沙盒宿主与真实 IndexedDB 联通', () => {
         h.send(2, 'requestUpdate', ['增加散步']); expect((await h.wait(2)).ok).toBe(true);
         h.send(3, 'notify', ['小狗想你了']); await h.wait(3);
         expect(h.onNotify).toHaveBeenCalledWith('小狗想你了');
+        await vi.waitFor(async()=>expect((await DB.getRawStoreData('workroom_events')).filter(r=>r.event.kind==='progress'&&r.delivery==='delivered')).toHaveLength(2));
         const rows = await DB.getRawStoreData('workroom_events');
-        expect(rows).toHaveLength(3);
+        expect(rows).toHaveLength(4);
         expect(rows.filter(r => r.event.kind === 'completed')).toHaveLength(1);
         expect(rows.every(r => r.charId === 'runner-char' && r.workId === h.work.id)).toBe(true);
         expect(rows.find(r => r.event.kind === 'completed').delivery).toBe('delivered');
@@ -99,3 +100,6 @@ it('preview accepts action declarations without exposing character execution or 
  const replies:any[]=[],onActions=vi.fn(),onGenerate=vi.fn();const port={onmessage:undefined as any,postMessage:(r:unknown)=>replies.push(r),close:vi.fn()};const host=createWorkroomHost('a','w','v','s',{onActions,onGenerate},true);host.bind(port as any);
  port.onmessage({data:{id:'1',method:'registerActions',args:[[{id:'feed',label:'喂食'}]]}});await vi.waitFor(()=>expect(replies[0]?.ok).toBe(true));host.characterPlay();expect(onActions).not.toHaveBeenCalled();expect(onGenerate).not.toHaveBeenCalled();expect(replies).toHaveLength(1);host.close();
 });
+
+it('one character action becomes one named system narration even when the game reports multiple results',async()=>{const h=await harness();h.send(1,'registerActions',[[{id:'open',label:'拆盲盒'}]]);await h.wait(1);h.host.characterPlay();h.host.characterPlay();expect(h.replies.filter(r=>r.event==='characterPlay')).toHaveLength(1);h.send(2,'emitEvent',['char抽到了扫帚','box1']);await h.wait(2);h.send(3,'emitEvent',['架子新增扫帚','box1b']);await h.wait(3);expect((await DB.getRawStoreData('workroom_events')).filter(r=>r.event.kind==='progress')).toHaveLength(0);h.send(4,'finishCharacterAction',[{actionId:'open',reply:'第一份盲盒！'}]);expect((await h.wait(4)).ok).toBe(true);const events=(await DB.getRawStoreData('workroom_events')).filter(r=>r.event.kind==='progress');expect(events).toHaveLength(1);expect(events[0].event.actorName).toBe('阿源');expect(events[0].event.detail).toContain('阿源抽到了扫帚');expect(events[0].event.detail).toContain('架子新增扫帚');expect(events[0].event.summary).not.toContain('饲养小狗');const messages=(await DB.getMessagesByCharId('runner-char',true)).filter(m=>m.metadata?.workroomEvent?.kind==='progress');expect(messages).toHaveLength(1);expect(messages[0].role).toBe('system');expect(messages[0].content).not.toContain('char抽');h.host.close();});
+it('component-generated public events cannot request the user-speech delivery path',async()=>{const generate=vi.fn(async(_task:any)=> '公开游戏结果'),port={onmessage:undefined as any,postMessage:vi.fn(),close:vi.fn()};const host=createWorkroomHost('runner-char','w','v','s',{onGenerate:generate});host.bind(port as any);port.onmessage({data:{id:'1',method:'generate',args:[{instruction:'游戏动作',publicEvent:'char拆了盲盒',companion:true}]}});await vi.waitFor(()=>expect(generate).toHaveBeenCalledOnce());expect(generate.mock.calls[0][0].companion).toBe(false);host.close();});

@@ -2,7 +2,7 @@ import { assertCode, type WorkroomCode } from './schema';
 
 export const WORKROOM_SANDBOX = 'allow-scripts';
 export const WORKROOM_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; media-src data:; font-src data:; connect-src 'none'; frame-src 'none'; child-src 'none'; worker-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
-export const WORKROOM_RPC_METHODS = ['loadState', 'saveState', 'emitEvent', 'notify', 'requestUpdate', 'reportError', 'reportReady', 'generate', 'registerActions'] as const;
+export const WORKROOM_RPC_METHODS = ['loadState', 'saveState', 'emitEvent', 'notify', 'requestUpdate', 'reportError', 'reportReady', 'generate', 'registerActions', 'finishCharacterAction'] as const;
 export type WorkroomMethod = typeof WORKROOM_RPC_METHODS[number];
 export interface WorkroomRpc { id: string; method: WorkroomMethod; args: unknown[] }
 export function readWorkroomRpc(value: unknown): WorkroomRpc | undefined {
@@ -55,11 +55,11 @@ export function buildWorkroomDocument(code: WorkroomCode, session: string): stri
                         const state=await call('loadState');
                         const choice=await call('generate',{instruction:'你受邀一起玩。根据当前游戏状态，从availableActions中选择一个愿意执行的动作，或选择none不行动。只返回JSON对象：{actionId:动作id或none,reply:简短公开回应}。不要声称动作已经完成。',context:{state,availableActions:actions.map(a=>({id:a.id,label:a.label}))},format:'json'});
                         if(!choice||typeof choice.actionId!=='string'||typeof choice.reply!=='string')throw Error('角色动作选择格式无效');
-                        if(choice.actionId==='none'){await call('notify',choice.reply.slice(0,1000)||'角色这次没有行动');return;}
+                        if(choice.actionId==='none'){await call('finishCharacterAction',{actionId:'none',reply:''});await call('notify',choice.reply.slice(0,1000)||'角色这次没有行动');return;}
                         const action=actions.find(a=>a.id===choice.actionId);if(!action)throw Error('角色选择了不可用动作');
-                        await action.run({actor:'char'});
-                        await call('emitEvent','角色在游戏中执行了「'+action.label+'」。'+choice.reply.slice(0,1000),'char-action-'+Date.now());
-                    })().catch(e=>call('reportError',String(e).slice(0,2000)).catch(()=>{})).finally(()=>{playing=false;});
+                        try{await action.run({actor:'char'});}catch(error){await call('finishCharacterAction',{actionId:action.id,reply:'',failed:true});throw error;}
+                        await call('finishCharacterAction',{actionId:action.id,reply:choice.reply.slice(0,1000)});
+                    })().catch(async e=>{await call('finishCharacterAction',{actionId:'none',reply:'',failed:true}).catch(()=>{});await call('reportError',String(e).slice(0,2000)).catch(()=>{});}).finally(()=>{playing=false;});
                     return;
                 }
                 const request = pending.get(reply?.id); if(!request) return;
@@ -69,6 +69,7 @@ export function buildWorkroomDocument(code: WorkroomCode, session: string): stri
             window.removeEventListener('message', init);
             waiting.splice(0).forEach(message => port.postMessage(message));
         }
+        document.addEventListener('click',event=>{if(playing){event.preventDefault();event.stopImmediatePropagation();}},true);
         window.addEventListener('message', init);
         window.addEventListener('DOMContentLoaded', () => {void call('reportReady','ready').catch(()=>{});}, {once:true});
         window.addEventListener('error', event => {void call('reportError', String(event.message).slice(0,2000)).catch(()=>{});});

@@ -1,3 +1,5 @@
+import MediaDraft from '../../../features/experience/MediaDraft';
+import {composeMediaMessage} from '../../../features/experience/media';
 import ExperienceTools from '../../../features/experience/Tools';
 import RealMediaView from '../../../features/experience/RealMediaView';
 import {realMediaContent} from '../../../features/experience/format';
@@ -302,6 +304,7 @@ const StoryTheaterSession: React.FC<Props> = ({ entry, preset, masks, onBack, on
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState('');
     const [sending, setSending] = useState(false);
+    const [mediaDraft,setMediaDraft]=useState<ExperienceMessage|null>(null),[mediaPreparing,setMediaPreparing]=useState(false);
     const [memoryStatus, setMemoryStatus] = useState('');
     const [contextTokens, setContextTokens] = useState(0);
     const [contextTokensExact, setContextTokensExact] = useState(false);
@@ -639,8 +642,11 @@ const StoryTheaterSession: React.FC<Props> = ({ entry, preset, masks, onBack, on
         }
     }, [addToast, apiConfig, entry, loadMessages, mask.name, memoryPalaceConfig, onEntryChange, threadId]);
 
+    useEffect(()=>{setMediaDraft(null);setMediaPreparing(false);},[threadId]);
     const send = useCallback(async (rerollTarget?: Message, continueRequested = false, externalMessage?:ExperienceMessage) => {
-        if (sendLock.current || !canStart) return;
+        if (sendLock.current || !canStart || mediaPreparing) return;
+        const preparedMedia=!rerollTarget&&!continueRequested&&!externalMessage&&mediaDraft?composeMediaMessage(mediaDraft,input):undefined;
+        externalMessage=externalMessage||preparedMedia;
         sendLock.current = true;
         setSending(true);
         setRerollingId(rerollTarget?.id || null);
@@ -685,6 +691,7 @@ const StoryTheaterSession: React.FC<Props> = ({ entry, preset, masks, onBack, on
                             ...(affinityInputs.length > 0 ? { theaterAffinityInputs: affinityInputs } : {}),
                             ...(isContinueTurn ? { theaterContinue: true } : {}),
                         });
+            if(preparedMedia)setMediaDraft(null);
             if (!isReroll && !assistantOpening) await loadMessages();
 
             // 归档不能只放在成功生成之后：一旦会话已经碰到上游上下文上限，正文永远生成
@@ -815,7 +822,7 @@ const StoryTheaterSession: React.FC<Props> = ({ entry, preset, masks, onBack, on
             setSending(false);
             setRerollingId(null);
         }
-    }, [canStart, actors, addToast, affinityDrafts, affinityEnabled, applyActorMemoryPipeline, archiveIfNeeded, buildActorContexts, buildMaskMemoryContext, callCompletion, effectivePreset, entry, independentRecall, input, loadMessages, mask, promptIdentityName, saveCentralAndMirrors, selectedBooks, threadId]);
+    }, [mediaDraft,mediaPreparing,canStart, actors, addToast, affinityDrafts, affinityEnabled, applyActorMemoryPipeline, archiveIfNeeded, buildActorContexts, buildMaskMemoryContext, callCompletion, effectivePreset, entry, independentRecall, input, loadMessages, mask, promptIdentityName, saveCentralAndMirrors, selectedBooks, threadId]);
 
     const archivedCount = messages.filter(message => mirrorArchived(message, entry)).length;
     const pendingRetryInput = getPendingStoryRetryInput(messages);
@@ -889,12 +896,12 @@ const StoryTheaterSession: React.FC<Props> = ({ entry, preset, masks, onBack, on
                                 </summary>
                                 {isExpanded && <div className='pb-5 pl-7'>
                                     {message.role === 'user'
-                                        ? <p className='text-sm leading-7 text-slate-600 whitespace-pre-wrap'>{message.metadata?.realMedia?<RealMediaView value={message.metadata.realMedia}/>:message.content}</p>
+                                        ? <p className='text-sm leading-7 text-slate-600 whitespace-pre-wrap'>{message.metadata?.realMedia?<RealMediaView text={message.content} value={message.metadata.realMedia}/>:message.content}</p>
                                         : <StoryOutput content={message.content} affinityInputs={affinityInputsFromMessage(message, actors)} />}
                                 </div>}
                             </details>;
                         }
-                        if (message.role === 'user') return <section key={message.id} {...pressHandlersFor(message)} className='meeting-user-turn pl-4 border-l-2 border-violet-300'><div className='meeting-user-label text-[9px] tracking-[.16em] font-bold text-violet-500'>你写下</div><p className='meeting-prose mt-2 text-sm leading-7 text-slate-600 whitespace-pre-wrap'>{message.metadata?.realMedia?<RealMediaView value={message.metadata.realMedia}/>:message.content}</p></section>;
+                        if (message.role === 'user') return <section key={message.id} {...pressHandlersFor(message)} className='meeting-user-turn pl-4 border-l-2 border-violet-300'><div className='meeting-user-label text-[9px] tracking-[.16em] font-bold text-violet-500'>你写下</div><p className='meeting-prose mt-2 text-sm leading-7 text-slate-600 whitespace-pre-wrap'>{message.metadata?.realMedia?<RealMediaView text={message.content} value={message.metadata.realMedia}/>:message.content}</p></section>;
                         const isLatest = message.id === messages[messages.length - 1]?.id;
                         return <article key={message.id} {...pressHandlersFor(message)}><StoryOutput content={message.content} onChoose={choice => setInput(choice)} affinityInputs={affinityInputsFromMessage(message, actors)} />{isLatest && <div className='mt-4 flex items-center justify-end gap-2'><span className='w-1.5 h-1.5 rounded-full bg-violet-400' /><button disabled={sending} onClick={() => void send(message)} className='inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-slate-200 bg-white text-[10px] font-bold text-slate-500 disabled:opacity-40'>{rerollingId === message.id ? <SpinnerGap size={12} className='animate-spin' /> : <ArrowClockwise size={12} />}换一种写法</button></div>}</article>;
                     })}
@@ -933,11 +940,12 @@ const StoryTheaterSession: React.FC<Props> = ({ entry, preset, masks, onBack, on
                         </div>}
                     </div>}
                 </div>}
+                {mediaDraft&&<MediaDraft message={mediaDraft} disabled={sending} onRemove={()=>setMediaDraft(null)}/>}
                 <div className='flex items-end gap-2 p-2 rounded-2xl bg-white border border-slate-200 shadow-sm'>
                     <button type='button' onClick={() => void send(undefined, true)} disabled={sending || !canStart} className='self-end h-11 shrink-0 px-3 rounded-xl border border-violet-200 bg-violet-50 text-violet-700 text-xs font-bold active:scale-95 transition-transform disabled:opacity-30' title='本轮不主动行动，让剧情按当前预设继续' aria-label='继续当前剧情'>继续</button>
-                    <ExperienceTools floating key={threadId} scopeId={threadId} inPerson disabled={sending} onSend={message=>send(undefined,false,message)}/>
+                    <ExperienceTools floating key={threadId} scopeId={threadId} inPerson disabled={sending} onStageMedia={setMediaDraft} onMediaPreparing={setMediaPreparing} onSend={message=>send(undefined,false,message)}/>
                     <textarea value={input} onChange={event => setInput(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) { event.preventDefault(); void send(); } }} disabled={sending} rows={2} placeholder={pendingRetryInput ? '留空并点击推进，可继续上次中断' : canWriteOpening ? '也可以先写一句；留空推进则由故事开场' : '写下动作、对白、时间跳转，或你希望故事发生的事……'} className='min-w-0 min-h-12 max-h-36 flex-1 px-2 py-2 bg-transparent text-sm leading-6 resize-none outline-none disabled:opacity-50' />
-                    <button onClick={() => void send()} disabled={sending || (!input.trim() && !pendingRetryInput && !canWriteOpening)} title={!input.trim() && pendingRetryInput ? '继续上次中断' : canWriteOpening && !input.trim() ? '让故事先开场' : '推进'} className='story-send-button self-end w-11 h-11 shrink-0 rounded-xl bg-slate-900 text-white grid place-items-center disabled:opacity-30'>{sending ? <SpinnerGap size={18} className='animate-spin' /> : <PaperPlaneTilt size={18} weight='fill' />}</button>
+                    <button onClick={() => void send()} disabled={sending || mediaPreparing || (!input.trim() && !mediaDraft && !pendingRetryInput && !canWriteOpening)} title={!input.trim() && pendingRetryInput ? '继续上次中断' : canWriteOpening && !input.trim() ? '让故事先开场' : '推进'} className='story-send-button self-end w-11 h-11 shrink-0 rounded-xl bg-slate-900 text-white grid place-items-center disabled:opacity-30'>{sending ? <SpinnerGap size={18} className='animate-spin' /> : <PaperPlaneTilt size={18} weight='fill' />}</button>
                 </div>
                 <div className='mt-2 text-center text-[9px] text-slate-400'>Ctrl / ⌘ + Enter 推进 · 长按楼层可编辑或删除</div>
             </div>
