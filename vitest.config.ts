@@ -15,6 +15,7 @@ export default defineConfig({
     setupFiles: ['./test-setup.ts'],
     include: [
       'utils/**/*.test.ts',
+      'utils/**/*.test.tsx',
       'worker/**/*.test.ts',
       'scripts/**/*.test.ts',
     ],
