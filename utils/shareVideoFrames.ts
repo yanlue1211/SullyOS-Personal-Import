@@ -6,8 +6,9 @@
 export interface VideoFrame { timeSeconds: number; image: string }
 
 export async function extractVideoFrames(videoUrl: string, options: {
-  count?: number; width?: number; timeoutMs?: number;
+  count?: number; width?: number; timeoutMs?: number; signal?:AbortSignal; onProgress?:(done:number,total:number)=>void; onFrame?:(blob:Blob,time:number)=>Promise<void>;
 } = {}): Promise<VideoFrame[]> {
+  options.signal?.throwIfAborted();
   if (!/^(?:https?:\/\/|blob:)/i.test(videoUrl)) return [];
   const count = Math.min(8, Math.max(1, Math.floor(options.count ?? 6)));
   const width = Math.min(640, Math.max(160, Math.floor(options.width ?? 480)));
@@ -19,10 +20,12 @@ export async function extractVideoFrames(videoUrl: string, options: {
   video.playsInline = true;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const wait = (eventName: string) => new Promise<void>((resolve, reject) => {
+    const abort=()=>{cleanup();reject(options.signal?.reason||new DOMException('已取消','AbortError'));};
     const success = () => { cleanup(); resolve(); };
     const failure = () => { cleanup(); reject(new Error('视频无法读取')); };
     const timeout = () => { cleanup(); reject(new Error('视频读取超时')); };
     const cleanup = () => {
+      options.signal?.removeEventListener('abort',abort);
       video.removeEventListener(eventName, success);
       video.removeEventListener('error', failure);
       if (timer) clearTimeout(timer);
@@ -30,6 +33,7 @@ export async function extractVideoFrames(videoUrl: string, options: {
     video.addEventListener(eventName, success, { once: true });
     video.addEventListener('error', failure, { once: true });
     timer = setTimeout(timeout, timeoutMs);
+    options.signal?.addEventListener('abort',abort,{once:true});if(options.signal?.aborted)abort();
   });
   try {
     const loaded = wait('loadedmetadata');
@@ -47,20 +51,25 @@ export async function extractVideoFrames(videoUrl: string, options: {
     const frames: VideoFrame[] = [];
     for (let i = 0; i < count; i++) {
       try {
+      options.signal?.throwIfAborted();
+      await new Promise(resolve=>setTimeout(resolve,0));
       const timeSeconds = Math.min(Math.max(0, duration - 0.1), (i + 0.5) * duration / count);
       const seeked = wait('seeked');
       video.currentTime = timeSeconds;
       await seeked;
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
       // Tainted canvas throws SecurityError; caller should fall back to cover.
-      frames.push({ timeSeconds, image: canvas.toDataURL('image/jpeg', 0.62) });
+      if(options.onFrame){const blob=await new Promise<Blob>((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(Error('画面编码失败')),'image/jpeg',.62));options.signal?.throwIfAborted();await options.onFrame(blob,timeSeconds);frames.push({timeSeconds,image:''});}else frames.push({ timeSeconds, image: canvas.toDataURL('image/jpeg', 0.62) });
+      options.onProgress?.(frames.length,count);
       } catch (error) {
+        if(options.signal?.aborted)throw error;
         console.warn('[share frames] Frame extraction stopped; keeping earlier frames', error);
         break;
       }
     }
     return frames;
   } catch (error) {
+    if(options.signal?.aborted)throw error;
     console.warn('[share frames] Cannot extract video frames; keep original cover', error);
     return [];
   } finally {

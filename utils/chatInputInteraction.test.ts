@@ -279,3 +279,8 @@ it.each(['聊天功能','表情包'])('switches keyboard and %s on pointerdown b
  const press=pointerdown(textarea());expect(press.defaultPrevented).toBe(true);
  expect(document.activeElement).toBe(textarea());expect(props.setShowPanel).toHaveBeenLastCalledWith('none');
 });
+it('consumes the opening touch click instead of activating a tile that moved under the finger',()=>{
+ renderInput({showPanel:'none'});pointerdown(container.querySelector('[aria-label="聊天功能"]')!);renderInput({showPanel:'actions'});const tile=[...container.querySelectorAll('button')].find(b=>b.textContent?.trim()==='我谕')!;
+ act(()=>tile.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,detail:1})));expect(props.onPanelAction).not.toHaveBeenCalled();pointerdown(tile);act(()=>tile.click());expect(props.onPanelAction).toHaveBeenLastCalledWith('oracle');
+});
+it('has separate video and oracle entries and puts cleanup on the final page',()=>{renderInput({showPanel:'actions'});const groups=[...container.querySelectorAll('[aria-label^="聊天功能第"]')];const last=groups.at(-1)!;expect(last.textContent).toContain('清理旧缓存');expect(container.textContent).toContain('视频');expect(container.textContent).toContain('我谕');expect(container.textContent).not.toContain('真实视频／我谕');});
