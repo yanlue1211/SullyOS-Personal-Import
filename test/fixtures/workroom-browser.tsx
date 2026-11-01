@@ -21,7 +21,7 @@ const a='qa-creator-'+crypto.randomUUID(),b='qa-recipient-'+crypto.randomUUID();
 const chars=[{id:a,name:'测试 Claude',workroomLinkEnabled:true,contextLimit:100},{id:b,name:'测试阿源',workroomLinkEnabled:true,contextLimit:100}];
 let workId='';
 function check(value:unknown,message:string){if(!value)throw Error(message);}
-async function seed(){for(const char of chars)await DB.saveCharacter(char as any);const work=await proposeIdea(a,'浏览器小狗屋','喂食和保存进度，支持与角色一起体验不同场景。这里是一段很长的作品简介，用于验证手机窄屏可以点击三角展开，简介末尾也能读到。','browser-idea');workId=work.id;await W.saveDraft(a,work.id,code,0,null);await W.publish(a,work.id,1);await drainWorkroomOutbox(a);return work;}
+async function seed(){for(const char of chars)await DB.saveCharacter(char as any);const work=await proposeIdea(a,'浏览器小狗屋','喂食和保存进度，支持与角色一起体验不同场景。这里是一段很长的作品简介，用于验证手机窄屏可以点击三角展开，简介末尾也能读到。','browser-idea');workId=work.id;await W.saveDraft(a,work.id,code,0,null);await W.publish(a,work.id,1);await W.appendTurn(a,work.id,'user','讨论游戏');await W.appendTurn(a,work.id,'assistant','可长按修改的创作回复');await drainWorkroomOutbox(a);return work;}
 async function verifyBoundaries(){
  await new Promise<void>((resolve,reject)=>{
   const frame=document.createElement('iframe'),session=crypto.randomUUID();let timer:ReturnType<typeof setTimeout>;

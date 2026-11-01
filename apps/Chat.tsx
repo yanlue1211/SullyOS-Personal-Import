@@ -3015,8 +3015,8 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
 
     useEffect(() => {
         const changed = (event: Event) => { const row = (event as CustomEvent<Message>).detail; if (row.charId !== char?.id) return; setMessages(previous => previous.map(message => message.id === row.id ? row : message)); markAmsgStateDirty({ char, userProfile, groups, realtimeConfig }); };
-        window.addEventListener('personal-recording-edited', changed);
-        return () => window.removeEventListener('personal-recording-edited', changed);
+        window.addEventListener('personal-recording-edited', changed);window.addEventListener('personal-message-edited', changed);
+        return () => {window.removeEventListener('personal-recording-edited', changed);window.removeEventListener('personal-message-edited', changed);};
     }, [char, userProfile, groups, realtimeConfig]);
     // --- Message Management ---
     const handleDeleteMessage = async () => {

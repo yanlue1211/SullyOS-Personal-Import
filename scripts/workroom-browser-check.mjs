@@ -28,6 +28,7 @@ try{
  failGeneration=true;await frame.getByRole('button',{name:'生成新题目',exact:true}).click();await page.getByText('造物间调用失败',{exact:true}).waitFor();await page.getByRole('button',{name:'复制',exact:true}).waitFor();await page.screenshot({path:'test-results/workroom/error-popup.png'});await page.getByRole('button',{name:'关闭',exact:true}).click();failGeneration=false;
  await page.getByRole('button',{name:'让 TA 玩一轮',exact:true}).click();await frame.getByText('等级 3',{exact:true}).waitFor();await page.waitForTimeout(400);
  await page.screenshot({path:'test-results/workroom/mobile.png'});
+ await page.getByRole('button',{name:'功能菜单',exact:true}).click();await page.getByRole('button',{name:'创作交流',exact:true}).click();const editable=page.getByText('可长按修改的创作回复',{exact:true});await editable.dispatchEvent('contextmenu');await page.getByRole('button',{name:'修改',exact:true}).click();await page.getByLabel('回复内容',{exact:true}).fill('浏览器修改后的创作回复');await page.getByRole('button',{name:'保存',exact:true}).click();await page.getByText('浏览器修改后的创作回复',{exact:true}).waitFor();await page.screenshot({path:'test-results/workroom/reply-edited.png'});
  await page.getByRole('button',{name:'验证启动观察',exact:true}).click();await page.getByText('PASS: 真实浏览器启动观察',{exact:true}).waitFor();
  await page.getByRole('button',{name:'验证分享与备份整链',exact:true}).click();
  await page.getByText('PASS: 进度、独立分享、五类卡片语义、组件文件、真实ZIP恢复',{exact:true}).waitFor();

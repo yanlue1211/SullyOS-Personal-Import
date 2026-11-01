@@ -1,3 +1,5 @@
+import ReplyEditor from './ReplyEditor';
+import {editWorkroomReply,regenerateWorkroomReply} from '../features/workroom/editing';
 import {ensureGameStarted} from '../features/workroom/narration';
 import React,{useEffect,useRef,useState} from 'react';
 import {createPortal} from 'react-dom';
@@ -40,7 +42,7 @@ export default function WorkroomPlay({charId,version,onNotify,onError,settingsOp
  <section className="wr-companion" aria-label="角色互动">
  <button type="button" disabled={busy||!enabled||!actions.length} title={actions.length?'从游戏开放的动作里选择并执行':'这个作品尚未开放角色动作，请先在创作交流中请 TA 更新共同游玩功能'} onClick={()=>playController.current?.()}>让 TA 玩一轮</button>
   <button type="button" className="wr-companion-toggle" aria-expanded={expanded} onClick={()=>setExpanded(v=>!v)}>{expanded?'▾ 收起聊天记录':'▸ 展开聊天记录'}</button>
-  {expanded&&<div className="wr-play-history">{[...turns.map(t=>({id:t.id,at:t.createdAt,label:t.role==='user'?os.userProfile.name:(os.characters.find(c=>c.id===charId)?.name||'TA'),text:t.role==='assistant'?publicCompanionText(t.text):t.text})),...narrations.map(n=>({id:n.id,at:n.event.timestamp,label:'旁白',text:n.event.detail}))].sort((a,b)=>a.at-b.at).slice(-18).map(t=><p key={t.id}><b>{t.label}</b> {t.text}</p>)}</div>}
+  {expanded&&<div className="wr-play-history">{[...turns.map(t=>({turn:t,id:t.id,at:t.createdAt,label:t.role==='user'?os.userProfile.name:(os.characters.find(c=>c.id===charId)?.name||'TA'),text:t.role==='assistant'?publicCompanionText(t.text):t.text})),...narrations.map(n=>({turn:undefined as WorkroomTurn|undefined,id:n.id,at:n.event.timestamp,label:'旁白',text:n.event.detail}))].sort((a,b)=>a.at-b.at).slice(-18).map(t=><p key={t.id}><b>{t.label}</b> {t.turn?.role==='assistant'?<ReplyEditor title="角色游戏回复" disabled={busy} fields={[{key:'text',label:'回复内容',value:t.turn.text,required:true}]} onSave={async values=>{await editWorkroomReply(charId,version.workId,t.id,t.turn!.text,values.text);await refresh();}} onError={reportFailure} onRegenerate={async()=>{if(!allow.current)throw Error('请先开启本游戏调用API');if(running.current)throw Error('正在调用，请稍候');running.current=true;setBusy(true);setCallKind('companion');const abort=new AbortController();controller.current=abort;try{await regenerateWorkroomReply({charId,workId:version.workId,turn:t.turn!,api:os.apiConfig,user:os.userProfile,signal:abort.signal,context:{realtimeConfig:os.realtimeConfig,groups:os.groups,emojis:[],categories:[]}});if(alive.current)await refresh();}finally{running.current=false;if(alive.current)setBusy(false);}}}>{t.text}</ReplyEditor>:t.text}</p>)}</div>}
   <form onSubmit={e=>{e.preventDefault();const text=input.trim();if(!text||busy||!enabled)return;setInput('');void speak(text,true);}}>
    <input aria-label="一起玩消息" value={input} maxLength={1500} onChange={e=>setInput(e.target.value)} placeholder={enabled?'和 TA 说点什么…':'开启游戏 API 后可发送消息'}/>
    <button disabled={busy||permissionBusy||!enabled||!input.trim()}>发送</button>
