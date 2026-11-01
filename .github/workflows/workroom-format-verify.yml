@@ -1,0 +1,30 @@
+name: Workroom output format verification
+on:
+  push:
+    branches: [personal/workroom-mode]
+  pull_request:
+    branches: [personal/audio-listening]
+    paths: ['features/workroom/creation.ts', 'features/workroom/reply.ts', 'utils/workroomCreation.test.ts', 'utils/workroomResponse.test.ts', '.github/workflows/workroom-format-verify.yml']
+permissions:
+  contents: read
+concurrency:
+  group: workroom-format-${{ github.event.pull_request.head.sha || github.sha }}
+  cancel-in-progress: true
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NODE_OPTIONS: '--max-old-space-size=6144'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm vitest run utils/workroomCreation.test.ts utils/workroomResponse.test.ts utils/workroomChatBridge.test.ts utils/workroomStorage.test.ts utils/workroomDelivery.test.ts utils/workroomRuntime.test.ts utils/replyEditing.test.ts utils/contextPipeline.test.ts utils/contextWorldbook.test.ts --maxWorkers=2 --minWorkers=1
+      - run: pnpm build

@@ -30,3 +30,9 @@ it('diagnostic previews redact credentials and reasoning before truncating, with
  expect(responsePreview('x'.repeat(9000))).toContain('中间内容省略');
  const error=new WorkroomResponseError('格式失败',{stage:'游戏',preview});expect(error.details).toContain(preview);
 });
+it('reports a chat-mode response distinctly instead of pretending it is malformed JSON',async()=>{
+ const {parseWorkroomReply,WorkroomChatFormatError}=await import('../features/workroom/reply');
+ expect(()=>parseWorkroomReply('[2026-11-01 21:05] [聊天] 小克加油\n[角色当时的心声，未说出口]')).toThrow(WorkroomChatFormatError);
+ expect(parseWorkroomReply(JSON.stringify({text:'游戏可以显示心声标签',code:{html:'<pre>[角色当时的心声] <心声>游戏文本</心声></pre>',css:'',js:''}})).code?.html).toContain('游戏文本');
+ expect(parseWorkroomReply('<workroom-text>代码里可以显示聊天日志。</workroom-text><workroom-html><pre>[2026-11-01 21:05] [聊天] 游戏内台词</pre></workroom-html><workroom-css></workroom-css><workroom-js></workroom-js>').code?.html).toContain('游戏内台词');
+});

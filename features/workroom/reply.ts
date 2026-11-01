@@ -1,6 +1,12 @@
 import {parseCompleteJson} from './response';
 import {assertCode,validText,type WorkroomCode} from './schema';
 export interface WorkroomReply{text:string;code?:WorkroomCode;action?:'read_code'|'test_code'}
+export const WORKROOM_CREATION_REMINDER = `【当前场景：造物间·创作交流】
+以上普通聊天、时间戳、心声和其他应用记录只是背景材料。人设与世界书继续有效，但其中普通聊天专用的输出格式在本轮不适用。不要续写历史聊天，不输出[聊天]、聊天时间戳、表情包命令、<心声>或“角色当时的心声”记录。只处理末尾用户给当前作品的创作请求。
+本轮回复只用 <workroom-text>自然交流</workroom-text>；需要修改代码时，同时追加完整的 <workroom-html>...</workroom-html><workroom-css>...</workroom-css><workroom-js>...</workroom-js>。不改代码则不输出代码片段。需要读取或测试已有代码时，仅输出 <workroom-tool>read_code</workroom-tool> 或 <workroom-tool>test_code</workroom-tool>，遵守本轮已用工具限制。不要凭空声称已发布、已测试或已改动进度。`;
+export class WorkroomChatFormatError extends Error {
+ constructor(){super('模型误用了普通聊天或心声格式，未返回造物间创作回复；旧草稿和进度已保留。');this.name='WorkroomChatFormatError';}
+}
 /** Code is not JSON-escaped in the preferred protocol. Never repair truncated executable code. */
 export function parseWorkroomReply(raw:string):WorkroomReply{
  let text=raw.trim();const outer=text.match(/^```(?:json|xml|text)?[ \t]*\n([\s\S]*)\n```$/i);if(outer)text=outer[1].trim();
@@ -24,6 +30,7 @@ export function parseWorkroomReply(raw:string):WorkroomReply{
   for(const f of fences){const key=f[1].toLowerCase()==='javascript'?'js':f[1].toLowerCase();if(seen.has(key))throw Error('创作回复包含重复代码片段');seen.add(key);code[key as keyof WorkroomCode]=f[2];prose=prose.replace(f[0],'');}
   if(!seen.has('html')||prose.includes('```'))throw Error('代码片段不完整，请重试；旧草稿未覆盖');assertCode(code);const reply=prose.trim()||'草稿已生成，请先试运行。';if(!validText(reply,8000))throw Error('创作说明过长');return {text:reply,code};
  }
+ if(!/^[{"]/.test(text)&&/(?:^|\n)\s*(?:\[\d{4}-\d{2}-\d{2}[^\]\n]*\]\s*)?\[聊天\]|\[角色当时的心声|<心声(?:\s|>)|\[\[(?:SEND_EMOJI|QUOTE):/m.test(text))throw new WorkroomChatFormatError();
  if(validText(text,8000)&&!(/^[\[{"]|```|<workroom-|^\s*(?:const|let|function|class|import|export)\s|<\/?(?:script|html|style|button|div)\b/m.test(text)))return {text};
  let value:any;
  try{value=parseCompleteJson(text);if(typeof value==='string')value=parseCompleteJson(value);}catch{throw Error('角色返回的创作格式不完整或JSON转义错误。请点“重试上一条”；旧草稿和进度未被覆盖。');}
