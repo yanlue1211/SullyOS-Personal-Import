@@ -1,6 +1,6 @@
 import ReplyEditor from '../components/ReplyEditor';
 import {editWorkroomReply,regenerateWorkroomReply} from '../features/workroom/editing';
-import { exportPortableWork, importPortableWork } from '../features/workroom/portable';
+import { exportPortableWork, importPortableWork, importPortableWorkUpdate } from '../features/workroom/portable';
 import React, { useEffect, useRef, useState } from 'react';
 import { useOS } from '../context/OSContext';
 import { useLocalBackHandler } from '../hooks/useLocalBackHandler';
@@ -139,7 +139,7 @@ export default function WorkroomApp() {
             const result = await generateWorkroomReply({ charId: owner, workId: selected, text, retryTurnId: previous?.id,
                 api: os.apiConfig, user: os.userProfile, signal: controller.signal,onPhase:phase=>{if(scope.current===expected)setCreationPhase(phase);},
                 context: { realtimeConfig: os.realtimeConfig, groups: os.groups, emojis: [], categories: [] } });
-            if (scope.current === expected) setNotice(result.savedDraft ? '新代码已保存为草稿，可以查看后保存版本运行。' : '交流已保存。');
+            if (scope.current === expected) setNotice(result.startupReport?.errors.length ? '草稿已保存，启动检查发现错误：'+result.startupReport.errors.join('；')+'。继续交流可让 TA 读取错误并修复。' : result.savedDraft ? '新代码已保存为草稿，可以查看后保存版本运行。' : '交流已保存。');
         } catch (error) {
             if (scope.current === expected) {
                 const latest = (await W.turns(owner, selected)).at(-1);
@@ -214,6 +214,7 @@ export default function WorkroomApp() {
                             {(['html', 'css', 'js'] as const).map(key => <label key={key} className="block text-xs uppercase">{key}<textarea aria-label={`${key}源码`} value={code[key]} onChange={e => { dirty.current = true; setCodeDirty(true); setCode(old => ({ ...old, [key]: e.target.value })); }} className="block w-full h-40 font-mono rounded-xl p-3 mt-1 bg-white normal-case" spellCheck={false}/></label>)}
                             <div className="flex flex-wrap gap-2"><button className={button} disabled={busy} onClick={saveDraft}>保存草稿</button><button className={button} disabled={busy || !detail.draft || codeDirty} onClick={()=>{if(!detail.draft)return;setTestErrors([]);setTestNotes('');setTestVersion({...detail.draft,id:'test-'+crypto.randomUUID(),number:detail.draft.revision,schemaVersion:version?.schemaVersion||1,createdAt:Date.now()});setPage('test');}}>试运行已保存草稿</button><button className={button} disabled={busy || !detail.draft || codeDirty} onClick={publish}>保存版本并打开</button></div>
                         </main> : <main className="flex-1 overflow-y-auto p-5 space-y-3">
+                            <label className={button}>导入此作品的新版本<input aria-label="导入此作品的新版本" type="file" accept=".json,application/json" className="hidden" disabled={busy||codeDirty} onChange={event=>{const file=event.target.files?.[0];event.target.value='';if(!file)return;const owner=charId,selected=workId,expected=scope.current,revision=detail.draft?.revision||0,base=detail.work.currentVersionId;void operate(async()=>{if(file.size>4_600_000)throw Error('组件文件过大');const text=await file.text();if(scope.current!==expected)return;await importPortableWorkUpdate(owner,selected,text,revision,base);await refresh(owner,selected);if(scope.current===expected){setPage('code');setNotice('新版代码已导入当前作品草稿，原版本和进度保留。试运行后可保存版本。');}});}}/></label>
                             {detail.draft && <p className="rounded-xl bg-amber-100 p-3 text-xs">有尚未发布的草稿 · 修订 {detail.draft.revision}</p>}
                             {detail.versions.map(item => <div key={item.id} className="rounded-xl bg-white p-4 flex items-center justify-between"><span className="text-sm">第 {item.number} 版{item.id === version?.id && ' · 当前版本'}</span>{version && item.id !== version.id && <button className={button} disabled={busy} onClick={() => operate(async () => { await W.rollback(charId, workId, item.id, version.id); await refresh(charId, workId); setNotice('已回退，兼容的游戏进度保留。'); })}>回退</button>}</div>)}
                             {version && <div className="flex flex-wrap gap-2"><select aria-label="分享给哪位角色" value={recipient} onChange={e=>setRecipient(e.target.value)} className={button}><option value="">分享给…</option>{os.characters.filter(c=>c.id!==charId).map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select><button className={button} disabled={busy || !recipient} onClick={()=>operate(async()=>{const key=shareRequest.current;await shareWork(charId,workId,recipient,key);shareRequest.current=crypto.randomUUID();setNotice('分享卡已发送；是否收藏由接收角色决定。');})}>分享作品</button></div>}
