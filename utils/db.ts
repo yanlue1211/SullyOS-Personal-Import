@@ -1854,6 +1854,21 @@ export const DB = {
       });
   },
 
+  deleteGalleryImages: async (ids: string[]): Promise<void> => {
+      const unique = [...new Set(ids)];
+      if (!unique.length) return;
+      const { preserveContentFavoritesBeforeGalleryDeletion } = await import('./contentFavorites');
+      await preserveContentFavoritesBeforeGalleryDeletion({ ids: unique });
+      const db = await openDB();
+      await new Promise<void>((resolve, reject) => {
+          const tx = db.transaction(STORE_GALLERY, 'readwrite');
+          unique.forEach(id => tx.objectStore(STORE_GALLERY).delete(id));
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => reject(tx.error);
+          tx.onabort = () => reject(tx.error || new Error('批量删除失败'));
+      });
+  },
+
   deleteGalleryImage: async (id: string): Promise<void> => {
       const { preserveContentFavoritesBeforeGalleryDeletion } = await import('./contentFavorites');
       await preserveContentFavoritesBeforeGalleryDeletion({ ids: [id] });

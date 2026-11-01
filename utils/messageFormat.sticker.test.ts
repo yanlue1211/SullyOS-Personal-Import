@@ -43,3 +43,11 @@ describe('buildMessageHistory 私聊表情包带名字', () => {
         expect(content).toContain('发送了表情包');
     });
 });
+
+it('sticker vision sends actual image only when enabled, and description-only requests remain text',()=>{
+ const msg:any={id:11,charId:'v',role:'user',type:'emoji',content:DOGE_URL,timestamp:Date.now()};
+ const build=(enabled:boolean,options?:any)=>ChatPrompts.buildMessageHistory([msg],10,{id:'v',name:'角色',stickerVisionEnabled:enabled} as any,{name:'我'} as any,emojis,undefined,options).apiMessages;
+ expect(JSON.stringify(build(false))).not.toContain('image_url');
+ expect(JSON.stringify(build(true))).toContain('image_url');expect(JSON.stringify(build(true))).toContain(DOGE_URL);
+ expect(JSON.stringify(build(true,{useVisionDescriptions:true}))).not.toContain('image_url');
+});

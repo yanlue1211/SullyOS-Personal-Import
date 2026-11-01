@@ -19,7 +19,7 @@ export function createWorkroomHost(charId: string, workId: string, versionId: st
     let queue = Promise.resolve();
     let highestRequest = 0;
     let declaredActions:GameAction[]=[];
-    let characterAction:{id:string;events:string[]}|undefined;
+    let characterAction:{id:string;events:string[];actions:GameAction[]}|undefined;
     let batchSequence=0;
     let userEvents:{id:string;details:string[]}|undefined;
     let flushTimer:ReturnType<typeof setTimeout>|undefined;
@@ -38,7 +38,7 @@ export function createWorkroomHost(charId: string, workId: string, versionId: st
     const dispose = () => { clearTimeout(flushTimer);void flushUser().catch(()=>{});const action=characterAction;characterAction=undefined;if(action?.events.length)void persist(action.id,action.events,'char').catch(()=>{});active = false; generationAbort.abort(new DOMException('组件已关闭','AbortError'));port?.close(); };
     return {
         close: dispose,
-        characterPlay(){if(active&&!preview&&!characterAction&&declaredActions.length){void flushUser().catch(e=>callbacks.onError?.(String(e)));characterAction={id:'char-'+session+'-'+crypto.randomUUID(),events:[]};port?.postMessage({event:'characterPlay'});}},
+        characterPlay(){if(active&&!preview&&!characterAction&&declaredActions.length){void flushUser().catch(e=>callbacks.onError?.(String(e)));characterAction={id:'char-'+session+'-'+crypto.randomUUID(),events:[],actions:declaredActions.slice()};port?.postMessage({event:'characterPlay'});}},
         bind(nextPort: MessagePort) {
             if (!active || port) { nextPort.close(); return; }
             port = nextPort;
@@ -63,7 +63,8 @@ export function createWorkroomHost(charId: string, workId: string, versionId: st
                         } else if(request.method==='finishCharacterAction'){
                             const action=characterAction;if(!action)throw Error('没有待完成的角色动作');const value=args[0] as any;
                             if(!value||typeof value.actionId!=='string'||typeof value.reply!=='string'||value.reply.length>1000)throw Error('角色动作结果无效');
-                            const selected=declaredActions.find(a=>a.id===value.actionId);if(value.actionId!=='none'&&!selected)throw Error('角色动作无效');
+                            const selected=action.actions.find(a=>a.id===value.actionId);if(value.actionId!=='none'&&!selected)throw Error('角色动作无效');
+                            if(selected?.id==='auto_play'&&!action.events.length&&value.failed!==true)throw Error('自动试玩未上报实际结果');
                             if(selected&&!action.events.length&&value.failed!==true)action.events.push('执行了「'+selected.label+'」。');
                             if(selected&&value.reply&&value.failed!==true)action.events.push('公开回应：'+value.reply);
                             characterAction=undefined;await persist(action.id,action.events,'char');result=true;

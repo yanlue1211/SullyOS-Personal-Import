@@ -39,6 +39,7 @@ export interface Song {
   local?: boolean;
   /** IndexedDB key (under DB.assets) where the audio Blob lives. */
   localAssetKey?: string;
+  remoteAudioUrl?: string;
   /** Optional MIME type — used to set <audio> source correctly. */
   localMimeType?: string;
   /** Cover gradient/color for songs without album art. */
@@ -47,6 +48,7 @@ export interface Song {
   customAuthorCharIds?: string[];
   /** Raw lyric text (with [Verse]/[Chorus] markers OK) — for synced display. */
   localLyrics?: string;
+  lyricTimingMode?: 'plain' | 'synced';
   /** Manual timestamps (seconds) per visible lyric line — overrides auto distribution. */
   lyricLineTimings?: number[];
 }
@@ -205,13 +207,17 @@ const saveState = (queue: Song[], idx: number) => {
 export const parseLyric = (txt: string): LyricLine[] => {
   if (!txt) return [];
   const out: LyricLine[] = [];
-  const re = /\[(\d+):(\d+)(?:\.(\d+))?\](.*)/;
+  const offset=Number(/\[offset:([+-]?\d+)\]/i.exec(txt)?.[1]||0)/1000;
   for (const line of txt.split(/\r?\n/)) {
-    const m = re.exec(line); if (!m) continue;
-    const mm = parseInt(m[1], 10), ss = parseInt(m[2], 10);
-    const ms = m[3] ? parseInt(m[3].padEnd(3, '0').slice(0, 3), 10) : 0;
-    const text = m[4].trim(); if (!text) continue;
-    out.push({ t: mm * 60 + ss + ms / 1000, text });
+    const tags=[...line.matchAll(/\[(\d+):(\d{1,2})(?:[.:](\d+))?\]/g)];
+    if(!tags.length)continue;
+    const text=line.replace(/\[\d+:\d{1,2}(?:[.:]\d+)?\]/g,'').trim();
+    if(!text)continue;
+    for(const m of tags){
+      const seconds=Number(m[2]);if(seconds>=60)continue;
+      const fraction=m[3]?Number('0.'+m[3]):0;
+      out.push({t:Math.max(0,Number(m[1])*60+seconds+fraction+offset),text});
+    }
   }
   out.sort((a, b) => a.t - b.t);
   return out;
@@ -432,17 +438,14 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // 「一起写的歌」本地专辑 — 由写歌 App 同步过来的 ACE-Step / MiniMax 出歌
   const [localAlbumSongs, setLocalAlbumSongs] = useState<Song[]>(loadLocalAlbum);
+  const localAlbumRef=useRef(localAlbumSongs);
+  localAlbumRef.current=localAlbumSongs;
   const addLocalSong = useCallback((song: Song) => {
-    setLocalAlbumSongs(prev => {
-      // 同 id 去重，新版本覆盖
-      const filtered = prev.filter(s => s.id !== song.id);
-      const next = [song, ...filtered];
-      saveLocalAlbum(next);
-      return next;
-    });
-    // Keep the queue object in sync too. MusicApp downloads from `current`,
-    // so a stale queue entry would otherwise keep the pre-regeneration asset key.
-    setQueueState(prev => prev.map(item => item.id === song.id ? song : item));
+    const next=[song,...localAlbumRef.current.filter(s=>s.id!==song.id)];
+    localStorage.setItem(LS_LOCAL_ALBUM_KEY,JSON.stringify(next));
+    localAlbumRef.current=next;
+    setLocalAlbumSongs(next);
+    setQueueState(prev=>prev.map(item=>item.id===song.id?song:item));
   }, []);
   const removeLocalSong = useCallback((songId: number) => {
     setLocalAlbumSongs(prev => {
@@ -497,11 +500,11 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [lyric, setLyric] = useState<LyricLine[]>([]);
   const [tlyric, setTlyric] = useState<LyricLine[]>([]);
   const activeLyricIdx = useMemo(() => {
-    if (!lyric.length) return -1;
-    let i = 0;
+    if (!lyric.length || (current?.lyricTimingMode==='plain' && !current.lyricLineTimings?.length)) return -1;
+    let i = -1;
     for (let k = 0; k < lyric.length; k++) if (lyric[k].t <= progress) i = k; else break;
     return i;
-  }, [lyric, progress]);
+  }, [lyric, progress, current]);
 
   // toast 转发
   const toastHandlerRef = useRef<(msg: string, type?: 'info' | 'success' | 'error') => void>(() => {});
@@ -688,21 +691,22 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setLoadingSong(true); setLyric([]); setTlyric([]); setProgress(0); setDuration(0);
     try {
       // ── Local-source branch ── 本地生成的歌（写歌 App 出歌）从 IndexedDB 取 blob
-      if (song.local && song.localAssetKey) {
+      if (song.local && (song.localAssetKey || song.remoteAudioUrl)) {
         const a = audioRef.current!;
-        const entry = await DB.getAssetRaw(song.localAssetKey).catch(() => null) as
+        const entry = song.localAssetKey ? await DB.getAssetRaw(song.localAssetKey).catch(() => null) as
           | { blob?: Blob; mimeType?: string }
           | Blob
-          | null;
+          | null : null;
         const blob: Blob | null = entry instanceof Blob ? entry : (entry?.blob instanceof Blob ? entry.blob : null);
-        if (!blob) {
+        if (!blob && !song.remoteAudioUrl) {
           toast('本地歌曲文件丢失', 'error');
           setLoadingSong(false);
           return;
         }
         const prevSrc = a.src;
         if (prevSrc.startsWith('blob:')) URL.revokeObjectURL(prevSrc);
-        a.src = URL.createObjectURL(blob);
+        if(song.remoteAudioUrl && new URL(song.remoteAudioUrl).protocol!=='https:')throw Error('歌曲链接需要使用 HTTPS');
+        a.src = song.remoteAudioUrl || URL.createObjectURL(blob!);
         a.play().catch(() => {});
 
         // ── 本地歌词时间分布 ──
@@ -731,6 +735,8 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 t: song.lyricLineTimings![i] ?? 0,
                 text,
               }));
+            } else if (song.lyricTimingMode==='plain') {
+              synced = lines.map(text=>({t:0,text}));
             } else {
               const intro = Math.min(2, dur * 0.05);
               const outro = Math.min(3, dur * 0.05);

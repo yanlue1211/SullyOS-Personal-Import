@@ -114,6 +114,7 @@ export async function describeImageWithVisionApi(
 export async function materializeVisionDescriptions(
   messages: Message[],
   config?: VisionApiConfig | null,
+  options?: {includeEmojis?: boolean},
 ): Promise<Message[]> {
   if (config?.enabled !== true) return messages;
   if (!isVisionApiReady(config)) {
@@ -162,7 +163,7 @@ export async function materializeVisionDescriptions(
       prepared.push({ ...message, metadata });
       continue;
     }
-    if (message.type !== 'image') {
+    if (message.type !== 'image' && !(options?.includeEmojis && message.type === 'emoji')) {
       prepared.push(message);
       continue;
     }

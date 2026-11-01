@@ -171,6 +171,15 @@ export interface SongAudio {
  * 文件超过上限就降一档重取。
  */
 export async function fetchSongAudio(song: Song, cfg: MusicCfg, quality: AudioApiSongQuality = 'exhigh'): Promise<SongAudio> {
+  if(song.remoteAudioUrl){
+    if(new URL(song.remoteAudioUrl).protocol!=='https:')throw Error('歌曲链接需要使用 HTTPS');
+    const raw=await downloadAudio(song.remoteAudioUrl);
+    if(raw.size>MAX_AUDIO_BYTES)throw Error('这首歌曲的文件太大，没法发给音频模型');
+    const header=new TextDecoder().decode(await raw.slice(0,12).arrayBuffer());
+    const mime=header.startsWith('OggS')?'audio/ogg':header.startsWith('fLaC')?'audio/flac':header.startsWith('RIFF')&&header.slice(8,12)==='WAVE'?'audio/wav':raw.type;
+    const blob=mime!==raw.type?raw.slice(0,raw.size,mime):raw;
+    return {blob,nameHint:song.remoteAudioUrl.split('?')[0],isTrial:false};
+  }
   if (song.local && song.localAssetKey) {
     const entry = await DB.getAssetRaw(song.localAssetKey).catch(() => null) as { blob?: Blob } | Blob | null;
     const blob = entry instanceof Blob ? entry : (entry?.blob instanceof Blob ? entry.blob : null);

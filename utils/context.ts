@@ -361,6 +361,7 @@ export const ContextBuilder = {
         userListening: {
             songName: string;
             artists: string;
+            fullLyrics?: string;
             lyricWindow: string[];      // 前2当前后2（共 ≤5 行）；可为空（没歌词）
             activeIdx: number;          // 在 lyricWindow 里的高亮位置，-1 表示没歌词
         } | null,
@@ -403,6 +404,8 @@ export const ContextBuilder = {
                     else lines.push(`  … ${l}`);
                 });
             }
+
+            if(userListening.fullLyrics) lines.push('以下为全曲歌词参考（未对轴，不能据此判断当前唱到哪句）：\n'+userListening.fullLyrics);
 
             // 歌单命中提示（按 songName 粗匹，避免在 context.ts 里引 MusicContext）
             const profile = char.musicProfile;

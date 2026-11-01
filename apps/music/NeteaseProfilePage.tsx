@@ -82,7 +82,7 @@ const LocalAlbumCard: React.FC<LocalAlbumCardProps> = ({ songs, expanded, setExp
         <div className="flex items-center gap-1.5">
           <span className="text-sm font-medium tracking-wider"
             style={{ color: C.primary, fontFamily: `'Georgia', 'Noto Serif SC', serif` }}>
-            一起写的歌
+            我的歌曲
           </span>
           <span className="text-[8px] px-1.5 py-[1px] rounded-full font-bold"
             style={{
@@ -94,7 +94,7 @@ const LocalAlbumCard: React.FC<LocalAlbumCardProps> = ({ songs, expanded, setExp
           </span>
         </div>
         <div className="text-[10px] truncate mt-0.5" style={{ color: C.muted }}>
-          {songs.length} 首 · 你和 char 共同创作
+          {songs.length} 首 · 创作与导入
         </div>
       </div>
       <div className="text-[10px] shrink-0" style={{ color: C.sakura }}>

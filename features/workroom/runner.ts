@@ -52,6 +52,11 @@ export function buildWorkroomDocument(code: WorkroomCode, session: string): stri
                 if(reply?.event==='characterPlay') {
                     if(playing||!actions.length)return;playing=true;
                     void (async()=>{
+                        const auto=actions.find(a=>a.id==='auto_play');
+                        if(auto){
+                            try{await auto.run({actor:'char'});}catch(error){await call('finishCharacterAction',{actionId:auto.id,reply:'',failed:true});throw error;}
+                            await call('finishCharacterAction',{actionId:auto.id,reply:''});return;
+                        }
                         const state=await call('loadState');
                         const choice=await call('generate',{instruction:'你受邀一起玩。根据当前游戏状态，从availableActions中选择一个愿意执行的动作，或选择none不行动。只返回JSON对象：{actionId:动作id或none,reply:简短公开回应}。不要声称动作已经完成。',context:{state,availableActions:actions.map(a=>({id:a.id,label:a.label}))},format:'json'});
                         if(!choice||typeof choice.actionId!=='string'||typeof choice.reply!=='string')throw Error('角色动作选择格式无效');

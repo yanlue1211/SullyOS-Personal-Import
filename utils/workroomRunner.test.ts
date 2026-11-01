@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { buildWorkroomDocument, readWorkroomRpc, WORKROOM_CSP, WORKROOM_SANDBOX } from '../features/workroom/runner';
 import { createRequire } from 'node:module';
 const { JSDOM } = createRequire(import.meta.url)('jsdom');
@@ -40,4 +40,17 @@ describe('造物间沙盒协议', () => {
         expect(await pending).toEqual({ level: 3 });
         window.close();
     });
+});
+
+it('automatic round runs locally, waits for its real result and ignores duplicate invitations',async()=>{
+ const dom=new JSDOM(buildWorkroomDocument({html:'',css:'',js:''},'auto'),{runScripts:'dangerously',url:'https://sandbox.invalid'});
+ const w=dom.window as any,sent:any[]=[];
+ const port={postMessage:(v:any)=>{sent.push(v);queueMicrotask(()=>port.onmessage({data:{id:v.id,ok:true,value:true}}));},onmessage:undefined as any};
+ w.dispatchEvent(new w.MessageEvent('message',{source:w.parent,data:{workroomSession:'auto'},ports:[port]}));
+ let finish!:()=>void,runs=0;
+ await w.workroom.registerActions([{id:'auto_play',label:'试玩',run:async()=>{runs++;await new Promise<void>(r=>finish=r);await w.workroom.emitEvent('实际得分 3','round1');}}]);
+ port.onmessage({data:{event:'characterPlay'}});port.onmessage({data:{event:'characterPlay'}});
+ expect(runs).toBe(1);expect(sent.some(v=>v.method==='generate')).toBe(false);expect(sent.some(v=>v.method==='finishCharacterAction')).toBe(false);
+ finish();await vi.waitFor(()=>expect(sent.filter(v=>v.method==='finishCharacterAction')).toHaveLength(1));
+ expect(sent.find(v=>v.method==='emitEvent').args[0]).toBe('实际得分 3');w.close();
 });
