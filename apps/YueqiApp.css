@@ -3,3 +3,5 @@
 .yq-scenes{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:13px}.yq-scenes button{background:#d0e3c406;border:1px solid #c6dbc42e;padding:17px 11px;border-radius:17px;color:#dce9d7;text-align:left;min-height:116px}.yq-scenes button.selected{background:#b7d4af1a;border-color:#c1d8b3}.yq-scenes svg{width:23px;height:23px;color:#c3dcb7;margin-bottom:11px}.yq-scenes strong,.yq-scenes small{display:block}.yq-scenes strong{font-size:13px;font-weight:500}.yq-scenes small{font-size:10px;line-height:1.7;margin-top:7px;color:#afc2ba}
 
 .yq-edit-overlay{position:fixed;z-index:80;display:flex;align-items:center;justify-content:center}.yq-edit-overlay .yq-settings{width:100%;max-height:90dvh;overflow:auto}.yq-edit-overlay textarea{min-height:220px}
+
+.yq-fieldset{border:0;padding:0;margin:15px 0;min-width:0}.yq-fieldset legend{font-size:13px;padding:0}
