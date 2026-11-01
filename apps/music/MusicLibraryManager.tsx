@@ -1,30 +1,31 @@
-import React, {useEffect, useState} from 'react';
+import React, {useState} from 'react';
 import {useOS} from '../../context/OSContext';
 import {useMusic, musicApi, parseLyric, type Song} from '../../context/MusicContext';
 import {putImageBlob} from '../../utils/blobRef';
+import {usePersonalPlaylists} from '../../hooks/usePersonalPlaylists';
+import {savePersonalPlaylists,mergePlaylistSongs} from '../../utils/personalMusicLibrary';
 import {DB} from '../../utils/db';
 import type {CharMusicProfile, CharPlaylist} from '../../types';
 import {C, MizuHeader} from './MusicUI';
 
-export default function MusicLibraryManager({onClose, initialOwner=''}:{onClose:()=>void;initialOwner?:string}) {
+export default function MusicLibraryManager({onClose, initialOwner='',initialPlaylist=''}:{onClose:()=>void;initialOwner?:string;initialPlaylist?:string}) {
  const {characters,updateCharacter,addToast}=useOS();
  const {localAlbumSongs,addLocalSong,current,cfg,playSong}=useMusic();
- const [owner,setOwner]=useState(initialOwner),[playlist,setPlaylist]=useState('');
+ const [owner,setOwner]=useState(initialOwner),[playlist,setPlaylist]=useState(initialPlaylist);
  const [title,setTitle]=useState(''),[artist,setArtist]=useState(''),[cover,setCover]=useState(''),[lyrics,setLyrics]=useState('');
  const [source,setSource]=useState<'file'|'url'>('url'),[audioUrl,setAudioUrl]=useState('');
  const [coverFile,setCoverFile]=useState<File|null>(null);
  const [audio,setAudio]=useState<File|null>(null),[busy,setBusy]=useState(false),[query,setQuery]=useState(''),[found,setFound]=useState<Song[]>([]);
  const [playlistName,setPlaylistName]=useState('');
- const [userPlaylists,setUserPlaylists]=useState<CharPlaylist[]>([]),[ready,setReady]=useState(false);
- useEffect(()=>{void DB.getAsset('music-user-playlists').then(raw=>{if(raw){const value=JSON.parse(raw);if(Array.isArray(value))setUserPlaylists(value);}setReady(true);}).catch(()=>addToast('歌单读取失败，请重新进入','error'));},[]);
+ const {playlists:userPlaylists,ready,error:playlistError}=usePersonalPlaylists();
  const character=characters.find(c=>c.id===owner);
  const profile:CharMusicProfile=character?.musicProfile||{bio:'',genreTags:[],signatureArtists:[],playlists:character?[]:userPlaylists,likedSongIds:[],recentPlays:[],initializedAt:Date.now(),updatedAt:Date.now()};
  const selected=profile.playlists.find(p=>p.id===playlist);
- const save=(next:CharMusicProfile)=>{if(character)updateCharacter(character.id,{musicProfile:{...next,updatedAt:Date.now()}});else void DB.saveAsset('music-user-playlists',JSON.stringify(next.playlists)).then(()=>setUserPlaylists(next.playlists)).catch(()=>addToast('歌单保存失败','error'));};
+ const save=(next:CharMusicProfile)=>{if(character)updateCharacter(character.id,{musicProfile:{...next,updatedAt:Date.now()}});else void savePersonalPlaylists(next.playlists).catch(()=>addToast('歌单保存失败','error'));};
  const add=(song:Song)=>{
   if(!selected)return;
-  if(selected.songs.some(s=>s.id===song.id)){addToast('这首歌已经在歌单里','info');return;}
-  save({...profile,playlists:profile.playlists.map(p=>p.id===selected.id?{...p,songs:[...p.songs,{...song,source:'user' as const,addedAt:Date.now()}],updatedAt:Date.now()}:p)});
+  if(mergePlaylistSongs(selected.songs,[song]).length===selected.songs.length){addToast('这首歌已经在歌单里','info');return;}
+  save({...profile,playlists:profile.playlists.map(p=>p.id===selected.id?{...p,songs:mergePlaylistSongs(p.songs,[{...song,source:'user' as const,addedAt:Date.now()}]),updatedAt:Date.now()}:p)});
   addToast('已加入歌单','success');
  };
  const importSong=async()=>{
@@ -43,10 +44,11 @@ export default function MusicLibraryManager({onClose, initialOwner=''}:{onClose:
  const input='w-full min-w-0 rounded-xl border p-2 text-sm bg-white';
  const button='shrink-0 whitespace-nowrap rounded-xl border px-3 py-2 text-sm bg-white disabled:opacity-40';
  const choices=[...new Map([...localAlbumSongs,...(current?[current]:[]),...found].map(s=>[s.id,s])).values()];
- return <div className="absolute inset-0 z-50 flex flex-col" style={{background:C.bg,color:C.text}}>
-  <MizuHeader title="歌曲与歌单" onBack={onClose}/>
+ return <div role="dialog" aria-modal="true" aria-label="音乐管理" className="absolute inset-0 z-50 flex flex-col" style={{background:C.bg,color:C.text}}>
+  <MizuHeader title="音乐管理" onBack={onClose}/>
   <main className="flex-1 overflow-y-auto p-4 space-y-4">
-   {!ready&&<p>正在读取歌单…</p>}
+   {playlistError&&<p role="alert">{playlistError}</p>}
+   {!ready&&!playlistError&&<p>正在读取歌单…</p>}
    <label className="block text-sm">管理账号<select aria-label="管理音乐账号" className={input} value={owner} disabled={busy} onChange={e=>{setOwner(e.target.value);setPlaylist('');setPlaylistName('');}}><option value="">我的歌单与歌曲</option>{characters.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
    {ready&&<section className="space-y-2 rounded-2xl bg-white/60 p-3">
     <div className="flex gap-2"><input aria-label="歌单名称" className={input} value={playlistName} onChange={e=>setPlaylistName(e.target.value)} placeholder="歌单名称" maxLength={100}/><button className={button} disabled={!playlistName.trim()} onClick={()=>{const id=crypto.randomUUID();save({...profile,playlists:[...profile.playlists,{id,title:playlistName.trim(),description:'',coverStyle:'gradient-01',songs:[],createdAt:Date.now(),updatedAt:Date.now()}]});setPlaylist(id);setPlaylistName('');}}>新建</button></div>

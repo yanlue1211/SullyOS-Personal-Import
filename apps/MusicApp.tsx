@@ -95,6 +95,7 @@ const MusicApp: React.FC = () => {
   // 把 OS toast 注入到 Music Context（这样全局播放报错也能弹 toast）
   useEffect(() => { setToastHandler(addToast); }, [addToast, setToastHandler]);
 
+  const [managePlaylist,setManagePlaylist]=useState('');
   const [manageLibrary, setManageLibrary] = useState(false);
   const [view, setView] = useState<View>('profile');
   // ── 手动对轴 modal state ──
@@ -558,14 +559,14 @@ const MusicApp: React.FC = () => {
 
   return (
     <div className="absolute inset-0 overflow-hidden">
-      {(view==='profile'||view==='visit_char')&&!manageLibrary&&<button type="button" className="absolute right-4 top-14 z-30 bg-white/90 border rounded-xl px-3 py-2 text-xs" onClick={()=>setManageLibrary(true)}>歌曲与歌单管理</button>}
-      {manageLibrary&&<MusicLibraryManager initialOwner={view==='visit_char'?visitCharId||'':''} onClose={()=>setManageLibrary(false)}/>}
+      {manageLibrary&&<MusicLibraryManager initialPlaylist={managePlaylist} initialOwner={view==='visit_char'?visitCharId||'':''} onClose={()=>setManageLibrary(false)}/>}
       {view === 'search' && renderSearch()}
       {view === 'player' && renderPlayer()}
       {view === 'settings' && renderSettings()}
       {view === 'profile' && (
         <NeteaseProfilePage
           onBack={closeApp}
+          onManage={id=>{setManagePlaylist(id||'');setManageLibrary(true);}}
           onOpenPlayer={() => setView('player')}
           onOpenSearch={() => setView('search')}
           onOpenSettings={() => setView('settings')}
@@ -741,6 +742,7 @@ const MusicApp: React.FC = () => {
       {view === 'visit_char' && visitCharId && (
         <CharVisitPage
           charId={visitCharId}
+          onManage={()=>{setManagePlaylist('');setManageLibrary(true);}}
           onBack={() => { setView('profile'); setVisitCharId(null); }}
           onOpenPlayer={() => setView('player')}
         />

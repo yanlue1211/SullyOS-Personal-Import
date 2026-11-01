@@ -31,6 +31,7 @@ interface Props {
   charId: string;
   onBack: () => void;
   onOpenPlayer: () => void;
+  onManage?: () => void;
 }
 
 const gradientMap: Record<string, string> = {
@@ -58,7 +59,7 @@ const toPlaylistSong = (s: Song): CharPlaylistSong => ({
   albumPic: s.albumPic, duration: s.duration, fee: s.fee,
 });
 
-const CharVisitPage: React.FC<Props> = ({ charId, onBack, onOpenPlayer }) => {
+const CharVisitPage: React.FC<Props> = ({ charId, onBack, onOpenPlayer, onManage }) => {
   const { characters, updateCharacter, userProfile, apiConfig, addToast } = useOS();
   const {
     cfg, playSong,
@@ -336,6 +337,7 @@ const CharVisitPage: React.FC<Props> = ({ charId, onBack, onOpenPlayer }) => {
       <BokehBg />
       <MizuHeader
         title={`拜访 · ${char.name}`}
+        right={<button type="button" className="text-[11px] px-2 py-1" onClick={onManage}>音乐管理</button>}
         onBack={onBack}
       />
 
