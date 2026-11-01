@@ -1,7 +1,7 @@
 name: Workroom browser verification
 on:
   push:
-    branches: [personal/workroom-foundation, personal/workroom-feedback, personal/workroom-json-fix, personal/interactive-media, personal/archived-media-cleanup, personal/media-ui-fixes, personal/meeting-drafts-narration, personal/reply-editing]
+    branches: [personal/workroom-foundation, personal/workroom-feedback, personal/workroom-json-fix, personal/interactive-media, personal/archived-media-cleanup, personal/media-ui-fixes, personal/meeting-drafts-narration, personal/reply-editing, personal/upstream-oct31]
   workflow_dispatch:
 permissions:
   contents: read
@@ -23,6 +23,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Verify workroom regressions
         run: pnpm vitest run utils/replyEditing.test.ts utils/replyEditorUI.test.tsx utils/workroomNarration.test.ts utils/workroomEvent.test.ts utils/mediaToolsUI.test.tsx utils/archivedMediaCleanup.test.ts utils/experience.test.ts utils/workroomRunner.test.ts utils/datePrompts.test.ts utils/chatInputInteraction.test.ts utils/chatInputEmojis.test.ts utils/responseStatus.test.ts utils/workroomResponse.test.ts utils/chatPrompts.firePack.test.ts utils/applyAssistantPostProcessing.test.ts utils/workroomRuntime.test.ts utils/workroomUI.test.ts utils/workroomCreation.test.ts utils/workroomHost.test.ts utils/workroomDelivery.test.ts utils/workroomPortable.test.ts --maxWorkers=2 --minWorkers=1
+      - name: Verify upstream update regressions
+        run: pnpm vitest run scripts/startup-recovery.test.ts utils/characterAwarenessSettings.test.ts utils/characterWeather.test.ts utils/databaseGuard.test.ts utils/friendFeedApp.test.ts utils/friendFeedCommentManagement.test.ts utils/friendFeedEmotion.test.ts utils/friendFeedGraph.test.ts utils/friendFeedOutput.test.ts utils/friendFeedPublic.test.ts utils/halloweenSkinMotion.test.ts utils/halloweenWardrobeUI.test.ts utils/homePhotoMode.test.ts utils/photoComposition.test.ts utils/userLocation.test.ts utils/userLocationContext.test.ts worker/amsg/src/plateFire.test.ts worker/amsg/src/realtimeWorld.test.ts --maxWorkers=2 --minWorkers=1
       - name: Install isolated browser test runtime
         run: |
           mkdir -p "$RUNNER_TEMP/workroom-browser"
@@ -43,3 +45,24 @@ jobs:
         with:
           name: workroom-browser-results
           path: test-results/workroom
+  record-upstream:
+    if: github.ref == 'refs/heads/personal/upstream-oct31'
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: personal/upstream-oct31
+          fetch-depth: 0
+      - name: Record verified upstream ancestry without changing the tested files
+        run: |
+          git fetch https://github.com/qegj567-cloud/SullyOS.git 9182e45a7df84806f6eedeb58b8a6080476df1bb
+          if git merge-base --is-ancestor FETCH_HEAD HEAD; then exit 0; fi
+          verified_tree=$(git rev-parse 'HEAD^{tree}')
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git merge --no-ff -s ours FETCH_HEAD -m 'Record upstream master 9182e45a after verified content merge'
+          test "$(git rev-parse 'HEAD^{tree}')" = "$verified_tree"
+          git push origin HEAD:refs/heads/personal/upstream-oct31
