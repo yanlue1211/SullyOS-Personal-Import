@@ -120,3 +120,15 @@ it('repeated wrong chat formatting stops after one correction and preserves old 
  const wrong='[2026-11-01 21:05] [聊天] 又回到聊天了';const calls=model([wrong,wrong]);
  await expect(generateWorkroomReply(args())).rejects.toThrow('普通聊天');expect(calls).toHaveLength(2);expect((await W.get('a',workId)).draft?.html).toBe('原草稿');expect((await W.turns('a',workId)).map(t=>t.role)).toEqual(['user']);
 });
+it('浏览器生成代码先做隔离启动观察，错误和草稿同修订保存且下轮可读',async()=>{
+    vi.stubGlobal('document',{});
+    model([JSON.stringify({text:'这是草稿',code:{html:'<canvas></canvas>',css:'',js:'let items;items.forEach(()=>{})'}})]);
+    const result=await generateWorkroomReply(args());
+    expect(result.startupReport?.errors).toEqual(['按钮报错']);
+    const snapshot=await W.get('a',workId);
+    expect(snapshot.work.testReport).toMatchObject({draftRevision:snapshot.draft!.revision,errors:['按钮报错']});
+    expect(snapshot.work.currentVersionId).toBeNull();
+    const calls=model(['<workroom-text>我来修复初始化。</workroom-text>']);
+    await generateWorkroomReply({...args(),text:'修复启动错误'});
+    expect(JSON.stringify(calls[0].body.messages)).toContain('按钮报错');
+});

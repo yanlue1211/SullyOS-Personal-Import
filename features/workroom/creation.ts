@@ -52,7 +52,13 @@ export async function generateWorkroomReply(input: {
 代码使用 window.workroom 异步接口：await loadState() 先读取状态；await saveState(JSON状态) 保存；emitEvent(本轮游戏实际发生的事情,唯一actionId) 记录本轮界面发生的变化，含游戏内可见行为或回应（如有）。没有角色回应就只记录变化；每轮只上报一次第三人称旁白，记录操作者、本轮实际行为和公开游戏变化，不重复作品简介；使用实际名字而非字面char/user，不要只写round编号；notify(短文字) 显示组件通知；requestUpdate(说明) 只提出修改请求。接口全名如 window.workroom.loadState()。
 角色一起玩：用 await window.workroom.registerActions([{id:"feed",label:"喂食",run:async({actor})=>{ /* 调用和用户按钮共用的动作函数；actor为char。实际更新并saveState后返回。 */ }}]) 注册最多12个受控动作。宿主提供“让TA玩一轮”，角色只能从这些动作选择并调用，不允许生成代码或直接改数据库。注册要在loadState完成、事件处理就绪后执行；状态变化后可重新注册当前允许的动作。旧作品需要增加注册后才支持角色实际操作。
 组件可以运行时生成新内容，不限固定模板或预设选项：await window.workroom.generate({instruction:"本轮生成任务",context:可选JSON材料,format:"text"或"json",publicEvent:"可选的公开互动摘要",shareReply:false})。宿主复用当前角色API和正常上下文；返回文本或JSON数据，组件负责验证并saveState保存结果。生成题目/汤底/场景/随机事件、逐轮问答均可调用；隐藏答案放context和状态里，不写publicEvent，不设shareReply:true。只有公开的角色对话才设shareReply:true。调用需要用户开启“运行时AI”，未开启/失败时保留已有进度并显示重试入口。重要操作再emitEvent，不要把隐藏汤底写入聊天卡。随机事件可由本地概率或生成接口决定，结果和检查时间要持久保存，不能每次打开重抽；禁止定时频繁调用API。
-单状态256000字符，40层；代码各字段最多500000字符。先读取再保存进度，同格式更新沿用旧状态，兼容既有字段；本轮不擅自改变状态格式。DOM可自由设计，适配手机宽度，按钮便于触摸。`;
+单状态256000字符，40层；代码各字段最多500000字符。先读取再保存进度，同格式更新沿用旧状态，兼容既有字段；本轮不擅自改变状态格式。DOM可自由设计，适配手机宽度，按钮便于触摸。
+制作游戏必须逐条满足以下工程约束：
+1. 第一次绘制、requestAnimationFrame、定时器、按钮事件和角色动作注册之前，初始化所有场景都会访问的数组、对象、计数器及玩家。菜单首帧也会执行绘制；不得依赖点击开始才初始化，不得用可选链或吞异常掩盖初始化错误。
+2. 顺序为DOM就绪→await loadState→校验并合并存档默认值→测量正数画布尺寸→初始化游戏→绑定动作和事件→启动唯一循环。空存档、旧版缺字段、null及类型错误均需处理，数组用Array.isArray，数字检查有限值；保留无关旧字段，不得清空进度来修复错误。存档格式不兼容必须提示，不得偷偷重置。
+3. 可用尺寸是iframe内部视口，不是整台手机。百分比高度必须有明确根容器高度；监听容器尺寸改变，正确处理canvas显示尺寸、逻辑坐标和触控坐标，缩放后玩家仍在边界内。短屏、横屏的菜单应可滚动，开始按钮可到达；touch-action:none只用于游戏操作区，不得禁止菜单滚动。
+4. 重开和重复点击不能叠加RAF、计时器或监听器；每轮完整重置临时状态，分数、生命和完成统计只结算一次。异步存档和上报失败提供重试，避免未处理Promise；不要逐帧调用宿主接口。用户操作不能冒称角色操作。
+5. 输出代码前逐项检查：空存档进入菜单的首帧、开始、移动、碰撞、结束、重开、旧存档和窗口缩放。修复提供完整三个代码片段，不省略关键函数。逻辑自查不等于实际运行通过，不能虚称已测试。`;
         stage='组装角色上下文';
         const payload = await buildChatRequestPayload({
             ...input.context, char, userProfile: input.user, groups: input.context?.groups || [], emojis: input.context?.emojis || [], categories: input.context?.categories || [],
@@ -107,10 +113,17 @@ export async function generateWorkroomReply(input: {
             result=await call();
         }
         input.signal.throwIfAborted();
+        let startupReport:{errors:string[];notes:string}|undefined;
+        if(result.code&&typeof document!=='undefined'){
+            stage='检查草稿启动';
+            try{const {smokeTestWorkroom}=await import('./smokeTest');startupReport=await smokeTestWorkroom(result.code,input.signal);}
+            catch(error){input.signal.throwIfAborted();startupReport={errors:[error instanceof Error?error.message:String(error)],notes:'启动检查未完成，代码已保留为草稿。'};}
+        }
+        input.signal.throwIfAborted();
         const turn = await W.commitReply(char.id, input.workId, { userTurnId: userTurn.id,
             expectedVersionId: snapshot.work.currentVersionId, expectedDraftRevision: snapshot.draft?.revision || 0,
-            text: result.text, code: result.code, signal: input.signal });
+            text: result.text, code: result.code, startupReport, signal: input.signal });
         await drainWorkroomOutbox(char.id);
-        return { turn, savedDraft: !!result.code };
+        return { turn, savedDraft: !!result.code, startupReport };
     } catch(error){if(error instanceof SyntaxError)throw Error(stage+'时读取到无效JSON，请保留旧草稿并重试：'+error.message);throw error;} finally { locks.delete(key); }
 }

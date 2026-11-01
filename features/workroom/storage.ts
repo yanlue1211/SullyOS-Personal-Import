@@ -198,7 +198,7 @@ export const WorkroomStorage = {
     },
     commitReply: (charId: string, workId: string, input: {
         userTurnId: string; expectedVersionId: string | null; expectedDraftRevision: number;
-        text: string; code?: WorkroomCode; signal?: AbortSignal;
+        text: string; code?: WorkroomCode; startupReport?: {errors:string[];notes:string}; signal?: AbortSignal;
     }) => {
         if (!validText(input.text, 8000)) throw Error('角色回复无效');
         if (input.code) assertCode(input.code);
@@ -213,6 +213,7 @@ export const WorkroomStorage = {
             if (input.code) await idbResult(tx.objectStore('workroom_drafts').put({
                 id: workId, workId, charId, baseVersionId: work.currentVersionId, revision: (draft?.revision || 0) + 1, ...codeOnly(input.code),
             } satisfies WorkroomDraft));
+            if(input.code&&input.startupReport) await idbResult(tx.objectStore('workroom_works').put({...work,testReport:{draftRevision:(draft?.revision||0)+1,createdAt:Date.now(),errors:input.startupReport.errors.slice(0,20).map(e=>e.slice(0,2000)),notes:input.startupReport.notes.slice(0,2000)}}));
             const turn: WorkroomTurn = { id: workroomId(), charId, workId, workTitle: work.title, role: 'assistant',
                 text: input.text, createdAt: Math.max(Date.now(), latest.createdAt + 1), delivery: 'pending' };
             await idbResult(tx.objectStore('workroom_turns').add(turn));

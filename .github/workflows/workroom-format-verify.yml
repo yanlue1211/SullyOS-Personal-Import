@@ -1,10 +1,10 @@
 name: Workroom output format verification
 on:
   push:
-    branches: [personal/workroom-mode]
+    branches: [personal/workroom-reliability]
   pull_request:
     branches: [personal/audio-listening]
-    paths: ['features/workroom/creation.ts', 'features/workroom/reply.ts', 'utils/workroomCreation.test.ts', 'utils/workroomResponse.test.ts', '.github/workflows/workroom-format-verify.yml']
+    paths: ['features/workroom/**', 'components/WorkroomRunner.tsx', 'apps/WorkroomApp.tsx', 'utils/workroom*.test.ts', 'test/fixtures/workroom-startup*', 'scripts/workroom-startup-check.mjs', '.github/workflows/workroom-format-verify.yml']
 permissions:
   contents: read
 concurrency:
@@ -26,5 +26,13 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm vitest run utils/workroomCreation.test.ts utils/workroomResponse.test.ts utils/workroomChatBridge.test.ts utils/workroomStorage.test.ts utils/workroomDelivery.test.ts utils/workroomRuntime.test.ts utils/replyEditing.test.ts utils/contextPipeline.test.ts utils/contextWorldbook.test.ts --maxWorkers=2 --minWorkers=1
+      - run: pnpm vitest run utils/workroomCreation.test.ts utils/workroomResponse.test.ts utils/workroomChatBridge.test.ts utils/workroomPortable.test.ts utils/workroomRunner.test.ts utils/workroomHost.test.ts utils/workroomUI.test.ts utils/workroomStorage.test.ts utils/workroomDelivery.test.ts utils/workroomRuntime.test.ts utils/replyEditing.test.ts utils/contextPipeline.test.ts utils/contextWorldbook.test.ts --maxWorkers=2 --minWorkers=1
       - run: pnpm build
+      - name: Browser startup regression
+        run: |
+          mkdir -p "$RUNNER_TEMP/workroom-browser"
+          pnpm --dir "$RUNNER_TEMP/workroom-browser" add playwright@1.56.1
+          pnpm --dir "$RUNNER_TEMP/workroom-browser" exec playwright install --with-deps chromium
+          pnpm exec vite --host 127.0.0.1 --port 4179 > /tmp/workroom-vite.log 2>&1 &
+          for i in $(seq 1 30); do curl --fail --silent http://127.0.0.1:4179/test/fixtures/workroom-startup.html > /dev/null && break; sleep 1; done
+          WORKROOM_PLAYWRIGHT_MODULE="$RUNNER_TEMP/workroom-browser/node_modules/playwright/index.mjs" node scripts/workroom-startup-check.mjs

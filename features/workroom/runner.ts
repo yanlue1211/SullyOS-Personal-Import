@@ -78,6 +78,6 @@ export function buildWorkroomDocument(code: WorkroomCode, session: string): stri
     return '<!doctype html><html><head><meta charset="utf-8">'
         + `<meta http-equiv="Content-Security-Policy" content="${WORKROOM_CSP}">`
         + '<meta name="viewport" content="width=device-width,initial-scale=1">'
-        + `<script>${bootstrap}</script><style>html,body{margin:0;min-height:100%;font-family:system-ui}*{box-sizing:border-box}</style>`
+        + `<script>${bootstrap}</script><style>html,body{margin:0;width:100%;height:100%;min-height:100%;font-family:system-ui}*{box-sizing:border-box}</style>`
         + `<style>${code.css}</style></head><body>${code.html}<script>${code.js}</script></body></html>`;
 }

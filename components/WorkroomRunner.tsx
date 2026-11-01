@@ -58,9 +58,9 @@ export default function WorkroomRunner({ charId, version, onNotify, onError, onE
         return () => { dispose(); setup.current = undefined; stop.current = undefined; };
     }, [charId, version.id, preview]);
     if (stopped) return <div role="status">组件已停止。</div>;
-    return <div className="h-full flex flex-col">
+    return <div className="h-full min-h-0 min-w-0 flex flex-col">
 
-        {doc && <iframe key={doc} ref={iframe} title="造物间作品" className="w-full flex-1 border-0" sandbox={WORKROOM_SANDBOX}
+        {doc && <iframe key={doc} ref={iframe} title="造物间作品" className="w-full min-h-0 flex-1 border-0" sandbox={WORKROOM_SANDBOX}
             referrerPolicy="no-referrer" allow="camera 'none'; microphone 'none'; geolocation 'none'; clipboard-read 'none'; clipboard-write 'none'"
             srcDoc={doc} onLoad={() => setup.current?.()} />}
     </div>;

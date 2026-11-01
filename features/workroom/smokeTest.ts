@@ -13,7 +13,9 @@ export function smokeTestWorkroom(code:WorkroomCode,signal:AbortSignal):Promise<
         const abort=()=>{if(finished)return;finished=true;cleanup();reject(signal.reason||new DOMException('测试取消','AbortError'));};
         const host=createWorkroomHost('smoke','smoke','smoke',session,{onError:text=>{if(errors.length<20)errors.push(text.slice(0,2000));},onStop:()=>{errors.push('运行通道已撤销');finish();},onReady:()=>{if(ready)return;ready=true;clearTimeout(timer);timer=setTimeout(finish,800);}},true);
         frame.setAttribute('sandbox',WORKROOM_SANDBOX);frame.referrerPolicy='no-referrer';
-        frame.style.cssText='position:fixed;left:-10000px;top:0;width:360px;height:640px;border:0;pointer-events:none';
+        // Keep the sandbox inside the viewport: Chromium suspends offscreen cross-origin RAF.
+        // Near-transparent and non-interactive so the busy editor remains visible.
+        frame.style.cssText='position:fixed;left:0;top:0;width:360px;height:640px;border:0;pointer-events:none;opacity:0.001;z-index:2147483647';
         frame.setAttribute('aria-hidden','true');frame.allow="camera 'none'; microphone 'none'; geolocation 'none'";
         frame.onload=()=>{if(finished)return;if(++loads>1){errors.push('组件尝试导航，测试已停止');finish();return;}const channel=new MessageChannel();host.bind(channel.port1);frame.contentWindow?.postMessage({workroomSession:session},'*',[channel.port2]);};
         signal.addEventListener('abort',abort,{once:true});

@@ -2,7 +2,7 @@ import { beforeEach, expect, it } from 'vitest';
 import { DB, openDB } from './db';
 import { WORKROOM_STORES, transactionDone } from '../features/workroom/schema';
 import { WorkroomStorage as W } from '../features/workroom/storage';
-import { exportPortableWork, importPortableWork, parsePortableWork } from '../features/workroom/portable';
+import { exportPortableWork, importPortableWork, importPortableWorkUpdate, parsePortableWork } from '../features/workroom/portable';
 import { validateWorkroomBackup } from '../features/workroom/backup';
 beforeEach(async()=>{const db=await openDB(),tx=db.transaction(['characters',...WORKROOM_STORES],'readwrite'),done=transactionDone(tx);for(const name of ['characters',...WORKROOM_STORES])tx.objectStore(name).clear();await done;for(const id of ['a','b'])await DB.saveCharacter({id,name:id} as any);});
 it('单组件往返只复制正式代码，保留作者说明并重置私人进度，不覆盖原作',async()=>{
@@ -31,4 +31,21 @@ it('草稿测试记录绑定修订、供后续创作读取并可备份，旧测�
     expect(validateWorkroomBackup(await DB.exportFullData() as any)?.workroomWorks[0].testReport?.errors).toEqual(['按钮报错']);
     await W.saveDraft('a',work.id,{html:'已改',css:'',js:''},1,null);
     await expect(W.saveTestReport('a',work.id,1,[],'旧反馈')).rejects.toThrow('草稿已变化');
+});
+
+it('新版导入绑定原作品，保留正式代码和进度，发布后仍可回退',async()=>{
+    const w=await W.create('a','原游戏','原简介'),d=await W.saveDraft('a',w.id,{html:'旧版',css:'',js:''},0,null),v=await W.publish('a',w.id,d.revision);
+    await W.saveState('a',w.id,v.id,1,{level:9,unknown:'保留'});
+    const file={...await exportPortableWork('a',w.id),title:'别名',html:'新版'};
+    const draft=await importPortableWorkUpdate('a',w.id,JSON.stringify(file),0,v.id);
+    expect((await W.get('a',w.id)).work).toMatchObject({title:'原游戏',currentVersionId:v.id});
+    expect(await DB.getRawStoreData('workroom_works')).toHaveLength(1);
+    await expect(importPortableWorkUpdate('a',w.id,JSON.stringify(file),0,v.id)).rejects.toThrow('其他窗口');
+    await expect(importPortableWorkUpdate('b',w.id,JSON.stringify(file),draft.revision,v.id)).rejects.toThrow();
+    await expect(importPortableWorkUpdate('a',w.id,JSON.stringify({...file,schemaVersion:2}),draft.revision,v.id)).rejects.toThrow('不兼容');
+    const next=await W.publish('a',w.id,draft.revision);
+    expect(next.number).toBe(2);expect(next.html).toBe('新版');
+    expect((await W.loadState('a',w.id,next.id)).data).toEqual({level:9,unknown:'保留'});
+    await W.rollback('a',w.id,v.id,next.id);
+    expect((await W.loadState('a',w.id,v.id)).data).toEqual({level:9,unknown:'保留'});
 });
