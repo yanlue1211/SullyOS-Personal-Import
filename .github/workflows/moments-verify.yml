@@ -36,7 +36,19 @@ jobs:
         env:
           MOMENTS_BROWSER_MODULE: ${{ runner.temp }}/moments-browser/node_modules/playwright/index.mjs
         run: |
-          pnpm exec vite --host 127.0.0.1 --port 4188 > /tmp/moments-vite.log 2>&1 &
+          pnpm exec vite --host 127.0.0.1 --port 4188 --strictPort > /tmp/moments-vite.log 2>&1 &
+          vite_pid=$!
+          trap 'kill "$vite_pid" 2>/dev/null || true' EXIT
+          for attempt in {1..60}; do
+            if curl --silent --fail http://127.0.0.1:4188/test/fixtures/moments.html > /dev/null; then
+              break
+            fi
+            if ! kill -0 "$vite_pid" 2>/dev/null || [ "$attempt" -eq 60 ]; then
+              cat /tmp/moments-vite.log
+              exit 1
+            fi
+            sleep 1
+          done
           node scripts/test-moments-browser.mjs
       - uses: actions/upload-artifact@v4
         if: always()
