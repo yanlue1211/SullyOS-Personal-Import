@@ -216,7 +216,8 @@ const NeteaseProfilePage: React.FC<Props> = ({ onBack, onOpenPlayer, onOpenSearc
           const key='music-netease-index:'+uid;
           if(!force){const saved=await DB.getAsset(key);if(saved){const cached=JSON.parse(saved);if(Array.isArray(cached))return {playlist:cached};}}
           const result=force?await musicApi._raw(curCfg,'/user/playlist',{uid,limit:60}):await musicApi.userPlaylist(curCfg,uid);
-          if(Array.isArray(result?.playlist))await DB.saveAsset(key,JSON.stringify(result.playlist));
+          if(!Array.isArray(result?.playlist))throw Error(result?.message||'歌单读取失败');
+          await DB.saveAsset(key,JSON.stringify(result.playlist));
           return result;
         })(),
         musicApi.userRecord(curCfg, uid, 1),

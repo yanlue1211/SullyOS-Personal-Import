@@ -59,3 +59,21 @@ export async function loadNeteasePlaylistSongs(source:{trackCount:number},readPa
  if(expected&&all.length<expected)throw Error('歌单尚未读取完整，请重试');
  return all;
 }
+
+/** Apply only the user's edits, preserving songs concurrently added by a cloud refresh. */
+export function savePersonalPlaylistEdits(previous:CharPlaylist[],next:CharPlaylist[]){
+ return updatePersonalPlaylists(current=>{
+  const removed=new Set(previous.filter(p=>!next.some(n=>n.id===p.id)).map(p=>p.id));
+  let result=current.filter(p=>!removed.has(p.id));
+  for(const edited of next){
+   const old=previous.find(p=>p.id===edited.id);
+   if(old===edited)continue;
+   if(!old){if(!result.some(p=>p.id===edited.id))result=[...result,edited];continue;}
+   const live=result.find(p=>p.id===edited.id);if(!live)throw Error('歌单已在其他窗口删除，请重新读取');
+   const removedSongs=new Set(old.songs.filter(s=>!edited.songs.some(n=>n.id===s.id)).map(s=>s.id));
+   const added=edited.songs.filter(s=>!old.songs.some(o=>o.id===s.id));
+   result=result.map(p=>p.id===edited.id?{...live,title:old.title!==edited.title?edited.title:live.title,description:old.description!==edited.description?edited.description:live.description,songs:mergePlaylistSongs(live.songs.filter(s=>!removedSongs.has(s.id)),added),updatedAt:Date.now()}:p);
+  }
+  return result;
+ });
+}

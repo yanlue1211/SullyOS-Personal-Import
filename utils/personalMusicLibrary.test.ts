@@ -1,6 +1,6 @@
 import {beforeEach,expect,it,vi} from 'vitest';
 import {DB} from './db';
-import {importNeteasePlaylist,readPersonalPlaylists,savePersonalPlaylists,mergePlaylistSongs,loadNeteasePlaylistSongs} from './personalMusicLibrary';
+import {importNeteasePlaylist,readPersonalPlaylists,savePersonalPlaylists,savePersonalPlaylistEdits,mergePlaylistSongs,loadNeteasePlaylistSongs} from './personalMusicLibrary';
 const song=(id:number,extra:any={})=>({id,name:'歌曲',artists:'歌手',album:'',albumPic:'',duration:1,fee:0,...extra});
 beforeEach(async()=>{await DB.deleteAsset('music-user-playlists');});
 it('retains old personal playlists, merges repeated imports and preserves local/remote sources',async()=>{
@@ -23,4 +23,11 @@ it('rejects missing or repeated pages so a partial response is not saved as a co
  const old=await importNeteasePlaylist({id:1,name:'保留'},[song(1)]);
  await expect(loadNeteasePlaylistSongs({trackCount:120},async()=>({songs:[{id:1,name:'歌'}]}))).rejects.toThrow('读取完整');
  expect(await readPersonalPlaylists()).toEqual(old.lists);
+});
+
+it('a delayed add/rename does not overwrite songs saved by a simultaneous cloud refresh',async()=>{
+ await importNeteasePlaylist({id:1,name:'歌单'},[song(1)]);const previous=await readPersonalPlaylists();
+ await importNeteasePlaylist({id:1,name:'歌单'},[song(1),song(2)]);
+ await savePersonalPlaylistEdits(previous,[{...previous[0],title:'新名字',songs:[...previous[0].songs,song(-1,{remoteAudioUrl:'https://cdn.test/local.mp3'})]}]);
+ const [result]=await readPersonalPlaylists();expect(result.title).toBe('新名字');expect(result.songs.map(s=>s.id)).toEqual([1,2,-1]);
 });

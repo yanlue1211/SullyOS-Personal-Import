@@ -26,15 +26,15 @@ try{
   await page.getByLabel('选择歌单').locator('option',{hasText:'原有网易歌单（125）'}).waitFor({state:'attached'});
   await page.getByLabel('歌曲音频链接').fill('https://cdn.test/private-song.mp3');await page.getByLabel('歌名',{exact:true}).fill('自己导入的歌');await page.getByRole('button',{name:'导入并加入此歌单',exact:true}).click();
   await page.getByLabel('选择歌单').locator('option',{hasText:'（126）'}).waitFor({state:'attached'});
-  await page.getByLabel('搜索添加歌曲').fill('搜索加歌');await page.getByRole('button',{name:'搜索',exact:true}).click();await page.getByRole('button',{name:'加入',exact:true}).last().click();
+  await page.getByLabel('搜索添加歌曲').fill('搜索加歌');await page.getByRole('dialog',{name:'音乐管理'}).getByRole('button',{name:'搜索',exact:true}).click();await page.getByRole('button',{name:'加入',exact:true}).last().click();
   await page.getByLabel('选择歌单').locator('option',{hasText:'（127）'}).waitFor({state:'attached'});
   await page.getByRole('dialog',{name:'音乐管理'}).getByRole('button',{name:'返回',exact:true}).click();
   await page.getByRole('button',{name:'展开歌单 原有网易歌单'}).click();await page.getByRole('button',{name:'播放 自己导入的歌',exact:true}).waitFor();await page.getByRole('button',{name:'播放 搜索加歌',exact:true}).waitFor();
   if(await page.getByRole('button',{name:'展开歌单 原有网易歌单'}).count()!==1)throw Error('原歌单被复制成两张卡片');
-  await page.getByRole('button',{name:'一键保存已有歌单',exact:true}).click();await page.waitForFunction(async()=>JSON.parse(await window.__libraryQA.DB.getAsset('music-user-playlists'))[0].songs.length===127);
+  await page.getByRole('button',{name:'一键保存已有歌单',exact:true}).click();await page.waitForFunction(()=>[...document.querySelectorAll('button')].some(b=>b.textContent==='一键保存已有歌单'&&!b.disabled));await page.waitForFunction(async()=>JSON.parse(await window.__libraryQA.DB.getAsset('music-user-playlists'))[0].songs.length===127);
   await page.reload();await page.getByRole('button',{name:'展开歌单 原有网易歌单'}).waitFor();if(indexCalls!==1)throw Error('重进页面重复请求歌单索引');
   await page.getByRole('button',{name:'展开歌单 原有网易歌单'}).click();await page.getByRole('button',{name:'播放 自己导入的歌'}).waitFor();
-  await page.getByRole('button',{name:'同步网易云',exact:true}).click();await page.waitForFunction(async()=>JSON.parse(await window.__libraryQA.DB.getAsset('music-user-playlists'))[0].songs.length===127);await page.waitForTimeout(200);if(indexCalls!==2)throw Error('手动同步没有拉取新索引');
+  await page.getByRole('button',{name:'同步网易云',exact:true}).click();await page.waitForFunction(()=>[...document.querySelectorAll('button')].some(b=>b.textContent==='同步网易云'&&!b.disabled));await page.waitForFunction(async()=>JSON.parse(await window.__libraryQA.DB.getAsset('music-user-playlists'))[0].songs.length===127);if(indexCalls!==2)throw Error('手动同步没有拉取新索引');
   if(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1))throw Error('歌单页面横向溢出');if(errors.length)throw Error(errors.join('\n'));await context.close();
  }
  console.log('PASS: original playlist cards, 125-song pagination, imported/search additions, deduplication, cached reopening and manual sync');

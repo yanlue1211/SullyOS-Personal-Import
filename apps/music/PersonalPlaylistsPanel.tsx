@@ -16,7 +16,7 @@ export default function PersonalPlaylistsPanel({sources=[],loadTracks,onManage,o
  const saveAll=()=>perform(async()=>{if(!loadTracks)return;let added=0,failed=0;for(const [i,p]of sources.entries()){setProgress(`正在保存 ${i+1}/${sources.length} · ${p.name}`);try{added+=(await importNeteasePlaylist(p,await loadTracks(p))).added;}catch{failed++;}}addToast(`保存完成，新增 ${added} 首${failed?`，${failed} 个歌单未完成，可重试`:''}`,failed?'info':'success');});
  return <section aria-label="我的歌单" className="px-3 mt-3 space-y-3">
   <div className="flex flex-wrap gap-2"><button type="button" className={button} disabled={busy} onClick={()=>onManage?.()}>新建歌单</button>{!!sources.length&&<button type="button" className={button} disabled={busy} onClick={()=>void saveAll()}>一键保存已有歌单</button>}{onSync&&<button type="button" className={button} disabled={busy} onClick={()=>void perform(onSync)}>同步网易云</button>}</div>
-  {progress&&<p role="status" className="text-[11px]" style={{color:C.muted}}>{progress}</p>}
+  {(progress||busy)&&<p role="status" className="text-[11px]" style={{color:C.muted}}>{progress||'正在读取歌单…'}</p>}
   {error&&<p role="alert" className="text-xs">{error}</p>}
   {!ready&&!error&&<p className="text-xs">正在读取歌单…</p>}
   {ready&&!rows.length&&<p className="text-[11px] py-4 text-center" style={{color:C.muted}}>还没有歌单，新建一份或登录网易云读取已有歌单吧。</p>}

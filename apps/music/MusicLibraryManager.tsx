@@ -3,7 +3,7 @@ import {useOS} from '../../context/OSContext';
 import {useMusic, musicApi, parseLyric, type Song} from '../../context/MusicContext';
 import {putImageBlob} from '../../utils/blobRef';
 import {usePersonalPlaylists} from '../../hooks/usePersonalPlaylists';
-import {savePersonalPlaylists,mergePlaylistSongs} from '../../utils/personalMusicLibrary';
+import {savePersonalPlaylistEdits,mergePlaylistSongs} from '../../utils/personalMusicLibrary';
 import {DB} from '../../utils/db';
 import type {CharMusicProfile, CharPlaylist} from '../../types';
 import {C, MizuHeader} from './MusicUI';
@@ -21,7 +21,7 @@ export default function MusicLibraryManager({onClose, initialOwner='',initialPla
  const character=characters.find(c=>c.id===owner);
  const profile:CharMusicProfile=character?.musicProfile||{bio:'',genreTags:[],signatureArtists:[],playlists:character?[]:userPlaylists,likedSongIds:[],recentPlays:[],initializedAt:Date.now(),updatedAt:Date.now()};
  const selected=profile.playlists.find(p=>p.id===playlist);
- const save=(next:CharMusicProfile)=>{if(character)updateCharacter(character.id,{musicProfile:{...next,updatedAt:Date.now()}});else void savePersonalPlaylists(next.playlists).catch(()=>addToast('歌单保存失败','error'));};
+ const save=(next:CharMusicProfile)=>{if(character)updateCharacter(character.id,{musicProfile:{...next,updatedAt:Date.now()}});else void savePersonalPlaylistEdits(profile.playlists,next.playlists).catch(()=>addToast('歌单保存失败','error'));};
  const add=(song:Song)=>{
   if(!selected)return;
   if(mergePlaylistSongs(selected.songs,[song]).length===selected.songs.length){addToast('这首歌已经在歌单里','info');return;}
