@@ -36,6 +36,12 @@ try {
     .getByText("太阳落下之前，刚好走到这里。", { exact: true })
     .waitFor();
   assert.equal(await page.locator(".mm-post").count(), 3);
+  async function centeredTitle() {
+    const title = await page.locator('.mm-header h1').boundingBox();
+    assert.ok(Math.abs(title.x + title.width / 2 - page.viewportSize().width / 2) < 1,
+      'Header title must stay centered independently of action buttons');
+  }
+  await centeredTitle();
   assert.equal(
     await page
       .locator("body")
@@ -48,6 +54,13 @@ try {
   await page.screenshot({ path: out + "/settings-390.png" });
   await page.getByRole("button", { name: /^A\s*已启用/ }).click();
   await page.getByText("通常不发布的休息时段", { exact: true }).waitFor();
+  const enabled = page.getByLabel('启用朋友圈', {exact:true});
+  await enabled.click();
+  await page.getByText('通常不发布的休息时段', {exact:true}).waitFor({state:'hidden'});
+  await enabled.click();
+  await page.getByText('通常不发布的休息时段', {exact:true}).waitFor();
+  assert.equal(await enabled.isChecked(), true);
+  await centeredTitle();
   await page.screenshot({ path: out + "/habits-390.png" });
   await page.getByRole("button", { name: "返回", exact: true }).click();
   await page.getByRole("button", { name: "返回", exact: true }).click();
@@ -84,6 +97,7 @@ try {
     .getByText("浏览器验收：窗外的风有点凉。", { exact: true })
     .waitFor();
   await page.setViewportSize({ width: 320, height: 740 });
+  await centeredTitle();
   assert.equal(
     await page
       .locator("body")

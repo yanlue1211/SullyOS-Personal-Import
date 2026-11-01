@@ -196,3 +196,24 @@ it("provides a read-only character preview without marking actual browsing", asy
   ).toBe(true);
   expect(await rows("seen")).toEqual([]);
 });
+it('persists character activation, behavior and habits after controlled inputs reset', async () => {
+  await saveConfig(c => { c.enabled = true; });
+  await render(); await click('朋友圈设置'); await click('阿青');
+  const toggle = () => host.querySelector('input[type=checkbox]') as HTMLInputElement;
+  expect(toggle().checked).toBe(false);
+  await act(async () => { toggle().click(); }); await settle();
+  expect((await getConfig()).participants.a.enabled).toBe(true);
+  expect(toggle().checked).toBe(true);
+  const post = host.querySelectorAll('input[type=checkbox]')[1] as HTMLInputElement;
+  await act(async () => { post.click(); }); await settle();
+  expect((await getConfig()).participants.a.post).toBe(false);
+  await field(host.querySelector('select')!, 'quiet');
+  expect((await getConfig()).participants.a.habits.posting).toBe('quiet');
+  const hour = host.querySelector('.mm-hours input') as HTMLInputElement;
+  const before = hour.checked;
+  await act(async () => { hour.click(); }); await settle();
+  expect((await getConfig()).participants.a.habits.hours.includes(0)).toBe(!before);
+  await click('返回'); await click('阿青');
+  expect(toggle().checked).toBe(true);
+  expect((host.querySelectorAll('input[type=checkbox]')[1] as HTMLInputElement).checked).toBe(false);
+});
