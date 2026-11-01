@@ -37,6 +37,7 @@ class MoonPlayer {
   if(this.voice?.src&&this.voice.paused&&!this.voice.ended){await this.voice.play();this.duck(true);}else if(s.cursor<s.clips.length)this.playClip();else this.maybeListen();
   if(this.music?.paused)void this.music.play().catch(e=>this.fail(e));
  }
+ async setPlaybackSpeed(speed:number){if(!this.session)return;const next=Math.max(.65,Math.min(1.5,Math.round(speed*20)/20));this.session={...this.session,speed:next};if(this.voice){this.voice.playbackRate=next;this.voice.preservesPitch=true;}await this.persist();}
  private playClip(){const s=this.session;if(!s||s.cursor>=s.clips.length){this.voiceFinished();return;}this.stopListening();this.stopVoice();const epoch=this.voiceEpoch;const clip=s.clips[s.cursor];if(!clip.audio)return;
   const a=new Audio(clip.audio);this.voice=a;a.volume=this.voiceVolume;a.playbackRate=s.speed;a.currentTime=s.offset||0;this.duck(true);
   a.ontimeupdate=()=>{if(this.session&&this.voice===a){this.session.offset=a.currentTime;if(Date.now()-this.saveAt>3000){this.saveAt=Date.now();void this.persist().catch(e=>this.fail(e));}this.emit();}};
