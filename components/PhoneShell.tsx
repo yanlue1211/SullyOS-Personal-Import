@@ -59,6 +59,7 @@ const BrowserApp = lazyApp(() => import('../apps/BrowserApp'));
 const SongwritingApp = lazyApp(() => import('../apps/SongwritingApp'));
 const MusicApp = lazyApp(() => import('../apps/MusicApp'));
 const SongArchiveApp = lazyApp(() => import('../apps/SongArchiveApp'));
+const YueqiApp = lazyApp(() => import('../apps/YueqiApp'));
 const WorkroomApp = lazyApp(() => import('../apps/WorkroomApp'));
 const CallApp = lazyApp(() => import('../apps/CallApp'));
 const VoiceDesignerApp = lazyApp(() => import('../apps/VoiceDesignerApp'));
@@ -100,7 +101,7 @@ const APP_BY_ID: Partial<Record<AppID, PreloadableLazy>> = {
   [AppID.FAQ]: FAQApp, [AppID.Game]: GameApp, [AppID.Worldbook]: WorldbookApp,
   [AppID.Novel]: NovelApp, [AppID.Bank]: BankApp, [AppID.XhsStock]: XhsStockApp,
   [AppID.XhsFreeRoam]: XhsFreeRoamApp, [AppID.Browser]: BrowserApp, [AppID.Songwriting]: SongwritingApp,
-  [AppID.Music]: MusicApp, [AppID.SongArchive]: SongArchiveApp, [AppID.Workroom]: WorkroomApp, [AppID.Call]: CallApp, [AppID.VoiceDesigner]: VoiceDesignerApp,
+  [AppID.Music]: MusicApp, [AppID.SongArchive]: SongArchiveApp, [AppID.Workroom]: WorkroomApp, [AppID.Yueqi]: YueqiApp, [AppID.Call]: CallApp, [AppID.VoiceDesigner]: VoiceDesignerApp,
   [AppID.Guidebook]: GuidebookApp, [AppID.LifeSim]: LifeSimApp, [AppID.MemoryPalace]: MemoryPalaceApp,
   [AppID.Handbook]: HandbookApp, [AppID.QQBridge]: QQBridge, [AppID.HotNews]: HotNewsApp,
   [AppID.VRWorld]: VRWorldApp, [AppID.CharCreatorDev]: CharCreatorDevApp, [AppID.SpecialMoments]: SpecialMomentsApp,
@@ -996,6 +997,7 @@ const PhoneShell: React.FC = () => {
       case AppID.Songwriting: return <SongwritingApp />;
       case AppID.Music: return <MusicApp />;
       case AppID.SongArchive: return <SongArchiveApp />;
+      case AppID.Yueqi: return <YueqiApp />;
       case AppID.Workroom: return <WorkroomApp />;
       case AppID.Call: return <CallApp />;
       case AppID.VoiceDesigner: return <VoiceDesignerApp />;

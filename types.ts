@@ -10,6 +10,7 @@ export enum AppID {
   Music = 'music',
   SongArchive = 'song_archive',
   Workroom = 'workroom',
+  Yueqi = 'yueqi',
   Browser = 'browser',
   ThemeMaker = 'thememaker', // Legacy shortcut ID; opens the embedded bubble maker, not an installed App.
   Appearance = 'appearance',
