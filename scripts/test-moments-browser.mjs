@@ -55,9 +55,9 @@ try {
   await page.getByRole("button", { name: /^A\s*已启用/ }).click();
   await page.getByText("通常不发布的休息时段", { exact: true }).waitFor();
   const enabled = page.getByLabel('启用朋友圈', {exact:true});
-  await enabled.uncheck();
+  await enabled.click();
   await page.getByText('通常不发布的休息时段', {exact:true}).waitFor({state:'hidden'});
-  await enabled.check();
+  await enabled.click();
   await page.getByText('通常不发布的休息时段', {exact:true}).waitFor();
   assert.equal(await enabled.isChecked(), true);
   await centeredTitle();
