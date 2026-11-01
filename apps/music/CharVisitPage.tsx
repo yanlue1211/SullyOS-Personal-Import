@@ -161,7 +161,9 @@ const CharVisitPage: React.FC<Props> = ({ charId, onBack, onOpenPlayer }) => {
     setInitializing(true);
     try {
       const newProfile = await CharMusicPersona.initialize(char, userProfile, apiConfig);
-      updateCharacter(char.id, { musicProfile: newProfile });
+      const existing=(await DB.getCharacter(char.id))?.musicProfile;
+      const ids=new Set((existing?.playlists||[]).map(p=>p.id));
+      updateCharacter(char.id, { musicProfile: {...newProfile,playlists:[...(existing?.playlists||[]),...newProfile.playlists.filter(p=>!ids.has(p.id))]} });
       addToast(`${char.name} 的音乐角落已开启`, 'success');
       trackEvent('生成角色的音乐人格');
     } catch (e: any) {
@@ -470,7 +472,7 @@ const CharVisitPage: React.FC<Props> = ({ charId, onBack, onOpenPlayer }) => {
         )}
 
         {/* 歌单 */}
-        {initialized && (profile?.playlists?.length || 0) > 0 && (
+        {(profile?.playlists?.length || 0) > 0 && (
           <div className="mx-4 mt-4">
             <SectionTitle>歌单 · {profile!.playlists.length}</SectionTitle>
             <div className="space-y-2">

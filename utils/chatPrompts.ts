@@ -14,6 +14,7 @@ import { kanataTitleContext } from './vrWorld/kanataTitle';
 import { selectCharacterContextMessages } from './chatContextRange';
 
 import { CharacterProfile, UserProfile, Message, Emoji, EmojiCategory, GroupProfile, RealtimeConfig, DailySchedule } from '../types';
+import { readVisionDescription } from './visionApi';
 import { ContextBuilder } from './context';
 import { DB } from './db';
 import { formatLifeSimResetCardForContext } from './lifeSimChatCard';
@@ -272,6 +273,7 @@ export const ChatPrompts = {
         userListeningContext?: {
             songName: string;
             artists: string;
+            fullLyrics?: string;
             lyricWindow: string[];
             activeIdx: number;
         } | null,
@@ -312,6 +314,7 @@ export const ChatPrompts = {
         userListeningContext?: {
             songName: string;
             artists: string;
+            fullLyrics?: string;
             lyricWindow: string[];
             activeIdx: number;
         } | null,
@@ -1409,6 +1412,14 @@ ${voiceActingGuide()}`;
                 }
                 else if (m.type === 'emoji') {
                      const stickerName = stickerNameFromUrl(emojis, m.content);
+                     if(char.stickerVisionEnabled && options?.useVisionDescriptions){
+                         const description=readVisionDescription(m);
+                         content=`${timeStr} [${m.role==='user'?'用户':'你'} 发送了表情包: ${stickerName}]${description?'\n[表情画面识别] '+description:''}`;
+                         return {role:m.role,content};
+                     }
+                     if (char.stickerVisionEnabled && m.content) {
+                         return {role:m.role,content:[{type:'text',text:`${timeStr} [${m.role==='user'?'用户':'你'} 发送了表情包: ${stickerName}]`},{type:'image_url',image_url:{url:m.content}}]};
+                     }
                      content = `${timeStr} [${m.role === 'user' ? '用户' : '你'} 发送了表情包: ${stickerName}]`;
                 }
                 else if ((m.type as string) === 'chat_forward') {

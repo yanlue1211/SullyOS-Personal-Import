@@ -2529,6 +2529,13 @@ export interface BankFullState {
 
 /** 角色本地歌单里的轻量歌曲快照 — 字段与 MusicContext 的 Song 对齐（无运行时 url） */
 export interface CharPlaylistSong {
+    local?: boolean;
+    localAssetKey?: string;
+    remoteAudioUrl?: string;
+    localMimeType?: string;
+    localLyrics?: string;
+    lyricLineTimings?: number[];
+    lyricTimingMode?: 'plain' | 'synced';
     id: number;
     name: string;
     artists: string;
@@ -3174,6 +3181,7 @@ export interface CharacterProfile {
    * - htmlModeCustomPrompt：用户自定义内容，**追加**在内置提示词之后（不会覆盖内置内容）。
    * - 上下文 / 归档 总结读到的 html_card 消息内容是已剥离 HTML 的纯文字摘要，避免 token 浪费。
    */
+  stickerVisionEnabled?: boolean;
   htmlModeEnabled?: boolean;
   htmlModeCustomPrompt?: string;
   /** 可选：在日常 ChatApp 注入任务优先的协同工作规则。提示词较长，默认关闭。 */
@@ -3289,7 +3297,8 @@ export interface GroupProfile {
     /** 提示音是否绑定进白框 CSS（跟着白框分享码走） */
     chatSoundBound?: boolean;
     /** HTML 模块模式：开启后角色可输出 [html] 卡片 */
-    htmlModeEnabled?: boolean;
+    stickerVisionEnabled?: boolean;
+  htmlModeEnabled?: boolean;
     /** HTML 模式自定义提示词（追加在内置提示词之后） */
     htmlModeCustomPrompt?: string;
 }

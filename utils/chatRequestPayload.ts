@@ -50,6 +50,7 @@ import { getSARModuleRuntimePlan } from './vrWorld/sarModuleRuntime';
 export { cleanApiMessages, flattenImageContentParts } from './promptMessageCleanup';
 
 export interface UserListeningContext {
+    fullLyrics?: string;
     songName: string;
     artists: string;
     lyricWindow: string[];
@@ -194,6 +195,7 @@ function deriveListeningFromSnapshot(
             songName: current.name,
             artists: current.artists,
             lyricWindow: [],
+            fullLyrics: current.lyricTimingMode==='plain'&&!current.lyricLineTimings?.length ? current.localLyrics?.slice(0,12000) : undefined,
             activeIdx: -1,
         };
     }
@@ -279,6 +281,7 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
         const prepared = await prepare('vision',()=>materializeVisionDescriptions(
             [...uniqueMessages.values()],
             input.visionApiConfig,
+            {includeEmojis: char.stickerVisionEnabled===true},
         ));
         const preparedById = new Map(prepared.map(message => [message.id, message]));
         historyMsgsForPrompt = selectedHistory.map(message => preparedById.get(message.id) || message);

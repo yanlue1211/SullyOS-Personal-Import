@@ -110,6 +110,8 @@ interface ChatModalsProps {
     xhsEnabled?: boolean;
     onToggleXhs?: () => void;
     // HTML mode
+    stickerVisionEnabled?: boolean;
+    onToggleStickerVision?: () => void;
     htmlModeEnabled?: boolean;
     onToggleHtmlMode?: () => void;
     htmlModeCustomPrompt?: string;
@@ -267,7 +269,7 @@ const ChatModals: React.FC<ChatModalsProps> = ({
     allCharacters = [], onSaveCategoryVisibility,
     translationEnabled, onToggleTranslation, translationExpanded, onToggleTranslationExpanded, translateSourceLang, translateTargetLang, onSetTranslateSourceLang, onSetTranslateLang,
     xhsEnabled, onToggleXhs,
-    htmlModeEnabled, onToggleHtmlMode, htmlModeCustomPrompt, setHtmlModeCustomPrompt,
+    stickerVisionEnabled, onToggleStickerVision, htmlModeEnabled, onToggleHtmlMode, htmlModeCustomPrompt, setHtmlModeCustomPrompt,
     chatVoiceEnabled, onToggleChatVoice, chatVoiceAutoPlay, onToggleChatVoiceAutoPlay, chatVoiceLang, onSetChatVoiceLang,
     onGenerateVoice, voiceAvailable, onDownloadVoice, voiceDownloadable, voiceCollectable, onToggleVoiceFavorite, voiceFavorited,
     scheduleData, isScheduleGenerating, onScheduleEdit, onScheduleDelete, onScheduleReroll, onScheduleCoverChange,
@@ -650,7 +652,12 @@ const ChatModals: React.FC<ChatModalsProps> = ({
                             )}
                         </div>
                     </ChatSettingsSection>
-                    <ChatSettingsSection title="扩展功能" summary="小红书与 HTML 卡片">
+                    <ChatSettingsSection title="扩展功能" summary="表情包识图、小红书与 HTML 卡片">
+                        <div className="pt-2 border-t border-slate-100">
+                            <button type="button" role="switch" aria-checked={!!stickerVisionEnabled} onClick={onToggleStickerVision} className="w-full flex justify-between items-center text-xs font-bold text-slate-500">
+                                表情包真实识图<span className={`w-10 h-6 rounded-full p-1 ${stickerVisionEnabled?'bg-emerald-500':'bg-slate-200'}`}><span className={`block w-4 h-4 rounded-full bg-white transition-transform ${stickerVisionEnabled?'translate-x-4':''}`}/></span>
+                            </button><p className="text-[10px] text-slate-400 mt-2">开启后将表情图片交给当前模型识图；关闭时只读取表情名称。需要支持图片的模型。</p>
+                        </div>
                         {/* XHS Toggle */}
                         <div className="pt-2 border-t border-slate-100">
                             <div className="flex justify-between items-center cursor-pointer" onClick={onToggleXhs}>
