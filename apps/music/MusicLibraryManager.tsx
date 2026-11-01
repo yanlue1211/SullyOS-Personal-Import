@@ -40,8 +40,8 @@ export default function MusicLibraryManager({onClose, initialOwner=''}:{onClose:
    addLocalSong(song);if(selected)add(song);setTitle('');setArtist('');setLyrics('');setCover('');setCoverFile(null);setAudio(null);setAudioUrl('');addToast('歌曲已保存','success');
   }catch(e){addToast('导入失败：'+String(e),'error');}finally{setBusy(false);}
  };
- const input='w-full rounded-xl border p-2 text-sm bg-white';
- const button='rounded-xl border px-3 py-2 text-sm bg-white disabled:opacity-40';
+ const input='w-full min-w-0 rounded-xl border p-2 text-sm bg-white';
+ const button='shrink-0 whitespace-nowrap rounded-xl border px-3 py-2 text-sm bg-white disabled:opacity-40';
  const choices=[...new Map([...localAlbumSongs,...(current?[current]:[]),...found].map(s=>[s.id,s])).values()];
  return <div className="absolute inset-0 z-50 flex flex-col" style={{background:C.bg,color:C.text}}>
   <MizuHeader title="歌曲与歌单" onBack={onClose}/>
