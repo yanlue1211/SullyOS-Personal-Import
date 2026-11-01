@@ -1,4 +1,4 @@
-import InnerVoiceChip from '../features/personal/innerVoice/InnerVoiceChip';
+import EditableInnerVoice from '../features/personal/messageEditing/EditableInnerVoice';
 import { INNER_VOICE_SYSTEM, type InnerVoice } from '../features/personal/innerVoice/protocol';
 import { editRecordingText } from '../features/personal/chatMedia/editRecording';
 import { recordingText, recordingContext } from '../features/personal/chatMedia/transcript';
@@ -2929,6 +2929,7 @@ ${sentencePlan}`;
     };
     window.addEventListener('personal-recording-edited', changed); return () => window.removeEventListener('personal-recording-edited', changed);
   }, [selectedChar?.id]);
+  useEffect(()=>{const changed=(event:Event)=>{const row=(event as CustomEvent<Message>).detail;const apply=(bubble:CallBubble):CallBubble=>bubble.dbId===row.id?{...bubble,innerVoice:row.metadata?.innerVoice}:bubble;setBubbles(previous=>previous.map(apply));setCallRecords(previous=>previous.map(record=>({...record,transcript:record.transcript.map(apply)})));if(row.charId===selectedChar?.id)markCallTurnDirty();};window.addEventListener('personal-message-edited',changed);return()=>window.removeEventListener('personal-message-edited',changed);},[selectedChar?.id]);
   const startEditBubble = (bubble: CallBubble) => {
     if (bubble.role !== 'user') return;
     setEditingBubble(bubble);
@@ -3650,7 +3651,7 @@ ${sentencePlan}`;
               className={`rounded-2xl px-3.5 py-2.5 border border-white/10 backdrop-blur-md ${item.role === 'user' ? 'bg-white/[0.07] ml-6' : 'bg-white/[0.03] mr-6'}`}
             >
               <div className="text-[10px] text-white/45">{item.role === 'user' ? '你' : recordDetail.characterName} · {item.time}</div>
-              {item.role === 'assistant' && <InnerVoiceChip value={item.innerVoice} dark={!lightTheme} />}
+              {item.role === 'assistant' && <EditableInnerVoice messageId={item.dbId} value={item.innerVoice} dark={!lightTheme} />}
               {item.role === 'user' && <CallRecordingPlayback messageId={item.dbId} transcript={item.text} recording={item.recording} />}
               {item.role === 'user' && <CallSnapshotImage imageRef={item.cameraSnapshotRef} expired={item.cameraSnapshotExpired} />}
               <div className="text-sm mt-1 leading-relaxed">{(() => {
@@ -4064,7 +4065,7 @@ ${sentencePlan}`;
                   {showTranslatedText && cleanVoice && <div className="mt-1 text-[11px] text-white/45 italic">{cleanVoice}</div>}
                 </>;
               })() : (line || bubble.text)}
-              {bubble.role === 'assistant' && <InnerVoiceChip value={bubble.innerVoice} dark={!lightTheme} />}
+              {bubble.role === 'assistant' && <EditableInnerVoice messageId={bubble.dbId} value={bubble.innerVoice} dark={!lightTheme} />}
               {bubble.role === 'user' && <CallRecordingPlayback messageId={bubble.dbId} transcript={bubble.text} recording={bubble.recording} />}
             </div>
             {bubble.role === 'assistant' && (

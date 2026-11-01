@@ -1,3 +1,4 @@
+import MessageDetailEditor from '../../features/personal/messageEditing/MessageDetailEditor';
 import RealMediaView from '../../features/experience/RealMediaView';
 import WorkroomCard from './WorkroomCard';
 import ResponseStatusCard from '../../features/personal/responseStatus/ResponseStatusCard';
@@ -1386,7 +1387,7 @@ const MessageItem = React.memo(({
     const responseStatus = m.type === 'score_card' ? readResponseStatus(m.content, m.metadata) : undefined;
     if (responseStatus) return <div className={`w-full px-4 my-3 relative ${selectionMode ? 'pl-12' : ''}`} {...interactionProps}>
         {selectionMode && <button type="button" className="absolute left-2 top-1/2" aria-label="选择状态卡片" aria-pressed={isSelected} onClick={event => { event.stopPropagation(); onToggleSelect(m.id); }}>{isSelected ? '●' : '○'}</button>}
-        <div className="flex justify-center"><ResponseStatusCard value={responseStatus} /></div>
+        <div className="flex justify-center"><MessageDetailEditor message={m} kind="status" disabled={selectionMode}><ResponseStatusCard value={responseStatus} /></MessageDetailEditor></div>
     </div>;
 
     if (m.type === 'workroom_card') return <div className={`w-full px-4 py-2 flex justify-center relative ${selectionMode ? 'pl-12' : ''}`} {...interactionProps}>
@@ -1759,7 +1760,7 @@ const MessageItem = React.memo(({
                             {showTimestamp !== 'never' && (
                                 <span className={`text-[9px] text-slate-400/80 font-medium pointer-events-none ${showTimestamp === 'hover' ? 'opacity-0 group-hover:opacity-100 transition-opacity' : ''}`}>{formatTime(m.timestamp)}</span>
                             )}
-                            {!isUser && m.metadata?.innerVoice && <InnerVoiceChip value={m.metadata.innerVoice} />}
+                            {!isUser && m.metadata?.innerVoice && <MessageDetailEditor message={m} kind="heart" disabled={selectionMode}><InnerVoiceChip value={m.metadata.innerVoice} /></MessageDetailEditor>}
                         </div>
                     )}
                     </div>
@@ -3665,7 +3666,7 @@ const MessageItem = React.memo(({
            // 否则用户点了「确认」，DB 已更新、消息已重载，卡片却因 memo 判等而纹丝不动。
            prev.msg.metadata?.reviewStatus === next.msg.metadata?.reviewStatus &&
            prev.msg.metadata?.status === next.msg.metadata?.status &&
-           prev.msg.metadata?.innerVoice === next.msg.metadata?.innerVoice &&
+           prev.msg.metadata?.innerVoice === next.msg.metadata?.innerVoice && prev.msg.metadata?.responseStatus===next.msg.metadata?.responseStatus &&
            prev.msg.metadata?.audioTranscript === next.msg.metadata?.audioTranscript &&
            prev.msg.metadata?.audioAnalysis === next.msg.metadata?.audioAnalysis &&
            prev.msg.metadata?.audioDescription === next.msg.metadata?.audioDescription &&
