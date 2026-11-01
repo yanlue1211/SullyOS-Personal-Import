@@ -1,6 +1,7 @@
 import MessageDetailEditor from '../../features/personal/messageEditing/MessageDetailEditor';
 import RealMediaView from '../../features/experience/RealMediaView';
 import WorkroomCard from './WorkroomCard';
+import YueqiCard from './YueqiCard';
 import ResponseStatusCard from '../../features/personal/responseStatus/ResponseStatusCard';
 import { readResponseStatus } from '../../features/personal/responseStatus/protocol';
 import OrderCard from '../commerce/OrderCard';
@@ -1389,6 +1390,8 @@ const MessageItem = React.memo(({
         {selectionMode && <button type="button" className="absolute left-2 top-1/2" aria-label="选择状态卡片" aria-pressed={isSelected} onClick={event => { event.stopPropagation(); onToggleSelect(m.id); }}>{isSelected ? '●' : '○'}</button>}
         <div className="flex justify-center"><MessageDetailEditor message={m} kind="status" disabled={selectionMode}><ResponseStatusCard value={responseStatus} /></MessageDetailEditor></div>
     </div>;
+
+    if (m.metadata?.source === 'yueqi' && m.metadata?.yueqiSessionId) return <div className="w-full px-4 py-2 flex justify-center"><YueqiCard message={m}/></div>;
 
     if (m.type === 'workroom_card') return <div className={`w-full px-4 py-2 flex justify-center relative ${selectionMode ? 'pl-12' : ''}`} {...interactionProps}>
         {selectionMode && <button type="button" className="absolute left-2 top-4" aria-label="选择造物间卡片" aria-pressed={isSelected} onClick={event => {event.stopPropagation(); onToggleSelect(m.id);}}>{isSelected ? '☑' : '□'}</button>}

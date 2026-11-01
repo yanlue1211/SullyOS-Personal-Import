@@ -1,0 +1,16 @@
+import {beforeEach,it,expect,vi} from 'vitest';
+vi.mock('./safeApi',async importOriginal=>({...await importOriginal<typeof import('./safeApi')>(),safeFetchJson:vi.fn(async()=>({choices:[{finish_reason:'stop',message:{content:'今晚海风很轻。'}}]}))}));
+import {safeFetchJson} from './safeApi';
+import {generate,type Environment} from '../features/yueqi/generate';
+import {newSession} from '../features/yueqi/model';
+import {DB,openDB} from './db';
+import {transactionDone} from '../features/workroom/schema';
+let env:Environment;
+beforeEach(async()=>{vi.clearAllMocks();localStorage.clear();const db=await openDB(),tx=db.transaction(['characters','messages'],'readwrite'),done=transactionDone(tx);tx.objectStore('characters').clear();tx.objectStore('messages').clear();await done;
+ await DB.saveCharacter({id:'a',name:'阿源',systemPrompt:'我是灯塔守护者',worldview:'海岸世界',memories:[{id:'today',date:'2026-11-01',summary:'今天真实修理了灯塔'},{id:'other',date:'2026-10-30',summary:'无关旧日度记录'}],activeMemoryMonths:[],refinedMemories:{},contextLimit:10,contextRangePolicyVersion:1,contextRangeMode:'manual',mountedWorldbooks:[{id:'wb',title:'月栖测试世界书',content:'海上有一片浅绿色月光',constant:true,disable:false}]} as any);
+ for(let i=0;i<12;i++)await DB.saveMessage({charId:'a',role:i%2?'assistant':'user',type:'text',content:'正常聊天第'+i+'条'});
+ env={api:{baseUrl:'https://qa.invalid/v1',apiKey:'TEST',model:'qa'},user:{name:'小羊',persona:'我喜欢浅绿色'} as any,context:{groups:[],emojis:[],categories:[]}};
+});
+it('复用正常角色与世界书管线，并遵守原聊天有效范围',async()=>{await generate(newSession('a','story',{sleepDay:'2026-11-01'}),env,'讲一个故事',new AbortController().signal);const body=JSON.parse(String(vi.mocked(safeFetchJson).mock.calls[0][1]?.body));const text=JSON.stringify(body.messages);expect(text).toContain('灯塔守护者');expect(text).toContain('浅绿色月光');expect(text).toContain('正常聊天第11条');expect(text).not.toContain('正常聊天第0条');expect(text).toContain('今天真实修理了灯塔');expect(text).not.toContain('无关旧日度记录');});
+it('本场线下场景覆盖远程假设，且固定睡眠日不跟随系统午夜变化',async()=>{await generate(newSession('a','night',{sleepDay:'2026-11-01',scene:'offline'}),env,'继续陪伴',new AbortController().signal);const text=JSON.stringify(JSON.parse(String(vi.mocked(safeFetchJson).mock.calls[0][1]?.body)).messages);expect(text).toContain('月下相依');expect(text).toContain('同一空间');expect(text).toContain('2026-11-01');expect(text).toContain('不证明现实世界');});
+it('截断与空响应不能作为成功正文保存',async()=>{vi.mocked(safeFetchJson).mockResolvedValueOnce({choices:[{finish_reason:'length',message:{content:'只写了一半'}}]} as any);await expect(generate(newSession('a','story'),env,'故事',new AbortController().signal)).rejects.toThrow('截断');vi.mocked(safeFetchJson).mockResolvedValueOnce({choices:[{finish_reason:'stop',message:{content:''}}]} as any);await expect(generate(newSession('a','story'),env,'故事',new AbortController().signal)).rejects.toThrow('没有返回');});
