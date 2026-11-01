@@ -26,7 +26,7 @@ try{
   await page.getByLabel('选择歌单').locator('option',{hasText:'原有网易歌单（125）'}).waitFor({state:'attached'});
   await page.getByLabel('歌曲音频链接').fill('https://cdn.test/private-song.mp3');await page.getByLabel('歌名',{exact:true}).fill('自己导入的歌');await page.getByRole('button',{name:'导入并加入此歌单',exact:true}).click();
   await page.getByLabel('选择歌单').locator('option',{hasText:'（126）'}).waitFor({state:'attached'});
-  await page.getByLabel('搜索添加歌曲').fill('搜索加歌');await page.getByRole('dialog',{name:'音乐管理'}).getByRole('button',{name:'搜索',exact:true}).click();await page.getByRole('button',{name:'加入',exact:true}).last().click();
+  await page.getByLabel('搜索添加歌曲').fill('搜索加歌');await page.getByRole('dialog',{name:'音乐管理'}).getByRole('button',{name:'搜索',exact:true}).click();await page.getByRole('dialog',{name:'音乐管理'}).getByRole('button',{name:/搜索加歌/}).waitFor();await page.getByRole('dialog',{name:'音乐管理'}).getByRole('button',{name:/搜索加歌/}).locator('..').getByRole('button',{name:'加入',exact:true}).click();
   await page.getByLabel('选择歌单').locator('option',{hasText:'（127）'}).waitFor({state:'attached'});
   await page.getByRole('dialog',{name:'音乐管理'}).getByRole('button',{name:'返回',exact:true}).click();
   await page.getByRole('button',{name:'展开歌单 原有网易歌单'}).click();await page.getByRole('button',{name:'播放 自己导入的歌',exact:true}).waitFor();await page.getByRole('button',{name:'播放 搜索加歌',exact:true}).waitFor();
