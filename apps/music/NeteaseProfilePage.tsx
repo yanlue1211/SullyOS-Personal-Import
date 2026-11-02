@@ -1,3 +1,4 @@
+import MusicCover from '../../components/os/MusicCover';
 /**
  * 网易云「我的」主页
  * - 未登录: 扫码登录 / 手机验证码登录
@@ -681,7 +682,7 @@ const NeteaseProfilePage: React.FC<Props> = ({ onBack, onOpenPlayer, onOpenSearc
                 style={{ background: 'rgba(255,255,255,0.06)' }}
               >
                 <div className="text-[10px] w-5 text-center shrink-0" style={{ color: C.faint }}>{i + 1}</div>
-                <TokenImg value={r.song.albumPic} alt="" className="w-10 h-10 rounded-lg object-cover" />
+                <MusicCover value={r.song.albumPic} alt="" className="w-10 h-10 rounded-lg object-cover" />
                 <div className="flex-1 min-w-0">
                   <div className="text-sm truncate" style={{ color: C.text }}>{r.song.name}</div>
                   <div className="text-[10px] truncate" style={{ color: C.muted }}>{r.song.artists}</div>
@@ -710,7 +711,7 @@ const NeteaseProfilePage: React.FC<Props> = ({ onBack, onOpenPlayer, onOpenSearc
                 className="w-full flex items-center gap-3 p-2 rounded-2xl text-left transition-all"
                 style={{ background: 'rgba(255,255,255,0.06)' }}
               >
-                <TokenImg value={s.albumPic || 'https://p1.music.126.net/y19E5SadGUmSR8SZxkrNtw==/109951163965029180.jpg'}
+                <MusicCover value={s.albumPic}
                   alt="" className="w-10 h-10 rounded-lg object-cover" />
                 <div className="flex-1 min-w-0">
                   <div className="text-sm truncate" style={{ color: C.text }}>{s.name}</div>

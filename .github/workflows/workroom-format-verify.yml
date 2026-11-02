@@ -27,7 +27,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm vitest run utils/workroomCreation.test.ts utils/workroomResponse.test.ts utils/workroomChatBridge.test.ts utils/workroomPortable.test.ts utils/workroomRunner.test.ts utils/workroomHost.test.ts utils/workroomUI.test.ts utils/workroomStorage.test.ts utils/workroomDelivery.test.ts utils/workroomRuntime.test.ts utils/replyEditing.test.ts utils/contextPipeline.test.ts utils/contextWorldbook.test.ts --maxWorkers=2 --minWorkers=1
-      - run: pnpm vitest run utils/musicLibraryUI.test.tsx utils/galleryBatchDelete.test.ts utils/messageFormat.sticker.test.ts utils/visionApi.test.ts utils/importedLyrics.test.ts utils/charPlaylistEdit.test.ts utils/personalMusicLibrary.test.ts utils/musicProfileLinkageUI.test.tsx --maxWorkers=2 --minWorkers=1
+      - run: pnpm vitest run utils/musicCover.test.tsx utils/musicLibraryUI.test.tsx utils/galleryBatchDelete.test.ts utils/messageFormat.sticker.test.ts utils/visionApi.test.ts utils/importedLyrics.test.ts utils/charPlaylistEdit.test.ts utils/personalMusicLibrary.test.ts utils/musicProfileLinkageUI.test.tsx --maxWorkers=2 --minWorkers=1
       - run: pnpm build
       - name: Browser startup regression
         run: |
