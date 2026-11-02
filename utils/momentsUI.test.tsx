@@ -224,3 +224,10 @@ it('lets user edit another authors post and choose ordinary or reality deletion'
  await click('删除朋友圈');expect(host.querySelector('[aria-label="删除朋友圈方式"]')).not.toBeNull();expect(host.textContent).toContain('普通删除');expect(host.textContent).toContain('真实删除');
  await click('真实删除');expect(host.textContent).not.toContain('用户调整后的正文');expect((await rows<Post>('post')).some(row=>row.id===p.id)).toBe(false);
 });
+it('offers an isolated temporary monitor with clear and stop controls in settings',async()=>{
+ await enable();await render();await click('朋友圈设置');await click('API 调用监控');
+ expect(host.querySelector('[aria-label="朋友圈 API 调用监控"]')).not.toBeNull();
+ await click('关闭并清除');expect(host.textContent).toContain('监控已关闭');
+ await click('开始记录两天');expect(host.textContent).toContain('记录至');
+ await click('返回');expect(host.querySelector('[aria-label="朋友圈 API 调用监控"]')).toBeNull();
+});

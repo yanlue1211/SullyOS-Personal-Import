@@ -1,3 +1,4 @@
+import MomentsApiMonitor from "./momentsApiMonitor";
 import {PencilSimple, Trash} from "@phosphor-icons/react";
 import {revisePost} from "../features/moments/revisions";
 import React, { useEffect, useRef, useState } from "react";
@@ -137,6 +138,7 @@ export default function MomentsApp() {
     [owner, setOwner] = useState<string | undefined>(),
     [viewer, setViewer] = useState("user"),
     [charId, setCharId] = useState("");
+  const [apiMonitor,setApiMonitor]=useState(false);
   const [editing,setEditing]=useState<Post>();
   const [deleting,setDeleting]=useState<Post>();
   const [text, setText] = useState(""),
@@ -222,6 +224,7 @@ export default function MomentsApp() {
   }, [viewer, owner]);
   useEffect(() => () => abort.current?.abort(), []);
   const back = () => {
+    if(apiMonitor){setApiMonitor(false);return true;}
     if (image) {
       setImage(undefined);
       return true;
@@ -630,6 +633,7 @@ export default function MomentsApp() {
                 />
               </label>
             </section>
+            <section><button className="mm-setting-row" onClick={()=>setApiMonitor(true)}><span>API 调用监控<small>仅朋友圈 · 临时两天 · 可随时关闭清除</small></span><b>›</b></button></section>
             {config.enabled && (
               <>
                 <section>
@@ -1357,6 +1361,7 @@ export default function MomentsApp() {
           </section>
         </div>
       )}
+      {apiMonitor && <MomentsApiMonitor onClose={()=>setApiMonitor(false)}/>}
       {deleting && <div className="mm-overlay"><section role="dialog" aria-modal="true" aria-label="删除朋友圈方式">
         <h3>如何删除这条朋友圈？</h3><p>普通删除：已经看见的人仍记得，没看见的人不能再看见。</p><p>真实删除：清理动态、浏览记录和关联事件卡。已经总结的长期记忆保留，如需调整请手动修改。</p>
         <div className="mm-dialog-actions"><button onClick={()=>setDeleting(undefined)}>取消</button>

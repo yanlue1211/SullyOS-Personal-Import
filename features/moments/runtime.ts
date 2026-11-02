@@ -7,7 +7,8 @@ import type {
   RealtimeConfig,
 } from "../../types";
 import { DB } from "../../utils/db";
-import { safeFetchJson, extractContent } from "../../utils/safeApi";
+import { extractContent } from "../../utils/safeApi";
+import {momentsFetchJson as safeFetchJson} from "./apiMonitor";
 import { resolveDialogueApi, dialogueMaxTokens } from "../../utils/characterApi";
 import { loadCharacterContextRange } from "../../utils/chatContextRange";
 import { buildChatRequestPayload } from "../../utils/chatRequestPayload";
@@ -556,7 +557,7 @@ export async function runActivity(
   try {
     const char = await DB.getCharacter(charId);
     if (!char) throw Error("角色不存在");
-    const data = await send(input, char, activityPrompt(task), "社交活动", () =>
+    const data = await send(input, char, activityPrompt(task), automatic ? "自动社交活动" : "手动社交活动", () =>
       markCallSent(task.call.id),
     );
     input.signal?.throwIfAborted();
