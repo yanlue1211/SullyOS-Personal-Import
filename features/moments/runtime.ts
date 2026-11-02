@@ -1,3 +1,4 @@
+import {saveActivityCard} from "./cards";
 import {reviseIn} from "./revisions";
 import { inQuietHours, quietNightKey, sleepOpportunity } from "./sleep";
 import type {
@@ -25,7 +26,6 @@ import {
   refreshSnapshot,
   publishIn,
   interactIn,
-  addCard,
   announceHistory,
 } from "./storage";
 import { projectPost, postText } from "./permissions";
@@ -37,6 +37,7 @@ import {
   type Call,
   type Activity,
   type Config,
+  type Seen,
   type Post,
   type FeedEvent,
   type Habits,
@@ -406,6 +407,8 @@ export async function applyActivity(
       !(await result(tx.objectStore("characters").get(char.id)))
     )
       throw Error("活动已过期或设置变化");
+    const cardEntries=new Map<string,{post:Post;events:string[]}>();
+    const record=(post:Post,event:string)=>{const old=cardEntries.get(post.id);cardEntries.set(post.id,{post,events:[...(old?.events||[]),event]});};
     const actual = new Map<string, Post>();
     for (const post of task.posts) {
       const p = await getRow<Post>(post.id, s),
@@ -414,8 +417,14 @@ export async function applyActivity(
         throw Error("动态或评论已变化，等待下次活动");
       actual.set(p.id, p);
     }
-    for (const id of browsed)
-      await markSeen(s, c, char.id, task.posts.find((p) => p.id === id)!);
+    for (const id of browsed) {
+      const material=task.posts.find(p=>p.id===id)!;
+      const previous=await getRow<Seen>(`seen:${char.id}:${id}`,s);
+      const prior=new Set(previous?.projection.comments.map(x=>x.id)||[]);
+      const received=material.comments.filter(x=>x.authorId!==char.id&&!prior.has(x.id)&&(x.replyTo?material.comments.some(parent=>parent.id===x.replyTo&&parent.authorId===char.id):material.owner===char.id));
+      if(received.length)record({...material,comments:material.comments},'实际读到别人对自己的评论或回复：'+[...new Set(received.map(x=>x.name))].join('、'));
+      await markSeen(s,c,char.id,material);
+    }
     const dedup = new Set<string>();
     for (const action of response.actions) {
       if(action && ['edit','delete'].includes(action.kind)){
@@ -445,6 +454,12 @@ export async function applyActivity(
         ...action,
         id: `${call.id}:${key}`,
       });
+      if(action.kind==='comment'){
+        const material=task.posts.find(p=>p.id===action.postId)!;
+        const updated=(await getRow<Post>(action.postId,s))!;
+        const own=updated.comments.filter(x=>x.id===`${call.id}:${key}`);
+        record({...material,comments:[...material.comments,...own]},action.replyTo?'本人回复了这条朋友圈中的评论':'本人评论了这条朋友圈');
+      }
     }
     let published: Post | undefined;
     if (response.post !== null && response.post !== undefined) {
@@ -464,6 +479,7 @@ export async function applyActivity(
         `post:${call.id}`,
       );
       await markSeen(s, c, char.id, published);
+      record(published,"本人发布朋友圈");
     }
     for (const item of response.important) {
       const id = item.postId === "new" ? published?.id : item.postId,
@@ -486,17 +502,9 @@ export async function applyActivity(
               ],
             };
       if (!known) throw Error("重要事件没有可读材料");
-      await addCard(
-        s,
-        tx,
-        c,
-        char.id,
-        known,
-        item.summary,
-        `${call.id}:${p.id}`,
-      );
-      card = true;
+      record(known,'重要见闻：'+String(item.summary||'').slice(0,1200));
     }
+    card=await saveActivityCard(tx,c,char.id,call.id,[...cardEntries.values()]);
     for (const event of task.events)
       if (browsed.has(event.postId)) s.put({ ...event, status: "done" });
     const old = await getRow<Activity>(`activity:${char.id}`, s);

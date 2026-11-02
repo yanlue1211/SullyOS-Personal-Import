@@ -4,6 +4,7 @@ import { normalizeApiConfig } from './apiConfigNormalize';
 import { neteaseCacheGet } from './neteaseCache';
 import {
   audioBlobToPayload,
+  assertAudioDescription,
   fetchSongAudio,
   fetchSongLyrics,
   findSongListenReview,
@@ -70,7 +71,9 @@ export const getOrAnalyzeSongSound = (song: Song, force = false): Promise<string
   if (inflight) return inflight;
   const task = (async () => {
     const cached = !force ? await getSongSoundCache(song.id) : '';
-    if (cached) {
+    let usable=!!cached;
+    if(cached){try{const parsed=JSON.parse(cached);assertAudioDescription(typeof parsed.description==='string'?parsed.description:cached);}catch(error){if(error instanceof SyntaxError){try{assertAudioDescription(cached);}catch{usable=false;}}else usable=false;}}
+    if (usable) {
       publishSongListenStatus('✅ 已复用歌曲客观分析：' + song.name);
       return cached;
     }
@@ -79,9 +82,10 @@ export const getOrAnalyzeSongSound = (song: Song, force = false): Promise<string
     publishSongListenStatus('⏳ 正在获取歌曲音频：' + song.name);
     const cfg = loadMusicCfgStandalone();
     const audio = await fetchSongAudio(song, cfg, config.songQuality || 'exhigh');
-    publishSongListenStatus('⏳ 已获取音频（' + (audio.blob.size / 1048576).toFixed(1) + 'MB），正在生成客观分析…');
+    const payload=await audioBlobToPayload(audio.blob,audio.nameHint);
+    publishSongListenStatus('⏳ 已获取音频（' + payload.format + '，' + (payload.bytes / 1048576).toFixed(1) + 'MB），正在生成客观分析…');
     const { describeAudioWithAudioApi } = await import('./audioApi');
-    const description = await describeAudioWithAudioApi(await audioBlobToPayload(audio.blob, audio.nameHint), config);
+    const description = await describeAudioWithAudioApi(payload, config);
     const previous = await getSongSoundRecord(song.id);
     const record = {
       description,
