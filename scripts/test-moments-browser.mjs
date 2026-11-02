@@ -99,6 +99,19 @@ try {
     .getByText("一条手动评论，不应触发模型。", { exact: false })
     .waitFor();
   assert.ok(await page.locator('.mm-comment-time').count() > 0);
+  assert.equal(await page.locator('.mm-delete-comment').count(),0);
+  const commentRow=page.locator('.mm-comment').filter({hasText:'一条手动评论，不应触发模型。'});
+  const bodyBounds=await commentRow.locator('button').boundingBox(),timeBounds=await commentRow.locator('time').boundingBox();
+  assert.ok(timeBounds.y>=bodyBounds.y+bodyBounds.height-1,'Timestamp must be below the full-width comment body');
+  await commentRow.dispatchEvent('pointerdown',{button:0,clientX:20,clientY:20,pointerType:'touch'});
+  const commentDialog=page.getByRole('dialog',{name:'评论操作'});await commentDialog.waitFor();
+  await commentRow.dispatchEvent('pointerup',{button:0});
+  await commentDialog.getByRole('button',{name:'修改评论',exact:true}).click();
+  await page.getByRole('textbox',{name:'修改评论正文'}).fill('长按修改后的完整评论。');
+  await commentDialog.getByRole('button',{name:'保存修改',exact:true}).click();
+  await page.getByText('长按修改后的完整评论。',{exact:false}).waitFor();
+  await page.screenshot({path:out+'/comments-edited-390.png'});
+
   const editedPost = page.locator('.mm-post').filter({hasText:'早起多出来的十分钟，用来吃一碗热面。'});
   await editedPost.getByRole('button',{name:'编辑朋友圈',exact:true}).click();
   await page.getByRole('textbox',{name:'朋友圈正文'}).fill('用户编辑了角色的早餐朋友圈。');

@@ -35,7 +35,7 @@ export function projectPost(
   // A reply cannot expose the name, quote or existence of a hidden parent.
   const memo = new Map<string, boolean>();
   const show = (x: Comment, path = new Set<string>()): boolean => {
-    if (!visible.has(x.id) || path.has(x.id)) return false;
+    if (x.deletedAt || !visible.has(x.id) || path.has(x.id)) return false;
     if (memo.has(x.id)) return memo.get(x.id)!;
     const parent = x.replyTo && p.comments.find((y) => y.id === x.replyTo);
     const yes =
@@ -52,3 +52,11 @@ export function projectPost(
 }
 export const postText = (p: Post) =>
   `${p.name}：${p.text}${p.media.map((m) => `\n[${m.kind === "video" ? "视频" : "图片"}] ${m.description || "尚未识别画面"}`).join("")}`;
+
+/** Previously witnessed ordinary-deleted material remains known, still subject to current friendship/privacy. */
+export function projectSeenPost(c:Config,viewer:string,current:Post,known:Post):Post|undefined{
+ const scope=projectPost(c,viewer,{...current,deletedAt:undefined,comments:current.comments.map(({deletedAt,...x})=>x)});if(!scope)return;
+ const allowed=new Set(scope.comments.map(x=>x.id));
+ return {...known,comments:known.comments.filter(x=>allowed.has(x.id)),likes:known.likes.filter(x=>viewer===current.owner||viewer===x.authorId||areFriends(c,viewer,x.authorId))};
+}
+export function activeComments(p:Post){const hidden=new Set(p.comments.filter(x=>x.deletedAt).map(x=>x.id));let changed=true;while(changed){changed=false;for(const x of p.comments)if(x.replyTo&&hidden.has(x.replyTo)&&!hidden.has(x.id)){hidden.add(x.id);changed=true;}}return p.comments.filter(x=>!hidden.has(x.id));}

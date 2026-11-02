@@ -100,6 +100,8 @@ export interface Media {
   name?: string;
 }
 export interface Comment {
+  deletedAt?:number;
+  editedAt?:number;
   id: string;
   authorId: string;
   name: string;
