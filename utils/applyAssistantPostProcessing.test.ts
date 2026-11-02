@@ -928,3 +928,22 @@ it('scheduling-only ordinary replies leave a neutral status instead of a blank t
  const rows=await DB.getRecentMessagesByCharId(id,20);expect(rows.filter(m=>m.metadata?.responseStatus?.kind==='read')).toHaveLength(proactive?0:1);
  }}finally{save.mockRestore();}
 });
+
+it('reports malformed status instead of silently clearing it or fabricating a read card', async () => {
+    const charId = `status-malformed-${Date.now()}`;
+    const ctx = makeCtx(charId, [quotedUserMsg]);
+    await applyAssistantPostProcessing('<回应状态>{"kind":"read"}</回应状态>', {...ctx, instantRender: true});
+    expect(ctx.hooks.addToast).toHaveBeenCalledWith('状态卡解析失败，请重试本轮回复。', 'error');
+    expect((await DB.getRecentMessagesByCharId(charId, 50)).filter(m => m.type === 'score_card')).toHaveLength(0);
+});
+it('lists future and overdue local tasks by character and cancellation persists', async () => {
+    const charId = `local-queue-${Date.now()}`;
+    const now = Date.now();
+    for (const [id, owner, dueAt] of [['late', charId, now - 5000], ['future', charId, now + 5000], ['other', charId+'other', now]] as const) {
+        await DB.saveScheduledMessage({id: charId+id, charId: owner, dueAt, content: id, createdAt: now});
+    }
+    expect((await DB.getScheduledMessages(charId)).map(m => m.content)).toEqual(['late', 'future']);
+    await DB.deleteScheduledMessage(charId+'future');
+    expect((await DB.getScheduledMessages(charId)).map(m => m.content)).toEqual(['late']);
+    expect(await DB.getScheduledMessages(charId+'other')).toHaveLength(1);
+});

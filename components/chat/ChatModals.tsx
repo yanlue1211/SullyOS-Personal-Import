@@ -1,3 +1,4 @@
+import LocalScheduledMessages from './LocalScheduledMessages';
 import { isEmotionFeatureOn } from '../../utils/scheduleFeature';
 
 import React, { useRef, useState } from 'react';
@@ -652,7 +653,8 @@ const ChatModals: React.FC<ChatModalsProps> = ({
                             )}
                         </div>
                     </ChatSettingsSection>
-                    <ChatSettingsSection title="扩展功能" summary="表情包识图、小红书与 HTML 卡片">
+                    <ChatSettingsSection title="扩展功能" summary="稍后联系、表情包识图与 HTML 卡片">
+                        {activeCharacter && <LocalScheduledMessages charId={activeCharacter.id} />}
                         <div className="pt-2 border-t border-slate-100">
                             <button type="button" role="switch" aria-checked={!!stickerVisionEnabled} onClick={onToggleStickerVision} className="w-full flex justify-between items-center text-xs font-bold text-slate-500">
                                 表情包真实识图<span className={`w-10 h-6 rounded-full p-1 ${stickerVisionEnabled?'bg-emerald-500':'bg-slate-200'}`}><span className={`block w-4 h-4 rounded-full bg-white transition-transform ${stickerVisionEnabled?'translate-x-4':''}`}/></span>
