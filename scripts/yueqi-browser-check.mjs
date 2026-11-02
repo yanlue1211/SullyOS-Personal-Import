@@ -13,7 +13,7 @@ try{
   page.on('pageerror',e=>errors.push(String(e)));
   await page.route('https://qa-yueqi.invalid/**',route=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({choices:[{finish_reason:'stop',message:{content:'测试摘要：两段合成测试音频均已播放，不涉及真实经历。'}}]})}));
   await page.goto('http://127.0.0.1:4183/test/fixtures/yueqi-browser.html');
-  await page.getByText('月亮今晚栖在哪里？').waitFor();
+  await page.getByText('月亮今天栖息在哪里').waitFor();
   const snap=async name=>{
    const overflow=await page.locator('.yueqi').evaluate(el=>el.scrollWidth>el.clientWidth+1);
    if(overflow)throw Error(`${width}px ${name} horizontal overflow`);
@@ -71,6 +71,16 @@ try{
 
    console.log('PASS: actual HTMLAudio playback, ordered two-clip completion, pause/resume, ducking, music fade-out and persisted audio.');
   }
+  if(await page.getByRole('button',{name:'完成',exact:true}).isVisible())await page.getByRole('button',{name:'完成',exact:true}).click();
+  await page.evaluate(()=>window.__yueqiQA.seedNight());
+  await page.getByRole('button',{name:'返回',exact:true}).click();await page.getByRole('button',{name:/月光拾音/}).click();await page.getByRole('button',{name:/声音语气验收/}).click();
+  await page.getByLabel('夜话语音识别方式').selectOption('audio');
+  await page.getByText(/今晚的文字 ·/).click();
+  const detail=page.locator('.yq-voice-detail');if(await detail.evaluate(el=>el.open))throw Error('Tone opened automatically');
+  await snap('voice-tone-folded');await detail.locator('summary').click();await detail.locator('p').waitFor({state:'visible'});await snap('voice-tone-open');
+  await page.reload();await page.getByRole('button',{name:/月光拾音/}).click();await page.getByRole('button',{name:/声音语气验收/}).click();await page.getByText(/今晚的文字 ·/).click();
+  if(await page.locator('.yq-voice-detail').evaluate(el=>el.open))throw Error('Tone did not reset to folded on reopen');
+  if(!await page.locator('.yq-voice-detail').textContent().then(text=>text.includes('声音轻柔')))throw Error('Tone lost after reload');
   await context.close();
  }
  if(errors.length)throw Error(errors.join('\n'));

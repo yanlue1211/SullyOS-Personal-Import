@@ -1,5 +1,5 @@
 export type Mode = 'story' | 'night';
-export interface Turn { id:string; role:'user'|'assistant'; text:string; at:number; source:'user'|'automatic'|'story'; played:boolean }
+export interface Turn { id:string; role:'user'|'assistant'; text:string; at:number; source:'user'|'automatic'|'story'; played:boolean; voiceAnalysis?:string; inputKind?:'audio'|'native'|'virtual' }
 export interface Clip { id:string; turnId:string; text:string; audio?:string; audioKey?:string; audioBytes?:number; seconds?:number; error?:string }
 export interface Session {
  id:string; charId:string; mode:Mode; scene?:'online'|'offline'; sleepDay:string; title:string; kind:string; theme:string;
@@ -28,3 +28,5 @@ export function newSession(charId:string,mode:Mode,options:Partial<Session>={}):
 export function sceneRules(scene:Session['scene']){return scene==='offline'
  ? '陪伴场景：月下相依（线下见面）。在本场角色扮演中，你与用户处于同一空间，可以自然地当面轻声交谈。不要说正在隔着屏幕或远程通话。亲密程度遵循既有关系，不默认同床、拥抱或任何身体接触；不代写用户的动作、感受、回答或同意。这是月栖的线下扮演场景，不证明现实世界发生了见面。'
  : '陪伴场景：隔屏伴月（线上陪伴）。你知道双方通过设备远程语音陪伴，不能真的触碰、看见或替用户做事；可以表达愿望和想象，但要明确是想象，不把拥抱等描述成实际发生。';}
+
+export function turnContext(t:Turn):string{return t.role==='user'&&t.voiceAnalysis?`${t.text}\n[声音细节，非用户原话] ${t.voiceAnalysis}`:t.text;}

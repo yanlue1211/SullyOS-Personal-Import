@@ -1,7 +1,7 @@
 name: Yueqi verification
 on:
   push:
-    branches: [personal/yueqi, personal/yueqi-music]
+    branches: [personal/yueqi, personal/yueqi-music, personal/yueqi-audio-input]
   pull_request:
     branches: [personal/audio-listening]
     paths: ['features/yueqi/**', 'apps/YueqiApp*', 'components/chat/YueqiCard.tsx', 'utils/yueqi*', 'scripts/yueqi-browser-check.mjs', 'test/fixtures/yueqi-browser*', '.github/workflows/yueqi-verify.yml']
@@ -24,7 +24,7 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm vitest run utils/yueqi.test.ts utils/yueqiRuntime.test.ts utils/yueqiContext.test.ts utils/yueqiUI.test.tsx utils/contextPipeline.test.ts utils/contextWorldbook.test.ts utils/experience.test.ts utils/chatInputInteraction.test.ts
+      - run: pnpm vitest run utils/yueqiAudioInput.test.ts utils/yueqi.test.ts utils/yueqiRuntime.test.ts utils/yueqiContext.test.ts utils/yueqiUI.test.tsx utils/contextPipeline.test.ts utils/contextWorldbook.test.ts utils/experience.test.ts utils/chatInputInteraction.test.ts --maxWorkers=2 --minWorkers=1
       - run: pnpm build
       - name: Install isolated browser test runtime
         run: |

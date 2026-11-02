@@ -13,10 +13,10 @@ const chars=[{id:'yueqi-qa-a',name:'阿源',avatar,memories:[],activeMemoryMonth
 for(const char of chars)await DB.saveCharacter(char as any);
 if(!(await storage.list()).length){let s=addReply(newSession(chars[0].id,'story',{title:'海边的小羊与灯塔',status:'ended',elapsedMs:20*60000}),'那晚，一只小羊在海边找到了一座灯塔。它终于明白，总有一盏灯，会为晚归的人亮着。','story');s.summary='虚构故事：小羊寻找灯塔。用户没有发言，不推断用户是否睡着。';await storage.save(s);}
 moon.session=null;
-createRoot(document.getElementById('root')!).render(<OSPreviewProvider value={{characters:chars,apiConfig:{baseUrl:'https://qa-yueqi.invalid/v1',apiKey:'TEST-ONLY',model:'qa-only'},userProfile:{name:'你'},groups:[],realtimeConfig:{},closeApp:()=>{}} as any}><YueqiApp/></OSPreviewProvider>);
+createRoot(document.getElementById('root')!).render(<OSPreviewProvider value={{characters:chars,apiConfig:{baseUrl:'https://qa-yueqi.invalid/v1',apiKey:'TEST-ONLY',model:'qa-only',audioApi:{enabled:true,baseUrl:'https://qa-yueqi.invalid/v1',apiKey:'TEST-ONLY',model:'qa-audio'}},userProfile:{name:'你'},groups:[],realtimeConfig:{},closeApp:()=>{}} as any}><YueqiApp/></OSPreviewProvider>);
 
 // Only this isolated QA fixture exposes controls; the production App has no test hook.
-(window as any).__yueqiQA={moon,storage,async seedAudio(){
+(window as any).__yueqiQA={moon,storage,async seedNight(){const s=newSession(chars[0].id,'night',{title:'声音语气验收',status:'paused',turns:[{id:'voice-qa',role:'user',text:'我盖好被子了。',voiceAnalysis:'声音轻柔，语速放慢，稍有困意。',inputKind:'audio',at:Date.now(),source:'user',played:true}]});await storage.save(s);await moon.select(s);return s.id;},async seedAudio(){
  const samples=new Float32Array(16000*2);for(let i=0;i<samples.length;i++)samples[i]=Math.sin(i*2*Math.PI*220/16000)*.025;
  const audio=await blobData(encodeWavFromFloat32(samples,16000,16000));
  let session=addReply(newSession(chars[0].id,'story',{title:'真实播放器验收',status:'ready',targetMinutes:1}),'第一段。','story');
