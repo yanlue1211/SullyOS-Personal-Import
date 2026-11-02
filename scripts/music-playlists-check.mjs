@@ -8,6 +8,13 @@ try{
   const context=await browser.newContext({viewport:{width,height:844},isMobile:true,hasTouch:true});
   await context.addInitScript(()=>localStorage.setItem('sully_music_cfg_v1',JSON.stringify({workerUrl:'https://qa-music.invalid',cookie:'TEST-ONLY',quality:'standard'})));
   const page=await context.newPage(),errors=[];let indexCalls=0;
+  const revealImportedSong=async()=>{
+   const target=page.getByRole('button',{name:'播放 自己导入的歌',exact:true});
+   await page.getByRole('button',{name:'播放 云端歌曲1',exact:true}).waitFor();
+   if(await page.getByRole('button',{name:/^播放 云端歌曲/}).count()!==50)throw Error('首次展开未限制为50首');
+   for(let batch=0;batch<3&&!await target.count();batch++)await page.getByRole('button',{name:/^继续显示/}).click();
+   await target.waitFor();
+  };
   page.on('pageerror',e=>errors.push(String(e)));
   await page.route('https://qa-music.invalid/**',async route=>{
    const url=route.request().url(),body=route.request().postDataJSON()||{};let result={code:200};
@@ -33,11 +40,11 @@ try{
   await page.getByLabel('搜索添加歌曲').fill('搜索加歌');await page.getByRole('dialog',{name:'音乐管理'}).getByRole('button',{name:'搜索',exact:true}).click();await page.getByRole('dialog',{name:'音乐管理'}).getByRole('button',{name:/搜索加歌/}).waitFor();await page.getByRole('dialog',{name:'音乐管理'}).getByRole('button',{name:/搜索加歌/}).locator('..').getByRole('button',{name:'加入',exact:true}).click();
   await page.getByLabel('选择歌单').locator('option',{hasText:'（127）'}).waitFor({state:'attached'});
   await page.getByRole('dialog',{name:'音乐管理'}).getByRole('button',{name:'返回',exact:true}).click();
-  await page.getByRole('button',{name:'展开歌单 原有网易歌单'}).click();await page.getByRole('button',{name:'播放 自己导入的歌',exact:true}).waitFor();await page.getByRole('button',{name:'播放 搜索加歌',exact:true}).waitFor();
+  await page.getByRole('button',{name:'展开歌单 原有网易歌单'}).click();await revealImportedSong();await page.getByRole('button',{name:'播放 搜索加歌',exact:true}).waitFor();
   if(await page.getByRole('button',{name:'展开歌单 原有网易歌单'}).count()!==1)throw Error('原歌单被复制成两张卡片');
   await page.getByRole('button',{name:'同步网易云歌单',exact:true}).click();await page.waitForFunction(()=>[...document.querySelectorAll('button')].some(b=>b.getAttribute('aria-label')==='同步网易云歌单'&&!b.disabled));await page.waitForFunction(async()=>JSON.parse(await window.__libraryQA.DB.getAsset('music-user-playlists'))[0].songs.length===127);
   await page.reload();await page.getByRole('button',{name:'展开歌单 原有网易歌单'}).waitFor();if(indexCalls!==3)throw Error('重进页面重复请求歌单索引');
-  await page.getByRole('button',{name:'展开歌单 原有网易歌单'}).click();await page.getByRole('button',{name:'播放 自己导入的歌'}).waitFor();
+  await page.getByRole('button',{name:'展开歌单 原有网易歌单'}).click();await revealImportedSong();
   await page.getByRole('button',{name:'同步网易云歌单',exact:true}).click();await page.waitForFunction(()=>[...document.querySelectorAll('button')].some(b=>b.getAttribute('aria-label')==='同步网易云歌单'&&!b.disabled));await page.waitForFunction(async()=>JSON.parse(await window.__libraryQA.DB.getAsset('music-user-playlists'))[0].songs.length===127);if(indexCalls!==4)throw Error('手动同步没有拉取新索引');
   if(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1))throw Error('歌单页面横向溢出');if(errors.length)throw Error(errors.join('\n'));await context.close();
  }
