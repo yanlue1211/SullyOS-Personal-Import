@@ -184,6 +184,7 @@ export interface Log {
   at: number;
   text: string;
 }
+/** Legacy backup compatibility only. Never created or injected into model context. */
 export interface Correction { id:string; kind:"correction"; owner:string; at:number; postId:string; text:string }
 export type Row =
   | Correction

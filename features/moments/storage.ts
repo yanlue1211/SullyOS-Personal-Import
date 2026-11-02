@@ -26,11 +26,10 @@ import { areFriends, canRead, projectPost, postText } from "./permissions";
 export async function transaction<T>(
   fn: (s: IDBObjectStore, tx: IDBTransaction) => Promise<T>,
   write = false,
-  memory = false,
 ): Promise<T> {
   const db = await openDB(),
     tx = db.transaction(
-      write ? [TABLE, "characters", "messages", "assets", ...(memory ? ["memory_nodes","memory_vectors","memory_links"] : [])] : [TABLE],
+      write ? [TABLE, "characters", "messages", "assets"] : [TABLE],
       write ? "readwrite" : "readonly",
     );
   const done = completed(tx);
