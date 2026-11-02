@@ -9,7 +9,7 @@ it('matches addressed nicknames without treating ordinary single characters as n
  expect(resolveMomentsNames('丁程鑫和小贺朋友圈',chars)).toEqual([]);
 });
 it('treats a unique single-character account variant as the same identity',()=>{
- for(const address of ['源源','张真源','小源','源的'])expect(resolveMomentsNames(address+'朋友圈',chars).map(x=>x.name)).toEqual(['张真源','源']);
+ for(const address of ['源源','张真源','小源','源的','你去看看源的'])expect(resolveMomentsNames(address+'朋友圈',chars).map(x=>x.name)).toEqual(['张真源','源']);
 });
 it('does not resolve ambiguous shared-character nicknames',()=>{
  expect(resolveMomentsNames('小贺朋友圈',[...chars,{id:'other',name:'贺小明'}])).toEqual([]);

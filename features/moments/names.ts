@@ -13,7 +13,7 @@ export function resolveMomentsNames<T extends {id:string;name:string}>(text:stri
   if([...name].length>1)return text.includes(name);
   const escaped=name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
   if(!/^[\p{Script=Han}]$/u.test(name))return new RegExp(`(?:^|[^a-zA-Z0-9])${escaped}(?=$|[^a-zA-Z0-9])`,'i').test(text);
-  return new RegExp(`(?:^|[^\\p{L}\\p{N}])${escaped}(?=$|[^\\p{L}\\p{N}]|的|说|发|在|朋友圈)`,'u').test(text);
+  return new RegExp(`(?:^|[^\\p{L}\\p{N}]|看看|看一下|去看|去刷|查看|翻翻)${escaped}(?=$|[^\\p{L}\\p{N}]|的|说|发|在|朋友圈)`,'u').test(text);
  };
  let matches=[...groups].filter(([name,members])=>hit(name)||members.some(m=>hit(m.name)));
  const addressed=matches.flatMap(([name,members])=>[name,...members.map(m=>m.name)]).filter(n=>n.length>1).reduce((body,n)=>body.split(n).join(' '),text);
