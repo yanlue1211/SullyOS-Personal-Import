@@ -46,3 +46,18 @@ export function stripResponseStatus(raw:string):string{
  try{const value=JSON.parse(text);if(value?.type==='response_status'&&normalizeResponseStatus(value))return '';}catch{/* ordinary prose */}
  return text;
 }
+
+/** Outreach may show a busy card, but must never deliver a read-without-reply status. */
+export function proactiveResponseText(raw:string):string {
+ raw=raw.replace(/<(think|thinking|thought)>[\s\S]*?(?:<\/\1>|$)/gi,'').trim();
+ const card=extractResponseStatus(raw);
+ if(card)return card.kind==='busy'?`<回应状态>${JSON.stringify(card)}</回应状态>`:'';
+ try{const card=normalizeResponseStatus(JSON.parse(raw));if(card)return card.kind==='busy'?`<回应状态>${JSON.stringify(card)}</回应状态>`:'';}catch{}
+ const text=stripResponseStatus(raw);
+ // Context renderings copied from history are internal state, never spoken messages.
+ if(/^\s*\[已读不回\]/.test(text))return '';
+ const busy=text.match(/^\s*\[忙碌状态[^\]]*\]([\s\S]*)$/);
+ if(busy){const body=busy[1].trim(),reason=body.split('[状态内情，非聊天台词]')[1]?.trim()||body;if(!reason)return '';const footer=/状态：([^。]+)。/.exec(body)?.[1],eta=/预计有空：([^（。]+)/.exec(body)?.[1];return `<回应状态>${JSON.stringify(normalizeResponseStatus({kind:'busy',reason,footer,eta}))}</回应状态>`;}
+ return text;
+}
+export const PROACTIVE_STATUS_SYSTEM = `\n【主动联系的回应状态】本轮是你主动联系对方，不能选择已读不回，也不能复述历史中的[已读不回]、[未说出口的内情]等上下文说明。如果确实忙碌，可以只输出 <回应状态>{"kind":"busy","reason":"第三人称的实际忙碌活动","footer":"忙碌中","eta":"暂不确定"}</回应状态>；卡片内情不是聊天台词，不另附心声。否则自然主动说话。`;

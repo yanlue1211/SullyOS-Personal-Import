@@ -876,7 +876,7 @@ describe('exclusive response status cards', () => {
     });
 });
 
-it('proactive deliveries suppress both statuses, while user-triggered instant chat retains them',async()=>{
+it('proactive deliveries suppress read but retain busy, while instant chat retains both',async()=>{
  for(const kind of ['read','busy']){
   const raw=`<回应状态>${JSON.stringify({kind,reason:'暂时不说话',footer:'稍后',eta:'一会儿'})}</回应状态>`;
   for(const route of ['v1','v2','instant']){
@@ -885,7 +885,7 @@ it('proactive deliveries suppress both statuses, while user-triggered instant ch
    else ctx.mcdInheritMeta={source:'active_msg_2',activeMsg2:{messageType:route==='instant'?'instant':'scheduled'}};
    await applyAssistantPostProcessing(raw,{...ctx,instantRender:true});
    const rows=await DB.getRecentMessagesByCharId(id,50);
-   expect(rows.filter(m=>m.type==='score_card')).toHaveLength(route==='instant'?1:0);
+   expect(rows.filter(m=>m.type==='score_card')).toHaveLength(route==='instant'||kind==='busy'?1:0);
    expect(rows.filter(m=>m.type==='text')).toHaveLength(0);
   }
  }

@@ -635,6 +635,9 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const modeRef = useRef(playMode); modeRef.current = playMode;
   const cfgRef = useRef(cfg); cfgRef.current = cfg;
   const endedHandlerRef = useRef<() => void>(() => {});
+  const failedHandlerRef = useRef<(error?:any) => void>(() => {});
+  const playAttemptRef = useRef(0);
+  const failedSongsRef = useRef(new Set<number>());
 
   // 初始化 audio（仅 Provider 生命周期创建一次）
   useEffect(() => {
@@ -648,7 +651,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const onTime = () => setProgress(a.currentTime);
     const onMeta = () => setDuration(a.duration || 0);
     // 播放出错 → 清掉 playing 状态 + 清掉"一起听"伙伴（防止 UI 卡在残留状态）
-    const onErr = () => { setPlaying(false); setListeningTogetherWith([]); toast('播放失败', 'error'); };
+    const onErr = () => { if(a.error)failedHandlerRef.current(a.error); };
     const onEnd = () => { endedHandlerRef.current(); };
 
     a.addEventListener('play', onPlay);
@@ -671,20 +674,39 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, []);
 
   // 播放单曲
-  const playSong = useCallback(async (song: Song, opts: { alsoSetQueue?: boolean; replaceQueue?: Song[]; startIdx?: number } = {}) => {
+  const playSong = useCallback(async (song: Song, opts: { alsoSetQueue?: boolean; replaceQueue?: Song[]; startIdx?: number; recovering?:boolean } = {}):Promise<void> => {
     const { alsoSetQueue = true, replaceQueue, startIdx } = opts;
+    const attempt=++playAttemptRef.current;
+    if(!opts.recovering)failedSongsRef.current.clear();
+    const failed=(error?:any)=>{
+      if(attempt!==playAttemptRef.current)return;
+      if(error?.name==='AbortError')return;
+      if(error?.name==='NotAllowedError'){setPlaying(false);setLoadingSong(false);toast('请点击播放以继续音乐','info');return;}
+      if(failedSongsRef.current.has(song.id))return;
+      failedSongsRef.current.add(song.id);
+      setPlaying(false);setLoadingSong(false);setListeningTogetherWith([]);
+      const q=queueRef.current,cur=q.findIndex(s=>s.id===song.id);
+      const next=Array.from({length:q.length},(_,i)=>(Math.max(0,cur)+i+1)%q.length).find(i=>!failedSongsRef.current.has(q[i].id));
+      if(next===undefined){toast('当前队列歌曲均无法播放，已暂停','error');return;}
+      toast('播放失败，已跳过这首歌','info');idxRef.current=next;setIdx(next);
+      void playSong(q[next],{alsoSetQueue:false,recovering:true});
+    };
+    failedHandlerRef.current=failed;
+    if(audioRef.current){const a=audioRef.current;const previous=a.src;a.pause();a.removeAttribute('src');a.load();if(previous.startsWith('blob:'))URL.revokeObjectURL(previous);}
 
     if (replaceQueue) {
+      queueRef.current=replaceQueue;
       setQueueState(replaceQueue);
+      idxRef.current=typeof startIdx==='number'?startIdx:replaceQueue.findIndex(s=>s.id===song.id);
       setIdx(typeof startIdx === 'number' ? startIdx : replaceQueue.findIndex(s => s.id === song.id));
     } else if (alsoSetQueue) {
       const qnow = queueRef.current;
       const existing = qnow.findIndex(s => s.id === song.id);
       if (existing >= 0) {
-        setIdx(existing);
+        idxRef.current=existing;setIdx(existing);
       } else {
-        setQueueState(q => [...q, song]);
-        setIdx(qnow.length);
+        queueRef.current=[...qnow,song];setQueueState(queueRef.current);
+        idxRef.current=qnow.length;setIdx(qnow.length);
       }
     }
 
@@ -697,17 +719,16 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           | { blob?: Blob; mimeType?: string }
           | Blob
           | null : null;
+        if(attempt!==playAttemptRef.current)return;
         const blob: Blob | null = entry instanceof Blob ? entry : (entry?.blob instanceof Blob ? entry.blob : null);
         if (!blob && !song.remoteAudioUrl) {
-          toast('本地歌曲文件丢失', 'error');
-          setLoadingSong(false);
-          return;
+          throw Error('本地歌曲文件丢失');
         }
         const prevSrc = a.src;
         if (prevSrc.startsWith('blob:')) URL.revokeObjectURL(prevSrc);
         if(song.remoteAudioUrl && new URL(song.remoteAudioUrl).protocol!=='https:')throw Error('歌曲链接需要使用 HTTPS');
         a.src = song.remoteAudioUrl || URL.createObjectURL(blob!);
-        a.play().catch(() => {});
+        a.play().catch(failed);
 
         // ── 本地歌词时间分布 ──
         // MiniMax / ACE-Step 不返回带时间戳的歌词，但我们写歌时就有原文。
@@ -715,6 +736,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         // 实现「跟着歌词滚动」的网易云播放器体验。
         if (song.localLyrics) {
           const distribute = () => {
+            if(attempt!==playAttemptRef.current)return;
             const dur = a.duration;
             if (!isFinite(dur) || dur <= 0) return;
             const lines = song.localLyrics!
@@ -778,15 +800,14 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         musicApi.songUrl(cfgRef.current, song.id),
         musicApi.lyric(cfgRef.current, song.id).catch(() => null),
       ]);
+      if(attempt!==playAttemptRef.current)return;
       const url: string | null = urlRes?.data?.[0]?.url || null;
       if (!url) {
-        toast(urlRes?.data?.[0]?.fee && !cfgRef.current.cookie ? '需要会员 cookie' : '暂无播放地址', 'error');
-        setLoadingSong(false);
-        return;
+        throw Error(urlRes?.data?.[0]?.fee && !cfgRef.current.cookie ? '需要会员 cookie' : '暂无播放地址');
       }
       const a = audioRef.current!;
       a.src = url.replace(/^http:\/\//i, 'https://');
-      a.play().catch(() => {});
+      a.play().catch(failed);
       if (lyricRes) {
         setLyric(parseLyric(lyricRes?.lrc?.lyric || ''));
         setTlyric(parseLyric(lyricRes?.tlyric?.lyric || ''));
@@ -810,9 +831,9 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         } catch {}
       }
     } catch (e: any) {
-      toast(`播放失败：${e.message}`, 'error');
+      failed(e);
     } finally {
-      setLoadingSong(false);
+      if(attempt===playAttemptRef.current)setLoadingSong(false);
     }
   }, [toast]);
 
@@ -842,7 +863,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   useEffect(() => {
     endedHandlerRef.current = () => {
       if (modeRef.current === 'single') {
-        const a = audioRef.current; if (a) { a.currentTime = 0; a.play().catch(() => {}); }
+        const a = audioRef.current; if (a) { a.currentTime = 0; a.play().catch(error=>failedHandlerRef.current(error)); }
         return;
       }
       nextSong();
@@ -858,7 +879,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (cur) playSong(cur, { alsoSetQueue: false });
       return;
     }
-    if (a.paused) a.play().catch(() => {}); else a.pause();
+    if (a.paused) a.play().catch(error=>failedHandlerRef.current(error)); else a.pause();
   }, [playSong]);
 
   const seek = useCallback((pct: number) => {
@@ -879,7 +900,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           if (cur) playSong(cur, { alsoSetQueue: false });
           return;
         }
-        if (a.paused) a.play().catch(() => {});
+        if (a.paused) a.play().catch(error=>failedHandlerRef.current(error));
       });
       ms.setActionHandler('pause', () => {
         const a = audioRef.current; if (a && !a.paused) a.pause();

@@ -1,5 +1,5 @@
 import {readRealMedia,realMediaContent} from '../features/experience/format';
-import { RESPONSE_STATUS_SYSTEM } from '../features/personal/responseStatus/protocol';
+import { RESPONSE_STATUS_SYSTEM, PROACTIVE_STATUS_SYSTEM } from '../features/personal/responseStatus/protocol';
 import { commerceContext } from './personalCommerce';
 import { getShareCardImageUrls } from './shareCardImages';
 import { INNER_VOICE_SYSTEM, innerVoiceContext } from '../features/personal/innerVoice/protocol';
@@ -1097,7 +1097,7 @@ ${voiceActingGuide()}`;
             .join(' ');
         console.log(`⏱ [buildSystemPrompt] total=${perfTotal}ms | stable=${baseSystemPrompt.length}ch volatile=${volatileState.length}ch | ${timingStr}`);
 
-        return { stable: baseSystemPrompt + (promptOptions?.appRules !== undefined ? '' : VIRTUAL_MEDIA_GUIDE + RECORDING_HISTORY_GUIDE + INNER_VOICE_SYSTEM + (!forFirePack&&promptOptions?.responseStatusEnabled!==false?RESPONSE_STATUS_SYSTEM:'')), volatileState, recencyTail, history: context.history };
+        return { stable: baseSystemPrompt + (promptOptions?.appRules !== undefined ? '' : VIRTUAL_MEDIA_GUIDE + RECORDING_HISTORY_GUIDE + INNER_VOICE_SYSTEM + (forFirePack||promptOptions?.responseStatusEnabled===false?PROACTIVE_STATUS_SYSTEM:RESPONSE_STATUS_SYSTEM)), volatileState, recencyTail, history: context.history };
     },
 
     // 格式化消息历史

@@ -259,7 +259,7 @@ describe('SAR public introduction', () => {
 
 it('read/busy capability remains in ordinary chat but not either proactive prompt',async()=>{
     expect(await build(baseChar(),false)).toContain('<回应状态>');
-    expect(await build(baseChar(),true)).not.toContain('<回应状态>');
+    expect(await build(baseChar(),true)).toContain('本轮是你主动联系对方');
     const parts=await ChatPrompts.buildSystemPromptParts(baseChar(),userProfile,[],[],[],[],realtimeConfig,undefined,undefined,undefined,undefined,undefined,{responseStatusEnabled:false});
-    expect(parts.stable).not.toContain('<回应状态>');
+    expect(parts.stable).toContain('不能选择已读不回');
 });
