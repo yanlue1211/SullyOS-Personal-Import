@@ -12,7 +12,7 @@ export async function readPersonalPlaylists():Promise<PersonalPlaylist[]>{
 function announce(){if(typeof window==='undefined')return;window.dispatchEvent(new Event(PERSONAL_PLAYLIST_EVENT));try{localStorage.setItem(PERSONAL_PLAYLIST_EVENT,crypto.randomUUID());}catch{}}
 export function updatePersonalPlaylists(change:(current:PersonalPlaylist[])=>PersonalPlaylist[]):Promise<PersonalPlaylist[]>{
  const operation=async()=>{const next=change(await readPersonalPlaylists());await DB.saveAsset(PERSONAL_PLAYLIST_KEY,JSON.stringify(next));announce();return next;};
- const run=()=>typeof navigator!=='undefined'&&navigator.locks?navigator.locks.request(PERSONAL_PLAYLIST_KEY,operation):operation();
+ const run=async():Promise<PersonalPlaylist[]>=>typeof navigator!=='undefined'&&navigator.locks?await navigator.locks.request(PERSONAL_PLAYLIST_KEY,operation):await operation();
  const job=writes.then(run,run);writes=job.catch(()=>{});return job;
 }
 export const savePersonalPlaylists=(playlists:PersonalPlaylist[])=>updatePersonalPlaylists(()=>playlists);
