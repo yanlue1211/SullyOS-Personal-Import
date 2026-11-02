@@ -17,8 +17,13 @@ try{
   await page.locator('.launcher-pages').evaluate(el=>{el.scrollLeft=el.clientWidth*3;});await page.waitForTimeout(500);
   const source=pages.nth(3).locator('[data-launcher-kind="app"]:not([data-launcher-empty])').first();
   const target=pages.nth(3).locator('[data-launcher-empty]').last();const sourceId=await source.getAttribute('data-launcher-item'),targetId=await target.getAttribute('data-launcher-item');
-  const from=await source.boundingBox(),to=await target.boundingBox();
-  await page.mouse.move(from.x+from.width/2,from.y+from.height/2);await page.mouse.down();await page.waitForTimeout(600);await page.mouse.move(to.x+to.width/2,to.y+to.height/2,{steps:15});await page.mouse.up();await page.getByRole('button',{name:'完成',exact:true}).click();
+  await source.scrollIntoViewIfNeeded();await page.waitForTimeout(500);
+  const from=await source.boundingBox();console.log('drag source',width,from,await page.locator('.launcher-pages').evaluate(el=>el.scrollLeft));
+  await page.screenshot({path:`test-results/lyrics-launcher/before-${width}.png`});
+  await page.mouse.move(from.x+from.width/2,from.y+from.height/2);await page.mouse.down();await page.waitForTimeout(850);
+  await page.screenshot({path:`test-results/lyrics-launcher/held-${width}.png`});
+  await page.getByRole('button',{name:'完成',exact:true}).waitFor({timeout:3000});
+  const to=await target.boundingBox();await page.mouse.move(to.x+to.width/2,to.y+to.height/2,{steps:15});await page.mouse.up();await page.getByRole('button',{name:'完成',exact:true}).click();
   const stored=await page.evaluate(()=>JSON.parse(localStorage.getItem('desktop-qa-theme')).launcherAppSlots);
   assert(stored.includes(sourceId)&&stored.includes(targetId),'slot state not persisted');
   const moved=await pages.nth(3).locator('[data-launcher-kind="app"]').evaluateAll(nodes=>nodes.map(n=>n.dataset.launcherItem));assert(moved.at(-1)===sourceId,'drop on empty cell failed');
