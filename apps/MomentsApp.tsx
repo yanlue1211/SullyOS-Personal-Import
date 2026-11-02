@@ -822,7 +822,7 @@ export default function MomentsApp() {
                       <label className="mm-setting-row" key={key}>
                         {["发布倾向", "浏览倾向", "互动倾向"][i]}
                         <select
-                          value={key === "joinChance" ? effectiveJoinChance(participant.habits) : participant.habits[key]}
+                          value={participant.habits[key]}
                           disabled={busy}
                           onChange={(e) => {
                             const value = e.currentTarget.value;
@@ -917,7 +917,7 @@ export default function MomentsApp() {
                         min="0"
                         max={i < 2 ? 23 : 1}
                         step={i < 2 ? 1 : 0.01}
-                        value={key === "joinChance" ? effectiveJoinChance(participant.habits) : participant.habits[key]}
+                        value={participant.habits[key]}
                         disabled={busy}
                         onChange={(e) => {
                           const n = Number(e.target.value);
