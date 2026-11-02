@@ -21,12 +21,26 @@ export function normalizeResponseStatus(value: unknown): ResponseStatus | undefi
     footer: clean(v.footer, 100) || (v.kind === 'read' ? '暂时留白' : '忙碌中'),
     eta: v.kind === 'busy' ? clean(v.eta, 100) || '暂不确定' : '' };
 }
+const withoutReasoning = (raw: string) => raw.replace(/<(think|thinking|thought)>[\s\S]*?(?:<\/\1>|$)/gi, '');
+const parseStatusPayload = (raw: string) => {
+  try { return normalizeResponseStatus(JSON.parse(raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, ''))); }
+  catch { return undefined; }
+};
 export function extractResponseStatus(raw: string): ResponseStatus | undefined {
-  // Reasoning examples are not actual decisions.
-  const text = raw.replace(/<(think|thinking|thought)>[\s\S]*?(?:<\/\1>|$)/gi, '');
-  for (const match of text.matchAll(/<回应状态\s*>([\s\S]*?)<\/回应状态\s*>/g)) {
-    try { const card = normalizeResponseStatus(JSON.parse(match[1].trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, ''))); if (card) return card; } catch {}
+  const text = withoutReasoning(raw);
+  // Accept a complete JSON object even when the closing wrapper was omitted.
+  // Never repair truncated JSON or invent a missing decision/reason.
+  for (const match of text.matchAll(/<回应状态\s*>([\s\S]*?)(?:<\/回应状态\s*>|$)/g)) {
+    const card = parseStatusPayload(match[1]);
+    if (card) return card;
   }
+  // Some providers return the whole structured response without its XML wrapper.
+  return parseStatusPayload(text);
+}
+export function hasMalformedResponseStatus(raw: string): boolean {
+  const text = withoutReasoning(raw);
+  return !extractResponseStatus(text) && (/<回应状态(?:\s*>|$)/.test(text)
+    || /^\s*(?:```(?:json)?\s*)?\{[\s\S]*"type"\s*:\s*"response_status"/.test(text));
 }
 export function readResponseStatus(content: string, metadata?: Record<string, any>): ResponseStatus | undefined {
   try { const raw = metadata?.responseStatus || JSON.parse(content); return raw?.type === 'response_status' ? normalizeResponseStatus(raw) : undefined; } catch { return; }

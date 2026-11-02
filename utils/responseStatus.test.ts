@@ -63,3 +63,17 @@ it('only allows top-level scheduling next to a status, never instructions hidden
  expect(proactiveResponseText(`${tag}\n${schedule}`)).toBe(schedule);
  expect(extractResponseStatus(proactiveResponseText(`<回应状态>${JSON.stringify({...card,kind:'busy'})}</回应状态>\n${schedule}`))?.kind).toBe('busy');
 });
+
+it('accepts complete structured/fenced payloads and complete JSON missing its XML closing tag', () => {
+  for (const raw of [JSON.stringify(card), '```json\n'+JSON.stringify(card)+'\n```', '<回应状态>'+JSON.stringify(card)]) {
+    expect(extractResponseStatus(raw)).toEqual(card);
+  }
+});
+it('detects malformed decisions without converting blank text or reasoning into a card', async () => {
+  const { hasMalformedResponseStatus } = await import('../features/personal/responseStatus/protocol');
+  for (const raw of ['<回应状态>{"kind":"read"}</回应状态>', '<回应状态>{"kind":', '{"type":"response_status","kind":"busy"}']) {
+    expect(hasMalformedResponseStatus(raw)).toBe(true);
+    expect(extractResponseStatus(raw)).toBeUndefined();
+  }
+  for (const raw of ['', '正常回复', '<think><回应状态>{"kind":</think>', tag]) expect(hasMalformedResponseStatus(raw)).toBe(false);
+});

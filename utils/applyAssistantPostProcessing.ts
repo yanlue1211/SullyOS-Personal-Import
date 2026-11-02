@@ -1,5 +1,5 @@
 import { consumeWorkroomActions } from '../features/workroom/bridge';
-import { extractResponseStatus,proactiveResponseText,isProactiveStatusDelivery,statusScheduleActions,isScheduleOnlyResponse } from '../features/personal/responseStatus/protocol';
+import { hasMalformedResponseStatus,extractResponseStatus,proactiveResponseText,isProactiveStatusDelivery,statusScheduleActions,isScheduleOnlyResponse } from '../features/personal/responseStatus/protocol';
 import { consumeCommerceAction } from './personalCommerce';
 import { extractInnerVoice, type InnerVoice } from '../features/personal/innerVoice/protocol';
 import { withReplyCancellation, type ReplyRun } from './chatReplyCancellation';
@@ -800,6 +800,11 @@ export async function applyAssistantPostProcessing(
     };
 
     // Status is the entire visible reply; scheduling is the sole independent exception.
+    if (responseStatusAllowed && hasMalformedResponseStatus(rawAiContent)) {
+        addToast('状态卡解析失败，请重试本轮回复。', 'error');
+        // An explicitly typed broken JSON payload contains private status, not spoken text.
+        if (!/<回应状态(?:\s*>|$)/.test(rawAiContent)) rawAiContent = '';
+    }
     const combinedStatusActions=rawAiContent+'\n'+replayedTagPrefix;
     const latestChatRole=contextMsgs.filter(message=>message.role==='user'||message.role==='assistant').at(-1)?.role;
     const responseStatus = extractResponseStatus(rawAiContent) || (responseStatusAllowed&&latestChatRole==='user'&&isScheduleOnlyResponse(combinedStatusActions)

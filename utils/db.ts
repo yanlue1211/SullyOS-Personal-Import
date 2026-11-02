@@ -122,6 +122,7 @@ const API_CALL_LOG_MAX_AGE_MS = 5 * 24 * 60 * 60 * 1000;
 const API_CALL_LOG_MAX_ENTRIES = 2000;
 
 export interface ScheduledMessage {
+    notificationId?: number;
     id: string;
     charId: string;
     content: string;
@@ -2025,6 +2026,16 @@ export const DB = {
           transaction.oncomplete = () => resolve();
           transaction.onerror = () => reject(transaction.error || new Error('定时消息未能保存'));
           transaction.onabort = () => reject(transaction.error || new Error('定时消息未能保存'));
+      });
+  },
+
+  getScheduledMessages: async (charId: string): Promise<ScheduledMessage[]> => {
+      const db = await openDB();
+      return new Promise((resolve, reject) => {
+          const request = db.transaction(STORE_SCHEDULED, 'readonly').objectStore(STORE_SCHEDULED)
+              .index('charId').getAll(IDBKeyRange.only(charId));
+          request.onsuccess = () => resolve((request.result as ScheduledMessage[]).sort((a, b) => a.dueAt - b.dueAt));
+          request.onerror = () => reject(request.error);
       });
   },
 
