@@ -1,3 +1,5 @@
+import {saveActivityCard} from "./cards";
+import {resolveMomentsNames} from "./names";
 import { momentsEnabled } from "./gate";
 import { getScheduleDateKey } from "../../utils/scheduleTime";
 import { DB } from "../../utils/db";
@@ -10,11 +12,12 @@ import {
   markSeen,
   refreshSnapshot,
   log,
+  announceHistory,
 } from "./storage";
 import { projectPost } from "./permissions";
 import type { Post, Snapshot, Seen } from "./schema";
 export const MOMENTS_GUIDE =
-  "\n### 私人朋友圈\n你可以在私人好友空间发布、浏览和互动。只有系统提供的实际见闻、已保存经历或明确查看结果代表你已读过；有权限不代表已经看过。朋友圈资料是生活背景，无需每轮提及。与公开哔哔独立，不能将私人内容搬到公开平台。\n";
+  "\n### 私人朋友圈\n你可以在私人好友空间发布、浏览和互动。只有系统提供的实际见闻、已保存经历或明确查看结果代表你已读过；有权限不代表已经看过。朋友圈资料是生活背景，无需每轮提及。未看过、未想起或无法确认时应坦率表达不确定并询问具体哪条；不得编造动态、评论或后续，不得把猜测当事实。新查看结果是刚翻到的资料，不代表一直记得。与公开哔哔独立，不能将私人内容搬到公开平台。\n";
 /** Called only on an actual local chat generation, never a prompt preview. No model requests. */
 export async function prepareMomentsQuery(
   charId: string,
@@ -37,7 +40,7 @@ export async function prepareMomentsQuery(
     );
   if (!explicit && !mention && !continuation) return;
   const chars = await DB.getAllCharacters(),
-    targets = chars.filter((x) => text.includes(x.name));
+    targets = resolveMomentsNames(text,chars.filter(x=>c.participants[x.id]?.enabled));
   const user = await DB.getUserProfile(),
     ownMention =
       /我的朋友圈|我发的朋友圈/.test(text) ||
@@ -56,10 +59,11 @@ export async function prepareMomentsQuery(
   )
     topic = undefined;
   let candidates: Post[] = [];
-  if (targets.length === 1)
-    candidates = await rows<Post>("post", targets[0].id, 50);
+  if (targets.length) {
+    candidates=(await Promise.all(targets.map(x=>rows<Post>("post",x.id,50)))).flat().sort((a,b)=>b.at-a.at||b.id.localeCompare(a.id));
+  }
   else if (ownMention) candidates = await rows<Post>("post", "user", 50);
-  else if (!targets.length && topic?.postId) {
+  else if (!targets.length && continuation && topic?.postId) {
     const p = await getRow<Post>(topic.postId);
     if (p) candidates = [p];
   } else {
@@ -94,9 +98,11 @@ export async function prepareMomentsQuery(
       });
     }
     chosen.push(p);
-    if (chosen.length === 3) break;
+    if (chosen.length === 5) break;
   }
-  await transaction(async (s) => {
+  let wroteCard=false;
+  await transaction(async (s,tx) => {
+    const receipts:{post:Post;events:string[]}[]=[];
     const live = await getConfig(s);
     if (live.revision !== c.revision)
       throw Error("朋友圈权限在读取时变化，请重新查看");
@@ -104,8 +110,16 @@ export async function prepareMomentsQuery(
       const actual = await getRow<Post>(p.id, s);
       if (!actual || actual.revision !== p.revision)
         throw Error("朋友圈在读取期间变化，请重新查看");
-      if (explicit) await markSeen(s, live, charId, actual);
+      if (explicit) {
+        const view=projectPost(live,charId,actual)!;
+        const seen=await getRow<Seen>(`seen:${charId}:${p.id}`,s);
+        const old=new Set(seen?.projection.comments.map(x=>x.id)||[]);
+        const received=view.comments.filter(x=>x.authorId!==charId&&!old.has(x.id)&&(x.replyTo?view.comments.some(parent=>parent.id===x.replyTo&&parent.authorId===charId):view.owner===charId));
+        if(received.length)receipts.push({post:view,events:['聊天中实际读到别人对自己的评论或回复']});
+        await markSeen(s, live, charId, actual);
+      }
     }
+    wroteCard=await saveActivityCard(tx,live,charId,`query:${last.id}` ,receipts);
     if (explicit && chosen.length) {
       await refreshSnapshot(s, live, charId);
       await log(
@@ -115,6 +129,8 @@ export async function prepareMomentsQuery(
       );
     }
   }, true);
+  if(wroteCard)announceHistory(charId);
+  if (chosen.length !== 1) await DB.deleteAsset(`moments_topic:${charId}`);
   if (chosen.length === 1)
     await DB.saveAsset(
       `moments_topic:${charId}`,

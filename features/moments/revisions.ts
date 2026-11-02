@@ -1,3 +1,4 @@
+import {activityCardText} from './cards';
 import {getConfig,getRow,rows,transaction,refreshSnapshot,markSeen,enqueue,announceHistory,checkPost} from './storage';
 import {result,type Post,type Seen,type Snapshot,type FeedEvent} from './schema';
 import {postText,projectPost,areFriends} from './permissions';
@@ -23,7 +24,7 @@ export async function reviseIn(s:IDBObjectStore,tx:IDBTransaction,actor:string,i
   }
   const messages=tx.objectStore('messages');
   const request=messages.openCursor();
-  await new Promise<void>((resolve,reject)=>{request.onerror=()=>reject(request.error);request.onsuccess=()=>{const cur=request.result;if(!cur){resolve();return;}const m=cur.value;if(m.metadata?.momentsPostId===id){if(!change||!projectPost(c,m.charId,next))cur.delete();else cur.update({...m,content:`[私人朋友圈]\n${postText(next)}\n动态ID：${id}`});}cur.continue();};});
+  await new Promise<void>((resolve,reject)=>{request.onerror=()=>reject(request.error);request.onsuccess=()=>{const cur=request.result;if(!cur){resolve();return;}const m=cur.value;if(Array.isArray(m.metadata?.momentsActivityParts)&&m.metadata.momentsActivityParts.some((part:any)=>part.postId===id)){const parts=m.metadata.momentsActivityParts.flatMap((part:any)=>part.postId!==id?[part]:change&&projectPost(c,m.charId,next)?[{postId:id,text:`[用户修订后的朋友圈]\n${postText(projectPost(c,m.charId,next)!)}\n动态ID：${id}`}]:[]);if(!parts.length)cur.delete();else cur.update({...m,content:activityCardText(parts,m.metadata.momentsActivityAt),metadata:{...m.metadata,momentsActivityParts:parts,momentsPostIds:parts.map((p:any)=>p.postId),momentsPostId:parts.length===1?parts[0].postId:undefined}});}else if(m.metadata?.momentsPostId===id){if(!change||!projectPost(c,m.charId,next))cur.delete();else cur.update({...m,content:`[私人朋友圈]\n${postText(next)}\n动态ID：${id}`});}cur.continue();};});
 
  }
  if(change&&!reality)await enqueue(s,c,next,'post');

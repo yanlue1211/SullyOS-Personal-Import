@@ -361,3 +361,36 @@ it('allows a character to delete only its own submitted historical post during o
  expect((await getRow<Post>(own.id))?.deletedAt).toBeTypeOf('number');
  expect((await rows<Call>('call'))[0].phase).toBe('success');
 });
+
+it('records ordinary posts and comments in one activity card without another API call',async()=>{
+ vi.mocked(safeFetchJson).mockImplementation(async(_url,options)=>({choices:[{finish_reason:'stop',message:{content:JSON.stringify({requestId:promptRequest(options).id,browsed:[post.id],actions:[{kind:'comment',postId:post.id,text:'这阵海风真舒服。'}],post:{text:'买到了新鲜的番茄',theme:'买菜',media:[],visibility:{mode:'all',ids:[]}},important:[{postId:post.id,summary:'记下了海边的交流'}]})}}]}));
+ await runActivity('a',{api:global,user:{name:'小雨'} as any});
+ const cards=(await DB.getMessagesByCharId('a')).filter(m=>m.type==='moments_card');
+ expect(cards).toHaveLength(1);expect(cards[0].content).toContain('这阵海风真舒服');expect(cards[0].content).toContain('买到了新鲜的番茄');expect(cards[0].metadata?.momentsPostIds).toHaveLength(2);expect(safeFetchJson).toHaveBeenCalledTimes(1);
+ const {revisePost}=await import('../features/moments/revisions');
+ await revisePost('user',post.id,null,true);
+ const remaining=(await DB.getMessagesByCharId('a')).filter(m=>m.type==='moments_card');expect(remaining).toHaveLength(1);expect(remaining[0].content).not.toContain('这阵海风真舒服');expect(remaining[0].content).toContain('买到了新鲜的番茄');
+});
+it('a plain like or browse creates no activity card',async()=>{
+ vi.mocked(safeFetchJson).mockImplementation(async(_url,options)=>({choices:[{finish_reason:'stop',message:{content:JSON.stringify({requestId:promptRequest(options).id,browsed:[post.id],actions:[{kind:'like',postId:post.id}],post:null,important:[]})}}]}));
+ await runActivity('a',{api:global,user:{name:'小雨'} as any});expect((await DB.getMessagesByCharId('a')).filter(m=>m.type==='moments_card')).toHaveLength(0);
+});
+it('only actual first reading of a comment addressed to the actor creates a receipt card',async()=>{
+ const own=await publish('a','阿青',{text:'周末散步',theme:'散步',media:[],visibility:{mode:'all',ids:[]}});
+ await transaction(async s=>markSeen(s,await getConfig(s),'a',own),true);
+ await interact('user','小雨',own.id,{kind:'comment',text:'一起去呀'});
+ const m={id:100,charId:'a',role:'user',type:'text',content:'看看阿青的朋友圈',timestamp:Date.now()} as any;
+ await prepareMomentsQuery('a',[m]);await prepareMomentsQuery('a',[m]);
+ const cards=(await DB.getMessagesByCharId('a')).filter(m=>m.type==='moments_card');expect(cards).toHaveLength(1);expect(cards[0].content).toContain('一起去呀');
+});
+it('queries five newest visible posts across same-person accounts, and binds results only to the latest user ID',async()=>{
+ await DB.saveCharacter({id:'z',name:'张真源',memories:[]} as any);await DB.saveCharacter({id:'z2',name:'源',memories:[]} as any);
+ await saveConfig(c=>{for(const id of ['z','z2'])c.participants[id]={...participantDefaults(),enabled:true};c.friends.push(['a','z']);});
+ for(const text of ['早餐吃了刚烤好的面包','练琴时发现新的和弦走向','傍晚的云像一座岛','楼下小猫终于肯靠近了','刚读完一本推理小说','球赛加时看得我好紧张','咖啡还是不加糖好喝'])await publish('z','张真源',{text,theme:text,media:[],visibility:{mode:'all',ids:[]}});
+ await publish('z2','源',{text:'不可见分身记录',theme:'生活',media:[],visibility:{mode:'all',ids:[]}});
+ const m={id:200,charId:'a',role:'user',type:'text',content:'看看源源的朋友圈',timestamp:Date.now()} as any;
+ await prepareMomentsQuery('a',[m,{...m,id:201,role:'assistant',content:'小雨的朋友圈'}]);
+ const q=JSON.parse((await DB.getAsset('moments_query:a'))!);expect(JSON.parse(q.text.split('本轮已按权限实际读取：')[1])).toHaveLength(5);expect(q.text).not.toContain('不可见分身记录');
+ expect((await chatMomentsContext('a',200)).dynamic).toContain('本轮朋友圈查看结果');expect((await chatMomentsContext('a',202)).dynamic).not.toContain('本轮朋友圈查看结果');
+ await prepareMomentsQuery('a',[m,{...m,id:202,content:'今天吃什么'},{...m,id:203,role:'assistant',content:'源源的朋友圈'}]);expect(JSON.parse((await DB.getAsset('moments_query:a'))!).messageId).toBe(200);
+});
