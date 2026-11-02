@@ -409,3 +409,10 @@ it('a char may ordinary-delete its own submitted comment, but not edit or delete
  vi.mocked(safeFetchJson).mockImplementation(async(_url,options)=>({choices:[{finish_reason:'stop',message:{content:JSON.stringify({requestId:promptRequest(options).id,browsed:[post.id],actions:[{kind:'delete_comment',postId:post.id,commentId:source.comments[0].id}],post:null,important:[]})}}]}));
  await runActivity('a',{api:global,user:{name:'小雨'} as any});expect((await getRow<Post>(post.id))!.comments[0].deletedAt).toBeTruthy();
 });
+
+it('rejects a conflicting reply recipient atomically without saving a misaddressed comment',async()=>{
+ await saveConfig(c=>{c.friends=[['a','b']];});await interact('b','乙',post.id,{kind:'comment',text:'先试试看'});const parent=(await getRow<Post>(post.id))!.comments[0];
+ vi.mocked(safeFetchJson).mockImplementation(async(_url,options)=>({choices:[{finish_reason:'stop',message:{content:JSON.stringify({requestId:promptRequest(options).id,browsed:[post.id],actions:[{kind:'comment',postId:post.id,replyTo:parent.id,recipientId:'user',text:'小雨我还没试过呢'}],post:null,important:[]})}}]}));
+ await expect(runActivity('a',{api:global,user:{name:'小雨'} as any})).rejects.toThrow('回复人物');
+ expect((await getRow<Post>(post.id))!.comments).toHaveLength(1);expect((await DB.getMessagesByCharId('a')).filter(m=>m.type==='moments_card')).toHaveLength(0);expect(safeFetchJson).toHaveBeenCalledTimes(1);
+});
