@@ -947,3 +947,11 @@ it('lists future and overdue local tasks by character and cancellation persists'
     expect((await DB.getScheduledMessages(charId)).map(m => m.content)).toEqual(['late']);
     expect(await DB.getScheduledMessages(charId+'other')).toHaveLength(1);
 });
+
+it('does not expose malformed standalone status JSON as spoken dialogue', async () => {
+    const charId = `status-json-malformed-${Date.now()}`;
+    const ctx = makeCtx(charId, [quotedUserMsg]);
+    await applyAssistantPostProcessing('{"type":"response_status","kind":"busy"}', {...ctx, instantRender: true});
+    expect(ctx.hooks.addToast).toHaveBeenCalledWith('状态卡解析失败，请重试本轮回复。', 'error');
+    expect(await DB.getRecentMessagesByCharId(charId, 50)).toHaveLength(0);
+});
