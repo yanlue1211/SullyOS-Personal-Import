@@ -24,3 +24,5 @@ it('语气默认折叠，原文独立展示',async()=>{
  (fake.session.turns as any)=[{id:'voice',role:'user',text:'我盖好被子了。',voiceAnalysis:'声音轻柔，稍有困意。',at:1,source:'user',played:true}];
  try{await click('月光拾音');await click('海边的小羊');const detail=host.querySelector('.yq-voice-detail') as HTMLDetailsElement;expect(detail).not.toBeNull();expect(detail.open).toBe(false);expect(detail.textContent).toContain('声音轻柔');expect(host.textContent).toContain('我盖好被子了。');}finally{fake.session.turns=[];}
 });
+
+it('首页两行文案去除标点并采用新措辞',()=>{expect(host.querySelector('h1')?.textContent).toBe('月亮今天栖息在哪里');expect(host.querySelector('.yq-answer')?.textContent).toBe('在你身边');});

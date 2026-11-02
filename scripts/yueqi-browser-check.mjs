@@ -13,7 +13,7 @@ try{
   page.on('pageerror',e=>errors.push(String(e)));
   await page.route('https://qa-yueqi.invalid/**',route=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({choices:[{finish_reason:'stop',message:{content:'测试摘要：两段合成测试音频均已播放，不涉及真实经历。'}}]})}));
   await page.goto('http://127.0.0.1:4183/test/fixtures/yueqi-browser.html');
-  await page.getByText('月亮今晚栖在哪里？').waitFor();
+  await page.getByText('月亮今天栖息在哪里').waitFor();
   const snap=async name=>{
    const overflow=await page.locator('.yueqi').evaluate(el=>el.scrollWidth>el.clientWidth+1);
    if(overflow)throw Error(`${width}px ${name} horizontal overflow`);
