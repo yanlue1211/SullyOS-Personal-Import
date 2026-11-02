@@ -37,3 +37,12 @@ it('reopening reads the saved playlist index instead of requesting it again',asy
  await vi.waitFor(()=>expect(host.textContent).toContain('网易收藏'));expect(mock.index).toHaveBeenCalledTimes(1);
  await act(async()=>root.render(<div/>));await act(async()=>root.render(<Profile onBack={()=>{}} onOpenPlayer={()=>{}} onManage={mock.manage}/>));await vi.waitFor(()=>expect(host.textContent).toContain('网易收藏'));expect(mock.index).toHaveBeenCalledTimes(1);
 });
+
+it('renders a thousand-song playlist in batches while retaining the full playback queue',async()=>{
+ const songs=Array.from({length:1001},(_,i)=>({id:10000+i,name:'长歌单'+i,artists:'歌手',album:'',albumPic:'',duration:1,fee:0}));
+ await act(async()=>savePersonalPlaylists([{id:'large',title:'千首歌单',songs,description:'',coverStyle:'',createdAt:1,updatedAt:1}]));
+ await vi.waitFor(()=>expect(host.textContent).toContain('千首歌单'));await click('展开歌单 千首歌单');
+ expect(host.querySelectorAll('[aria-label^="播放 长歌单"]')).toHaveLength(50);
+ await click('播放 长歌单0');expect(mock.play.mock.calls.at(-1)?.[1].replaceQueue).toHaveLength(1001);
+ await click('继续显示（已显示 50 / 1001 首）');expect(host.querySelectorAll('[aria-label^="播放 长歌单"]')).toHaveLength(100);
+});

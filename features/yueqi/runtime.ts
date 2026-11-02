@@ -22,9 +22,9 @@ class MoonPlayer {
   let s=this.session!;const wasEnded=s.status==='ended';s={...s,status:'preparing'};this.session=s;await this.persist();
   if(s.mode==='story'){
    const parts=s.plannedParts||Math.max(1,Math.ceil(s.targetMinutes/5));
-   if(!s.plan){s={...s,plannedParts:parts,plan:await generate(s,this.env!,`为一篇${s.kind}规划${parts}个连续段落的简短提纲，主题：${s.theme||'由你决定'}。整篇朗读目标${s.targetMinutes}分钟。仅输出提纲，不开始正文。故事最后一段必须收束；碎碎念区分真实经历与想象。`,signal)};this.session=s;await this.persist();}
+   if(!s.plan){s={...s,plannedParts:parts,plan:await generate(s,this.env!,`为一篇${s.kind}规划${parts}个编号明确、情节互不重叠的连续部分的简短提纲，每部分写明起点、推进的新事件与停笔位置。不要把同一次问答或同一场景分配给多个部分。最后再列出全篇关键事件顺序。，主题：${s.theme||'由你决定'}。整篇朗读目标${s.targetMinutes}分钟。仅输出提纲，不开始正文。故事最后一段必须收束；碎碎念区分真实经历与想象。`,signal)};this.session=s;await this.persist();}
    for(let part=s.turns.filter(t=>t.source==='story').length;part<parts;part++){
-    const prompt=`根据这个完整提纲继续创作第${part+1}/${parts}部分：${s.plan}。类型${s.kind}；本段约${Math.round(s.targetMinutes/parts*210*s.speed)}汉字。仅输出可以朗读的正文，不输出标题、章节编号和解释。承接前文，不重复，${part===parts-1?'本段结束整篇内容，温柔收束。':'不要提前结束整篇内容。'}`;
+    const prompt=`根据这个完整提纲继续创作第${part+1}/${parts}部分：${s.plan}。类型${s.kind}；本段约${Math.round(s.targetMinutes/parts*210*s.speed)}汉字。仅输出可以朗读的正文，不输出标题、章节编号和解释。前面${part}部分已经讲完，仅完成提纲中第${part+1}部分的新内容；从已生成正文最后的时间与动作继续，不回顾、不换说法重演已经发生的问答、入睡或告别。提纲与已生成正文有出入时，以正文已经发生的事实为准，跳过已讲过的情节。允许短于目标字数，不能靠重复凑字数。上一部分的停笔位置（仅用于衔接，不要复述）：${s.turns.filter(t=>t.source==='story').at(-1)?.text.slice(-500)||'尚未开篇'}。承接前文，不重复，${part===parts-1?'本段结束整篇内容，温柔收束。':'不要提前结束整篇内容。'}`;
     const text=await generate(s,this.env!,prompt,signal);signal.throwIfAborted();s=addReply(s,text,'story');this.session=s;await this.persist();
    }
   }else if(!s.turns.some(t=>t.role==='assistant')){s=addReply(s,await generate(s,this.env!,`开始睡前陪伴。${s.theme}。自然说一小段，不超过180字，不反复问睡了没有。`,signal),'automatic');this.session=s;await this.persist();}
@@ -38,15 +38,15 @@ class MoonPlayer {
   if(this.music?.paused)void this.music.play().catch(e=>this.fail(e));
  }
  async setPlaybackSpeed(speed:number){if(!this.session)return;const next=Math.max(.65,Math.min(1.5,Math.round(speed*20)/20));this.session={...this.session,speed:next};if(this.voice){this.voice.playbackRate=next;this.voice.preservesPitch=true;}await this.persist();}
- private playClip(){const s=this.session;if(!s||s.cursor>=s.clips.length){this.voiceFinished();return;}this.stopListening();this.stopVoice();const epoch=this.voiceEpoch;const clip=s.clips[s.cursor];if(!clip.audio)return;
-  const a=new Audio(clip.audio);this.voice=a;a.volume=this.voiceVolume;a.playbackRate=s.speed;a.currentTime=s.offset||0;this.duck(true);
-  a.ontimeupdate=()=>{if(this.session&&this.voice===a){this.session.offset=a.currentTime;if(Date.now()-this.saveAt>3000){this.saveAt=Date.now();void this.persist().catch(e=>this.fail(e));}this.emit();}};
-  a.onended=()=>{if(this.voice!==a||!this.session)return;const current=this.session;const cursor=current.cursor+1;this.session={...current,cursor,offset:0,turns:current.turns.map(t=>t.id===clip.turnId&&!current.clips.slice(cursor).some(c=>c.turnId===t.id)?{...t,played:true}:t)};void this.persist().then(()=>{if(epoch===this.voiceEpoch&&!this.playbackPaused)this.playClip();}).catch(e=>this.fail(e));};
-  a.onerror=()=>{this.duck(false);this.pause();this.fail(Error('播放失败，文字和已合成音频已保留，可继续或重新合成'));};
-  void a.play().catch(e=>{this.pause();this.fail(e);});this.emit();
+ private playClip(){const s=this.session;if(!s||s.cursor>=s.clips.length){this.voiceFinished();return;}this.stopListening();const existing=this.voice;if(existing){existing.onended=null;existing.ontimeupdate=null;existing.onerror=null;existing.pause();}this.voiceEpoch++;const epoch=this.voiceEpoch;const clip=s.clips[s.cursor];if(!clip.audio)return;
+  const a=existing||new Audio();this.voice=a;a.src=clip.audio;a.volume=this.voiceVolume;a.playbackRate=s.speed;a.onloadedmetadata=null;const offset=s.offset||0;if(offset>0){const seek=()=>{if(this.voice===a&&epoch===this.voiceEpoch)a.currentTime=offset;};if(a.readyState>=1)seek();else a.onloadedmetadata=()=>{a.onloadedmetadata=null;seek();};}this.duck(true);
+  a.ontimeupdate=()=>{if(this.session&&this.voice===a&&epoch===this.voiceEpoch){this.session.offset=a.currentTime;if(Date.now()-this.saveAt>3000){this.saveAt=Date.now();void this.persist().catch(e=>this.fail(e));}this.emit();}};
+  a.onended=()=>{if(this.voice!==a||epoch!==this.voiceEpoch||!this.session)return;const current=this.session;const cursor=current.cursor+1;this.session={...current,cursor,offset:0,turns:current.turns.map(t=>t.id===clip.turnId&&!current.clips.slice(cursor).some(c=>c.turnId===t.id)?{...t,played:true}:t)};void this.persist().catch(e=>this.fail(e));if(epoch===this.voiceEpoch&&!this.playbackPaused)this.playClip();};
+  a.onerror=()=>{if(this.voice!==a||epoch!==this.voiceEpoch)return;this.duck(false);this.pause();this.fail(Error('播放失败，文字和已合成音频已保留，可继续或重新合成'));};
+  void a.play().catch(e=>{if(this.voice!==a||epoch!==this.voiceEpoch)return;this.pause();this.fail(e);});this.emit();
  }
  private voiceFinished(){this.stopVoice();this.duck(false);const s=this.session;if(!s)return;if(s.status==='ended'){this.emit();return;}if(s.mode==='story'){void this.end();}else{this.nextAt=Date.now()+nextInterval(s);this.maybeListen();}this.emit();}
- private stopVoice(){this.voiceEpoch++;if(this.voice){this.voice.pause();this.voice.onended=null;this.voice.ontimeupdate=null;this.voice.onerror=null;this.voice.removeAttribute('src');this.voice.load();this.voice=null;}}
+ private stopVoice(){this.voiceEpoch++;if(this.voice){this.voice.pause();this.voice.onended=null;this.voice.ontimeupdate=null;this.voice.onerror=null;this.voice.onloadedmetadata=null;this.voice.removeAttribute('src');this.voice.load();this.voice=null;}}
  pause(){if(!this.session)return;this.inputEpoch++;this.playbackPaused=true;const s=this.session;this.session={...s,elapsedMs:elapsed(s),runningSince:undefined,status:s.status==='ended'?'ended':'paused'};this.voice?.pause();this.music?.pause();this.stopListening();void this.persist().catch(e=>this.fail(e));}
  async end(){if(!this.session||!this.env)return;this.inputEpoch++;this.playbackPaused=true;this.abort?.abort();this.busy=false;this.abort=null;this.stopListening();this.stopVoice();if(this.timer){clearInterval(this.timer);this.timer=null;}
   const s=this.session;this.session={...s,status:'ended',endedAt:Date.now(),elapsedMs:elapsed(s),runningSince:undefined};if(this.musicAfter==='stop')this.fadeOutMusic();await this.persist();await this.summarize();}

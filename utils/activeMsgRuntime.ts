@@ -1,4 +1,4 @@
-import {stripResponseStatus,isProactiveStatusDelivery} from '../features/personal/responseStatus/protocol';
+import {extractResponseStatus,proactiveResponseText,isProactiveStatusDelivery} from '../features/personal/responseStatus/protocol';
 import { createReplyRun, isReplyStopped, withReplyCancellation, type ReplyRun } from './chatReplyCancellation';
 import { loadCharacterContextMessages } from './chatContextRange';
 import { ActiveMsg2InboxMessage, ActiveMsg2TaskRecord, APIConfig, RealtimeConfig, UserProfile } from '../types';
@@ -1737,17 +1737,18 @@ const flushInboxToChatImpl = async (trigger: FlushTrigger, charId?: string): Pro
       if (!routed) {
         // 2.0 fallback: even when the rich post-processing pipeline fails, never
         // persist the raw inner-voice protocol as a public chat bubble.
-        const recoveredVoice = extractInnerVoice(isProactiveStatusDelivery(message)?stripResponseStatus(message.body||''):(message.body||''));
+        const recoveredVoice = extractInnerVoice(isProactiveStatusDelivery(message)?proactiveResponseText(message.body||''):(message.body||''));
+        const recoveredStatus=extractResponseStatus(recoveredVoice.text);
         try {
           if(recoveredVoice.text.trim())await replyStep(async () => (replyRun?.saveMessage ?? DB.saveMessage)({
             charId: message.charId,
             role: 'assistant',
-            type: 'text',
-            content: recoveredVoice.text,
+            type: recoveredStatus?'score_card':'text',
+            content: recoveredStatus?JSON.stringify(recoveredStatus):recoveredVoice.text,
             timestamp: persistTimestamp,
             metadata: {
               source: 'active_msg_2',
-              ...(recoveredVoice.innerVoice ? { innerVoice: recoveredVoice.innerVoice } : {}),
+              ...(recoveredStatus?{responseStatus:recoveredStatus}:recoveredVoice.innerVoice ? { innerVoice: recoveredVoice.innerVoice } : {}),
               activeMsg2: {
                 messageId: message.messageId,
                 taskId: message.taskId,

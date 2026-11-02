@@ -44,3 +44,12 @@ it('strips read and busy protocols from proactive delivery without dropping actu
   expect(isProactiveStatusDelivery({messageType:'instant'})).toBe(false);
   expect(isProactiveStatusDelivery({messageSubtype:'instant-chat'})).toBe(false);
 });
+
+it('outreach blocks copied read narration and renders malformed busy narration as a card',async()=>{
+ const {proactiveResponseText}=await import('../features/personal/responseStatus/protocol');
+ expect(proactiveResponseText(responseStatusContext(card,'阿甲'))).toBe('');
+ const busy={...card,kind:'busy' as const,eta:'半小时'};
+ expect(extractResponseStatus(proactiveResponseText(`<回应状态>${JSON.stringify(busy)}</回应状态>`))).toEqual(busy);
+ expect(extractResponseStatus(proactiveResponseText(responseStatusContext(busy,'阿甲')))?.kind).toBe('busy');
+ expect(proactiveResponseText(tag)).toBe('');expect(proactiveResponseText('想你了。')).toBe('想你了。');
+});
