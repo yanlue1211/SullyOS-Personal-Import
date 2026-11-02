@@ -1,3 +1,5 @@
+import LyricCompletionPanel from './LyricCompletionPanel';
+import {lyricFields,type LyricTrack,type LyricCandidate} from '../../utils/lyricCompletion';
 import BulkSongImport from './BulkSongImport';
 import PlaylistSongButton from './PlaylistSongButton';
 import React, {useState} from 'react';
@@ -12,7 +14,7 @@ import {C, MizuHeader} from './MusicUI';
 
 export default function MusicLibraryManager({onClose, initialOwner='',initialPlaylist=''}:{onClose:()=>void;initialOwner?:string;initialPlaylist?:string}) {
  const {characters,updateCharacter,addToast}=useOS();
- const {localAlbumSongs,addLocalSong,current,cfg,playSong}=useMusic();
+ const {localAlbumSongs,addLocalSong,patchSongLyrics,current,cfg,playSong}=useMusic();
  const [owner,setOwner]=useState(initialOwner),[playlist,setPlaylist]=useState(initialPlaylist);
  const [title,setTitle]=useState(''),[artist,setArtist]=useState(''),[cover,setCover]=useState(''),[lyrics,setLyrics]=useState('');
  const [source,setSource]=useState<'file'|'url'>('url'),[audioUrl,setAudioUrl]=useState('');
@@ -52,6 +54,19 @@ export default function MusicLibraryManager({onClose, initialOwner='',initialPla
   }catch(e){addToast('歌词导入失败：'+String(e),'error');}
  };
  const lyricControl=(song:Song)=><label className="shrink-0 whitespace-nowrap rounded-xl border px-3 py-2 text-xs bg-white cursor-pointer">导入歌词<input aria-label={'导入歌词 '+song.name} type="file" accept=".lrc,.txt,text/plain" className="hidden" onChange={e=>{const f=e.target.files?.[0];e.target.value='';void attachLyrics(song,f);}}/></label>;
+ const lyricSongs=[...new Map([...localAlbumSongs,...profile.playlists.flatMap(p=>p.songs)].filter(s=>s.local||s.remoteAudioUrl||s.localAssetKey).map(s=>[s.id,s])).values()];
+ const lyricTracks:LyricTrack[]=lyricSongs.map(s=>({id:String(s.id),name:s.name,artists:s.artists,album:s.album,duration:s.duration,url:s.remoteAudioUrl,assetKey:s.localAssetKey,lyrics:s.localLyrics}));
+ const saveMatchedLyrics=async(track:LyricTrack,candidate:LyricCandidate,overwrite:boolean)=>{
+  const song=lyricSongs.find(s=>String(s.id)===track.id);if(!song)return false;
+  const fields=lyricFields(candidate);if(!fields.localLyrics)return false;
+  const same=(s:Song)=>s.id===song.id||!!song.remoteAudioUrl&&s.remoteAudioUrl===song.remoteAudioUrl||!!song.localAssetKey&&s.localAssetKey===song.localAssetKey;
+  const patch=<T extends Song>(s:T):T=>same(s)&&(overwrite||!s.localLyrics?.trim())?{...s,...fields}:s;
+  await updatePersonalPlaylists(lists=>lists.map(p=>({...p,songs:p.songs.map(patch)})));
+  for(const c of characters){if(!c.musicProfile?.playlists.some(p=>p.songs.some(same)))continue;
+   updateCharacter(c.id,latest=>latest.musicProfile?{musicProfile:{...latest.musicProfile,playlists:latest.musicProfile.playlists.map(p=>({...p,songs:p.songs.map(patch)})),updatedAt:Date.now()}}:{});
+  }
+  patchSongLyrics(song,fields,overwrite);return true;
+ };
  const input='w-full min-w-0 rounded-xl border p-2 text-sm bg-white';
  const button='shrink-0 whitespace-nowrap rounded-xl border px-3 py-2 text-sm bg-white disabled:opacity-40';
  const choices=[...new Map([...localAlbumSongs,...(current?[current]:[]),...found].map(s=>[s.id,s])).values()];
@@ -68,6 +83,7 @@ export default function MusicLibraryManager({onClose, initialOwner='',initialPla
     <button className={button} onClick={()=>{if(!window.confirm(`删除歌单「${selected.title}」？歌曲文件会保留。`))return;save({...profile,playlists:profile.playlists.filter(p=>p.id!==playlist)});setPlaylist('');}}>删除歌单</button>
     {selected.songs.map((s,index)=><div key={s.id} className="flex items-center gap-2 text-sm"><div className="flex-1 min-w-0">{!character?<PlaylistSongButton song={s} onPlay={()=>playSong(s,{alsoSetQueue:true,replaceQueue:selected.songs,startIdx:index})} onRemove={()=>save({...profile,playlists:profile.playlists.map(p=>p.id===playlist?{...p,songs:p.songs.filter(x=>x.id!==s.id),updatedAt:Date.now()}:p)})}/>:<button onClick={()=>playSong(s,{alsoSetQueue:true,replaceQueue:selected.songs,startIdx:index})}>{s.name} · {s.artists}</button>}</div>{lyricControl(s)}<button className={button} onClick={()=>save({...profile,playlists:profile.playlists.map(p=>p.id===playlist?{...p,songs:p.songs.filter(x=>x.id!==s.id),updatedAt:Date.now()}:p)})}>移出</button></div>)}</>}
    </section>}
+   <LyricCompletionPanel tracks={lyricTracks} cfg={cfg} onSave={saveMatchedLyrics}/>
    <BulkSongImport readDetail={id=>musicApi._raw(cfg,'/song/detail',{ids:id})} onConfirm={async songs=>{
     if(character&&!selected)throw Error('请先为角色选择歌单');
     if(selected){

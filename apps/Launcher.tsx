@@ -264,7 +264,7 @@ const AppGridPage = React.memo(({
     editing?: boolean,
 }) => {
     return (
-        <div className={`grid place-items-center animate-fade-in relative ${acnh ? 'grid-cols-4 gap-y-6 gap-x-2' : 'grid-cols-4 gap-y-6 gap-x-2'}`}>
+        <div data-app-grid className={`grid place-items-center relative ${acnh ? 'grid-cols-4 gap-y-3 gap-x-2' : 'grid-cols-4 gap-y-3 gap-x-2'}`}>
              {apps.map(app => (
                  <div
                     key={app.id}
@@ -586,16 +586,14 @@ const Launcher: React.FC<{ staticPreview?: boolean }> = ({ staticPreview = false
       return launcherDockOrder.map(id => byId.get(id as AppID)).filter(Boolean) as typeof INSTALLED_APPS;
   }, [launcherDockOrder]);
 
-  // Split apps into pages of 8 (4 cols x 2 rows fit comfortably below widget)
-  // Pages: 0 = clock+chat+music+grid (original), 1 = pinwheel, 2 = widget images + grid,
-  //        3+ = plain grid. Pad to at least 3 slots so the pinwheel/widget pages always exist.
-  const APPS_PER_PAGE = 8;
+  // Personal desktop: sixteen apps per page, retaining saved order and the final widget page.
+  const APPS_PER_PAGE = 16;
   const appPages = useMemo(() => {
       const pages: typeof INSTALLED_APPS[] = [];
       for (let i = 0; i < gridApps.length; i += APPS_PER_PAGE) {
           pages.push(gridApps.slice(i, i + APPS_PER_PAGE));
       }
-      while (pages.length < 3) pages.push([]);
+      if (!pages.length) pages.push([]);
       return pages;
   }, [gridApps]);
 
@@ -608,6 +606,13 @@ const Launcher: React.FC<{ staticPreview?: boolean }> = ({ staticPreview = false
   const totalPages = appPages.length + 1;
 
   useEffect(() => { activePageIndexRef.current = activePageIndex; }, [activePageIndex]);
+  useEffect(() => {
+      if (activePageIndex >= totalPages) {
+          const next = totalPages - 1;
+          setActivePageIndex(next); activePageIndexRef.current = next; _lastPageIndex = next;
+          if (scrollContainerRef.current) scrollContainerRef.current.scrollLeft = scrollContainerRef.current.clientWidth * next;
+      }
+  }, [totalPages, activePageIndex]);
 
   useEffect(() => {
       let cancelled = false;
@@ -981,6 +986,12 @@ const Launcher: React.FC<{ staticPreview?: boolean }> = ({ staticPreview = false
           padding-right: max(1.5rem, env(safe-area-inset-right));
         }
         .launcher-page > * { flex-shrink: 0; }
+        .launcher-primary-header > :first-child { margin-top: 4px; margin-bottom: 12px; }
+        @media (max-height: 800px) {
+          .launcher-primary-header > :first-child { margin-top: 0; margin-bottom: 8px; }
+          .launcher-primary-header > :last-child { margin-bottom: 8px; }
+          [data-app-grid] { row-gap: 8px; }
+        }
         .launcher-pinwheel-content { flex: 0 0 auto; margin-block: auto; }
         .launcher-editing .launcher-page { padding-top: max(5rem, calc(var(--safe-top, 0px) + 4rem)); }
         .launcher-widget-remove {
@@ -1068,9 +1079,9 @@ const Launcher: React.FC<{ staticPreview?: boolean }> = ({ staticPreview = false
                 style={{ contentVisibility: 'auto', contain: 'layout paint', transform: 'translateZ(0)' }}
               >
                   {idx === 0 ? (
-                      // Page 1 (original): Clock + Chat + 4x2 App Grid
+                      // Page 1: Clock + Chat + 4x4 App Grid
                       <>
-                        <DesktopClock />
+                        <div className="launcher-primary-header"><DesktopClock />
                         <CharacterWidget
                             char={widgetChar}
                             unreadCount={widgetUnread}
@@ -1078,14 +1089,15 @@ const Launcher: React.FC<{ staticPreview?: boolean }> = ({ staticPreview = false
                             onClick={() => openApp(AppID.Chat)}
                             contentColor={contentColor}
                             paper={paper}
-                        />
+                        /></div>
                         <div className="flex-1">
                             <AppGridPage apps={pageApps} openApp={openApp} acnh={acnh} editing={layoutEditing} />
                         </div>
                       </>
                   ) : idx === 1 ? (
-                      // Page 2: Schedule 4x2 widget on top + Pinwheel (Music / 2x2 icons / 2x2 icons / Image) below
+                      // Page 2: full app grid, followed by existing widgets.
                       <div className="launcher-pinwheel-content w-full flex flex-col gap-5">
+                          <AppGridPage apps={pageApps} openApp={openApp} acnh={acnh} editing={layoutEditing} />
                           {scheduleChar && (
                               <ScheduleHomeWidget
                                   schedule={scheduleData}
@@ -1097,7 +1109,7 @@ const Launcher: React.FC<{ staticPreview?: boolean }> = ({ staticPreview = false
                               />
                           )}
                           <div className="launcher-pinwheel-grid grid grid-cols-2 gap-x-3 gap-y-5 w-full">
-                              {pinwheelOrder.filter(cell => cell === 'music' ? theme.launcherMusicVisible !== false : cell === 'image' ? theme.launcherImageVisible !== false : true).map(cell => (
+                              {pinwheelOrder.filter(cell => cell !== 'appsA' && cell !== 'appsB').filter(cell => cell === 'music' ? theme.launcherMusicVisible !== false : cell === 'image' ? theme.launcherImageVisible !== false : true).map(cell => (
                                   <div
                                       key={cell}
                                       data-launcher-item={cell}
