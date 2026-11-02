@@ -597,11 +597,6 @@ const Launcher: React.FC<{ staticPreview?: boolean }> = ({ staticPreview = false
       return pages;
   }, [gridApps]);
 
-  // Page 2 (pinwheel) uses appPages[1]: split into two 2x2 quads
-  const page2Apps = appPages[1] || [];
-  const page2QuadA = useMemo(() => page2Apps.slice(0, 4), [page2Apps]);
-  const page2QuadB = useMemo(() => page2Apps.slice(4, 8), [page2Apps]);
-
   // Total pages = App Pages + 1 Widget Page
   const totalPages = appPages.length + 1;
 
@@ -1126,10 +1121,6 @@ const Launcher: React.FC<{ staticPreview?: boolean }> = ({ staticPreview = false
                                       )}
                                       {cell === 'music' ? (
                                           <NowPlayingSquareWidget contentColor={contentColor} />
-                                      ) : cell === 'appsA' ? (
-                                          <AppQuadGrid apps={page2QuadA} openApp={openApp} editing={layoutEditing} />
-                                      ) : cell === 'appsB' ? (
-                                          <AppQuadGrid apps={page2QuadB} openApp={openApp} editing={layoutEditing} />
                                       ) : (
                                           <DesktopSquareImage
                                               image={theme.launcherWidgets?.['dsq']}
