@@ -5,6 +5,8 @@ import {
   runActivity,
   assessHabits,
   activityMaterial,
+  reserveActivity,
+  activityPrompt,
 } from "../features/moments/runtime";
 import {
   saveConfig,
@@ -415,4 +417,60 @@ it('rejects a conflicting reply recipient atomically without saving a misaddress
  vi.mocked(safeFetchJson).mockImplementation(async(_url,options)=>({choices:[{finish_reason:'stop',message:{content:JSON.stringify({requestId:promptRequest(options).id,browsed:[post.id],actions:[{kind:'comment',postId:post.id,replyTo:parent.id,recipientId:'user',text:'小雨我还没试过呢'}],post:null,important:[]})}}]}));
  await expect(runActivity('a',{api:global,user:{name:'小雨'} as any})).rejects.toThrow('回复人物');
  expect((await getRow<Post>(post.id))!.comments).toHaveLength(1);expect((await DB.getMessagesByCharId('a')).filter(m=>m.type==='moments_card')).toHaveLength(0);expect(safeFetchJson).toHaveBeenCalledTimes(1);
+});
+
+const noSocialAction = () => vi.mocked(safeFetchJson).mockImplementation(async (_url, options) => ({choices:[{finish_reason:'stop',message:{content:JSON.stringify({requestId:promptRequest(options).id,browsed:[post.id],actions:[],post:null,important:[]})}}]}));
+it('consumes a first read without interaction and does not retry it or a later like', async () => {
+ noSocialAction();
+ await runActivity('a',{api:global,user:{name:'小雨'} as any});
+ expect(await getRow(`seen:a:${post.id}`)).toBeDefined();
+ await saveConfig(c=>{c.participants.a.post=false;});
+ expect(await reserveActivity('a',false)).toBeUndefined();
+ await interact('user','小雨',post.id,{kind:'like'});
+ // Drain old-version like-only pending events too.
+ await transaction(async s=>{s.put({id:'legacy-like',kind:'event',owner:'a',at:Date.now(),postId:post.id,status:'pending',eventType:'like'});},true);
+ expect(await reserveActivity('a',false)).toBeUndefined();
+ expect((await getRow<any>('legacy-like')).status).toBe('done');
+ expect(safeFetchJson).toHaveBeenCalledTimes(1);
+});
+it('allows replies to two distinct new comments in one read and identifies direct replies on another person post',async()=>{
+ await interact('a','阿青',post.id,{kind:'comment',text:'我也喜欢海风'});
+ let current=(await getRow<Post>(post.id))!;
+ const own=current.comments[0];
+ await transaction(async s=>markSeen(s,await getConfig(s),'a',current),true);
+ await interact('user','小雨',post.id,{kind:'comment',replyTo:own.id,text:'下次一起？'});
+ await interact('user','小雨',post.id,{kind:'comment',text:'这边还有贝壳'});
+ current=(await getRow<Post>(post.id))!;
+ const fresh=current.comments.filter(x=>x.id!==own.id);
+ vi.mocked(safeFetchJson).mockImplementation(async(_url,options)=>{
+  const request=promptRequest(options);
+  expect(request.text).toContain('"firstView":false');
+  expect(request.text).toContain('"directCommentIds":["'+fresh[0].id+'"]');
+  return {choices:[{finish_reason:'stop',message:{content:JSON.stringify({requestId:request.id,browsed:[post.id],actions:fresh.map((x,i)=>({kind:'comment',postId:post.id,replyTo:x.id,recipientId:'user',text:i?'贝壳也好看':'好呀，一起'})),post:null,important:[]})}}]};
+ });
+ await runActivity('a',{api:global,user:{name:'小雨'} as any});
+ current=(await getRow<Post>(post.id))!;
+ expect(current.comments.filter(x=>x.authorId==='a')).toHaveLength(3);
+ const seen=(await getRow<Seen>(`seen:a:${post.id}`))!;
+ expect(seen.projection.comments.filter(x=>x.authorId==='a')).toHaveLength(3);
+ const cards=(await DB.getMessagesByCharId('a')).filter(x=>x.type==='moments_card');
+ expect(cards.at(-1)?.content).toContain('贝壳也好看');
+ expect(cards.at(-1)?.content).toContain('好呀，一起');
+});
+it('rejects reconsidering an old root comment when only a new comment arrived',async()=>{
+ await transaction(async s=>markSeen(s,await getConfig(s),'a',post),true);
+ await interact('user','小雨',post.id,{kind:'comment',text:'新内容'});
+ vi.mocked(safeFetchJson).mockImplementation(async(_url,options)=>({choices:[{finish_reason:'stop',message:{content:JSON.stringify({requestId:promptRequest(options).id,browsed:[post.id],actions:[{kind:'comment',postId:post.id,recipientId:'user',text:'重复考虑旧帖'}],post:null,important:[]})}}]}));
+ await expect(runActivity('a',{api:global,user:{name:'小雨'} as any})).rejects.toThrow('已读动态只能回应本次新增评论');
+ expect((await getRow<Post>(post.id))!.comments).toHaveLength(1);
+});
+it('preserves the shared thread cap when multiple new replies are submitted',async()=>{
+ await interact('user','小雨',post.id,{kind:'comment',text:'根话题'});
+ let p=(await getRow<Post>(post.id))!;const root=p.comments[0].id;
+ for(let i=0;i<5;i++) await interact('user','小雨',post.id,{kind:'comment',text:'话题进展'+i,replyTo:root});
+ p=(await getRow<Post>(post.id))!;
+ const targets=p.comments.slice(-2);
+ vi.mocked(safeFetchJson).mockImplementation(async(_url,options)=>({choices:[{finish_reason:'stop',message:{content:JSON.stringify({requestId:promptRequest(options).id,browsed:[post.id],actions:targets.map(x=>({kind:'comment',postId:post.id,replyTo:x.id,recipientId:'user',text:'继续'})),post:null,important:[]})}}]}));
+ await expect(runActivity('a',{api:global,user:{name:'小雨'} as any})).rejects.toThrow('这个话题已收束');
+ expect((await getRow<Post>(post.id))!.comments).toHaveLength(6);
 });
