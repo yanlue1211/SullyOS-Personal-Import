@@ -18,7 +18,7 @@ import {
   resolveInsets,
   resolveSafeTopInset,
 } from '../../utils/floatingBallBounds';
-import TokenImg from './TokenImg';
+import MusicCover from './MusicCover';
 
 const STORAGE_KEY = 'globalMiniPlayer.bubblePos.v1';
 const HIDDEN_KEY = 'globalMiniPlayer.hidden.v1';
@@ -314,7 +314,7 @@ const GlobalMiniPlayer: React.FC = () => {
           aria-label="音乐播放器（点击展开，拖动移位，长按隐藏）"
           title="点击展开 · 拖动移位 · 长按隐藏"
         >
-          <TokenImg
+          <MusicCover
             value={current.albumPic}
             alt=""
             draggable={false}
@@ -374,7 +374,7 @@ const GlobalMiniPlayer: React.FC = () => {
           <div className="w-1 h-7 rounded-full" style={{ background: 'rgba(255,255,255,0.25)' }} />
         </div>
         {/* 封面 */}
-        <TokenImg
+        <MusicCover
           value={current.albumPic}
           alt=""
           className="w-9 h-9 rounded-lg object-cover shrink-0"

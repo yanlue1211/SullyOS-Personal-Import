@@ -1,3 +1,4 @@
+import MusicCover from '../../components/os/MusicCover';
 /**
  * 雫 (shizuku) 主题 — 音乐 App 视觉组件
  * 水滴般清澈 + 二次元装饰: 玻璃拟态, 浮游粒子, 星芒, 柔光, 梦幻渐变
@@ -7,7 +8,7 @@ import {
   ArrowLeft, X, MagnifyingGlass,
   Play, Pause, SkipBack, SkipForward,
 } from '@phosphor-icons/react';
-import { isBlobRef, useBlobRefUrl } from '../../utils/blobRef';
+import { isBlobRef } from '../../utils/blobRef';
 import TokenImg from '../../components/os/TokenImg';
 
 /* ══════════ 色板 — 水滴 × 星空 ══════════ */
@@ -168,7 +169,6 @@ export const SongRow: React.FC<{
   isActive: boolean;
   onClick: () => void;
 }> = ({ name, artists, album, albumPic, duration, isVip, isActive, onClick }) => {
-  const resolvedAlbumPic = useBlobRefUrl(albumPic) || '';
   return (
   <button
     onClick={onClick}
@@ -184,7 +184,7 @@ export const SongRow: React.FC<{
   >
     {/* 封面 — 圆角 + 水光边框 */}
     <div className="relative shrink-0">
-      <img src={resolvedAlbumPic} alt="" className="w-11 h-11 rounded-xl object-cover"
+      <MusicCover value={albumPic} alt="" className="w-11 h-11 rounded-xl object-cover"
         style={{ border: `1.5px solid ${isActive ? C.accent + '60' : C.faint + '40'}` }} />
       {isActive && <div className="absolute -top-0.5 -right-0.5"><Sparkle size={8} color={C.glow} delay={0.3} /></div>}
     </div>
@@ -329,7 +329,6 @@ export const MiniPlayer: React.FC<{
   charsWithSong?: { id: string; name: string; playlistTitle: string }[]; // 歌单里也有这首歌的 char
   regenStatus?: string;  // 当前歌正在重录时的状态文案，置则显示进度条
 }> = ({ name, artists, albumPic, playing, onTap, onPrev, onToggle, onNext, userAvatar, userName, companions, onKickCompanion, charsWithSong, regenStatus }) => {
-  const resolvedAlbumPic = useBlobRefUrl(albumPic) || '';
   return (
   <div
     onClick={onTap}
@@ -351,7 +350,7 @@ export const MiniPlayer: React.FC<{
     <div className="flex items-center gap-3">
       {/* 封面 — 水滴圆角 */}
       <div className="relative">
-        <img src={resolvedAlbumPic} alt="" className="w-10 h-10 rounded-xl object-cover"
+        <MusicCover value={albumPic} alt="" className="w-10 h-10 rounded-xl object-cover"
           style={{ border: `1.5px solid ${C.accent}40`, opacity: regenStatus ? 0.4 : 1 }} />
         {playing && !regenStatus && <div className="absolute -bottom-1 -right-1"><Sparkle size={6} color={C.glow} /></div>}
         {regenStatus && (
@@ -400,7 +399,6 @@ export const VinylDisc: React.FC<{
   size?: number;
   bitrate?: string;
 }> = ({ albumPic, playing, size = 180, bitrate }) => {
-  const resolvedAlbumPic = useBlobRefUrl(albumPic) || '';
   return (
   <div className="relative" style={{ width: size, height: size }}>
     {/* 单层柔光 — 收敛简洁，不再散乱 */}
@@ -419,7 +417,7 @@ export const VinylDisc: React.FC<{
         boxShadow: `0 8px 32px ${C.primary}20, 0 0 0 1px ${C.glow}30`,
       }}>
       {/* 单张封面 — 完全不透明，干净清晰 */}
-      <img src={resolvedAlbumPic} alt=""
+      <MusicCover value={albumPic} alt=""
         className="absolute inset-0 w-full h-full object-cover" />
 
       {/* 中心标签 — 不旋转跟随，保持唱片标识 */}
