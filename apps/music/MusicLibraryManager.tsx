@@ -1,9 +1,11 @@
+import BulkSongImport from './BulkSongImport';
+import PlaylistSongButton from './PlaylistSongButton';
 import React, {useState} from 'react';
 import {useOS} from '../../context/OSContext';
 import {useMusic, musicApi, parseLyric, type Song} from '../../context/MusicContext';
 import {putImageBlob} from '../../utils/blobRef';
 import {usePersonalPlaylists} from '../../hooks/usePersonalPlaylists';
-import {savePersonalPlaylistEdits,mergePlaylistSongs} from '../../utils/personalMusicLibrary';
+import {savePersonalPlaylistEdits,mergePlaylistSongs,updatePersonalPlaylists} from '../../utils/personalMusicLibrary';
 import {DB} from '../../utils/db';
 import type {CharMusicProfile, CharPlaylist} from '../../types';
 import {C, MizuHeader} from './MusicUI';
@@ -41,6 +43,15 @@ export default function MusicLibraryManager({onClose, initialOwner='',initialPla
    addLocalSong(song);if(selected)add(song);setTitle('');setArtist('');setLyrics('');setCover('');setCoverFile(null);setAudio(null);setAudioUrl('');addToast('歌曲已保存','success');
   }catch(e){addToast('导入失败：'+String(e),'error');}finally{setBusy(false);}
  };
+ const attachLyrics=async(song:Song,file?:File)=>{
+  if(!file)return;if(file.size>200000){addToast('歌词文件过大','error');return;}
+  try{const text=await file.text(),timed=parseLyric(text),updated={...song,localLyrics:timed.length?timed.map(l=>l.text).join('\n'):text.trim(),lyricLineTimings:timed.length?timed.map(l=>l.t):undefined,lyricTimingMode:(timed.length?'synced':'plain') as 'synced'|'plain'};
+   if(character)await Promise.resolve(updateCharacter(character.id,{musicProfile:{...profile,playlists:profile.playlists.map(p=>({...p,songs:p.songs.map(s=>s.id===song.id?{...s,...updated}:s)})),updatedAt:Date.now()}}));
+   else {await updatePersonalPlaylists(lists=>lists.map(p=>({...p,songs:p.songs.map(s=>s.id===song.id?{...s,...updated}:s)})));addLocalSong(updated);}
+   addToast('歌词已更新','success');
+  }catch(e){addToast('歌词导入失败：'+String(e),'error');}
+ };
+ const lyricControl=(song:Song)=><label className="shrink-0 whitespace-nowrap rounded-xl border px-3 py-2 text-xs bg-white cursor-pointer">导入歌词<input aria-label={'导入歌词 '+song.name} type="file" accept=".lrc,.txt,text/plain" className="hidden" onChange={e=>{const f=e.target.files?.[0];e.target.value='';void attachLyrics(song,f);}}/></label>;
  const input='w-full min-w-0 rounded-xl border p-2 text-sm bg-white';
  const button='shrink-0 whitespace-nowrap rounded-xl border px-3 py-2 text-sm bg-white disabled:opacity-40';
  const choices=[...new Map([...localAlbumSongs,...(current?[current]:[]),...found].map(s=>[s.id,s])).values()];
@@ -55,8 +66,18 @@ export default function MusicLibraryManager({onClose, initialOwner='',initialPla
     <select aria-label="选择歌单" className={input} value={playlist} onChange={e=>setPlaylist(e.target.value)}><option value="">选择歌单</option>{profile.playlists.map(p=><option key={p.id} value={p.id}>{p.title}（{p.songs.length}）</option>)}</select>
     {selected&&<><button className={button} disabled={!playlistName.trim()} onClick={()=>{save({...profile,playlists:profile.playlists.map(p=>p.id===playlist?{...p,title:playlistName.trim(),updatedAt:Date.now()}:p)});setPlaylistName('');}}>用上方名称改名</button>
     <button className={button} onClick={()=>{if(!window.confirm(`删除歌单「${selected.title}」？歌曲文件会保留。`))return;save({...profile,playlists:profile.playlists.filter(p=>p.id!==playlist)});setPlaylist('');}}>删除歌单</button>
-    {selected.songs.map((s,index)=><div key={s.id} className="flex items-center gap-2 text-sm"><button className="flex-1 text-left" onClick={()=>playSong(s,{alsoSetQueue:true,replaceQueue:selected.songs,startIdx:index})}>{s.name} · {s.artists}</button><button className={button} onClick={()=>save({...profile,playlists:profile.playlists.map(p=>p.id===playlist?{...p,songs:p.songs.filter(x=>x.id!==s.id),updatedAt:Date.now()}:p)})}>移出</button></div>)}</>}
+    {selected.songs.map((s,index)=><div key={s.id} className="flex items-center gap-2 text-sm"><div className="flex-1 min-w-0">{!character?<PlaylistSongButton song={s} onPlay={()=>playSong(s,{alsoSetQueue:true,replaceQueue:selected.songs,startIdx:index})} onRemove={()=>save({...profile,playlists:profile.playlists.map(p=>p.id===playlist?{...p,songs:p.songs.filter(x=>x.id!==s.id),updatedAt:Date.now()}:p)})}/>:<button onClick={()=>playSong(s,{alsoSetQueue:true,replaceQueue:selected.songs,startIdx:index})}>{s.name} · {s.artists}</button>}</div>{lyricControl(s)}<button className={button} onClick={()=>save({...profile,playlists:profile.playlists.map(p=>p.id===playlist?{...p,songs:p.songs.filter(x=>x.id!==s.id),updatedAt:Date.now()}:p)})}>移出</button></div>)}</>}
    </section>}
+   <BulkSongImport readDetail={id=>musicApi._raw(cfg,'/song/detail',{ids:id})} onConfirm={async songs=>{
+    if(character&&!selected)throw Error('请先为角色选择歌单');
+    if(selected){
+      const next=profile.playlists.map(p=>p.id===selected.id?{...p,songs:mergePlaylistSongs(p.songs,songs.map(song=>({...song,source:'user' as const,addedAt:Date.now()}))),updatedAt:Date.now()}:p);
+      if(character)await Promise.resolve(updateCharacter(character.id,{musicProfile:{...profile,playlists:next,updatedAt:Date.now()}}));
+      else await savePersonalPlaylistEdits(profile.playlists,next);
+    }
+    songs.forEach(song=>addLocalSong(song));
+    addToast(`已导入 ${songs.length} 首歌曲`,'success');
+   }}/>
    <section className="rounded-2xl bg-white/60 p-3 space-y-2"><h2 className="text-sm font-bold">导入歌曲{selected?' · '+selected.title:''}</h2>
     <div className="flex gap-2"><button className={button} aria-pressed={source==='url'} onClick={()=>setSource('url')}>链接导入</button><button className={button} aria-pressed={source==='file'} onClick={()=>setSource('file')}>文件导入</button></div>
     {source==='url'?<><input aria-label="歌曲音频链接" className={input} value={audioUrl} onChange={e=>setAudioUrl(e.target.value)} placeholder="https://…/歌曲.mp3"/><p className="text-xs opacity-60">只保存链接，在线播放，不下载到本地歌曲缓存。</p></>:<input aria-label="歌曲文件" type="file" accept="audio/*,.mp3,.flac,.m4a,.wav,.ogg" disabled={busy} onChange={e=>{const f=e.target.files?.[0];if(f){setAudio(f);if(!title)setTitle(f.name.replace(/\.[^.]+$/,''));}}}/>}{source==='file'&&audio&&<p className="text-xs">{audio.name}</p>}
@@ -72,7 +93,7 @@ export default function MusicLibraryManager({onClose, initialOwner='',initialPla
    </section>
    <section className="space-y-2"><h2 className="text-sm font-bold">{selected?'往歌单添加歌曲':'本地歌曲'}</h2>
     {selected&&<form className="flex gap-2" onSubmit={async e=>{e.preventDefault();if(busy||!query.trim())return;setBusy(true);try{const r=await musicApi.search(cfg,query.trim());setFound((r?.result?.songs||[]).map((s:any)=>({id:s.id,name:s.name,artists:(s.ar||s.artists||[]).map((a:any)=>a.name).join(' / '),album:s.al?.name||s.album?.name||'',albumPic:s.al?.picUrl||s.album?.picUrl||'',duration:(s.dt||s.duration||0)/1000,fee:s.fee||0})));}catch(e){addToast('搜索失败：'+String(e),'error');}finally{setBusy(false);}}}><input aria-label="搜索添加歌曲" className={input} value={query} onChange={e=>setQuery(e.target.value)} placeholder="搜索歌曲"/><button className={button} disabled={busy}>搜索</button></form>}
-    {choices.map(s=><div key={s.id} className="flex gap-2 items-center"><button className="flex-1 min-w-0 text-left text-sm" onClick={()=>playSong(s,{alsoSetQueue:true,replaceQueue:choices,startIdx:choices.findIndex(x=>x.id===s.id)})}>{s.name}<small className="block opacity-60">{s.artists}</small></button>{selected&&<button className={button} disabled={selected.songs.some(x=>x.id===s.id)} onClick={()=>add(s)}>加入</button>}</div>)}
+    {choices.map(s=><div key={s.id} className="flex gap-2 items-center"><button className="flex-1 min-w-0 text-left text-sm" onClick={()=>playSong(s,{alsoSetQueue:true,replaceQueue:choices,startIdx:choices.findIndex(x=>x.id===s.id)})}>{s.name}<small className="block opacity-60">{s.artists}</small></button>{lyricControl(s)}{selected&&<button className={button} disabled={selected.songs.some(x=>x.id===s.id)} onClick={()=>add(s)}>加入</button>}</div>)}
    </section>
   </main>
  </div>;

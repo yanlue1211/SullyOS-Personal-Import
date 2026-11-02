@@ -15,7 +15,7 @@ import TokenImg from '../../components/os/TokenImg';
 import { isBlobRef } from '../../utils/blobRef';
 import PersonalPlaylistsPanel from './PersonalPlaylistsPanel';
 import {DB} from '../../utils/db';
-import {loadNeteasePlaylistSongs} from '../../utils/personalMusicLibrary';
+import {loadNeteasePlaylistSongs,importNeteasePlaylist} from '../../utils/personalMusicLibrary';
 import { trackEvent } from '../../utils/analytics';
 
 interface Playlist {
@@ -215,7 +215,19 @@ const NeteaseProfilePage: React.FC<Props> = ({ onBack, onOpenPlayer, onOpenSearc
         (async()=>{
           const key='music-netease-index:'+uid;
           if(!force){const saved=await DB.getAsset(key);if(saved){const cached=JSON.parse(saved);if(Array.isArray(cached))return {playlist:cached};}}
-          const result=force?await musicApi._raw(curCfg,'/user/playlist',{uid,limit:60}):await musicApi.userPlaylist(curCfg,uid);
+          let result=force?await musicApi._raw(curCfg,'/user/playlist',{uid,limit:60,offset:0}):await musicApi.userPlaylist(curCfg,uid);
+          if(force&&Array.isArray(result?.playlist)){
+            const all=[...result.playlist];let offset=all.length;
+            while(result.more===true || result.playlist.length===60){
+              const page=await musicApi._raw(curCfg,'/user/playlist',{uid,limit:60,offset});
+              if(!Array.isArray(page?.playlist))throw Error('歌单分页读取失败');
+              const fresh=page.playlist.filter((p:any)=>!all.some((x:any)=>x.id===p.id));
+              if(!fresh.length){if(page.more)throw Error('网易云歌单分页未完成');break;}
+              all.push(...fresh);offset+=page.playlist.length;result=page;
+              if(offset>10000)throw Error('歌单数量过多，请稍后重试');
+            }
+            result={...result,playlist:all};
+          }
           if(!Array.isArray(result?.playlist))throw Error(result?.message||'歌单读取失败');
           await DB.saveAsset(key,JSON.stringify(result.playlist));
           return result;
@@ -277,8 +289,22 @@ const NeteaseProfilePage: React.FC<Props> = ({ onBack, onOpenPlayer, onOpenSearc
 
   useEffect(() => { reload(); }, [reload]);
 
+  const [syncing,setSyncing]=useState(false);
+  const syncLock=useRef(false);
   const loadImportTracks = async (source:{id:number;trackCount:number},force=false) => {
     return loadNeteasePlaylistSongs(source,(limit,offset)=>force?musicApi._raw(cfgRef.current,'/playlist/track/all',{id:source.id,limit,offset}):musicApi.playlistTrackAll(cfgRef.current,source.id,limit,offset));
+  };
+
+  const syncAll = async () => {
+    if(syncLock.current)return;syncLock.current=true;setSyncing(true);
+    try {
+      await reload(true);
+      const raw=await DB.getAsset('music-netease-index:'+uid);
+      if(!raw)throw Error('没有读取到网易云歌单');
+      const sources=JSON.parse(raw);let failed=0;
+      for(const source of sources){try{await importNeteasePlaylist({...source,coverImgUrl:toHttps(source.coverImgUrl||'')},await loadImportTracks(source,true));}catch{failed++;}}
+      toastRef.current(failed?`已完成同步，${failed} 个歌单未完成，可再次同步重试`:`已同步并保存 ${sources.length} 个歌单`,failed?'info':'success');
+    }catch(e){toastRef.current('同步失败：'+String(e),'error');}finally{syncLock.current=false;setSyncing(false);}
   };
 
   // 签到
@@ -622,6 +648,7 @@ const NeteaseProfilePage: React.FC<Props> = ({ onBack, onOpenPlayer, onOpenSearc
               {t.label}
             </button>
           ))}
+          <button type="button" aria-label="同步网易云歌单" disabled={syncing||loading} onClick={()=>void syncAll()} className="flex-1 py-1.5 rounded-full text-[11px] tracking-wider disabled:opacity-40" style={{color:C.muted}}>{syncing?'同步中…':'同步'}</button>
         </div>
 
         {loading && (
@@ -633,15 +660,7 @@ const NeteaseProfilePage: React.FC<Props> = ({ onBack, onOpenPlayer, onOpenSearc
         )}
 
         {tab==='playlist'&&<>
-          <PersonalPlaylistsPanel sources={playlists} loadTracks={loadImportTracks} onManage={onManage} onOpenPlayer={onOpenPlayer} onSync={async()=>{
-            await reload(true);
-            let refreshed=playlists;
-            const raw=uid?await DB.getAsset('music-netease-index:'+uid):null;
-            if(raw)refreshed=JSON.parse(raw).map((p:any)=>({id:p.id,name:p.name,trackCount:p.trackCount||0,coverImgUrl:toHttps(p.coverImgUrl||''),subscribed:!!p.subscribed}));
-            const {importNeteasePlaylist,readPersonalPlaylists}=await import('../../utils/personalMusicLibrary');
-            const saved=await readPersonalPlaylists();
-            for(const source of refreshed){if(saved.some(p=>p.neteaseSourceId===source.id||p.id==='netease-'+source.id))await importNeteasePlaylist(source,await loadImportTracks(source,true));}
-          }}/>
+          <PersonalPlaylistsPanel sources={playlists} loadTracks={loadImportTracks} onManage={onManage} onOpenPlayer={onOpenPlayer}/>
           {localAlbumSongs.length>0&&<div className="px-3 mt-3"><LocalAlbumCard songs={localAlbumSongs} expanded={localAlbumExpanded} setExpanded={setLocalAlbumExpanded} currentId={current?.id??null} playing={playing} onPlay={(song,index)=>{playSong(song,{replaceQueue:localAlbumSongs,startIdx:index});onOpenPlayer();}} onRemove={removeLocalSong}/></div>}
         </>}
 

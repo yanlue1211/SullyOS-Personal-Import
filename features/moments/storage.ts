@@ -26,10 +26,11 @@ import { areFriends, canRead, projectPost, postText } from "./permissions";
 export async function transaction<T>(
   fn: (s: IDBObjectStore, tx: IDBTransaction) => Promise<T>,
   write = false,
+  memory = false,
 ): Promise<T> {
   const db = await openDB(),
     tx = db.transaction(
-      write ? [TABLE, "characters", "messages", "assets"] : [TABLE],
+      write ? [TABLE, "characters", "messages", "assets", ...(memory ? ["memory_nodes","memory_vectors","memory_links"] : [])] : [TABLE],
       write ? "readwrite" : "readonly",
     );
   const done = completed(tx);
@@ -373,21 +374,8 @@ export async function interact(
   );
 }
 export async function deletePost(actor: string, id: string) {
-  return transaction(async (s) => {
-    const c = await getConfig(s);
-    requireEnabled(c);
-    const p = await getRow<Post>(id, s);
-    if (!p || p.owner !== actor) throw Error("只能删除自己的动态");
-    s.delete(id);
-    for (const snap of await rows<Snapshot>(
-      "snapshot",
-      undefined,
-      10000,
-      Infinity,
-      s,
-    ))
-      await refreshSnapshot(s, c, snap.owner);
-  }, true);
+  const {revisePost}=await import('./revisions');
+  return revisePost(actor,id,null);
 }
 export async function deleteComment(actor: string, postId: string, id: string) {
   return transaction(async (s) => {
@@ -434,7 +422,7 @@ export async function feedPage(
     const all = await rows<Post>("post", author, 60, before, s);
     return {
       posts: all
-        .map((p) => projectPost(c, viewer, p))
+        .map((p) => viewer === "user" ? (p.deletedAt ? undefined : p) : projectPost(c, viewer, p))
         .filter((p): p is Post => !!p),
       cursor: all.length
         ? { at: all[all.length - 1].at, id: all[all.length - 1].id }
@@ -489,7 +477,7 @@ export async function refreshSnapshot(
     if (now - record.at > 3 * 86400000) continue;
     const p = await getRow<Post>(record.postId, s);
     if (!p) continue;
-    const current = projectPost(c, owner, p);
+    const current = projectPost(c, owner, p.deletedAt ? {...p,deletedAt:undefined} : p);
     if (!current) continue;
     const allowed = new Set(current.comments.map((x) => x.id));
     const known = record.projection.comments.filter((x) => allowed.has(x.id));

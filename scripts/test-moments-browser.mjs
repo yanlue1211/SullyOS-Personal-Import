@@ -92,6 +92,15 @@ try {
   await page
     .getByText("一条手动评论，不应触发模型。", { exact: false })
     .waitFor();
+  assert.ok(await page.locator('.mm-comment-time').count() > 0);
+  const editedPost = page.locator('.mm-post').filter({hasText:'早起多出来的十分钟，用来吃一碗热面。'});
+  await editedPost.getByRole('button',{name:'编辑朋友圈',exact:true}).click();
+  await page.getByRole('textbox',{name:'朋友圈正文'}).fill('用户编辑了角色的早餐朋友圈。');
+  await page.getByRole('button',{name:'保存修改',exact:true}).click();
+  await page.getByText('用户编辑了角色的早餐朋友圈。',{exact:true}).waitFor();
+  await page.locator('.mm-post').filter({hasText:'用户编辑了角色的早餐朋友圈。'}).getByRole('button',{name:'删除朋友圈',exact:true}).click();
+  await page.getByRole('dialog',{name:'删除朋友圈方式'}).getByRole('button',{name:'普通删除',exact:true}).click();
+  await page.getByText('用户编辑了角色的早餐朋友圈。',{exact:true}).waitFor({state:'hidden'});
   await page.reload();
   await page
     .getByText("浏览器验收：窗外的风有点凉。", { exact: true })
@@ -105,6 +114,36 @@ try {
     true,
   );
   await page.screenshot({ path: out + "/feed-320.png" });
+  const music = await context.newPage();
+  music.on('pageerror',e=>errors.push(e.message));
+  const musicUrl=(process.env.MOMENTS_PREVIEW_ORIGIN || 'http://127.0.0.1:4188')+'/test/fixtures/music-management.html';
+  await music.goto(musicUrl);
+  await music.getByRole('textbox',{name:'批量歌曲链接'}).fill('https://fixture.invalid/one.mp3\nhttps://fixture.invalid/two.mp3');
+  await music.getByRole('button',{name:'识别链接',exact:true}).click();
+  await music.getByRole('button',{name:'移除待导入歌曲 1',exact:true}).click();
+  await music.getByRole('textbox',{name:'第1首歌名'}).fill('留下的歌曲');
+  await music.getByRole('textbox',{name:'第1首歌手'}).fill('确认的歌手');
+  await music.screenshot({path:out+'/music-confirm-390.png'});
+  await music.getByRole('button',{name:'确认导入',exact:true}).click();
+  await music.getByRole('dialog',{name:'确认批量歌曲'}).waitFor({state:'hidden'});
+  await music.goto(musicUrl+'?playlists');
+  await music.getByRole('button',{name:'展开歌单 测试歌单'}).click();
+  const track=music.getByRole('button',{name:'播放 留下的歌曲',exact:true});
+  await track.waitFor();
+  assert.equal(await music.getByRole('button',{name:'播放 one',exact:true}).count(),0);
+  const box=await track.boundingBox();
+  await music.mouse.move(box.x+box.width/2,box.y+box.height/2);
+  await music.mouse.down();
+  await music.getByRole('dialog',{name:'歌曲操作'}).waitFor();
+  await music.mouse.up();
+  assert.equal(await music.locator('[data-play-count]').getAttribute('data-play-count'),'0');
+  await music.getByRole('button',{name:'删除歌曲',exact:true}).click();
+  await track.waitFor({state:'hidden'});
+  await music.reload();
+  await music.getByRole('button',{name:'展开歌单 测试歌单'}).click();
+  assert.equal(await music.getByRole('button',{name:'播放 留下的歌曲',exact:true}).count(),0);
+  await music.setViewportSize({width:320,height:740});
+  await music.screenshot({path:out+'/music-playlist-320.png'});
   assert.equal(
     modelCalls,
     0,

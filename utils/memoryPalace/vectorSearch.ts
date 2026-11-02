@@ -1,3 +1,4 @@
+import {DB} from '../db';
 /**
  * Memory Palace — 向量搜索（Web Worker 加速版）
  *
@@ -117,7 +118,9 @@ export async function vectorSearch(
             const remoteResults = await remoteSearch(remoteConfig, queryVector, charId, threshold, topK);
             if (remoteResults.length > 0) {
                 // 远程结果已包含内容，构建轻量 MemoryNode（带 EventBox 字段 + Russell 情感 + 置顶 + 衍生来源）
-                return remoteResults.map(r => ({
+                const revoked=await DB.getAssetRaw('moments-invalid-memory:'+charId);
+                const excluded=new Set(Array.isArray(revoked)?revoked:[]);
+                return remoteResults.filter(r=>!excluded.has(r.memoryId)).map(r => ({
                     node: {
                         id: r.memoryId,
                         charId,

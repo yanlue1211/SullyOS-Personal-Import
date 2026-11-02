@@ -1,3 +1,5 @@
+import {PencilSimple, Trash} from "@phosphor-icons/react";
+import {revisePost} from "../features/moments/revisions";
 import React, { useEffect, useRef, useState } from "react";
 import { useOS } from "../context/OSContext";
 import { useLocalBackHandler } from "../hooks/useLocalBackHandler";
@@ -6,6 +8,7 @@ import { useBlobRefUrl } from "../utils/blobRef";
 import { putImageBlob } from "../utils/blobRef";
 import { processImageToBlob } from "../utils/file";
 import {
+  getRow,
   getConfig,
   saveConfig,
   setFriend,
@@ -134,6 +137,8 @@ export default function MomentsApp() {
     [owner, setOwner] = useState<string | undefined>(),
     [viewer, setViewer] = useState("user"),
     [charId, setCharId] = useState("");
+  const [editing,setEditing]=useState<Post>();
+  const [deleting,setDeleting]=useState<Post>();
   const [text, setText] = useState(""),
     [media, setMedia] = useState<Media[]>([]),
     [visibility, setVisibility] = useState<Visibility>({
@@ -221,6 +226,7 @@ export default function MomentsApp() {
       setImage(undefined);
       return true;
     }
+    if(deleting){setDeleting(undefined);return true;}
     if (confirm) {
       setConfirm(null);
       return true;
@@ -262,7 +268,7 @@ export default function MomentsApp() {
     page !== "feed" ||
       !!owner ||
       !!image ||
-      !!confirm ||
+      !!confirm || !!deleting ||
       !!suggestion ||
       !!reply ||
       !!menu ||
@@ -280,6 +286,7 @@ export default function MomentsApp() {
     );
   const available = os.characters.filter((c) => c.name.includes(find));
   const startCompose = () => {
+    setEditing(undefined);
     setText("");
     setMedia([]);
     setVisibility({ mode: "all", ids: [] });
@@ -320,7 +327,7 @@ export default function MomentsApp() {
               : "朋友圈"
             : {
                 settings: "朋友圈设置",
-                compose: "分享生活",
+                compose: editing ? "编辑朋友圈" : "分享生活",
                 friends: "好友关系",
                 character: char?.name || "角色设置",
                 logs: "活动记录",
@@ -460,27 +467,23 @@ export default function MomentsApp() {
                           minute: "2-digit",
                         })}
                       </time>
-                      {viewer === "user" && p.owner === "user" && (
-                        <button
-                          onClick={() =>
-                            setConfirm({
-                              text: "删除这条朋友圈？",
-                              run: () => deletePost("user", p.id),
-                            })
-                          }
-                        >
-                          删除
-                        </button>
-                      )}
+                      {viewer === "user" && <>
+                        <button className="mm-post-tool" aria-label="编辑朋友圈" onClick={()=>void operate(async()=>{
+                          const original=await getRow<Post>(p.id);if(!original||original.deletedAt)throw Error('动态已删除');
+                          setEditing(original);setText(original.text);setMedia(original.media);setVisibility(original.visibility);setPage('compose');
+                        })}><PencilSimple size={15}/></button>
+                        <button className="mm-post-tool" aria-label="删除朋友圈" onClick={()=>setDeleting(p)}><Trash size={15}/></button>
+                      </>}
                       <span />
                       {viewer === "user" && (
                         <button
+                          className="mm-social-menu"
                           aria-label="点赞或评论"
                           onClick={() =>
                             setMenu(menu === p.id ? undefined : p.id)
                           }
                         >
-                          ••
+                          <svg width="17" height="12" viewBox="0 0 17 12" aria-hidden="true"><circle cx="4" cy="6" r="1.6" fill="currentColor"/><circle cx="13" cy="6" r="1.6" fill="currentColor"/></svg>
                         </button>
                       )}
                     </div>
@@ -549,6 +552,7 @@ export default function MomentsApp() {
                               )}
                               ：{c.text}
                             </button>
+                            <time className="mm-comment-time" dateTime={new Date(c.at).toISOString()}>{new Date(c.at).toLocaleString([], {month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}</time>
                             {viewer === "user" &&
                               (c.authorId === "user" || p.owner === "user") && (
                                 <button
@@ -1098,9 +1102,10 @@ export default function MomentsApp() {
                 <option value="self">仅自己</option>
               </select>
             </label>
+            {editing && editing.owner!=='user' && ['include','exclude'].includes(visibility.mode) && <label className="mm-setting-row">{name('user')}<input type="checkbox" checked={visibility.ids.includes('user')} onChange={e=>{const checked=e.currentTarget.checked;setVisibility(v=>({...v,ids:checked?[...v.ids,'user']:v.ids.filter(id=>id!=='user')}));}}/></label>}
             {["include", "exclude"].includes(visibility.mode) &&
               os.characters
-                .filter((c) => config.participants[c.id]?.enabled)
+                .filter((c) => areFriends(config,editing?.owner||'user',c.id) && c.id!==editing?.owner)
                 .map((c) => (
                   <label className="mm-setting-row" key={c.id}>
                     {c.name}
@@ -1123,7 +1128,8 @@ export default function MomentsApp() {
               disabled={busy || (!text.trim() && !media.length)}
               onClick={() =>
                 operate(async () => {
-                  await publish(
+                  if(editing)await revisePost('user',editing.id,{text,media,visibility,theme:editing.theme},true,editing.revision);
+                  else await publish(
                     "user",
                     name("user"),
                     { text, media, visibility, theme: "" },
@@ -1134,7 +1140,7 @@ export default function MomentsApp() {
                 })
               }
             >
-              发表
+              {editing ? '保存修改' : '发表'}
             </button>
           </div>
         )}
@@ -1351,6 +1357,12 @@ export default function MomentsApp() {
           </section>
         </div>
       )}
+      {deleting && <div className="mm-overlay"><section role="dialog" aria-modal="true" aria-label="删除朋友圈方式">
+        <h3>如何删除这条朋友圈？</h3><p>普通删除：已经看见的人仍记得，没看见的人不能再看见。</p><p>真实删除：撤销这条动态带来的见闻、事件记录与相关认知，视作从未发布。</p>
+        <div className="mm-dialog-actions"><button onClick={()=>setDeleting(undefined)}>取消</button>
+        <button disabled={busy} onClick={()=>void operate(async()=>{await revisePost('user',deleting.id,null,false,deleting.revision);setDeleting(undefined);})}>普通删除</button>
+        <button disabled={busy} onClick={()=>void operate(async()=>{await revisePost('user',deleting.id,null,true,deleting.revision);setDeleting(undefined);})}>真实删除</button></div>
+      </section></div>}
       {confirm && (
         <div className="mm-overlay">
           <section role="dialog" aria-modal="true" aria-label="确认操作">

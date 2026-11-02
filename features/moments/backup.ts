@@ -27,6 +27,7 @@ export function validateMomentsBackup(value: unknown): Row[] {
       !Number.isFinite(r.at) ||
       r.at < 0 ||
       ![
+        "correction",
         "config",
         "post",
         "seen",
@@ -39,6 +40,7 @@ export function validateMomentsBackup(value: unknown): Row[] {
     )
       throw Error("朋友圈记录格式无效");
     ids.add(r.id);
+    if(r.kind === "correction" && (typeof r.postId!=="string"||typeof r.text!=="string"||r.text.length>16000))throw Error("现实修订记录无效");
     if (r.kind === "config") {
       if (
         r.id !== "config" ||
@@ -135,6 +137,8 @@ function validatePost(p: any): asserts p is Post {
   if (
     !p ||
     typeof p.id !== "string" ||
+    (p.deletedAt!==undefined&&(!Number.isFinite(p.deletedAt)||p.deletedAt<0)) ||
+    (p.editedAt!==undefined&&(!Number.isFinite(p.editedAt)||p.editedAt<0)) ||
     p.kind !== "post" ||
     typeof p.owner !== "string" ||
     typeof p.name !== "string" ||

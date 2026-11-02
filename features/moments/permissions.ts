@@ -10,6 +10,7 @@ export function areFriends(c: Config, a: string, b: string): boolean {
   );
 }
 export function canRead(c: Config, viewer: string, p: Post): boolean {
+  if (p.deletedAt) return false;
   if (!c.enabled || (viewer !== "user" && !c.participants[viewer]?.enabled))
     return false;
   if (viewer === p.owner) return true;
