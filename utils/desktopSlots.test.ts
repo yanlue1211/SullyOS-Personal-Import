@@ -1,0 +1,5 @@
+import {it,expect} from 'vitest';
+import {desktopSlots,desktopPages,moveDesktopSlot,isDesktopEmpty} from './desktopSlots';
+it('preserves first two 8-app pages and allocates later 16-app pages',()=>{const ids=Array.from({length:37},(_,i)=>'app'+i);const pages=desktopPages(desktopSlots(undefined,ids));expect(pages.map(p=>p.length)).toEqual([8,8,16,16]);expect(pages.flat().filter(id=>!isDesktopEmpty(id))).toEqual(ids);});
+it('moves into empty cell without shifting other apps and survives reload',()=>{const ids=Array.from({length:17},(_,i)=>'app'+i),slots=desktopSlots(undefined,ids),target=slots[25];const moved=moveDesktopSlot(slots,'app16',target);expect(moved[25]).toBe('app16');expect(isDesktopEmpty(moved[16])).toBe(true);expect(moved.slice(0,16)).toEqual(slots.slice(0,16));expect(desktopSlots(JSON.parse(JSON.stringify(moved)),ids)).toEqual(moved);});
+it('normalizes duplicates without dropping apps or occupied gaps',()=>{const slots=desktopSlots(['b','launcher-empty-5','b','a'],['a','b','c']);expect(slots.slice(0,4)).toEqual(['b','launcher-empty-5','a','c']);expect(slots.filter(id=>!isDesktopEmpty(id))).toHaveLength(3);});
