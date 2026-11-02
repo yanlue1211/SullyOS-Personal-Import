@@ -1,3 +1,4 @@
+import {recordVoice} from './recording';
 import {audioBlobToPayload,recognizeUserRecording} from '../../utils/audioApi';
 import type {AudioApiConfig} from '../../types';
 export type CaptureCancel=(()=>void)&{finish?:()=>void};
@@ -11,6 +12,7 @@ export async function handsFree(api:APIConfig,cb:{text:(text:string,analysis?:st
   return()=>{cancelled=true;session.stop();};
  }
  if(!navigator.mediaDevices?.getUserMedia)throw Error('当前环境无法录音，请检查麦克风权限或使用支持录音的浏览器。');
+ if(typeof MediaRecorder!=='undefined')return recordVoice(api,cb,options);
  const stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
  let ctx:AudioContext;try{ctx=new AudioContext();await ctx.resume();}catch(error){stream.getTracks().forEach(t=>t.stop());throw error;}const source=ctx.createMediaStreamSource(stream);const processor=ctx.createScriptProcessor(4096,1,1);const mute=ctx.createGain();mute.gain.value=0;
  let chunks:Float32Array[]=[],pre:Float32Array[]=[],started=0,lastVoice=0,voiced=0,finished=false;

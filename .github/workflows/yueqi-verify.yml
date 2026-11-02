@@ -24,7 +24,7 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm vitest run utils/yueqiAudioInput.test.ts utils/yueqi.test.ts utils/yueqiRuntime.test.ts utils/yueqiContext.test.ts utils/yueqiUI.test.tsx utils/contextPipeline.test.ts utils/contextWorldbook.test.ts utils/experience.test.ts utils/chatInputInteraction.test.ts --maxWorkers=2 --minWorkers=1
+      - run: pnpm vitest run utils/yueqiRecording.test.ts utils/yueqiAudioInput.test.ts utils/yueqi.test.ts utils/yueqiRuntime.test.ts utils/yueqiContext.test.ts utils/yueqiUI.test.tsx utils/contextPipeline.test.ts utils/contextWorldbook.test.ts utils/experience.test.ts utils/chatInputInteraction.test.ts --maxWorkers=2 --minWorkers=1
       - run: pnpm build
       - name: Install isolated browser test runtime
         run: |
@@ -41,6 +41,7 @@ jobs:
             sleep 1
           done
           node scripts/yueqi-browser-check.mjs
+          node scripts/yueqi-recording-browser-check.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
