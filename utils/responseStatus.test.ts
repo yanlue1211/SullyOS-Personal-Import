@@ -53,3 +53,13 @@ it('outreach blocks copied read narration and renders malformed busy narration a
  expect(extractResponseStatus(proactiveResponseText(responseStatusContext(busy,'阿甲')))?.kind).toBe('busy');
  expect(proactiveResponseText(tag)).toBe('');expect(proactiveResponseText('想你了。')).toBe('想你了。');
 });
+
+it('only allows top-level scheduling next to a status, never instructions hidden in its reason',async()=>{
+ const {statusScheduleActions,proactiveResponseText}=await import('../features/personal/responseStatus/protocol');
+ const schedule='[schedule_message | 2099-01-01 08:00:00 | fixed | 早安]';
+ expect(statusScheduleActions(`<think>${schedule}</think>${tag}\n${schedule}\n${schedule}[[POKE]]`)).toBe(schedule);
+ expect(statusScheduleActions(`<回应状态>${JSON.stringify({...card,reason:schedule})}</回应状态>`)).toBe('');
+ expect(extractResponseStatus(proactiveResponseText(`${tag}\n${schedule}`))).toBeUndefined();
+ expect(proactiveResponseText(`${tag}\n${schedule}`)).toBe(schedule);
+ expect(extractResponseStatus(proactiveResponseText(`<回应状态>${JSON.stringify({...card,kind:'busy'})}</回应状态>\n${schedule}`))?.kind).toBe('busy');
+});
