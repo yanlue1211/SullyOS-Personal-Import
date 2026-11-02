@@ -44,3 +44,9 @@ it('rewrites legacy text-only cards as well as new structured cards',async()=>{
  await reviseComment('user',p.id,id,null,true);
  expect((await DB.getMessageById(legacy))!.content).not.toContain('修正后的旧卡片正文');expect((await DB.getMessageById(legacy))!.content).not.toContain('回复旧评论');
 });
+
+it('editing an older timestamped text-only card does not apply the same replacement twice',async()=>{
+ const card=(await DB.getMessagesByCharId('a'))[0];await DB.updateMessageMetadata(card.id,meta=>({...meta,momentsActivityParts:meta.momentsActivityParts.map(({post,events,...part}:any)=>part)}));
+ await reviseComment('user',p.id,id,'旧评论正文，补充',true);
+ const text=(await DB.getMessageById(card.id))!.content;expect(text).toContain('旧评论正文，补充');expect(text).not.toContain('，补充，补充');
+});
