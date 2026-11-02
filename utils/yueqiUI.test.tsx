@@ -19,3 +19,8 @@ it('历史记录的修改摘要按钮打开真实编辑框，保存更新同一�
 it('选择角色后，故事设置同时提供线上与线下场景',async()=>{await click('选择一位熟悉的声音');await click('阿源');await click('枕月听书');expect(host.textContent).toContain('隔屏伴月');expect(host.textContent).toContain('月下相依');await click('月下相依');const selected=[...host.querySelectorAll('.yq-scenes button')].find(x=>x.classList.contains('selected'));expect(selected?.textContent).toContain('月下相依');});
 
 it('首页只保留一个角色入口，音乐入口可选择已导入音乐且无测试免责声明',async()=>{fake.moon.playlist=[{id:'saved',name:'雨声.mp3',audio:'saved-audio'}];await click('月下听风');expect(host.querySelector('h2')?.textContent).toBe('月下听风');await click('雨声.mp3');expect(fake.moon.musicPlay).toHaveBeenCalledWith(0);await act(async()=>{(host.querySelector('[aria-label="设置"]') as HTMLButtonElement).click();});expect(host.textContent).not.toContain('需真机验证');expect(host.textContent).not.toContain('测试');});
+
+it('语气默认折叠，原文独立展示',async()=>{
+ (fake.session.turns as any)=[{id:'voice',role:'user',text:'我盖好被子了。',voiceAnalysis:'声音轻柔，稍有困意。',at:1,source:'user',played:true}];
+ try{await click('月光拾音');await click('海边的小羊');const detail=host.querySelector('.yq-voice-detail') as HTMLDetailsElement;expect(detail).not.toBeNull();expect(detail.open).toBe(false);expect(detail.textContent).toContain('声音轻柔');expect(host.textContent).toContain('我盖好被子了。');}finally{fake.session.turns=[];}
+});

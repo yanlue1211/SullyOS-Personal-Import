@@ -35,3 +35,17 @@ it('long stories carry distinct continuation instructions through all six parts'
  expect(tasks[6]).toContain('前面5部分已经讲完');
  expect(vi.mocked(generate).mock.calls[6][0].turns).toHaveLength(5);
 });
+
+it('audio API input preserves tone and ignores callbacks after pause',async()=>{
+ const {handsFree}=await import('../features/yueqi/listen');
+ moon.configure({api:{audioApi:{enabled:true,baseUrl:'https://audio.test',apiKey:'test',model:'test'}},user:{},context:{groups:[],emojis:[],categories:[]}} as any);
+ moon.recognitionMode='audio';moon.session!.status='active';moon.session!.runningSince=Date.now();moon.voice=null;
+ await moon.record();expect(startStt).not.toHaveBeenCalled();const cb=vi.mocked(handsFree).mock.calls.at(-1)![1];
+ moon.pause();cb.text('迟到的结果','温柔');await Promise.resolve();expect(moon.session!.turns.some(t=>t.text==='迟到的结果')).toBe(false);
+ moon.recognitionMode='auto';
+});
+it('voice observations are stored separately when sending a recognized utterance',async()=>{
+ moon.session!.status='active';moon.session!.runningSince=Date.now();moon.voice=null;
+ vi.mocked(generate).mockResolvedValueOnce('盖好被子。');await moon.send('我盖好了。','声音轻柔。','audio');
+ const user=moon.session!.turns.find(t=>t.role==='user');expect(user?.text).toBe('我盖好了。');expect(user?.voiceAnalysis).toBe('声音轻柔。');expect(user?.inputKind).toBe('audio');
+});
