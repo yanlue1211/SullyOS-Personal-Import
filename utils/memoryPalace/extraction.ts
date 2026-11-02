@@ -204,8 +204,6 @@ function parseMemoryNodesFromBuffer(
                 eventBoxId: null,  // 由 pipeline 在 binding 阶段设置
                 origin: 'extraction',
             };
-            const allowedPostIds=new Set(messages.map(m=>m.metadata?.momentsPostId).filter((id):id is string=>typeof id==='string'));
-            if(Array.isArray(item.sourcePostIds))memory.sourcePostIds=item.sourcePostIds.filter((id:unknown):id is string=>typeof id==='string'&&allowedPostIds.has(id));
             if (includeEntities) memory.entities = parseEntities(item.entities);
             // No anchor guesses from event dates or the extraction batch. Only a valid original message reference.
             if (linkDates && relativeTimeEnabled() && hasRelativeTime(memory.content)
@@ -468,10 +466,7 @@ export async function extractMemoriesFromBuffer(
         ? `\n12. **便利贴摘除**（unpin，可选）：如果对话中明确提到某条便利贴描述的状态已结束（如"感冒好了""提前回来了""考试考完了"），在输出的 JSON 数组末尾加一条 {"unpin": "P0"} 来摘除它。只在对话明确提及时才摘除，不要猜测。`
         : '';
 
-    const {rows:momentRows}=await import('../../features/moments/storage');
-    const realityCorrections=await momentRows<import('../../features/moments/schema').Correction>('correction',charId,1000);
-    const realityBlock=realityCorrections.length?'\n现实校正：以下记录高于旧聊天和旧摘要。作废事实不要重新提取成记忆，也不要记录修订/删除本身。\n'+realityCorrections.map(x=>x.text).join('\n'):'';
-    const systemPrompt = `你是 ${charName}。根据给定的对话内容，以你的第一人称视角（"我"）提取值得记住的记忆。${contextBlock}${relatedBlock}${pinnedBlock}${realityBlock}
+    const systemPrompt = `你是 ${charName}。根据给定的对话内容，以你的第一人称视角（"我"）提取值得记住的记忆。${contextBlock}${relatedBlock}${pinnedBlock}
 
 ${buildRulesBlock(charName, userLabel, includeEntities)}${relatedToRule}${unpinRule}${sarMemoryBoundary ? `\n\n${sarMemoryBoundary}` : ''}${linkDates ? `
 
@@ -498,7 +493,6 @@ content 保留原消息的相对时间措辞，不要自行添加日期括号。
 
 date 必填，按该记忆实际发生当天填（参考消息行首的时间戳）。
 pinDays 仅在需要置顶时才写，大多数记忆不需要。
-如果某条记忆确实来自私人朋友圈事件，添加 sourcePostIds 字段（动态ID数组），只引用该条记忆实际使用的事件，不给其他聊天记忆附加来源。
 如果对话过于琐碎无值得记忆的内容，返回空数组 []。`;
 
     try {

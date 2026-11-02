@@ -1358,7 +1358,7 @@ export default function MomentsApp() {
         </div>
       )}
       {deleting && <div className="mm-overlay"><section role="dialog" aria-modal="true" aria-label="删除朋友圈方式">
-        <h3>如何删除这条朋友圈？</h3><p>普通删除：已经看见的人仍记得，没看见的人不能再看见。</p><p>真实删除：撤销这条动态带来的见闻、事件记录与相关认知，视作从未发布。</p>
+        <h3>如何删除这条朋友圈？</h3><p>普通删除：已经看见的人仍记得，没看见的人不能再看见。</p><p>真实删除：清理动态、浏览记录和关联事件卡。已经总结的长期记忆保留，如需调整请手动修改。</p>
         <div className="mm-dialog-actions"><button onClick={()=>setDeleting(undefined)}>取消</button>
         <button disabled={busy} onClick={()=>void operate(async()=>{await revisePost('user',deleting.id,null,false,deleting.revision);setDeleting(undefined);})}>普通删除</button>
         <button disabled={busy} onClick={()=>void operate(async()=>{await revisePost('user',deleting.id,null,true,deleting.revision);setDeleting(undefined);})}>真实删除</button></div>

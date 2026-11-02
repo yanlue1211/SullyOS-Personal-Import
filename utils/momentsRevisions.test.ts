@@ -18,16 +18,29 @@ it('ordinary deletion hides the feed from everyone while preserving only actual 
  expect((await chatMomentsContext('c',3)).dynamic).not.toContain('暂时不想说话');
  expect(validateMomentsBackup(await exportMoments(await openDB())).length).toBeGreaterThan(0);
 });
-it('user reality deletion revokes seen, cards, source memories and embeddings, retaining unrelated memories',async()=>{
+it('reality deletion clears feed records and cards but leaves long-term memories and vectors untouched',async()=>{
  const char=await DB.getCharacter('b');
- await transaction(async(_s,tx)=>{tx.objectStore('memory_nodes').put({id:'linked',charId:'b',content:'我听说好友心情很差',sourcePostIds:[post.id]});tx.objectStore('memory_nodes').put({id:'other',charId:'b',content:'我喜欢海边'});tx.objectStore('memory_vectors').put({memoryId:'linked',charId:'b',vector:[]});tx.objectStore('characters').put({...char,memories:[{id:'m',summary:'旧朋友圈记忆',palaceMemoryId:'linked'},{id:'keep',summary:'无关记忆'}]});},true,true);
+ await DB.saveCharacter({...char,memories:[{id:'m',date:'2026-11-02',summary:'已经总结的朋友圈记忆'}]} as any);
+ const db=await openDB(),tx=db.transaction(['memory_nodes','memory_vectors'],'readwrite');
+ tx.objectStore('memory_nodes').put({id:'linked',charId:'b',content:'我听说好友心情很差',sourcePostIds:[post.id]});
+ tx.objectStore('memory_vectors').put({memoryId:'linked',charId:'b',vector:[]});
+ await new Promise<void>((resolve,reject)=>{tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);});
  await revisePost('user',post.id,null,true);
  expect(await getRow(post.id)).toBeUndefined();expect(await getRow<Seen>('seen:b:'+post.id)).toBeUndefined();
  expect((await DB.getMessagesByCharId('b')).filter(m=>m.metadata?.momentsPostId===post.id)).toEqual([]);
- expect((await DB.getCharacter('b'))?.memories.map(m=>m.id)).toEqual(['keep']);
- expect((await chatMomentsContext('b')).dynamic).toContain('从未发布');
- expect((await chatMomentsContext('c')).dynamic).not.toContain('从未发布');
- expect(validateMomentsBackup(await exportMoments(await openDB())).some(r=>r.kind==='correction')).toBe(true);
+ expect((await DB.getCharacter('b'))?.memories.map(m=>m.id)).toEqual(['m']);
+ const read=db.transaction(['memory_nodes','memory_vectors']);
+ const {result}=await import('../features/moments/schema');
+ const [node,vector]=await Promise.all([result(read.objectStore('memory_nodes').get('linked')),result(read.objectStore('memory_vectors').get('linked'))]);
+ expect(node.content).toBe('我听说好友心情很差');expect(vector).toBeDefined();
+ expect((await chatMomentsContext('b')).dynamic).not.toContain('从未发布');
+ expect(validateMomentsBackup(await exportMoments(await openDB())).some(r=>r.kind==='correction')).toBe(false);
+});
+it('never injects legacy reality reminders from an older backup',async()=>{
+ await transaction(async s=>{s.put({id:'correction:b:'+post.id,kind:'correction',owner:'b',at:Date.now(),postId:post.id,text:'旧提醒：这件事从未发生'});},true);
+ expect((await chatMomentsContext('b')).dynamic).not.toContain('旧提醒');
+ const {activityPrompt}=await import('../features/moments/runtime');
+ expect(activityPrompt({call:{id:'test'},participant:participantDefaults(),history:[],posts:[],canPost:false,corrections:['旧提醒']} as any)).not.toContain('旧提醒');
 });
 it('normal character edits leave old viewers unchanged until reading again; user edits rewrite actual viewers immediately',async()=>{
  const changed={...post,text:'已经平静了，出门吃饭。'};
