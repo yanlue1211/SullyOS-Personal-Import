@@ -67,7 +67,7 @@ export async function recordVoice(api: APIConfig, cb: Callbacks, options: {
         };
         const finish = () => { if (!finished && recorder.state === 'recording') recorder.stop(); };
         let analyser: AnalyserNode | undefined;
-        let samples: Float32Array | undefined;
+        let samples: Float32Array<ArrayBuffer> | undefined;
         if (!options.manual) {
             context = new AudioContext(); await context.resume();
             source = context.createMediaStreamSource(stream);
