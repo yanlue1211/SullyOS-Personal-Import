@@ -265,13 +265,16 @@ it("round-trips through the real full export/import entry point and resets old p
   expect(await rows("post")).toEqual([]);
 });
 
-it("enforces the estimated input token budget before starting a provider request", async () => {
-  await DB.saveCharacter({ ...actor, systemPrompt: "长".repeat(23000) });
-  await expect(
-    runActivity("a", { api: global, user: { name: "小雨" } as any }),
-  ).rejects.toThrow("超过20000预算");
-  expect(safeFetchJson).not.toHaveBeenCalled();
-  expect((await rows<Call>("call"))[0].phase).toBe("reserved");
+it.each([{ownMax:16384,globalMax:9000,expected:16384},{ownMax:undefined,globalMax:24576,expected:24576}])('preserves heavy character context and respects configured output tokens ($expected)',async({ownMax,globalMax,expected})=>{
+  const heavy='完整人设与上下文。'.repeat(12000);
+  await DB.saveCharacter({...actor,systemPrompt:heavy,dialogueApi:{...actor.dialogueApi,maxTokens:ownMax}});
+  vi.mocked(safeFetchJson).mockImplementation(async(_url,options)=>({choices:[{finish_reason:'stop',message:{content:JSON.stringify({requestId:promptRequest(options).id,browsed:[],actions:[],post:null,important:[]})}}]}));
+  await runActivity('a',{api:{...global,maxTokens:globalMax},user:{name:'小雨'} as any});
+  expect(safeFetchJson).toHaveBeenCalledTimes(1);
+  const request=promptRequest(vi.mocked(safeFetchJson).mock.calls[0][1]);
+  expect(request.text.includes(heavy)).toBe(true);
+  expect(request.body.max_tokens).toBe(expected);
+  expect((await rows<Call>('call'))[0].phase).toBe('success');
 });
 
 it("posting has an independent opportunity when browsing is not due or has zero frequency", async () => {
