@@ -29,9 +29,9 @@ it('only user may rewrite or really delete; updates known cards and snapshots wi
  expect((await getRow<Post>(p.id))!.comments.map(x=>x.id)).not.toContain(reply);expect((await getRow<Seen>('seen:a:'+p.id))!.projection.comments).toEqual([]);
  expect((await DB.getMessagesByCharId('a'))[0].content).not.toContain('用户修改后的评论');expect((await DB.getCharacter('a'))!.memories[0].summary).toBe('长期记忆保持原样');
 });
-it('likes enqueue activity opportunities but do not immediately teach the author new facts',async()=>{
+it('likes do not enqueue activity opportunities or immediately teach the author new facts',async()=>{
  await interact('user','用户',p.id,{kind:'like'});
- expect((await rows<FeedEvent>('event','a',100)).some(x=>x.eventType==='like')).toBe(true);
+ expect((await rows<FeedEvent>('event','a',100)).some(x=>x.eventType==='like')).toBe(false);
  expect((await getRow<Snapshot>('snapshot:a'))?.text).not.toContain('已看到的点赞：用户');
  await transaction(async s=>{const c=await getConfig(s);await markSeen(s,c,'a',(await getRow<Post>(p.id,s))!,'本轮未新增评论或回复');await refreshSnapshot(s,c,'a');},true);
  expect((await getRow<Snapshot>('snapshot:a'))?.text).toContain('已看到的点赞：用户');

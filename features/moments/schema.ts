@@ -12,6 +12,8 @@ export interface Habits {
   likeChance: number;
   commentChance: number;
   replyChance: number;
+  /** Joining a new comment that is not addressed to this actor; optional for old backups. */
+  joinChance?: number;
   hours: number[];
   quietStart: number;
   quietEnd: number;
@@ -32,6 +34,7 @@ export const habitDefaults = (
   browsesPerDay: { active: 3, normal: 2, quiet: 1 }[browsing],
   likeChance: { active: 0.75, normal: 0.55, quiet: 0.3 }[interaction],
   commentChance: { active: 0.45, normal: 0.28, quiet: 0.15 }[interaction],
+  joinChance: { active: 0.12, normal: 0.05, quiet: 0.02 }[interaction],
   replyChance: { active: 0.98, normal: 0.95, quiet: 0.9 }[interaction],
   hours: [8, 12, 18, 21],
   quietStart: 0,
@@ -237,6 +240,7 @@ export function validHabits(h: any): h is Habits {
     ["likeChance", "commentChance", "replyChance"].every(
       (k) => Number.isFinite(h[k]) && h[k] >= 0 && h[k] <= 1,
     ) &&
+    (h.joinChance === undefined || (Number.isFinite(h.joinChance) && h.joinChance >= 0 && h.joinChance <= 1)) &&
     ["quietStart", "quietEnd"].every(
       (k) => Number.isInteger(h[k]) && h[k] >= 0 && h[k] < 24,
     ) &&
@@ -282,3 +286,5 @@ export function validMedia(media: any): media is Media[] {
     )
   );
 }
+
+export const effectiveJoinChance = (h: Habits): number => h.joinChance ?? ({active: 0.12, normal: 0.05, quiet: 0.02}[h.interaction]);

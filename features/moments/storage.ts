@@ -219,6 +219,7 @@ export async function enqueue(
   interactionId?: string,
   actorId?: string,
 ) {
+  if (eventType === "like") return;
   const at = Date.now();
   for (const [id, part] of Object.entries(c.participants))
     if (

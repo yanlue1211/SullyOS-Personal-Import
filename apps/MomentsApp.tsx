@@ -25,6 +25,7 @@ import {
   emptyConfig,
   participantDefaults,
   habitDefaults,
+  effectiveJoinChance,
   MOMENTS_CHANGED,
   type Config,
   type Post,
@@ -860,6 +861,7 @@ export default function MomentsApp() {
                       "browsesPerDay",
                       "likeChance",
                       "commentChance",
+                      "joinChance",
                       "replyChance",
                     ] as const
                   ).map((key, i) => (
@@ -869,7 +871,8 @@ export default function MomentsApp() {
                           "平均每周发布",
                           "平均每日浏览机会",
                           "点赞倾向（0～1）",
-                          "主动评论倾向（0～1）",
+                          "首次评论倾向（0～1）",
+                          "新评论接话倾向（0～1）",
                           "回应倾向（0～1）",
                         ][i]
                       }
@@ -879,7 +882,7 @@ export default function MomentsApp() {
                         min="0"
                         max={i === 0 ? 14 : i === 1 ? 8 : 1}
                         disabled={busy}
-                        value={participant.habits[key]}
+                        value={key === "joinChance" ? effectiveJoinChance(participant.habits) : participant.habits[key]}
                         onChange={(e) => {
                           const value = Number(e.target.value);
                           void updateParticipant((p) => {
@@ -1293,7 +1296,7 @@ export default function MomentsApp() {
             </p>
             <p>
               点赞 {Math.round(suggestion.likeChance * 100)}% · 评论{" "}
-              {Math.round(suggestion.commentChance * 100)}% · 回应{" "}
+              {Math.round(suggestion.commentChance * 100)}% · 新评论接话 {Math.round(effectiveJoinChance(suggestion) * 100)}% · 回应{" "}
               {Math.round(suggestion.replyChance * 100)}%
             </p>
             <p>
