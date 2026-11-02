@@ -307,7 +307,7 @@ const buildMusicTasteBlock = (char: CharacterProfile): string => {
   const lines: string[] = [];
   if (mp.bio?.trim()) lines.push(`你的音乐品味：${mp.bio.trim()}`);
   if (mp.genreTags?.length) lines.push(`你常听的类型：${mp.genreTags.slice(0, 8).join('、')}`);
-  const artists = (mp.signatureArtists || []).slice(0, 8).map(a => a.starred ? `${a.name}（最爱）` : a.name);
+  const artists = (mp.signatureArtists || []).slice(0, 8).map(a => a.name);
   if (artists.length) lines.push(`你偏爱的歌手：${artists.join('、')}`);
   return lines.length ? `\n${lines.join('\n')}\n` : '';
 };
