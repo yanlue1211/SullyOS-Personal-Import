@@ -3,9 +3,9 @@ export const isDesktopEmpty=(id:string)=>/^launcher-empty-\d+$/.test(id);
 export function desktopSlots(saved:string[]|undefined,available:string[]){
  const valid=new Set(available),seen=new Set<string>();
  const slots=(saved||[]).filter(id=>{if((valid.has(id)||isDesktopEmpty(id))&&!seen.has(id)){seen.add(id);return true;}return false;});
- for(const id of available)if(!seen.has(id))slots.push(id);
- // Preserve positional holes, discard only completely empty trailing pages.
- while(slots.length>32&&slots.slice(-16).every(isDesktopEmpty)&&slots.length%16===0)slots.splice(-16);
+ // Keep interior holes, but trim trailing padding before adding newly visible apps.
+ while(slots.length&&isDesktopEmpty(slots[slots.length-1]))slots.pop();
+ for(const id of available)if(!seen.has(id)){slots.push(id);seen.add(id);}
  const count=Math.max(32,16+Math.ceil(Math.max(0,slots.length-16)/16)*16);
  let n=0;while(slots.length<count){while(seen.has('launcher-empty-'+n))n++;const id='launcher-empty-'+n++;seen.add(id);slots.push(id);}return slots;
 }
