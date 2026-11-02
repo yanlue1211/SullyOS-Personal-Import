@@ -543,7 +543,7 @@ const Launcher: React.FC<{ staticPreview?: boolean }> = ({ staticPreview = false
   }, []);
 
   const availableGridIds = useMemo(() => availableGridApps.map(app => app.id), [availableGridApps]);
-  const [launcherAppOrder, setLauncherAppOrder] = useState<string[]>(() => desktopSlots(theme.launcherAppSlots || theme.launcherAppOrder, INSTALLED_APPS.filter(app => !DOCK_APPS.includes(app.id)).map(app => app.id)));
+  const [launcherAppOrder, setLauncherAppOrder] = useState<string[]>(() => desktopSlots(theme.launcherAppSlots || theme.launcherAppOrder, availableGridIds));
   const [launcherDockOrder, setLauncherDockOrder] = useState<string[]>(() => normalizeOrder(theme.launcherDockOrder, DOCK_APPS));
   const [pinwheelOrder, setPinwheelOrder] = useState<Array<'music' | 'appsA' | 'appsB' | 'image'>>(() => {
       const available = ['music', 'appsA', 'appsB', 'image'] as const;
