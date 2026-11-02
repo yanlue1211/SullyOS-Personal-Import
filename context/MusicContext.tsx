@@ -383,6 +383,7 @@ interface MusicContextType {
   // 「一起写的歌」专辑 — 从 写歌 App 同步过来的本地生成歌
   localAlbumSongs: Song[];
   addLocalSong: (song: Song) => void;
+  patchSongLyrics: (song: Song, fields: Partial<Song>, overwrite: boolean) => boolean;
   removeLocalSong: (songId: number) => void;
   // 实时重录状态 — 让音乐 App 即使在切到其他界面也能看到"正在重录"提示
   regeneratingId: number | null;
@@ -447,6 +448,15 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setLocalAlbumSongs(next);
     setQueueState(prev=>prev.map(item=>item.id===song.id?song:item));
   }, []);
+  const patchSongLyrics = useCallback((song: Song, fields: Partial<Song>, overwrite: boolean) => {
+    const same = (item: Song) => item.id === song.id || !!song.remoteAudioUrl && item.remoteAudioUrl === song.remoteAudioUrl || !!song.localAssetKey && item.localAssetKey === song.localAssetKey;
+    const patch = (item: Song) => same(item) && (overwrite || !item.localLyrics?.trim()) ? {...item, ...fields} : item;
+    const album = localAlbumRef.current.map(patch);
+    localStorage.setItem(LS_LOCAL_ALBUM_KEY, JSON.stringify(album));
+    localAlbumRef.current = album; setLocalAlbumSongs(album);
+    setQueueState(items => items.map(patch));
+    return true;
+  }, []);
   const removeLocalSong = useCallback((songId: number) => {
     setLocalAlbumSongs(prev => {
       const next = prev.filter(s => s.id !== songId);
@@ -499,6 +509,13 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // 歌词
   const [lyric, setLyric] = useState<LyricLine[]>([]);
   const [tlyric, setTlyric] = useState<LyricLine[]>([]);
+  // Refresh imported lyrics without restarting audio or changing playback progress.
+  useEffect(() => {
+    if (!current?.local || !current.localLyrics || !current.lyricTimingMode) return;
+    const lines = current.localLyrics.split(/\r?\n/).map(text=>text.trim()).filter(Boolean);
+    setLyric(lines.map((text,i)=>({text,t:current.lyricTimingMode==='synced' ? current.lyricLineTimings?.[i] ?? 0 : 0})));
+    setTlyric([]);
+  }, [current?.id, current?.localLyrics, current?.lyricTimingMode, current?.lyricLineTimings]);
   const activeLyricIdx = useMemo(() => {
     if (!lyric.length || (current?.lyricTimingMode==='plain' && !current.lyricLineTimings?.length)) return -1;
     let i = -1;
@@ -1049,7 +1066,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     listeningTogetherWith, addListeningPartner, removeListeningPartner, clearListeningPartners,
     recentTrackChange,
     toast, setToastHandler,
-    localAlbumSongs, addLocalSong, removeLocalSong,
+    localAlbumSongs, addLocalSong, patchSongLyrics, removeLocalSong,
     regeneratingId, regeneratingStatus, markRegenerating,
   };
 

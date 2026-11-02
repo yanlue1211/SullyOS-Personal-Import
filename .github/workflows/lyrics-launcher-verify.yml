@@ -1,0 +1,40 @@
+name: Lyrics and 16-app desktop verification
+on:
+  push:
+    branches: [personal/lyrics-desktop]
+  pull_request:
+    branches: [personal/audio-listening]
+    paths: ['utils/lyricCompletion*', 'apps/music/LyricCompletion*', 'apps/Launcher.tsx', '.github/workflows/lyrics-launcher-verify.yml']
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      NODE_OPTIONS: '--max-old-space-size=8192'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm vitest run utils/lyricCompletion.test.ts utils/launcherWidgetsBlobRef.test.ts utils/importedLyrics.test.ts utils/personalMusicLibrary.test.ts utils/musicLibraryUI.test.tsx --maxWorkers=2 --minWorkers=1
+      - run: pnpm build
+      - name: Android-sized browser checks
+        run: |
+          mkdir -p "$RUNNER_TEMP/lyrics-browser"
+          pnpm --dir "$RUNNER_TEMP/lyrics-browser" add playwright@1.56.1
+          pnpm --dir "$RUNNER_TEMP/lyrics-browser" exec playwright install --with-deps chromium
+          pnpm exec vite --host 127.0.0.1 --port 4179 > /tmp/lyrics-vite.log 2>&1 &
+          for i in $(seq 1 30); do curl --fail --silent http://127.0.0.1:4179/test/fixtures/lyrics-launcher.html > /dev/null && break; sleep 1; done
+          WORKROOM_PLAYWRIGHT_MODULE="$RUNNER_TEMP/lyrics-browser/node_modules/playwright/index.mjs" node scripts/lyrics-launcher-check.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lyrics-launcher-mobile
+          path: test-results/lyrics-launcher
