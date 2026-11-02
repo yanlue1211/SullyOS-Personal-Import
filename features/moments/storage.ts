@@ -22,7 +22,7 @@ import {
   type FeedEvent,
   type Log,
 } from "./schema";
-import { areFriends, canRead, projectPost, postText } from "./permissions";
+import { areFriends, canRead, projectPost, projectSeenPost, activeComments, postText } from "./permissions";
 export async function transaction<T>(
   fn: (s: IDBObjectStore, tx: IDBTransaction) => Promise<T>,
   write = false,
@@ -351,6 +351,7 @@ export async function interactIn(
       p.likes.push({ authorId: actor, name: clean(name, 100) });
       p.revision++;
       s.put(p);
+      await enqueue(s,c,p,"like",undefined,actor);
     }
     if (action.kind === "unlike" && exists) {
       p.likes = p.likes.filter((x) => x.authorId !== actor);
@@ -376,40 +377,7 @@ export async function deletePost(actor: string, id: string) {
   const {revisePost}=await import('./revisions');
   return revisePost(actor,id,null);
 }
-export async function deleteComment(actor: string, postId: string, id: string) {
-  return transaction(async (s) => {
-    const c = await getConfig(s),
-      p = await getRow<Post>(postId, s);
-    if (!p || !canRead(c, actor, p)) throw Error("无权查看");
-    const comment = p.comments.find((x) => x.id === id);
-    if (
-      !comment ||
-      (comment.authorId !== actor && !(actor === "user" && p.owner === "user"))
-    )
-      throw Error("不能删除这条评论");
-    const removed = new Set([id]);
-    let expanded = true;
-    while (expanded) {
-      expanded = false;
-      for (const x of p.comments)
-        if (x.replyTo && removed.has(x.replyTo) && !removed.has(x.id)) {
-          removed.add(x.id);
-          expanded = true;
-        }
-    }
-    p.comments = p.comments.filter((x) => !removed.has(x.id));
-    p.revision++;
-    s.put(p);
-    for (const snap of await rows<Snapshot>(
-      "snapshot",
-      undefined,
-      10000,
-      Infinity,
-      s,
-    ))
-      await refreshSnapshot(s, c, snap.owner);
-  }, true);
-}
+export async function deleteComment(actor:string,postId:string,id:string){const {reviseComment}=await import('./comments');return reviseComment(actor,postId,id,null,actor==='user');}
 export async function feedPage(
   viewer = "user",
   before: PageCursor = Infinity,
@@ -421,7 +389,7 @@ export async function feedPage(
     const all = await rows<Post>("post", author, 60, before, s);
     return {
       posts: all
-        .map((p) => viewer === "user" ? (p.deletedAt ? undefined : p) : projectPost(c, viewer, p))
+        .map((p) => viewer === "user" ? (p.deletedAt ? undefined : {...p,comments:activeComments(p)}) : projectPost(c, viewer, p))
         .filter((p): p is Post => !!p),
       cursor: all.length
         ? { at: all[all.length - 1].at, id: all[all.length - 1].id }
@@ -476,12 +444,11 @@ export async function refreshSnapshot(
     if (now - record.at > 3 * 86400000) continue;
     const p = await getRow<Post>(record.postId, s);
     if (!p) continue;
-    const current = projectPost(c, owner, p.deletedAt ? {...p,deletedAt:undefined} : p);
-    if (!current) continue;
-    const allowed = new Set(current.comments.map((x) => x.id));
-    const known = record.projection.comments.filter((x) => allowed.has(x.id));
+    const current=projectSeenPost(c,owner,p,record.projection);
+    if(!current)continue;
+    const known=current.comments;
     const text =
-      `[${new Date(record.at).toISOString()} 已浏览 ${p.id}] ${postText({ ...record.projection, comments: [] })}\n${known.map((x) => x.name + "：" + x.text).join("\n")}${record.reaction ? "\n你的反应：" + record.reaction : ""}`.slice(
+      `[${new Date(record.at).toISOString()} 已浏览 ${p.id}] ${postText({ ...record.projection, comments: [] })}\n${current.likes.length?"已看到的点赞："+current.likes.map(x=>x.name).join("、"):""}\n${known.map((x) => x.name + "：" + x.text).join("\n")}${record.reaction ? "\n你的反应：" + record.reaction : ""}`.slice(
         0,
         1800,
       );

@@ -1,3 +1,5 @@
+import MomentsComment from "./MomentsComment";
+import {reviseComment} from "../features/moments/comments";
 import MomentsApiMonitor from "./momentsApiMonitor";
 import {PencilSimple, Trash} from "@phosphor-icons/react";
 import {revisePost} from "../features/moments/revisions";
@@ -17,7 +19,6 @@ import {
   publish,
   interact,
   deletePost,
-  deleteComment,
   rows,
 } from "../features/moments/storage";
 import {
@@ -161,6 +162,7 @@ export default function MomentsApp() {
     [logs, setLogs] = useState<Log[]>([]),
     [seen, setSeen] = useState<Seen[]>([]),
     [calls, setCalls] = useState<Call[]>([]);
+  const [commentMenu,setCommentMenu]=useState<{post:Post;id:string;editing:boolean;text:string}>();
   const [confirm, setConfirm] = useState<{
       text: string;
       run: () => Promise<unknown>;
@@ -224,6 +226,7 @@ export default function MomentsApp() {
   }, [viewer, owner]);
   useEffect(() => () => abort.current?.abort(), []);
   const back = () => {
+    if(commentMenu){setCommentMenu(undefined);return true;}
     if(apiMonitor){setApiMonitor(false);return true;}
     if (image) {
       setImage(undefined);
@@ -271,7 +274,7 @@ export default function MomentsApp() {
     page !== "feed" ||
       !!owner ||
       !!image ||
-      !!confirm || !!deleting ||
+      !!confirm || !!deleting || !!commentMenu ||
       !!suggestion ||
       !!reply ||
       !!menu ||
@@ -527,53 +530,7 @@ export default function MomentsApp() {
                             ♡ {p.likes.map((x) => x.name).join("、")}
                           </div>
                         )}
-                        {p.comments.map((c) => (
-                          <div className="mm-comment" key={c.id}>
-                            <button
-                              disabled={viewer !== "user"}
-                              onClick={() => {
-                                setReply({
-                                  postId: p.id,
-                                  id: c.id,
-                                  name: c.name,
-                                });
-                                setComment("");
-                              }}
-                            >
-                              <b>{c.name}</b>
-                              {c.replyTo && (
-                                <>
-                                  {" "}
-                                  回复{" "}
-                                  <b>
-                                    {
-                                      p.comments.find((x) => x.id === c.replyTo)
-                                        ?.name
-                                    }
-                                  </b>
-                                </>
-                              )}
-                              ：{c.text}
-                            </button>
-                            <time className="mm-comment-time" dateTime={new Date(c.at).toISOString()}>{new Date(c.at).toLocaleString([], {month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}</time>
-                            {viewer === "user" &&
-                              (c.authorId === "user" || p.owner === "user") && (
-                                <button
-                                  className="mm-delete-comment"
-                                  aria-label="删除评论"
-                                  onClick={() =>
-                                    setConfirm({
-                                      text: "删除这条评论及其回复？",
-                                      run: () =>
-                                        deleteComment("user", p.id, c.id),
-                                    })
-                                  }
-                                >
-                                  ×
-                                </button>
-                              )}
-                          </div>
-                        ))}
+                        {p.comments.map(c=><MomentsComment key={c.id} post={p} comment={c} viewer={viewer} onReply={()=>{setReply({postId:p.id,id:c.id,name:c.name});setComment("");}} onManage={()=>setCommentMenu({post:p,id:c.id,text:c.text,editing:false})}/>)}
                       </div>
                     )}
                   </div>
@@ -1257,6 +1214,11 @@ export default function MomentsApp() {
           });
         }}
       />
+      {commentMenu&&<div className="mm-overlay"><section role="dialog" aria-modal="true" aria-label="评论操作"><h3>{commentMenu.editing?'修改评论':'评论操作'}</h3>
+        {commentMenu.editing?<textarea aria-label="修改评论正文" autoFocus maxLength={2000} value={commentMenu.text} onChange={e=>setCommentMenu({...commentMenu,text:e.target.value})}/>:<p className="mm-comment-preview">{commentMenu.text}</p>}
+        <div className="mm-dialog-actions"><button disabled={busy} onClick={()=>setCommentMenu(undefined)}>取消</button>
+         {viewer==='user'?commentMenu.editing?<button className="mm-primary" disabled={busy||!commentMenu.text.trim()} onClick={()=>void operate(async()=>{await reviseComment('user',commentMenu.post.id,commentMenu.id,commentMenu.text,true,commentMenu.post.revision);setCommentMenu(undefined);})}>保存修改</button>:<><button disabled={busy} onClick={()=>setCommentMenu({...commentMenu,editing:true})}>修改评论</button><button disabled={busy} onClick={()=>{const target=commentMenu;setCommentMenu(undefined);setConfirm({text:'真实删除这条评论及其回复？相关聊天卡片和近期见闻会同步更新，已有长期记忆不改动。',run:()=>reviseComment('user',target.post.id,target.id,null,true,target.post.revision)});}}>真实删除</button></>:<button disabled={busy} onClick={()=>{const target=commentMenu;setCommentMenu(undefined);setConfirm({text:'普通删除自己的这条评论及其回复？已经看过的人保留经历。',run:()=>reviseComment(viewer,target.post.id,target.id,null,false,target.post.revision)});}}>普通删除</button>}
+        </div></section></div>}
       {reply && (
         <div className="mm-overlay">
           <section role="dialog" aria-modal="true" aria-label="评论朋友圈">

@@ -168,6 +168,8 @@ function validatePost(p: any): asserts p is Post {
         typeof x.text !== "string" ||
         x.text.length > 2000 ||
         !Number.isFinite(x.at) ||
+        (x.deletedAt!==undefined&&(!Number.isFinite(x.deletedAt)||x.deletedAt<0)) ||
+        (x.editedAt!==undefined&&(!Number.isFinite(x.editedAt)||x.editedAt<0)) ||
         (x.replyTo !== undefined && typeof x.replyTo !== "string"),
     ) ||
     new Set(p.comments.map((x: any) => x.id)).size !== p.comments.length

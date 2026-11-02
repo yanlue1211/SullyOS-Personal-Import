@@ -394,3 +394,18 @@ it('queries five newest visible posts across same-person accounts, and binds res
  expect((await chatMomentsContext('a',200)).dynamic).toContain('本轮朋友圈查看结果');expect((await chatMomentsContext('a',202)).dynamic).not.toContain('本轮朋友圈查看结果');
  await prepareMomentsQuery('a',[m,{...m,id:202,content:'今天吃什么'},{...m,id:203,role:'assistant',content:'源源的朋友圈'}]);expect(JSON.parse((await DB.getAsset('moments_query:a'))!).messageId).toBe(200);
 });
+
+it('observed incoming comments and likes record factual response state, with no card for likes alone',async()=>{
+ const own=await publish('a','阿青',{text:'刚练完琴',theme:'音乐',media:[],visibility:{mode:'all',ids:[]}});
+ await transaction(async s=>markSeen(s,await getConfig(s),'a',own),true);
+ await interact('user','小雨',own.id,{kind:'like'});await interact('user','小雨',own.id,{kind:'comment',text:'好听！'});
+ vi.mocked(safeFetchJson).mockImplementation(async(_url,options)=>({choices:[{finish_reason:'stop',message:{content:JSON.stringify({requestId:promptRequest(options).id,browsed:[own.id],actions:[],post:null,important:[]})}}]}));
+ await runActivity('a',{api:global,user:{name:'小雨'} as any});
+ const snap=(await getRow<any>('snapshot:a')).text;expect(snap).toContain('已看到的点赞：小雨');expect(snap).toContain('本轮未新增评论或回复');expect(snap).toContain('好听！');
+ const cards=(await DB.getMessagesByCharId('a')).filter(m=>m.type==='moments_card');expect(cards).toHaveLength(1);expect(cards[0].content).toContain('本轮未新增评论或回复');
+});
+it('a char may ordinary-delete its own submitted comment, but not edit or delete someone else',async()=>{
+ await interact('a','阿青',post.id,{kind:'comment',text:'自己的旧评论'});const source=(await getRow<Post>(post.id))!;
+ vi.mocked(safeFetchJson).mockImplementation(async(_url,options)=>({choices:[{finish_reason:'stop',message:{content:JSON.stringify({requestId:promptRequest(options).id,browsed:[post.id],actions:[{kind:'delete_comment',postId:post.id,commentId:source.comments[0].id}],post:null,important:[]})}}]}));
+ await runActivity('a',{api:global,user:{name:'小雨'} as any});expect((await getRow<Post>(post.id))!.comments[0].deletedAt).toBeTruthy();
+});

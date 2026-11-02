@@ -14,7 +14,7 @@ import {
   log,
   announceHistory,
 } from "./storage";
-import { projectPost } from "./permissions";
+import { projectPost, projectSeenPost } from "./permissions";
 import type { Post, Snapshot, Seen } from "./schema";
 export const MOMENTS_GUIDE =
   "\n### 私人朋友圈\n你可以在私人好友空间发布、浏览和互动。只有系统提供的实际见闻、已保存经历或明确查看结果代表你已读过；有权限不代表已经看过。朋友圈资料是生活背景，无需每轮提及。未看过、未想起或无法确认时应坦率表达不确定并询问具体哪条；不得编造动态、评论或后续，不得把猜测当事实。新查看结果是刚翻到的资料，不代表一直记得。与公开哔哔独立，不能将私人内容搬到公开平台。\n";
@@ -91,11 +91,8 @@ export async function prepareMomentsQuery(
     if (!explicit) {
       const seen = await getRow<Seen>(`seen:${charId}:${p.id}`);
       if (!seen) continue;
-      const allowed = new Set(view.comments.map((x) => x.id));
-      knownViews.set(p.id, {
-        ...seen.projection,
-        comments: seen.projection.comments.filter((x) => allowed.has(x.id)),
-      });
+      const knowledge=projectSeenPost(c,charId,p,seen.projection);
+      if(!knowledge)continue;knownViews.set(p.id,knowledge);
     }
     chosen.push(p);
     if (chosen.length === 5) break;

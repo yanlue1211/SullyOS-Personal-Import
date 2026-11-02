@@ -122,7 +122,10 @@ it("publishes text without API calls, shows it immediately and supports reply/de
   await click("发送");
   expect(host.textContent).toContain("先占一楼");
   expect(await rows("call")).toEqual([]);
-  await click("删除评论");
+  expect(host.querySelector('.mm-delete-comment')).toBeNull();
+  await act(async()=>button('回复评论 小雨：先占一楼').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true})));
+  await settle();
+  await click("真实删除");
   await click("确认");
   expect(host.textContent).not.toContain("先占一楼");
 });
@@ -230,4 +233,9 @@ it('offers an isolated temporary monitor with clear and stop controls in setting
  await click('关闭并清除');expect(host.textContent).toContain('监控已关闭');
  await click('开始记录两天');expect(host.textContent).toContain('记录至');
  await click('返回');expect(host.querySelector('[aria-label="朋友圈 API 调用监控"]')).toBeNull();
+});
+
+it('opens comment editing by long-press menu and saves the updated body',async()=>{
+ await enable();const p=await publish('user','小雨',{text:'测试长评论',theme:'',media:[],visibility:{mode:'all',ids:[]}});const {interact}=await import('../features/moments/storage');await interact('a','阿青',p.id,{kind:'comment',text:'等待修改的内容'});await render();
+ await act(async()=>button('回复评论 阿青：等待修改的内容').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true})));await settle();await click('修改评论');await field(host.querySelector('[aria-label="修改评论正文"]')!,'更新后的评论内容');await click('保存修改');expect(host.querySelector('.mm-interactions')?.textContent).toContain('更新后的评论内容');expect(host.querySelector('.mm-interactions')?.textContent).not.toContain('等待修改的内容');expect(host.querySelector('.mm-delete-comment')).toBeNull();expect(host.querySelector('.mm-comment-time')?.parentElement?.className).toBe('mm-comment');
 });

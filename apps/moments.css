@@ -640,3 +640,9 @@
 .mm-comment {flex-wrap:wrap;align-items:flex-start}
 .mm-comment > button:first-child {min-width:0;flex:1 1 180px}
 .mm-comment-time {font-size:10px;color:#999;white-space:nowrap;padding-top:5px;margin-left:auto}
+
+/* Comment text keeps the full column; timestamps use their own quiet bottom row. */
+.mm-comment {display:flex;flex-direction:column;gap:0;align-items:stretch;padding:5px 0;touch-action:pan-y}
+.mm-comment > button:first-child {flex:none;width:100%;min-width:0;overflow-wrap:anywhere;white-space:pre-wrap;user-select:none}
+.mm-comment-time {align-self:flex-end;margin-left:0;padding-top:0;font-size:10px;line-height:1.5;color:#999}
+.mm-comment-preview {white-space:pre-wrap;overflow-wrap:anywhere;color:#596d68;max-height:35vh;overflow:auto}
