@@ -1,3 +1,4 @@
+import {desktopSlots,desktopPages,isDesktopEmpty,moveDesktopSlot} from '../utils/desktopSlots';
 import React, { useMemo, useEffect, useLayoutEffect, useState, useRef, useCallback } from 'react';
 import { isPaperWallpaper, useOS } from '../context/OSContext';
 import { INSTALLED_APPS, DOCK_APPS } from '../constants';
@@ -257,15 +258,17 @@ const AppGridPage = React.memo(({
     openApp,
     acnh = false,
     editing = false,
+    dense = false,
 }: {
+    dense?: boolean,
     apps: typeof INSTALLED_APPS,
     openApp: (id: AppID) => void,
     acnh?: boolean,
     editing?: boolean,
 }) => {
     return (
-        <div data-app-grid className={`grid place-items-center relative ${acnh ? 'grid-cols-4 gap-y-3 gap-x-2' : 'grid-cols-4 gap-y-3 gap-x-2'}`}>
-             {apps.map(app => (
+        <div data-app-grid className={`grid place-items-center relative grid-cols-4 gap-x-2 ${dense?'gap-y-3':'gap-y-6'}`}>
+             {apps.map(app => isDesktopEmpty(app.id) ? <div key={app.id} data-launcher-item={app.id} data-launcher-kind="app" data-launcher-empty className={`w-14 h-[78px] rounded-2xl ${editing?'border border-dashed border-current opacity-20':''}`} aria-label="桌面空位"/> : (
                  <div
                     key={app.id}
                     data-launcher-item={app.id}
@@ -287,7 +290,7 @@ const AppGridPage = React.memo(({
 const AppQuadGrid = React.memo(({ apps, openApp, editing = false }: { apps: typeof INSTALLED_APPS, openApp: (id: AppID) => void, editing?: boolean }) => {
     return (
         <div className="w-full h-full grid grid-cols-2 grid-rows-2 place-items-center gap-x-2 gap-y-3">
-            {apps.map(app => (
+            {apps.map(app => isDesktopEmpty(app.id) ? <div key={app.id} data-launcher-item={app.id} data-launcher-kind="app" data-launcher-empty className={`w-14 h-[78px] rounded-2xl ${editing?'border border-dashed border-current opacity-20':''}`} aria-label="桌面空位"/> : (
                 <div key={app.id} data-launcher-item={app.id} data-launcher-kind="app" className={`relative transition-transform duration-200 active:scale-95 ${editing ? 'launcher-edit-item' : ''}`}>
                     <AppIcon app={app} onClick={() => { if (!editing) openApp(app.id); }} />
                 </div>
@@ -540,7 +543,7 @@ const Launcher: React.FC<{ staticPreview?: boolean }> = ({ staticPreview = false
   }, []);
 
   const availableGridIds = useMemo(() => availableGridApps.map(app => app.id), [availableGridApps]);
-  const [launcherAppOrder, setLauncherAppOrder] = useState<string[]>(() => normalizeOrder(theme.launcherAppOrder, INSTALLED_APPS.filter(app => !DOCK_APPS.includes(app.id)).map(app => app.id)));
+  const [launcherAppOrder, setLauncherAppOrder] = useState<string[]>(() => desktopSlots(theme.launcherAppSlots || theme.launcherAppOrder, INSTALLED_APPS.filter(app => !DOCK_APPS.includes(app.id)).map(app => app.id)));
   const [launcherDockOrder, setLauncherDockOrder] = useState<string[]>(() => normalizeOrder(theme.launcherDockOrder, DOCK_APPS));
   const [pinwheelOrder, setPinwheelOrder] = useState<Array<'music' | 'appsA' | 'appsB' | 'image'>>(() => {
       const available = ['music', 'appsA', 'appsB', 'image'] as const;
@@ -553,7 +556,7 @@ const Launcher: React.FC<{ staticPreview?: boolean }> = ({ staticPreview = false
 
   useEffect(() => {
       setLauncherAppOrder(prev => {
-          const next = normalizeOrder(prev.length ? prev : theme.launcherAppOrder, availableGridIds);
+          const next = desktopSlots(prev.length ? prev : theme.launcherAppSlots || theme.launcherAppOrder, availableGridIds);
           launcherAppOrderRef.current = next;
           return next;
       });
@@ -578,7 +581,7 @@ const Launcher: React.FC<{ staticPreview?: boolean }> = ({ staticPreview = false
 
   const gridApps = useMemo(() => {
       const byId = new Map(availableGridApps.map(app => [app.id, app]));
-      return launcherAppOrder.map(id => byId.get(id as AppID)).filter(Boolean) as typeof INSTALLED_APPS;
+      return launcherAppOrder.map(id => isDesktopEmpty(id) ? {...availableGridApps[0], id:id as AppID, name:''} : byId.get(id as AppID)).filter(Boolean) as typeof INSTALLED_APPS;
   }, [availableGridApps, launcherAppOrder]);
 
   const dockAppsConfig = useMemo(() => {
@@ -586,28 +589,18 @@ const Launcher: React.FC<{ staticPreview?: boolean }> = ({ staticPreview = false
       return launcherDockOrder.map(id => byId.get(id as AppID)).filter(Boolean) as typeof INSTALLED_APPS;
   }, [launcherDockOrder]);
 
-  // Personal desktop: sixteen apps per page, retaining saved order and the final widget page.
-  const APPS_PER_PAGE = 16;
-  const appPages = useMemo(() => {
-      const pages: typeof INSTALLED_APPS[] = [];
-      for (let i = 0; i < gridApps.length; i += APPS_PER_PAGE) {
-          pages.push(gridApps.slice(i, i + APPS_PER_PAGE));
-      }
-      if (!pages.length) pages.push([]);
-      return pages;
-  }, [gridApps]);
+  // Preserve both original eight-app pages; later app pages use four rows.
+  const appPages = useMemo(() => desktopPages(gridApps), [gridApps]);
+
+  // Page 2 (pinwheel) uses appPages[1]: split into two 2x2 quads
+  const page2Apps = appPages[1] || [];
+  const page2QuadA = useMemo(() => page2Apps.slice(0, 4), [page2Apps]);
+  const page2QuadB = useMemo(() => page2Apps.slice(4, 8), [page2Apps]);
 
   // Total pages = App Pages + 1 Widget Page
   const totalPages = appPages.length + 1;
 
   useEffect(() => { activePageIndexRef.current = activePageIndex; }, [activePageIndex]);
-  useEffect(() => {
-      if (activePageIndex >= totalPages) {
-          const next = totalPages - 1;
-          setActivePageIndex(next); activePageIndexRef.current = next; _lastPageIndex = next;
-          if (scrollContainerRef.current) scrollContainerRef.current.scrollLeft = scrollContainerRef.current.clientWidth * next;
-      }
-  }, [totalPages, activePageIndex]);
 
   useEffect(() => {
       let cancelled = false;
@@ -748,7 +741,7 @@ const Launcher: React.FC<{ staticPreview?: boolean }> = ({ staticPreview = false
           return next;
       };
       if (kind === 'app') {
-          const next = reorder(launcherAppOrderRef.current);
+          const next = moveDesktopSlot(launcherAppOrderRef.current, source, target);
           launcherAppOrderRef.current = next;
           setLauncherAppOrder(next);
       } else if (kind === 'dock') {
@@ -845,7 +838,7 @@ const Launcher: React.FC<{ staticPreview?: boolean }> = ({ staticPreview = false
       if (!item) return;
       const key = item.dataset.launcherItem;
       const kind = item.dataset.launcherKind;
-      if (!key || !kind) return;
+      if (!key || !kind || isDesktopEmpty(key)) return;
       clearLayoutPressTimer();
       layoutPointer.current = { pointerId: e.pointerId, key, kind, x: e.clientX, y: e.clientY, active: layoutEditing, element: item };
       if (layoutEditing) {
@@ -915,7 +908,8 @@ const Launcher: React.FC<{ staticPreview?: boolean }> = ({ staticPreview = false
           pointer.targetElement?.classList.remove('launcher-drop-target');
           if (pointer.lastTarget) reorderByTarget(pointer.kind, pointer.key, pointer.lastTarget);
           void updateTheme({
-              launcherAppOrder: launcherAppOrderRef.current,
+              launcherAppOrder: launcherAppOrderRef.current.filter(id=>!isDesktopEmpty(id)),
+              launcherAppSlots: launcherAppOrderRef.current,
               launcherDockOrder: launcherDockOrderRef.current,
               launcherPinwheelOrder: pinwheelOrderRef.current,
           });
@@ -981,12 +975,6 @@ const Launcher: React.FC<{ staticPreview?: boolean }> = ({ staticPreview = false
           padding-right: max(1.5rem, env(safe-area-inset-right));
         }
         .launcher-page > * { flex-shrink: 0; }
-        .launcher-primary-header > :first-child { margin-top: 4px; margin-bottom: 12px; }
-        @media (max-height: 800px) {
-          .launcher-primary-header > :first-child { margin-top: 0; margin-bottom: 8px; }
-          .launcher-primary-header > :last-child { margin-bottom: 8px; }
-          [data-app-grid] { row-gap: 8px; }
-        }
         .launcher-pinwheel-content { flex: 0 0 auto; margin-block: auto; }
         .launcher-editing .launcher-page { padding-top: max(5rem, calc(var(--safe-top, 0px) + 4rem)); }
         .launcher-widget-remove {
@@ -1030,7 +1018,7 @@ const Launcher: React.FC<{ staticPreview?: boolean }> = ({ staticPreview = false
       {layoutEditing && (
           <div className="absolute top-[calc(var(--safe-top)+0.65rem)] left-4 right-4 z-50 flex items-center justify-between rounded-full px-3 py-2"
               style={{ background: 'rgba(75,65,54,0.88)', color: '#fffdf8', boxShadow: '0 8px 24px rgba(75,65,54,0.20)' }}>
-              <span className="text-[10px] font-semibold tracking-wide">按住拖动，松手交换位置</span>
+              <span className="text-[10px] font-semibold tracking-wide">按住拖动，可移入空位</span>
               <button onClick={finishLayoutEditing} className="ml-3 px-3 py-1 rounded-full text-[10px] font-bold bg-white/15 active:scale-95">完成</button>
           </div>
       )}
@@ -1074,9 +1062,9 @@ const Launcher: React.FC<{ staticPreview?: boolean }> = ({ staticPreview = false
                 style={{ contentVisibility: 'auto', contain: 'layout paint', transform: 'translateZ(0)' }}
               >
                   {idx === 0 ? (
-                      // Page 1: Clock + Chat + 4x4 App Grid
+                      // Page 1 (original): Clock + Chat + 4x2 App Grid
                       <>
-                        <div className="launcher-primary-header"><DesktopClock />
+                        <DesktopClock />
                         <CharacterWidget
                             char={widgetChar}
                             unreadCount={widgetUnread}
@@ -1084,15 +1072,14 @@ const Launcher: React.FC<{ staticPreview?: boolean }> = ({ staticPreview = false
                             onClick={() => openApp(AppID.Chat)}
                             contentColor={contentColor}
                             paper={paper}
-                        /></div>
+                        />
                         <div className="flex-1">
                             <AppGridPage apps={pageApps} openApp={openApp} acnh={acnh} editing={layoutEditing} />
                         </div>
                       </>
                   ) : idx === 1 ? (
-                      // Page 2: full app grid, followed by existing widgets.
+                      // Page 2: Schedule 4x2 widget on top + Pinwheel (Music / 2x2 icons / 2x2 icons / Image) below
                       <div className="launcher-pinwheel-content w-full flex flex-col gap-5">
-                          <AppGridPage apps={pageApps} openApp={openApp} acnh={acnh} editing={layoutEditing} />
                           {scheduleChar && (
                               <ScheduleHomeWidget
                                   schedule={scheduleData}
@@ -1104,7 +1091,7 @@ const Launcher: React.FC<{ staticPreview?: boolean }> = ({ staticPreview = false
                               />
                           )}
                           <div className="launcher-pinwheel-grid grid grid-cols-2 gap-x-3 gap-y-5 w-full">
-                              {pinwheelOrder.filter(cell => cell !== 'appsA' && cell !== 'appsB').filter(cell => cell === 'music' ? theme.launcherMusicVisible !== false : cell === 'image' ? theme.launcherImageVisible !== false : true).map(cell => (
+                              {pinwheelOrder.filter(cell => cell === 'music' ? theme.launcherMusicVisible !== false : cell === 'image' ? theme.launcherImageVisible !== false : true).map(cell => (
                                   <div
                                       key={cell}
                                       data-launcher-item={cell}
@@ -1121,6 +1108,10 @@ const Launcher: React.FC<{ staticPreview?: boolean }> = ({ staticPreview = false
                                       )}
                                       {cell === 'music' ? (
                                           <NowPlayingSquareWidget contentColor={contentColor} />
+                                      ) : cell === 'appsA' ? (
+                                          <AppQuadGrid apps={page2QuadA} openApp={openApp} editing={layoutEditing} />
+                                      ) : cell === 'appsB' ? (
+                                          <AppQuadGrid apps={page2QuadB} openApp={openApp} editing={layoutEditing} />
                                       ) : (
                                           <DesktopSquareImage
                                               image={theme.launcherWidgets?.['dsq']}
@@ -1189,6 +1180,7 @@ const Launcher: React.FC<{ staticPreview?: boolean }> = ({ staticPreview = false
 
                           <AppGridPage
                                 apps={pageApps}
+                                dense
                                 openApp={openApp}
                                 acnh={acnh}
                                 editing={layoutEditing}

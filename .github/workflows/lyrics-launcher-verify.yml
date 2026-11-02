@@ -1,10 +1,10 @@
 name: Lyrics and 16-app desktop verification
 on:
   push:
-    branches: [personal/lyrics-desktop]
+    branches: [personal/desktop-restore]
   pull_request:
     branches: [personal/audio-listening]
-    paths: ['utils/lyricCompletion*', 'apps/music/LyricCompletion*', 'apps/Launcher.tsx', '.github/workflows/lyrics-launcher-verify.yml']
+    paths: ['utils/desktopSlots*', 'utils/lyricCompletion*', 'apps/music/LyricCompletion*', 'apps/Launcher.tsx', '.github/workflows/lyrics-launcher-verify.yml']
 permissions:
   contents: read
 jobs:
@@ -23,7 +23,7 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm vitest run utils/lyricCompletion.test.ts utils/launcherWidgetsBlobRef.test.ts utils/importedLyrics.test.ts utils/personalMusicLibrary.test.ts utils/musicLibraryUI.test.tsx --maxWorkers=2 --minWorkers=1
+      - run: pnpm vitest run utils/desktopSlots.test.ts utils/lyricCompletion.test.ts utils/launcherWidgetsBlobRef.test.ts utils/importedLyrics.test.ts utils/personalMusicLibrary.test.ts utils/musicLibraryUI.test.tsx --maxWorkers=2 --minWorkers=1
       - run: pnpm build
       - name: Android-sized browser checks
         run: |
