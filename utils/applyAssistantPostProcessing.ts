@@ -1,5 +1,5 @@
 import { consumeWorkroomActions } from '../features/workroom/bridge';
-import { extractResponseStatus,proactiveResponseText,isProactiveStatusDelivery } from '../features/personal/responseStatus/protocol';
+import { extractResponseStatus,proactiveResponseText,isProactiveStatusDelivery,statusScheduleActions,isScheduleOnlyResponse } from '../features/personal/responseStatus/protocol';
 import { consumeCommerceAction } from './personalCommerce';
 import { extractInnerVoice, type InnerVoice } from '../features/personal/innerVoice/protocol';
 import { withReplyCancellation, type ReplyRun } from './chatReplyCancellation';
@@ -32,7 +32,7 @@ import { dialogueMaxTokens } from './characterApi';
 
 import { CharacterProfile, UserProfile, Message, Emoji, EmojiCategory, RealtimeConfig, GroupProfile } from '../types';
 import { DB } from './db';
-import { ChatParser, type FrozenMusicSong } from './chatParser';
+import { executeLocalScheduledMessages, ChatParser, type FrozenMusicSong } from './chatParser';
 import { resolveCharTimeZone } from './timezone';
 import { NotionManager, FeishuManager, XhsNote } from './realtimeContext';
 import { enqueuePendingDiary, removePendingDiary } from './pendingDiary';
@@ -785,12 +785,31 @@ export async function applyAssistantPostProcessing(
         return result.cleanedText;
     };
 
-    // A status is the entire response. Resolve before actions, tools or speech.
-    const responseStatus = extractResponseStatus(rawAiContent);
+    const completedStatusSchedules=new Set<string>();
+    const scheduleAlongsideStatus=async(raw:string)=>{
+        const actions=statusScheduleActions(raw).split('\n').filter(action=>action&&!completedStatusSchedules.has(action));
+        if(!actions.length)return;
+        actions.forEach(action=>completedStatusSchedules.add(action));
+        try {
+            await replyStep(()=>executeLocalScheduledMessages(actions.join('\n'),char.id,char.name,addToast,resolveCharTimeZone(char),ctx.replyRun));
+        } catch(error) {
+            ctx.replyRun?.check();
+            console.warn('[ResponseStatus] 定时消息未安排',error);
+            addToast('本轮状态已保留，但本地定时消息未能保存，请重试。','error');
+        }
+    };
+
+    // Status is the entire visible reply; scheduling is the sole independent exception.
+    const combinedStatusActions=rawAiContent+'\n'+replayedTagPrefix;
+    const latestChatRole=contextMsgs.filter(message=>message.role==='user'||message.role==='assistant').at(-1)?.role;
+    const responseStatus = extractResponseStatus(rawAiContent) || (responseStatusAllowed&&latestChatRole==='user'&&isScheduleOnlyResponse(combinedStatusActions)
+        ? {type:'response_status' as const,kind:'read' as const,reason:'他打算稍后再联系，这一轮暂时没有发来文字回复。',footer:'稍后回复',eta:''}
+        : undefined);
     if (responseStatus) {
         await replyStep(() => persistMessage({ charId: char.id, role: 'assistant', type: 'score_card',
             content: JSON.stringify(responseStatus), metadata: { ...(mcdInheritMeta || {}), responseStatus } }));
         setMessages(await replyStep(() => DB.getRecentMessagesByCharId(char.id, 200)));
+        await scheduleAlongsideStatus(rawAiContent+'\n'+replayedTagPrefix);
         return;
     }
 
@@ -872,6 +891,7 @@ export async function applyAssistantPostProcessing(
             await replyStep(() => persistMessage({ charId: char.id, role: 'assistant', type: 'score_card',
                 content: JSON.stringify(status), metadata: { ...(mcdInheritMeta || {}), responseStatus: status } }));
             setMessages(await replyStep(() => DB.getRecentMessagesByCharId(char.id, 200)));
+            await scheduleAlongsideStatus(rawContent);
             return;
         }
 
