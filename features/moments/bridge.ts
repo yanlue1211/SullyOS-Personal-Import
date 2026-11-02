@@ -12,7 +12,7 @@ import {
   log,
 } from "./storage";
 import { projectPost } from "./permissions";
-import type { Post, Snapshot, Seen } from "./schema";
+import type { Post, Snapshot, Seen, Correction } from "./schema";
 export const MOMENTS_GUIDE =
   "\n### 私人朋友圈\n你可以在私人好友空间发布、浏览和互动。只有系统提供的实际见闻、已保存经历或明确查看结果代表你已读过；有权限不代表已经看过。朋友圈资料是生活背景，无需每轮提及。与公开哔哔独立，不能将私人内容搬到公开平台。\n";
 /** Called only on an actual local chat generation, never a prompt preview. No model requests. */
@@ -82,7 +82,7 @@ export async function prepareMomentsQuery(
   const knownViews = new Map<string, Post>();
   const chosen: Post[] = [];
   for (const p of candidates) {
-    const view = projectPost(c, charId, p);
+    const view = projectPost(c, charId, !explicit&&p.deletedAt?{...p,deletedAt:undefined}:p);
     if (!view) continue;
     if (!explicit) {
       const seen = await getRow<Seen>(`seen:${charId}:${p.id}`);
@@ -158,8 +158,9 @@ export async function chatMomentsContext(
     if (q && q.revision === c.revision && q.messageId === lastUserId)
       query = "\n### 本轮朋友圈查看结果\n" + q.text;
   } catch {}
+  const corrections=await rows<Correction>("correction",charId,1000);
   return {
     stable: MOMENTS_GUIDE,
-    dynamic: (snap?.revision === c.revision ? snap.text : "") + query,
+    dynamic: (snap?.revision === c.revision ? snap.text : "") + query + (corrections.length ? "\n### 以此为准的现实记录\n"+corrections.map(x=>x.text).join("\n") : ""),
   };
 }

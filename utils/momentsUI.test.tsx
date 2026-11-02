@@ -217,3 +217,10 @@ it('persists character activation, behavior and habits after controlled inputs r
   expect(toggle().checked).toBe(true);
   expect((host.querySelectorAll('input[type=checkbox]')[1] as HTMLInputElement).checked).toBe(false);
 });
+it('lets user edit another authors post and choose ordinary or reality deletion',async()=>{
+ await enable();const p=await publish('a','阿青',{text:'旧正文',media:[],visibility:{mode:'all',ids:[]},theme:'日常'});
+ await render();await click('编辑朋友圈');await field(host.querySelector('[aria-label="朋友圈正文"]')!,'用户调整后的正文');await click('保存修改');
+ expect(host.textContent).toContain('用户调整后的正文');expect(host.textContent).not.toContain('旧正文');
+ await click('删除朋友圈');expect(host.querySelector('[aria-label="删除朋友圈方式"]')).not.toBeNull();expect(host.textContent).toContain('普通删除');expect(host.textContent).toContain('真实删除');
+ await click('真实删除');expect(host.textContent).not.toContain('用户调整后的正文');expect((await rows<Post>('post')).some(row=>row.id===p.id)).toBe(false);
+});

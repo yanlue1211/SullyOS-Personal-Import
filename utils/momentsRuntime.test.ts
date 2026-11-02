@@ -350,3 +350,11 @@ it("important event cards include only the submitted comment material, not unrea
     (await DB.getRecentMessagesByCharId("a", 10))[0].content,
   ).not.toContain("最早未提交的评论秘密");
 });
+it('allows a character to delete only its own submitted historical post during one normal call',async()=>{
+ const own=await publish('a','阿青',{text:'昨晚赌气写下的话，今天不想留着。',media:[],visibility:{mode:'all',ids:[]},theme:'昨夜'});
+ const {reserveActivity,markCallSent,applyActivity}=await import('../features/moments/runtime');
+ const task=(await reserveActivity('a',false))!;expect(task.history.some(p=>p.id===own.id)).toBe(true);await markCallSent(task.call.id);
+ await applyActivity(task,{requestId:task.call.id,browsed:[],actions:[{kind:'delete',postId:own.id}],post:null,important:[]},actor);
+ expect((await getRow<Post>(own.id))?.deletedAt).toBeTypeOf('number');
+ expect((await rows<Call>('call'))[0].phase).toBe('success');
+});

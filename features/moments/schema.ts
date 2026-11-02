@@ -108,6 +108,8 @@ export interface Comment {
   replyTo?: string;
 }
 export interface Post {
+  deletedAt?: number;
+  editedAt?: number;
   id: string;
   kind: "post";
   owner: string;
@@ -182,7 +184,9 @@ export interface Log {
   at: number;
   text: string;
 }
+export interface Correction { id:string; kind:"correction"; owner:string; at:number; postId:string; text:string }
 export type Row =
+  | Correction
   | Config
   | Post
   | Seen

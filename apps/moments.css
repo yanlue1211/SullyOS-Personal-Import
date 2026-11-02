@@ -634,3 +634,9 @@
     grid-template-columns: repeat(3, 1fr);
   }
 }
+
+.mm-meta .mm-post-tool {display:inline-flex;align-items:center;justify-content:center;background:transparent;padding:4px;min-height:32px;min-width:28px;color:#687b94}
+.mm-meta .mm-social-menu {display:inline-flex;align-items:center;justify-content:center;width:30px;height:24px;min-height:24px;padding:2px;letter-spacing:0;font-size:13px}
+.mm-comment {flex-wrap:wrap;align-items:flex-start}
+.mm-comment > button:first-child {min-width:0;flex:1 1 180px}
+.mm-comment-time {font-size:10px;color:#999;white-space:nowrap;padding-top:5px;margin-left:auto}

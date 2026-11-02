@@ -31,3 +31,10 @@ it('starts the selected playlist as a full queue, retaining remote audio source 
  const pl=host.querySelector('[aria-label="选择歌单"]') as HTMLSelectElement;await act(async()=>{pl.value='p';pl.dispatchEvent(new Event('change',{bubbles:true}));});
  await click('B · 歌手');expect(m.play).toHaveBeenCalledWith(songs[1],{alsoSetQueue:true,replaceQueue:songs,startIdx:1});
 });
+it('bulk confirmation supports per-song removal and only commits the confirmed rows',async()=>{
+ await fill('批量歌曲链接','https://cdn.test/a.mp3\nhttps://cdn.test/b.mp3');await click('识别链接');
+ expect(m.add).not.toHaveBeenCalled();
+ const remove=host.querySelector('[aria-label="移除待导入歌曲 1"]') as HTMLButtonElement;await act(async()=>remove.click());
+ await fill('第1首歌名','保留的歌');await fill('第1首歌手','歌手乙');await click('确认导入');
+ expect(m.add).toHaveBeenCalledTimes(1);expect(m.add).toHaveBeenCalledWith(expect.objectContaining({name:'保留的歌',artists:'歌手乙',remoteAudioUrl:'https://cdn.test/b.mp3'}));
+});
