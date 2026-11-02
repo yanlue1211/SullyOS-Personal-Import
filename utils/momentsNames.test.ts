@@ -14,3 +14,5 @@ it('treats a unique single-character account variant as the same identity',()=>{
 it('does not resolve ambiguous shared-character nicknames',()=>{
  expect(resolveMomentsNames('小贺朋友圈',[...chars,{id:'other',name:'贺小明'}])).toEqual([]);
 });
+
+it('does not merge a single Latin account name into an unrelated longer name',()=>{expect(resolveMomentsNames('a的朋友圈',[{id:'a',name:'a'},{id:'c',name:'claude'}]).map(c=>c.id)).toEqual(['a']);});

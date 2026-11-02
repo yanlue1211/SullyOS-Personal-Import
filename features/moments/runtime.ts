@@ -495,7 +495,7 @@ export async function applyActivity(
               comments: [
                 ...material.comments,
                 ...p.comments.filter(
-                  (row) =>
+                  (row: Post['comments'][number]) =>
                     row.authorId === char.id &&
                     !material.comments.some((old) => old.id === row.id),
                 ),

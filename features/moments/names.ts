@@ -3,7 +3,7 @@ export function resolveMomentsNames<T extends {id:string;name:string}>(text:stri
  const names=characters.map(c=>({...c,name:c.name.trim()})).filter(c=>c.name);
  const full=names.filter(c=>[...c.name].length>1);
  const identity=(c:T):string=>{
-  if([...c.name].length!==1)return c.name;
+  if([...c.name].length!==1||!/^\p{Script=Han}$/u.test(c.name))return c.name;
   const parents=[...new Set(full.filter(p=>p.name.includes(c.name)).map(p=>p.name))];
   return parents.length===1?parents[0]:c.name;
  };
