@@ -1,5 +1,4 @@
 import {reviseIn} from "./revisions";
-import { estimateContextTokens } from "../../utils/characterStats";
 import { inQuietHours, quietNightKey, sleepOpportunity } from "./sleep";
 import type {
   APIConfig,
@@ -9,7 +8,7 @@ import type {
 } from "../../types";
 import { DB } from "../../utils/db";
 import { safeFetchJson, extractContent } from "../../utils/safeApi";
-import { resolveDialogueApi } from "../../utils/characterApi";
+import { resolveDialogueApi, dialogueMaxTokens } from "../../utils/characterApi";
 import { loadCharacterContextRange } from "../../utils/chatContextRange";
 import { buildChatRequestPayload } from "../../utils/chatRequestPayload";
 import { getLocalDateKey } from "../../utils/localDate";
@@ -315,18 +314,6 @@ async function send(
     },
   });
   input.signal?.throwIfAborted();
-  const estimated = payload.fullMessages.reduce(
-    (sum, m) =>
-      sum +
-      estimateContextTokens(
-        typeof m.content === "string" ? m.content : JSON.stringify(m.content),
-      ),
-    0,
-  );
-  if (estimated > 20000)
-    throw Error(
-      `朋友圈本轮输入估算${estimated} Token，超过20000预算，请缩小角色原文上下文范围后重试`,
-    );
   await beforeSend?.();
   const data = await safeFetchJson(
     `${api.baseUrl.replace(/\/+$/, "")}/chat/completions`,
@@ -341,7 +328,7 @@ async function send(
         model: api.model,
         messages: payload.fullMessages,
         temperature: api.temperature ?? 0.8,
-        max_tokens: 5000,
+        max_tokens: dialogueMaxTokens(api),
         stream: api.stream ?? false,
       }),
     },
