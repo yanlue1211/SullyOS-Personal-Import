@@ -1,7 +1,8 @@
 import type { APIConfig } from "../../types";
 import { prepareRealMedia } from "../experience/media";
 import { DB } from "../../utils/db";
-import { safeFetchJson, extractContent } from "../../utils/safeApi";
+import { extractContent } from "../../utils/safeApi";
+import {momentsFetchJson as safeFetchJson} from "./apiMonitor";
 import { isVisionApiReady } from "../../utils/visionApi";
 import type { Media } from "./schema";
 const inFlight = new Map<string, Promise<string>>();

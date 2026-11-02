@@ -51,6 +51,12 @@ try {
   await page.screenshot({ path: out + "/feed-390.png" });
   await page.getByRole("button", { name: "朋友圈设置", exact: true }).click();
   await page.getByRole("button", { name: "管理角色之间的好友关系" }).waitFor();
+  await page.getByRole('button',{name:/API 调用监控/}).click();
+  const monitor=page.getByRole('dialog',{name:'朋友圈 API 调用监控'});
+  await monitor.getByRole('button',{name:'关闭并清除',exact:true}).click();
+  await monitor.getByText('监控已关闭',{exact:true}).waitFor();
+  await monitor.getByRole('button',{name:'返回',exact:true}).click();
+  await monitor.waitFor({state:'hidden'});
   await page.screenshot({ path: out + "/settings-390.png" });
   await page.getByRole("button", { name: /^A\s*已启用/ }).click();
   await page.getByText("通常不发布的休息时段", { exact: true }).waitFor();
