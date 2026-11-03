@@ -579,7 +579,7 @@ const initializeClient = (config: ActiveMsg2GlobalConfig) => {
 };
 
 const resolveApiConfig = (char: CharacterProfile, _config: ActiveMsg2CharacterConfig, apiConfig: APIConfig) => {
-  const source = resolveDialogueApi(apiConfig, char);
+  const source = resolveDialogueApi(apiConfig, char, _config.independentApi);
 
   if (!source.baseUrl || !source.apiKey || !source.model) {
     throw new Error('主动消息 2.0 缺少可用的 API URL / Key / Model。');
