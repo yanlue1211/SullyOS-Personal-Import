@@ -88,7 +88,24 @@ export function toAnthropicRequest(body: any): any {
     // Three explicit 5-minute breakpoints: tools, stable system, history before volatile reminders.
     if (tools.length) tools.at(-1).cache_control = {...ephemeral};
     if (system.length) system.at(-1)!.cache_control = {...ephemeral};
-    // Thinking blocks cannot carry cache_control. Cache the most recent eligible\n    // preceding history block instead, preserving all message content and order.\n    const cacheableHistoryBlock = [...messages].reverse()\n        .flatMap(message => [...message.content].reverse())\n        .find(block => !['thinking','redacted_thinking'].includes(block.type));\n    if (cacheableHistoryBlock && !sawReminder) cacheableHistoryBlock.cache_control = {...ephemeral};\n    else if (lastHistoryBlock && !['thinking','redacted_thinking'].includes(lastHistoryBlock.type)) lastHistoryBlock.cache_control = {...ephemeral};
+    // Keep an earlier history checkpoint in addition to the latest one. This lets
+    // a stable history prefix survive changes near the end of a conversation.
+    // Anthropic permits up to four explicit breakpoints (tools + system + 2 history).
+    // Only use blocks before the first volatile system reminder.
+    const stableHistory: Block[] = [];
+    for (const message of messages) {
+        for (const block of message.content) {
+            if (block.type === 'text' && block.text?.startsWith('<system-reminder>\\n')) break;
+            if (!['thinking','redacted_thinking'].includes(block.type)) stableHistory.push(block);
+        }
+        if (message.content.some(block => block.type === 'text' && block.text?.startsWith('<system-reminder>\\n'))) break;
+    }
+    if (stableHistory.length) {
+        const latest = stableHistory.at(-1)!;
+        const earlier = stableHistory[Math.floor((stableHistory.length - 1) * 0.7)];
+        if (earlier !== latest && stableHistory.length >= 8) earlier.cache_control = {...ephemeral};
+        latest.cache_control = {...ephemeral};
+    }
     const thinking = body.thinking || body.extra_body?.thinking;
     const request: any = {
         model: body.model,
