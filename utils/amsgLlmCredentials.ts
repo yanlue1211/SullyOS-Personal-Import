@@ -109,13 +109,13 @@ export const toCredentialValue = (
   return isUsableCredentialValue(value) ? value : null;
 };
 
-/** 定时主动消息跟随角色默认对话 API，未设置时跟随全局；旧主动消息副 API 字段不参与取值。 */
+/** 定时主动消息优先使用独立 API，未设置则跟随角色默认对话 API。 */
 export const buildCharChatCredRow = (
   char: Pick<CharacterProfile, 'id' | 'dialogueApi'>,
-  _config: ActiveMsg2CharacterConfig | undefined,
+  config: ActiveMsg2CharacterConfig | undefined,
   apiConfig: Pick<APIConfig, 'baseUrl' | 'apiKey' | 'model'>,
 ): LlmCredentialRow | null => {
-  const value = toCredentialValue(resolveDialogueApi(apiConfig, char));
+  const value = toCredentialValue(resolveDialogueApi(apiConfig as APIConfig, char, config?.independentApi));
   return value ? { credId: charCredId(char.id, 'chat'), value } : null;
 };
 
