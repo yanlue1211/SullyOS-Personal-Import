@@ -2,7 +2,8 @@ import {momentsEnabled} from '../features/moments/gate';
 import {oracleContext} from '../features/experience/oracle';
 import { materializeAudioDescriptions } from './audioApi';
 import { loadAudioApiConfig } from './songListening';
-import { buildListenSongGuide, collectListenCandidates, isListenSongEnabled, isSongListeningAvailable, isRealSongListeningEnabled, getOrAnalyzeSongSound, buildCurrentSongSoundBlock } from './songListening';
+import { buildSongSearchGuide } from './songSearch';
+import { isListenSongEnabled, isSongListeningAvailable, isRealSongListeningEnabled, getOrAnalyzeSongSound, buildCurrentSongSoundBlock } from './songListening';
 import { getMemoryPalaceHighWaterMarkForContext, selectCharacterContextMessages } from './chatContextRange';
 import { expandHomeContextHistory } from './homeContextSegments';
 import { protectPendingChatTurn } from './storyTheaterTimeline';
@@ -37,6 +38,7 @@ import { buildLuckinMiniAppContextBlock, buildLuckinChatSystemBlock } from './lu
 import type { LuckinMiniAppSnapshot, LuckinChatState } from './luckinToolBridge';
 import { isMcpChatAvailable } from './mcpClient';
 import { buildMcpSystemBlock, MCP_TAIL_REMINDER } from './mcpToolBridge';
+import { loadMusicPlaybackSnapshot } from '../context/MusicContext';
 import type { MusicCfg, Song, LyricLine, MusicPlaybackSnapshot, RecentTrackChange } from '../context/MusicContext';
 import { isPromptBuildSkipped, isSystemMessageMergeEnabled } from './devDebug';
 import { mergeSystemMessages } from './systemMessageMerge';
@@ -395,6 +397,7 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
             includeUserLocation: isChatConversationEntry(input.recallEntryPoint),
             returningFromMode: returningFromMode || undefined,
             appRules: input.appPrompt?.rules,
+            suppressMusicAtmosphere: !isRealSongListeningEnabled(char) || !!input.musicSnapshot?.requestedByCharId,
             responseStatusEnabled: input.recallEntryPoint!=='proactive_chat',
         },
     ));
@@ -441,7 +444,9 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
           const record = await getOrAnalyzeSongSound(currentSong);
           const { DB } = await import('./db');
           const liveChar = await DB.getCharacter(char.id);
-          if (isRealSongListeningEnabled(liveChar)) {
+          const livePlayback = loadMusicPlaybackSnapshot();
+          if (isRealSongListeningEnabled(liveChar) && livePlayback?.playing
+              && livePlayback.current?.id === currentSong.id) {
             volatileTail += buildCurrentSongSoundBlock(currentSong, record);
           }
         } catch (error) {
@@ -449,14 +454,19 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
         }
       }
     }
-    if (input.recallEntryPoint === 'chat_app' && isSongListeningAvailable() && isListenSongEnabled(char)) {
-      try {
-        const choices = await collectListenCandidates(char, userProfile?.name || '用户');
-        const guide = buildListenSongGuide(choices, userProfile?.name || '用户');
-        if (guide) volatileTail += `\n${guide}`;
-      } catch (error) { console.warn('[audio-listening] 候选歌曲加载失败', error); }
+    if (input.recallEntryPoint === 'chat_app' && !input.appPrompt && isListenSongEnabled(char)) {
+      volatileTail += buildSongSearchGuide();
     }
 
+
+    // Explicit current state overrides earlier listening messages after pause/stop.
+    const livePlayback = loadMusicPlaybackSnapshot() ?? input.musicSnapshot;
+    if (input.musicSnapshot !== undefined && livePlayback) {
+      const state = !livePlayback.playing ? '播放器当前未在播放音乐。'
+        : livePlayback.requestedByCharId ? '当前由角色主动点播，正在共享播放器播放《' + livePlayback.current?.name + '》。这是角色点歌，不是用户主动听歌的证据。'
+        : '用户的播放器当前正在播放《' + livePlayback.current?.name + '》。';
+      volatileTail += '\n### 【当前播放器状态】\n' + state + '先前听歌记录、收藏和搜索意图均不代表当前播放状态，也不能证明用户正在专心听。\n';
+    }
 
     // ── 9. 麦当劳小程序上下文（购物车/菜单实时快照 → 易变尾段） ──
     const mcdActive = !!mcdMiniSnap?.open;

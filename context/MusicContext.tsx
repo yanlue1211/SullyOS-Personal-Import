@@ -162,6 +162,7 @@ export interface RecentTrackChange {
 }
 
 export interface MusicPlaybackSnapshot {
+  requestedByCharId?: string;
   current: Song | null;
   playing: boolean;
   lyric: LyricLine[];
@@ -181,7 +182,7 @@ export const loadMusicPlaybackSnapshot = (): MusicPlaybackSnapshot | null => __m
  */
 let __musicHooks: PostProcessMusicHooks | null = null;
 export const loadMusicHooks = (): PostProcessMusicHooks | null => __musicHooks;
-let __musicControl: { playSong: (song: Song) => Promise<void> } | null = null;
+let __musicControl: { playSong: (song: Song, opts?: {requestedByCharId?: string}) => Promise<void> } | null = null;
 export const loadMusicControl = () => __musicControl;
 
 const saveCfg = (cfg: MusicCfg) => {
@@ -339,6 +340,7 @@ interface MusicContextType {
   idx: number;
   current: Song | null;
 
+  requestedByCharId?: string;
   // 播放状态
   playing: boolean;
   progress: number;
@@ -355,7 +357,7 @@ interface MusicContextType {
   refreshProfile: () => Promise<void>;
 
   // 操作
-  playSong: (song: Song, opts?: { alsoSetQueue?: boolean; replaceQueue?: Song[]; startIdx?: number }) => Promise<void>;
+  playSong: (song: Song, opts?: { alsoSetQueue?: boolean; replaceQueue?: Song[]; startIdx?: number; requestedByCharId?: string }) => Promise<void>;
   togglePlay: () => void;
   nextSong: () => void;
   prevSong: () => void;
@@ -502,6 +504,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // 播放
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [playing, setPlaying] = useState(false);
+  const [requestedByCharId, setRequestedByCharId] = useState<string>();
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
   const [loadingSong, setLoadingSong] = useState(false);
@@ -691,8 +694,9 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, []);
 
   // 播放单曲
-  const playSong = useCallback(async (song: Song, opts: { alsoSetQueue?: boolean; replaceQueue?: Song[]; startIdx?: number; recovering?:boolean } = {}):Promise<void> => {
+  const playSong = useCallback(async (song: Song, opts: { alsoSetQueue?: boolean; replaceQueue?: Song[]; startIdx?: number; recovering?:boolean; requestedByCharId?: string } = {}):Promise<void> => {
     const { alsoSetQueue = true, replaceQueue, startIdx } = opts;
+    setRequestedByCharId(opts.requestedByCharId);
     const attempt=++playAttemptRef.current;
     if(!opts.recovering)failedSongsRef.current.clear();
     const failed=(error?:any)=>{
@@ -941,6 +945,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // 等位于 MusicProvider 上层的代码）读取。useMusic() 在那一层用不了。
   useEffect(() => {
     __musicPlaybackSnapshot = {
+      requestedByCharId,
       current,
       playing,
       lyric,
@@ -949,7 +954,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       cfg,
       recentTrackChange,
     };
-  }, [current, playing, lyric, activeLyricIdx, listeningTogetherWith, cfg, recentTrackChange]);
+  }, [current, playing, lyric, activeLyricIdx, listeningTogetherWith, cfg, recentTrackChange, requestedByCharId]);
 
   // 把整组 musicHooks 写到模块级 slot — useChatAI 和 activeMsgRuntime 都从这里取.
   // current / addListeningPartner 变化时刷新闭包, 保证读到的是最新 React state.
@@ -1057,7 +1062,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const value: MusicContextType = {
     cfg, setCfg, effectiveWorkerUrl,
     queue, setQueue, idx, current,
-    playing, progress, duration, loadingSong,
+    requestedByCharId, playing, progress, duration, loadingSong,
     lyric, tlyric, activeLyricIdx,
     profile, refreshProfile,
     playSong, togglePlay, nextSong, prevSong, seek,

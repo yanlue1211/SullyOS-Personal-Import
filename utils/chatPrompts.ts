@@ -170,6 +170,7 @@ export interface PromptBuildOptions {
     appRules?: string;
     /** Proactive outreach never teaches optional read/busy response cards. */
     responseStatusEnabled?: boolean;
+    suppressMusicAtmosphere?: boolean;
     /** 已完成清洗的实际消息，由公共上下文管线统一处理世界书。 */
     history?: import('./context').ContextMessage[];
     forFirePack?: boolean;
@@ -568,7 +569,7 @@ ${groupLogStr}\n`;
         //     fire_pack 不烤：这首歌是按打包时刻的时段抽的，跟日程一起挪到 AMSG_SLOT_SCENE。
         //     那边只渲染「你此刻在听什么」一句——一起听状态要读用户此刻的播放器、歌词要拉网络，
         //     worker 两样都够不着。
-        if (!forFirePack) try {
+        if (!forFirePack && !promptOptions?.suppressMusicAtmosphere) try {
             let charListening: {
                 songId?: number; songName: string; artists: string; vibe?: string; lyricSnippet?: string[];
             } | null = null;

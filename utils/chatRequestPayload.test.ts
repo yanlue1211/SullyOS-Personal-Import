@@ -427,3 +427,50 @@ describe('ChatApp 按月 RECALL 提示偏好', () => {
         expect(JSON.stringify(char)).toBe(before);
     });
 });
+
+it('real listening off keeps search tool but excludes lyrics and random library candidates', async () => {
+    const input = baseInput();
+    input.recallEntryPoint = 'chat_app';
+    input.char = {...input.char, realSongListeningEnabled: false} as any;
+    input.musicSnapshot = {current: {id: 123, name: '角色选歌', artists: '歌手'}, playing: true,
+      requestedByCharId: input.char.id, lyric: [{t:0,text:'不应注入的歌词'}], activeLyricIdx:0,
+      listeningTogetherWith:[],cfg:{}} as any;
+    const payload = await buildChatRequestPayload(input);
+    const text = joinMessages(payload.fullMessages);
+    expect(text).toContain('主动搜索点歌工具');
+    expect(text).toContain('当前由角色主动点播');
+    expect(text).not.toContain('不应注入的歌词');
+    expect(text).not.toContain('【戴上耳机】');
+    expect(text).not.toContain('当前播放歌曲的客观声音信息');
+    expect(text).not.toContain('用户的播放器当前正在播放');
+});
+
+it('paused player explicitly overrides old song history without injecting paused lyrics', async () => {
+    const input = baseInput();
+    input.recallEntryPoint = 'chat_app';
+    input.musicSnapshot = {current:{id:123,name:'旧歌'},playing:false,lyric:[{t:0,text:'旧歌词'}],
+      activeLyricIdx:0,listeningTogetherWith:[],cfg:{}} as any;
+    const text = joinMessages((await buildChatRequestPayload(input)).fullMessages);
+    expect(text).toContain('播放器当前未在播放音乐');
+    expect(text).not.toContain('旧歌词');
+    expect(text).not.toContain('旧歌');
+});
+
+it.each(['pause', 'switch', 'disable'])('discards sound analysis when playback changes during analysis: %s', async change => {
+    const listening = await import('./songListening');
+    const music = await import('../context/MusicContext');
+    const {DB} = await import('./db');
+    const input = baseInput();
+    input.char = {...input.char, realSongListeningEnabled:true} as any;
+    input.musicSnapshot = {current:{id:123,name:'分析中的歌'},playing:true,lyric:[],activeLyricIdx:-1,listeningTogetherWith:[],cfg:{}} as any;
+    const current = {...input.musicSnapshot, playing:change !== 'pause',current:{...input.musicSnapshot!.current,id:change==='switch'?456:123}} as any;
+    vi.spyOn(music,'loadMusicPlaybackSnapshot').mockReturnValue(current);
+    vi.spyOn(listening,'isSongListeningAvailable').mockReturnValue(true);
+    vi.spyOn(listening,'getOrAnalyzeSongSound').mockResolvedValue(JSON.stringify({description:'不应继续注入的音迹分析'}));
+    vi.spyOn(DB,'getCharacter').mockResolvedValue({...input.char,realSongListeningEnabled:change!=='disable'} as any);
+    try {
+      const text=joinMessages((await buildChatRequestPayload(input)).fullMessages);
+      expect(listening.getOrAnalyzeSongSound).toHaveBeenCalled();
+      expect(text).not.toContain('不应继续注入的音迹分析');
+    } finally {vi.restoreAllMocks();}
+});

@@ -444,23 +444,24 @@ export const ChatParser = {
             const query = listenMatch[1];
             void (async () => {
                 const listening = await import('./songListening');
-                if (!listening.isSongListeningAvailable()) return;
-                const [target, user] = await Promise.all([DB.getCharacter(charId), DB.getUserProfile()]);
+                const target = await DB.getCharacter(charId);
                 if (!target || !listening.isListenSongEnabled(target)) return;
-                const options = await listening.collectListenCandidates(target, user?.name || '用户');
-                const picked = listening.resolveListenCandidate(options, query);
-                if (!picked) { console.warn('[audio-listening] 歌单里找不到歌曲', query); return; }
+                const { searchNeteaseSong } = await import('./songSearch');
+                const picked = await searchNeteaseSong(query);
+                if (!picked) { addToast('没有找到匹配的网易云歌曲，本次未播放', 'info'); return; }
+                const liveTarget = await DB.getCharacter(charId);
+                if (!liveTarget || !listening.isListenSongEnabled(liveTarget)) return;
                 const { loadMusicControl } = await import('../context/MusicContext');
                 const control = loadMusicControl();
-                if (!control) { console.warn('[audio-listening] 播放器尚未初始化'); return; }
-                await control.playSong(picked.song);
+                if (!control) { addToast('播放器尚未初始化，本次未播放', 'info'); return; }
+                await control.playSong(picked, {requestedByCharId: charId});
                 // 角色自主点歌只负责播放；不要自动写个人听歌日记。
                 // 音频分析只由用户开启的真实听歌功能控制。
-                if (listening.isRealSongListeningEnabled(target)) {
-                  try { await listening.getOrAnalyzeSongSound(picked.song); }
+                if (listening.isRealSongListeningEnabled(liveTarget)) {
+                  try { await listening.getOrAnalyzeSongSound(picked); }
                   catch (error) { console.warn('[audio-listening] 自主点歌分析失败', error); }
                 }
-            })().catch(error => console.warn('[audio-listening] 执行失败', error));
+            })().catch(error => { console.warn('[audio-listening] 执行失败', error); addToast('网易云点歌失败，请稍后再试', 'error'); });
         }
 
         // NEWS_CARD — char 主动把某条热点当作新闻卡片分享（来源 + 标题）
