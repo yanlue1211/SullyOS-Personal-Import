@@ -6,15 +6,16 @@ import { REF_SOURCE_STORES } from '../../../utils/blobGc';
 import { currentMaintenanceHolder, releaseMaintenanceLock, tryAcquireMaintenanceLock } from '../../../utils/maintenanceLock';
 
 export interface UserRecording { id: number; charId: string; charName?: string; ref: string; timestamp: number; duration: number; bytes: number; description: string; transcript?: string; }
-export async function listUserRecordings(charId?: string): Promise<UserRecording[]> {
+export async function listUserRecordings(charId?: string, includeCharacterVoices = false): Promise<UserRecording[]> {
   const result: UserRecording[] = [];
   let after: IDBValidKey | null = null;
   for (;;) {
     const { rows, lastKey } = await DB.getStoreRowsPage('messages', after, 200);
     for (const message of rows as Message[]) {
-      if (message.role !== 'user' || message.type !== 'audio' || message.metadata?.audioCleared || !isBlobRef(message.content) || (charId && message.charId !== charId)) continue;
-      const blob = await getBlobForRef(message.content);
-      result.push({ id: message.id, charId: message.charId, ref: message.content, timestamp: message.timestamp, duration: message.metadata?.duration || 0, bytes: blob?.size || 0, description: message.metadata?.audioDescription || '', transcript: recordingText(message.metadata).transcript });
+      if ((message.role !== 'user' && !(includeCharacterVoices && message.role === 'assistant')) || message.type !== 'audio' || message.metadata?.audioCleared || !(isBlobRef(message.content) || (includeCharacterVoices && /^data:audio\//i.test(message.content))) || (charId && message.charId !== charId)) continue;
+      const blob = isBlobRef(message.content) ? await getBlobForRef(message.content) : null;
+      const inlineBytes = blob ? 0 : /^data:audio\//i.test(message.content) ? Math.floor((message.content.length - message.content.indexOf(',') - 1) * .75) : 0;
+      result.push({ id: message.id, charId: message.charId, ref: message.content, timestamp: message.timestamp, duration: message.metadata?.duration || 0, bytes: blob?.size || inlineBytes, description: message.metadata?.audioDescription || '', transcript: recordingText(message.metadata).transcript });
     }
     if (lastKey === null || rows.length < 200) break;
     after = lastKey;
@@ -26,7 +27,7 @@ export async function listUserRecordings(charId?: string): Promise<UserRecording
 }
 
 /** Detach only reviewed user recordings. Commit message changes before reclaiming unreferenced blobs. */
-export async function clearUserRecordings(recordings: UserRecording[]): Promise<{ cleared: number; freedBytes: number; retainedFiles: number }> {
+export async function clearUserRecordings(recordings: UserRecording[], includeCharacterVoices = false): Promise<{ cleared: number; freedBytes: number; retainedFiles: number }> {
   if (!tryAcquireMaintenanceLock('用户录音清理')) throw new Error(`请等待「${currentMaintenanceHolder()}」完成后重试`);
   try {
     const db = await openDB();
@@ -39,9 +40,9 @@ export async function clearUserRecordings(recordings: UserRecording[]): Promise<
         const req = store.get(candidate.id);
         req.onsuccess = () => {
           const current = req.result as Message | undefined;
-          if (!current || current.role !== 'user' || current.type !== 'audio' || current.content !== candidate.ref || current.metadata?.audioCleared) return;
+          if (!current || (current.role !== 'user' && !(includeCharacterVoices && current.role === 'assistant')) || current.type !== 'audio' || current.content !== candidate.ref || current.metadata?.audioCleared) return;
           refs.set(candidate.ref, candidate.bytes);
-          store.put({ ...current, content: '[用户录音已清理]', metadata: { ...current.metadata, audioCleared: true } });
+          store.put({ ...current, content: current.role === 'user' ? '[用户录音已清理]' : '[角色语音已清理]', metadata: { ...current.metadata, audioCleared: true } });
           cleared++;
         };
       }

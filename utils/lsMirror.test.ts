@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { DB } from './db';
 import { MIRRORED_KEYS, healLocalStorageMirror, snapshotLocalStorageMirror } from './lsMirror';
 import { healAllMemoryPalaceHighWaterMarks, setReliableMemoryPalaceHighWaterMark } from './memoryPalace/highWaterMark';
@@ -122,4 +122,23 @@ describe('localStorage IndexedDB 镜像 (lsMirror)', () => {
         expect(localStorage.getItem('mp_lastMsgId_char-a')).toBe('6800');
         expect(localStorage.getItem('mp_lastMsgId_char-b')).toBe('1200');
     });
+});
+
+it('keeps the archived SAR value when quota blocks healing and a partial snapshot follows', async () => {
+    const saved = '{"inventory":["earned-item"]}';
+    localStorage.setItem('vr_fishing_market_v1', saved);
+    localStorage.setItem('os_theme', '{"hue":7}');
+    await snapshotLocalStorageMirror();
+    localStorage.clear();
+    const set = localStorage.setItem.bind(localStorage);
+    const spy = vi.spyOn(localStorage, 'setItem').mockImplementation((key, value) => {
+        if (key === 'vr_fishing_market_v1') throw new DOMException('full', 'QuotaExceededError');
+        set(key, value);
+    });
+    expect(await healLocalStorageMirror()).toContain('os_theme');
+    await snapshotLocalStorageMirror();
+    expect((await DB.getAssetRaw('ls_mirror_v1')).data.vr_fishing_market_v1).toBe(saved);
+    spy.mockRestore();
+    expect(await healLocalStorageMirror()).toContain('vr_fishing_market_v1');
+    expect(localStorage.getItem('vr_fishing_market_v1')).toBe(saved);
 });
