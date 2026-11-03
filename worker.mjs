@@ -1,3 +1,4 @@
+import { handleMusic } from './music.mjs';
 // Independent, read-only Haimian connectivity probe. No database or cron.
 const ROUTES = {
   '/probe/balance': '/jd/api/v1/credit/balance',
@@ -23,6 +24,7 @@ function redact(value, cookie, token) {
 
 export async function handle(request, env, upstreamFetch = fetch) {
   const url = new URL(request.url);
+  if (url.pathname === '/music' || url.pathname.startsWith('/music/')) return handleMusic(request, env, upstreamFetch);
   const origin = request.headers.get('Origin');
   // The built-in test page is same-origin. Optionally permit the personal app.
   const allowed = origin && (origin === url.origin || origin === env.APP_ORIGIN);
