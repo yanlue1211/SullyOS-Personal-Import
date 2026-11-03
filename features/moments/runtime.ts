@@ -297,7 +297,7 @@ async function send(
   purpose: string,
   beforeSend?: () => Promise<void>,
 ): Promise<any> {
-  const api = resolveDialogueApi(input.api, char);
+  const api = resolveDialogueApi(input.api, char, input.api.momentsApi);
   if (!api.baseUrl || !api.model) throw Error("请先配置角色或全局对话API");
   const range = await loadCharacterContextRange(char);
   const payload = await buildChatRequestPayload({
