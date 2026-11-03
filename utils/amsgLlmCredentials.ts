@@ -115,7 +115,7 @@ export const buildCharChatCredRow = (
   config: ActiveMsg2CharacterConfig | undefined,
   apiConfig: Pick<APIConfig, 'baseUrl' | 'apiKey' | 'model'>,
 ): LlmCredentialRow | null => {
-  const value = toCredentialValue(resolveDialogueApi(apiConfig as APIConfig, char, config?.independentApi));
+  const value = toCredentialValue(resolveDialogueApi(apiConfig as APIConfig, char, config?.independentApi?.baseUrl ? config.independentApi : undefined));
   return value ? { credId: charCredId(char.id, 'chat'), value } : null;
 };
 
