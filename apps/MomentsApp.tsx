@@ -1,6 +1,7 @@
 import MomentsComment from "./MomentsComment";
 import {reviseComment} from "../features/moments/comments";
 import MomentsApiMonitor from "./momentsApiMonitor";
+import { BackgroundApiEditor } from "../components/settings/BackgroundApiEditor";
 import {PencilSimple, Trash} from "@phosphor-icons/react";
 import {revisePost} from "../features/moments/revisions";
 import React, { useEffect, useRef, useState } from "react";
@@ -591,6 +592,7 @@ export default function MomentsApp() {
                 />
               </label>
             </section>
+            <BackgroundApiEditor title="朋友圈独立 API" help="全局共用；未设置时仍沿用角色对话 API。" value={os.apiConfig.momentsApi} onSave={value=>os.updateApiConfig({momentsApi:value})}/>
             <section><button className="mm-setting-row" onClick={()=>setApiMonitor(true)}><span>API 调用监控<small>仅朋友圈 · 临时两天 · 可随时关闭清除</small></span><b>›</b></button></section>
             {config.enabled && (
               <>
