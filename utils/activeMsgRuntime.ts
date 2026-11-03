@@ -3,6 +3,7 @@ import { createReplyRun, isReplyStopped, withReplyCancellation, type ReplyRun } 
 import { loadCharacterContextMessages } from './chatContextRange';
 import { ActiveMsg2InboxMessage, ActiveMsg2TaskRecord, APIConfig, RealtimeConfig, UserProfile } from '../types';
 import { DB } from './db';
+import { consumeIncomingCallInvites } from '../features/personal/calls/incoming';
 import { extractInnerVoice } from '../features/personal/innerVoice/protocol';
 import { ChatPrompts } from './chatPrompts';
 import { ActiveMsgStore } from './activeMsgStore';
@@ -1737,7 +1738,7 @@ const flushInboxToChatImpl = async (trigger: FlushTrigger, charId?: string): Pro
       if (!routed) {
         // 2.0 fallback: even when the rich post-processing pipeline fails, never
         // persist the raw inner-voice protocol as a public chat bubble.
-        const recoveredVoice = extractInnerVoice(isProactiveStatusDelivery(message)?proactiveResponseText(message.body||''):(message.body||''));
+        const recoveredVoice = extractInnerVoice(await replyStep(() => consumeIncomingCallInvites(isProactiveStatusDelivery(message)?proactiveResponseText(message.body||''):(message.body||''),message.charId,persistTimestamp)));
         const recoveredStatus=extractResponseStatus(recoveredVoice.text);
         const heartEnabled = (await replyStep(() => DB.getCharacter(message.charId)))?.innerVoiceEnabled !== false;
         try {

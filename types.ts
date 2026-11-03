@@ -3206,6 +3206,9 @@ export interface CharacterProfile {
 
   /** 普通聊天拟人提示；缺省开启。关闭不删除人设、世界书和历史。 */
   humanStyleEnabled?: boolean;
+  /** 主动来电需逐角色明确授权；缺省关闭。 */
+  allowIncomingVoiceCalls?: boolean;
+  allowIncomingVideoCalls?: boolean;
   /** 新回复心声；缺省开启，旧记录保留。 */
   innerVoiceEnabled?: boolean;
 

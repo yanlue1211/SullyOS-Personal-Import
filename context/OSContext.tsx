@@ -1,3 +1,4 @@
+import { consumeIncomingCallInvites } from '../features/personal/calls/incoming';
 import {SONGWRITING_UPDATED} from '../features/songwriting/model';
 import {streamMoments} from '../features/moments/backup';
 import {stripResponseStatus} from '../features/personal/responseStatus/protocol';
@@ -2635,7 +2636,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
               // Proactive 1.0 is an online chat reply: use the same heart parser
               // before chunking or HTML rendering, never expose raw <心声> tags.
               const proactiveHeart = extractInnerVoice(aiContent);
-              aiContent = proactiveHeart.text;
+              aiContent = await consumeIncomingCallInvites(proactiveHeart.text, charId);
 
               let lastProactiveAssistantId: number | undefined;
               const saveProactiveMessage: typeof DB.saveMessage = async msg => {

@@ -1,5 +1,6 @@
 
 import React from 'react';
+import IncomingCallOverlay from './features/personal/calls/IncomingCallOverlay';
 import { OSProvider } from './context/OSContext';
 import { MusicProvider } from './context/MusicContext';
 import PhoneShell from './components/PhoneShell';
@@ -43,6 +44,7 @@ const App: React.FC = () => {
             </MusicProvider>
             {/* 挂在 Provider 里面才能直接读 characters（省掉轮询 IndexedDB），
                 面板自身用 portal 渲染到 body，绕开上面那层 transform 对 fixed 定位的影响。 */}
+            <IncomingCallOverlay />
             <Amsg2DebugPanel />
             <WebUpdateNotice />
           </OSProvider>

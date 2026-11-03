@@ -2,6 +2,9 @@ import EditableInnerVoice from '../features/personal/messageEditing/EditableInne
 import { INNER_VOICE_SYSTEM, type InnerVoice } from '../features/personal/innerVoice/protocol';
 import { editRecordingText } from '../features/personal/chatMedia/editRecording';
 import { recordingText, recordingContext } from '../features/personal/chatMedia/transcript';
+import { takeIncomingCallLaunch, INCOMING_CALL_LAUNCH, setLocalCallPresence, type IncomingCall } from '../features/personal/calls/incoming';
+import HandsFreeCallControl, { type HandsFreeUtterance } from '../features/personal/calls/HandsFreeCallControl';
+import { transcribeAudioWithProvider } from '../utils/speechToText';
 import PersonalMediaComposer from '../features/personal/chatMedia/Composer';
 import CallRecordingPlayback, { type CallRecording } from '../features/personal/chatMedia/CallRecordingPlayback';
 import { recordingToWav } from '../features/personal/chatMedia/recording';
@@ -543,6 +546,11 @@ ${mode === 'video' ? '台词只写说出口的话；屏幕旁白是唯一例外�
 const CallApp: React.FC = () => {
   const { closeApp, openApp, characters, activeCharacterId, addToast, apiConfig, updateApiConfig, userProfile, customThemes, suspendCall, suspendedCall, clearSuspendedCall, updateCharacter, characterGroups, groups, realtimeConfig, memoryPalaceConfig } = useOS();
 
+  const [incomingLaunch, setIncomingLaunch] = useState<IncomingCall | null>(null);
+  useEffect(() => { const take=()=>{const launch=takeIncomingCallLaunch();if(launch)setIncomingLaunch(launch);};take();window.addEventListener(INCOMING_CALL_LAUNCH,take);return()=>window.removeEventListener(INCOMING_CALL_LAUNCH,take); }, []);
+  const [handsFreeEnabled, setHandsFreeEnabled] = useState(false);
+  const [callPageVisible, setCallPageVisible] = useState(() => document.visibilityState !== 'hidden');
+  useEffect(() => { const sync = () => setCallPageVisible(document.visibilityState !== 'hidden'); document.addEventListener('visibilitychange',sync); return () => document.removeEventListener('visibilitychange',sync); }, []);
   const [viewMode, setViewMode] = useState<ViewMode>('role-select');
   useAppShortcut(ShortcutAppID.Call, intent => {
     if (callState !== 'idle') { addToast('请先结束当前通话，再切换快捷入口', 'info'); return; }
@@ -1675,6 +1683,7 @@ const CallApp: React.FC = () => {
     markCallTurnDirty();
   };
   const resetCurrentCall = () => {
+    setHandsFreeEnabled(false);
     callTextAbortRef.current?.abort();
     callTextAbortRef.current = null;
     revokeSessionBlobs();
@@ -1756,6 +1765,18 @@ const CallApp: React.FC = () => {
     }
     void startUserCamera(cameraMode);
   };
+  useEffect(() => {
+    if (!incomingLaunch) return;
+    setSelectedCharId(incomingLaunch.charId); setCallMode(incomingLaunch.mode);
+    setShowCallUpdateAnnouncement(false);setShowCallPreferences(false);
+  }, [incomingLaunch]);
+  useEffect(() => {
+    if (!incomingLaunch || selectedCharId !== incomingLaunch.charId || callMode !== incomingLaunch.mode) return;
+    setIncomingLaunch(null);beginSelectedCall('off');
+  }, [incomingLaunch, selectedCharId, callMode]);
+
+  useEffect(() => { setLocalCallPresence(currentSessionId,viewMode==='in-call'&&!['idle','ended','error'].includes(callState));return()=>setLocalCallPresence(currentSessionId,false); }, [viewMode,callState,currentSessionId]);
+
   const requestSelectedCall = () => {
     if (callMode === 'video') {
       let guideCompleted = false;
@@ -2673,10 +2694,10 @@ ${sentencePlan}`;
     avatarTouchEffectTimersRef.current.forEach(timer => window.clearTimeout(timer));
     avatarTouchEffectTimersRef.current = [];
   }, []);
-  const handleTurn = async (recorded?: { text: string; ref: string; duration: number; description: string; transcript: string; analysis: string }) => {
+  const handleTurn = async (recorded?: { text: string; ref: string; duration: number; description: string; transcript: string; analysis: string }, automaticText?: string) => {
     if (callRecordingBusy && !recorded) return;
     if (isListening) { sttSessionRef.current?.stop(); setIsListening(false); }
-    const typedInput = recorded?.text || draftInput.trim();
+    const typedInput = recorded?.text || automaticText?.trim() || draftInput.trim();
     const retryInput = getPendingReplyText(bubbles);
     const input = typedInput || retryInput;
     if (!input) return addToast('说点什么吧', 'info');
@@ -2886,6 +2907,25 @@ ${sentencePlan}`;
       if (callMode === 'video') playSilentAvatarSpeech(assistantText, turnPerformanceCues);
       else setCallState('listening');
       addToast(`TTS失败：${e?.message || '语音生成失败'}，已保留文本并启用无声表演`, 'info');
+    }
+  };
+  const sendHandsFreeUtterance = async (utterance: HandsFreeUtterance, signal: AbortSignal) => {
+    signal.throwIfAborted();
+    if (utterance.text) { await handleTurn(undefined, utterance.text); return; }
+    if (!utterance.audio) return;
+    if (callInputMode === 'real') {
+      if (!isAudioApiReady(apiConfig.audioApi)) throw new Error('请先配置音频理解 API，或切换为原生识别');
+      const recognition = await recognizeUserRecording(await audioBlobToPayload(utterance.audio, 'voice.wav'), apiConfig.audioApi);
+      signal.throwIfAborted();if (!recognition.transcript.trim()) return;
+      const ref = await putImageBlob(utterance.audio);signal.throwIfAborted();
+      const description = recordingContext(recognition);
+      await handleTurn({text: `[用户真实录音识别说明] ${description}`,ref,duration:utterance.duration || 0,description,...recognition});
+    } else {
+      const provider = resolveSttProvider(apiConfig);if(provider === 'browser') return;
+      const transcript = await transcribeAudioWithProvider(utterance.audio,provider,voiceLang === 'yue' ? 'yue' : 'zh-CN',apiConfig);
+      signal.throwIfAborted();if(!transcript.trim()) return;
+      const ref = await putImageBlob(utterance.audio);signal.throwIfAborted();
+      await handleTurn({text:transcript,ref,duration:utterance.duration || 0,description:'',transcript,analysis:''});
     }
   };
   const sendingBusy = ['connecting', 'thinking'].includes(callState);
@@ -3614,6 +3654,7 @@ ${sentencePlan}`;
       <div className={`h-full w-full bg-gradient-to-b text-white px-5 pb-6 flex flex-col ${lightTheme ? 'sully-call-light from-[#f5f2fd] via-[#eef0f8] to-[#eef0f8]' : 'from-[#140d28] via-[#0a0613] to-[#0a0613]'}`} style={{ paddingTop: 'max(2.5rem, var(--safe-top))' }}>
         {lightTheme && <style>{CALL_LIGHT_THEME_CSS}</style>}
         <StreamingVoiceBar state={streamingVoice.state} onStop={pauseAudio} />
+
         <div className="flex items-center justify-between">
           <button onClick={() => setViewMode('history')} className="text-sm text-white/45">← 返回</button>
           <div className="text-sm text-white/80 font-medium">{recordDetail.characterName}</div>
@@ -4095,9 +4136,12 @@ ${sentencePlan}`;
       </div>
       )}
       <StreamingVoiceBar state={streamingVoice.state} onStop={pauseAudio} />
+      <HandsFreeCallControl enabled={handsFreeEnabled} onEnabledChange={setHandsFreeEnabled} sessionId={currentSessionId} inputMode={callInputMode} apiConfig={apiConfig} language={voiceLang === 'yue' ? 'yue' : 'zh-CN'}
+        ready={viewMode === 'in-call' && !showHangupConfirm && !showCallPreferences && !showCallSetupGuide && !showUserCameraModePicker && callPageVisible && callState === 'listening' && !isAudioPlaying && !isListening && !callRecordingBusy && !isTranscribing && !draftInput.trim()}
+        onStart={() => { sttSessionRef.current?.stop();setIsListening(false);pauseAudio();primeCallAudioFromGesture(true);setCallPreferences(previous=>({...previous,voiceAutoPlay:true})); }} onUtterance={sendHandsFreeUtterance} />
       {showInputPanel && (
         <div className="shrink-0">
-        {callInputMode === 'real' && <PersonalMediaComposer key={`${selectedChar?.id}:${currentSessionId}`} conversationId={selectedChar?.id || ''} dark={!lightTheme} recordingOnly disabled={sendingBusy || isTranscribing}
+        {callInputMode === 'real' && <PersonalMediaComposer key={`${selectedChar?.id}:${currentSessionId}`} conversationId={selectedChar?.id || ''} dark={!lightTheme} recordingOnly disabled={handsFreeEnabled || sendingBusy || isTranscribing}
           onBusyChange={setCallRecordingBusy}
           onRecordingStart={() => { sttSessionRef.current?.stop(); setIsListening(false); pauseAudio(); }}
           onRecognize={isAudioApiReady(apiConfig.audioApi) ? async blob => recognizeUserRecording(await audioBlobToPayload(await recordingToWav(blob), 'voice.wav'), apiConfig.audioApi!) : undefined}
@@ -4114,7 +4158,7 @@ ${sentencePlan}`;
           <div className={`${callMode === 'video' ? 'rounded-[1.15rem] p-1.5' : 'rounded-2xl p-2'} border border-white/12 bg-black/30 backdrop-blur-md flex gap-2 items-center`} style={{ boxShadow: `inset 0 0 20px ${accentColor}1f` }}>
             {callInputMode === 'native' && <button
               onClick={toggleStt}
-              disabled={sendingBusy || isTranscribing || callRecordingBusy}
+              disabled={handsFreeEnabled || sendingBusy || isTranscribing || callRecordingBusy}
               title={isTranscribing ? '正在转写语音…' : isListening ? '结束语音输入' : `按一下开始说话（${getSttProviderLabel(activeSttProvider)}）`}
               className="w-9 h-9 rounded-full flex items-center justify-center shrink-0 transition active:scale-90 disabled:opacity-40"
               style={
@@ -4177,7 +4221,7 @@ ${sentencePlan}`;
               <span className="text-[10px] text-white/70">{userCameraLoading ? '准备中' : userCameraMode === 'fake' ? '假机位' : userCameraMode === 'emotion' ? '情绪' : userCameraMode === 'snapshot' ? '快照' : '用户画面'}</span>
             </button>
           )}
-          <button disabled={callRecordingBusy || sendingBusy || isTranscribing} onClick={() => { sttSessionRef.current?.stop(); setIsListening(false); setCallInputMode(previous => previous === 'real' ? 'native' : 'real'); setShowInputPanel(true); }} title="切换真实语音与原生语音识别" className={`flex flex-col items-center transition active:scale-95 ${callMode === 'video' ? 'gap-0.5' : 'gap-1.5'}`}>
+          <button disabled={handsFreeEnabled || callRecordingBusy || sendingBusy || isTranscribing} onClick={() => { sttSessionRef.current?.stop(); setIsListening(false); setCallInputMode(previous => previous === 'real' ? 'native' : 'real'); setShowInputPanel(true); }} title="切换真实语音与原生语音识别" className={`flex flex-col items-center transition active:scale-95 ${callMode === 'video' ? 'gap-0.5' : 'gap-1.5'}`}>
             <span className={`${callControlSize} rounded-full border flex items-center justify-center backdrop-blur-md transition mx-auto`} style={{ background: callInputMode === 'real' ? `${accentColor}33` : 'rgba(255,255,255,0.06)', borderColor: callInputMode === 'real' ? `${accentColor}88` : 'rgba(255,255,255,0.15)' }}><Microphone size={22} weight={callInputMode === 'real' ? 'fill' : 'regular'} className="text-white/90" /></span>
             <span className="text-[10px] text-white/70">{callInputMode === 'real' ? '真实语音' : '原生识别'}</span>
           </button>

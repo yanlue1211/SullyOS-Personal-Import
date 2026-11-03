@@ -1895,6 +1895,15 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
                 deactivateLuckin();
                 break;
             case 'workroom-toggle': { if(char) updateCharacter(char.id,{workroomLinkEnabled:char.workroomLinkEnabled!==true}); break; }
+            case 'incoming-voice-toggle':
+            case 'incoming-video-toggle': {
+                if (!char) break;
+                const key = type === 'incoming-voice-toggle' ? 'allowIncomingVoiceCalls' : 'allowIncomingVideoCalls';
+                const next = char[key] !== true;
+                updateCharacter(char.id, { [key]: next });
+                addToast(`${key === 'allowIncomingVoiceCalls' ? '主动语音来电' : '主动视频来电'}${next ? '已允许' : '已关闭'}`, 'info');
+                break;
+            }
             case 'human-style-toggle':
             case 'inner-voice-toggle': {
                 if (!char) break;
@@ -4579,6 +4588,8 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
                     luckinConfigured={luckinConfiguredFlag}
                     luckinActivated={luckinActivated}
                     htmlModeEnabled={!!(char as any).htmlModeEnabled}
+                    allowIncomingVoiceCalls={char.allowIncomingVoiceCalls === true}
+                    allowIncomingVideoCalls={char.allowIncomingVideoCalls === true}
                     humanStyleEnabled={char.humanStyleEnabled !== false}
                     innerVoiceEnabled={char.innerVoiceEnabled !== false}
                     realSongListeningEnabled={!!(char as any).realSongListeningEnabled}

@@ -1,3 +1,4 @@
+import { consumeIncomingCallInvites } from '../features/personal/calls/incoming';
 import { consumeWorkroomActions } from '../features/workroom/bridge';
 import { hasMalformedResponseStatus,extractResponseStatus,proactiveResponseText,isProactiveStatusDelivery,statusScheduleActions,isScheduleOnlyResponse } from '../features/personal/responseStatus/protocol';
 import { consumeCommerceAction } from './personalCommerce';
@@ -839,6 +840,7 @@ export async function applyAssistantPostProcessing(
     let aiContent = replayedTagPrefix ? `${replayedTagPrefix}${rawAiContent}` : rawAiContent;
     const heart = extractInnerVoice(aiContent); pendingInnerVoice = char.innerVoiceEnabled === false ? undefined : heart.innerVoice;
     aiContent = await replyStep(() => consumeWorkroomActions(heart.text, char.id, message => addToast('造物间操作未完成：'+message,'info'), ctx.replyRun?.signal));
+    aiContent = await replyStep(() => consumeIncomingCallInvites(aiContent, char.id, messageTimestamp));
     aiContent = normalizeAiContent(aiContent);
     // 先于 lead-in / 二轮渲染消费：否则控制标签会作为普通气泡短暂闪给用户看。
     aiContent = await replyStep(async () => consumeScheduleChanges(aiContent, utteranceAt));
@@ -2392,6 +2394,7 @@ export async function applyAssistantPostProcessing(
         (d): d is Extract<PostProcessDirective, { type: 'music_action' }> =>
             d.type === 'music_action' && !!d.song,
     )?.song;
+    aiContent = await replyStep(() => consumeIncomingCallInvites(aiContent, char.id, messageTimestamp));
     aiContent = await replyStep(async () => ChatParser.parseAndExecuteActions(aiContent, char.id, char.name, addToast, musicHooks, resolveCharTimeZone(char), messageTimestamp, mcdInheritMeta, frozenMusicSong, ctx.replyRun));
 
     // ─── Step 4: thinking chain 抽取 (本轮末尾展示用) ───

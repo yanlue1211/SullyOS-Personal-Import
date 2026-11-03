@@ -3,10 +3,11 @@ import { openDB } from './db';
 import { loadCharacterContextMessages } from './chatContextRange';
 
 /** 本剧情原文已有独立历史槽位，角色镜像不得重复注入或带回待重写回复。 */
-export async function loadStoryActorContext(char: CharacterProfile, theaterId: string, limit: number): Promise<Message[]> {
-    if (limit <= 0) return [];
+export async function loadStoryActorContext(char: CharacterProfile, theaterId: string, limit?: number): Promise<Message[]> {
+    if (limit !== undefined && limit <= 0) return [];
     const messages = await loadCharacterContextMessages(char);
-    return messages.filter(message => !(message.metadata?.source === 'story_theater_memory' && message.metadata?.theaterId === theaterId)).slice(-limit);
+    const visible = messages.filter(message => !(message.metadata?.source === 'story_theater_memory' && message.metadata?.theaterId === theaterId));
+    return limit === undefined ? visible : visible.slice(-limit);
 }
 
 export const STORY_REROLL_INSTRUCTION = '本轮是重新生成：从同一处故事落点重新写这一轮，换一个合理的切入角度、对白和细节展开；保留已确立的事实和用户输入，不把这次操作写进故事，不把尚未发生的旧版本当作既定经历。';
@@ -36,4 +37,11 @@ export async function replaceStoryTheaterReply(original: Message, content: strin
             };
         }
     });
+}
+
+/** The current scene must supply the newest user query, ahead of older shared chat. */
+export function buildStoryActorRecallMessages(carried: Message[], scene: Message[]): Message[] {
+    const latest = scene.slice(-9);
+    const sceneIds = new Set(latest.map(message => message.id));
+    return [...carried.filter(message => !sceneIds.has(message.id)), ...latest];
 }
