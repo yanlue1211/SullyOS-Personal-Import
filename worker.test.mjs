@@ -49,3 +49,15 @@ test('empty stream POST is accepted, nonempty body never reaches upstream', asyn
   assert.equal((await handle(make('x'), env, upstream)).status, 400);
   assert.equal(calls, 1);
 });
+
+test('Cloudflare entry does not treat ExecutionContext as upstream fetch', async () => {
+  const { default: worker } = await import('./worker.mjs');
+  const original = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => { calls++; return Response.json({ balance: 1 }); };
+  try {
+    const response = await worker.fetch(req(), env, { waitUntil() {} });
+    assert.equal(response.status, 200);
+    assert.equal(calls, 1);
+  } finally { globalThis.fetch = original; }
+});
