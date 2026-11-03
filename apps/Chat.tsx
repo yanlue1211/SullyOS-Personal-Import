@@ -3009,12 +3009,14 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
         window.addEventListener('workroom-history-updated',refresh);
         window.addEventListener('moments-history-updated',refresh);
         window.addEventListener('yueqi-history-updated',refresh);
+        window.addEventListener('songwriting-history-updated',refresh);
         return()=>{
             window.removeEventListener('home-secrets-updated',refresh);
             window.removeEventListener('friend-feed-history-updated',refresh);
             window.removeEventListener('workroom-history-updated',refresh);
             window.removeEventListener('moments-history-updated',refresh);
             window.removeEventListener('yueqi-history-updated',refresh);
+            window.removeEventListener('songwriting-history-updated',refresh);
         };
     },[char?.id,visibleCount,reloadMessages]);
 

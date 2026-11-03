@@ -1,3 +1,4 @@
+import {SONGWRITING_UPDATED} from '../features/songwriting/model';
 import {streamMoments} from '../features/moments/backup';
 import {stripResponseStatus} from '../features/personal/responseStatus/protocol';
 import { drainWorkroomOutbox, WORKROOM_HISTORY_UPDATED } from '../features/workroom/delivery';
@@ -2394,9 +2395,12 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       window.addEventListener('workroom-open-requested', openWorkroom);
       window.addEventListener(WORKROOM_HISTORY_UPDATED, historyChanged);
       window.addEventListener('moments-history-updated', historyChanged);
+      window.addEventListener(SONGWRITING_UPDATED, historyChanged);
+      const reloadSongs = () => { void DB.getAllSongs().then(setSongs).catch(()=>{}); };
+      window.addEventListener(SONGWRITING_UPDATED, reloadSongs);
       document.addEventListener('visibilitychange', drain);
       drain();
-      return () => { window.removeEventListener('workroom-chat-requested', askWorkroom); window.removeEventListener('workroom-open-requested', openWorkroom); window.removeEventListener(WORKROOM_HISTORY_UPDATED, historyChanged); window.removeEventListener('moments-history-updated', historyChanged); document.removeEventListener('visibilitychange', drain); };
+      return () => { window.removeEventListener('workroom-chat-requested', askWorkroom); window.removeEventListener('workroom-open-requested', openWorkroom); window.removeEventListener(WORKROOM_HISTORY_UPDATED, historyChanged); window.removeEventListener('moments-history-updated', historyChanged); window.removeEventListener(SONGWRITING_UPDATED, historyChanged); window.removeEventListener(SONGWRITING_UPDATED, reloadSongs); document.removeEventListener('visibilitychange', drain); };
   }, [isDataLoaded]);
 
 
