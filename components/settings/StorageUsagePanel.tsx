@@ -18,6 +18,7 @@ import {
     type BreakdownProgress,
 } from '../../utils/storageStats';
 import { optimizeResourceStorage, type OptimizeProgress, type OptimizeResult } from '../../utils/storageOptimize';
+import VoiceCleanupPanel from './VoiceCleanupPanel';
 import { trackEvent } from '../../utils/analytics';
 
 /**
@@ -202,6 +203,7 @@ const StorageUsagePanel: React.FC = () => {
 
     return (
         <div data-testid="storage-usage-panel" className="mb-5 pb-4 border-b border-slate-100">
+            <VoiceCleanupPanel />
             {/* ── 总量 ── */}
             <div className="flex items-baseline justify-between gap-2 mb-1.5">
                 <span className="text-xs font-bold text-slate-600">本机数据</span>
