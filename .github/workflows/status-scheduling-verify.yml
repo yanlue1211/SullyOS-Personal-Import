@@ -23,7 +23,7 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm vitest run utils/responseStatus.test.ts utils/responseStatusUI.test.ts utils/applyAssistantPostProcessing.test.ts utils/chatParser.scheduleMessage.test.ts utils/chatPrompts.firePack.test.ts utils/amsg2ToolBridge.test.ts utils/amsg2ToolLoop.test.ts --maxWorkers=2 --minWorkers=1
+      - run: pnpm vitest run utils/localScheduleReplay.test.ts utils/messageDeliveryDurability.test.ts utils/personalBackupAudit.test.ts utils/responseStatus.test.ts utils/responseStatusUI.test.ts utils/applyAssistantPostProcessing.test.ts utils/chatParser.scheduleMessage.test.ts utils/chatPrompts.firePack.test.ts utils/amsg2ToolBridge.test.ts utils/amsg2ToolLoop.test.ts --maxWorkers=2 --minWorkers=1
       - run: pnpm build
       - name: Install browser tools
         run: |
