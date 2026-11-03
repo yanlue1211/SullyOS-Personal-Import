@@ -2091,6 +2091,7 @@ export type MusicProvider = 'minimax-free' | 'minimax-paid' | 'ace-step';
 // Audio blob lives in the IndexedDB assets store keyed by `assetKey`,
 // so the sheet itself stays small and JSON-serializable for sync/export.
 export interface SongAudio {
+    lyricRevisionId?: string;
     assetKey: string;          // DB.getAssetRaw / saveAssetRaw key
     mimeType: string;          // e.g. "audio/mpeg", "audio/wav"
     durationSec?: number;
@@ -2103,6 +2104,11 @@ export interface SongAudio {
 }
 
 export interface SongSheet {
+    lyricProposal?: import('./features/songwriting/model').LyricProposal;
+    lyricRevisions?: import('./features/songwriting/model').LyricRevision[];
+    completionCardId?: number;
+    completedLyricFingerprint?: string;
+    audioVersions?: SongAudio[];
     id: string;
     title: string;
     subtitle?: string;

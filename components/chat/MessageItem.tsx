@@ -1,3 +1,4 @@
+import SongwritingCard from '../song/SongwritingCard';
 import MessageDetailEditor from '../../features/personal/messageEditing/MessageDetailEditor';
 import RealMediaView from '../../features/experience/RealMediaView';
 import WorkroomCard from './WorkroomCard';
@@ -2872,6 +2873,8 @@ const MessageItem = React.memo(({
             </div>
         );
     }
+
+    if (m.metadata?.source === 'songwriting' && m.metadata?.songwritingCard) return commonLayout(<SongwritingCard card={m.metadata.songwritingCard}/>);
 
     // --- Score Card Rendering (Songwriting & Quiz) ---
     if (m.type === 'score_card') {
