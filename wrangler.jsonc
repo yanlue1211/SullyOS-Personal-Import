@@ -1,11 +1,8 @@
 {
-  "name": "sully-os-site",
-  "main": "worker/static-site-not-found.ts",
-  "compatibility_date": "2026-08-13",
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "nuomi-haimian",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-11-01",
   "workers_dev": true,
-  "preview_urls": true,
-  "assets": {
-    "directory": "./dist",
-    "not_found_handling": "none"
-  }
+  "observability": { "enabled": false }
 }

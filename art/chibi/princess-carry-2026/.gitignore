@@ -1,5 +1,0 @@
-motions/*.fbx
-motions/active.lock
-motions/*.pending
-build/
-.vite/
