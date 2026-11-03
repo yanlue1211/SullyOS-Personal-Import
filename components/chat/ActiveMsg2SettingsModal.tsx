@@ -641,7 +641,7 @@ const ActiveMsg2SettingsModal: React.FC<ActiveMsg2SettingsModalProps> = ({
           </p>
         ) : null}
 
-        <BackgroundApiEditor title="主动消息独立 API" help="仅用于主动生成（含云端定时消息），即时对话仍使用主 API。" value={saved?.independentApi} onSave={value => {onSave(prev => ({...(prev ?? {enabled:false}),independentApi:value}));syncAmsgLlmCredentials(apiConfig);}} />
+        <BackgroundApiEditor title="主动消息独立 API" help="仅用于主动生成（含云端定时消息），即时对话仍使用主 API。" value={saved?.independentApi} onSave={value => {onSave(prev => ({...(prev ?? {enabled:false}),independentApi:value}));}} />
 
         {/* 即时对话按角色单独关，和上面的排程开关互相独立（只排程不即时、只即时不排程
             都行），所以不裹在 enabled 里。全局那道门没开时这里只置灰说明，不代替它。 */}
