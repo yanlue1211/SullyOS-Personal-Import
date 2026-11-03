@@ -2,7 +2,7 @@
 import React,{act} from 'react';
 import {createRoot, type Root} from 'react-dom/client';
 import {beforeEach,afterEach,it,expect,vi} from 'vitest';
-const fake=vi.hoisted(()=>{const listeners=new Set<()=>void>();let revision=0;const session={id:'qa',charId:'a',mode:'story',scene:'online',sleepDay:'2026-11-01',title:'海边的小羊',status:'ended',summary:'原摘要',createdAt:1,elapsedMs:0,targetMinutes:15,speed:1,turns:[],clips:[],cursor:0,offset:0};const moon:any={session:null,busy:false,notice:'',playlist:[],musicIndex:0,musicPlay:vi.fn(async()=>{}),configure:vi.fn(),loadMusic:vi.fn(async()=>{}),subscribe:(fn:()=>void)=>{listeners.add(fn);return()=>listeners.delete(fn);},snapshot:()=>revision,emit:()=>{revision++;listeners.forEach(fn=>fn());},fail:vi.fn(),select:vi.fn(async()=>{moon.session=session;moon.emit();}),editSummary:vi.fn(async()=>{}),voiceVolume:.85,musicVolume:.35,duckVolume:.12};return {moon,session};});
+const fake=vi.hoisted(()=>{const listeners=new Set<()=>void>();let revision=0;const session={id:'qa',charId:'a',mode:'story',scene:'online',sleepDay:'2026-11-01',title:'海边的小羊',status:'ended',summary:'原摘要',createdAt:1,elapsedMs:0,targetMinutes:15,speed:1,turns:[],clips:[],cursor:0,offset:0};const moon:any={session:null,busy:false,notice:'',playlist:[],musicIndex:0,musicPlay:vi.fn(async()=>{}),configure:vi.fn(),loadMusic:vi.fn(async()=>{}),subscribe:(fn:()=>void)=>{listeners.add(fn);return()=>listeners.delete(fn);},snapshot:()=>revision,emit:()=>{revision++;listeners.forEach(fn=>fn());},fail:vi.fn(),select:vi.fn(async()=>{moon.session=session;moon.emit();}),editSummary:vi.fn(async()=>{}),end:vi.fn(async()=>{}),summarize:vi.fn(async()=>{}),voiceVolume:.85,musicVolume:.35,duckVolume:.12};return {moon,session};});
 vi.mock('../context/OSContext',()=>({useOS:()=>({characters:[{id:'a',name:'阿源',avatar:''}],apiConfig:{},userProfile:{},groups:[],realtimeConfig:{},closeApp:vi.fn()})}));
 vi.mock('../features/yueqi/runtime',()=>({moon:fake.moon}));
 vi.mock('../features/yueqi/storage',()=>({storage:{list:vi.fn(async()=>[fake.session]),get:vi.fn(async()=>fake.session)},blobData:vi.fn()}));
@@ -26,3 +26,13 @@ it('语气默认折叠，原文独立展示',async()=>{
 });
 
 it('首页两行文案去除标点并采用新措辞',()=>{expect(host.querySelector('h1')?.textContent).toBe('月亮今天栖息在哪里');expect(host.querySelector('.yq-answer')?.textContent).toBe('在你身边');});
+
+it('interrupted paused records retain an explicit finish-and-summary entry',async()=>{
+ const old={status:fake.session.status,summary:fake.session.summary,turns:fake.session.turns};
+ Object.assign(fake.session,{status:'paused',summary:'',turns:[{id:'saved',role:'assistant',text:'保存的故事',at:1,source:'story',played:true}]});
+ try{await click('月光拾音');await click('海边的小羊');expect(host.textContent).toContain('等待整理摘要');await click('结束并总结 / 重试整理');expect(fake.moon.end).toHaveBeenCalledOnce();expect(fake.moon.summarize).not.toHaveBeenCalled();}finally{Object.assign(fake.session,old);}
+});
+it('ended records without a summary retain retry access',async()=>{
+ const old=fake.session.summary;fake.session.summary='';
+ try{await click('月光拾音');await click('海边的小羊');await click('重新总结 / 重试发送');expect(fake.moon.summarize).toHaveBeenCalledOnce();}finally{fake.session.summary=old;}
+});
