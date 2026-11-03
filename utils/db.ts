@@ -2018,12 +2018,20 @@ export const DB = {
       });
   },
 
-  saveScheduledMessage: async (msg: ScheduledMessage): Promise<void> => {
+  saveScheduledMessage: async (msg: ScheduledMessage): Promise<boolean> => {
       const db = await openDB();
       return new Promise((resolve, reject) => {
           const transaction = db.transaction(STORE_SCHEDULED, 'readwrite');
-          transaction.objectStore(STORE_SCHEDULED).put(msg);
-          transaction.oncomplete = () => resolve();
+          const store = transaction.objectStore(STORE_SCHEDULED);
+          let inserted = false;
+          const request = store.index('charId').getAll(IDBKeyRange.only(msg.charId));
+          request.onsuccess = () => {
+              const duplicate = (request.result as ScheduledMessage[]).some(row =>
+                  row.id !== msg.id && row.content.trim() === msg.content.trim()
+                  && Math.abs(row.dueAt - msg.dueAt) <= 60000);
+              if (!duplicate) { store.put(msg); inserted = true; }
+          };
+          transaction.oncomplete = () => resolve(inserted);
           transaction.onerror = () => reject(transaction.error || new Error('定时消息未能保存'));
           transaction.onabort = () => reject(transaction.error || new Error('定时消息未能保存'));
       });
@@ -2053,6 +2061,51 @@ export const DB = {
               resolve(due);
           };
           request.onerror = () => reject(request.error);
+      });
+  },
+
+  /** Chat write and task consumption commit together, including across tabs. */
+  deliverDueScheduledMessages: async (charId: string): Promise<ScheduledMessage[]> => {
+      const db = await openDB();
+      return new Promise((resolve, reject) => {
+          const tx = db.transaction([STORE_SCHEDULED, STORE_MESSAGES, STORE_ASSETS], 'readwrite');
+          const tasks = tx.objectStore(STORE_SCHEDULED);
+          const messages = tx.objectStore(STORE_MESSAGES);
+          const delivered: ScheduledMessage[] = [];
+          const now = Date.now();
+          let firstMessageId = 0;
+          const request = tasks.index('charId').openCursor(IDBKeyRange.only(charId));
+          request.onsuccess = () => {
+              const cursor = request.result;
+              if (!cursor) return;
+              const task = cursor.value as ScheduledMessage;
+              if (task.dueAt <= now) {
+                  const duplicate = delivered.some(row => row.content.trim() === task.content.trim()
+                      && Math.abs(row.dueAt - task.dueAt) <= 60000);
+                  if (duplicate) cursor.delete();
+                  else if (delivered.length < 20) {
+                      const write = messages.add({ charId, role: 'assistant', type: 'text',
+                          content: task.content, timestamp: now,
+                          metadata: { deliveryId: `local-schedule:${task.id}` } });
+                      write.onsuccess = () => {
+                          const id = write.result as number;
+                          if (!firstMessageId) firstMessageId = id;
+                          clearStaleMemoryMirror(tx, charId, id);
+                      };
+                      cursor.delete();
+                      delivered.push(task);
+                  }
+              }
+              cursor.continue();
+          };
+          tx.oncomplete = () => {
+              try {
+                  const key = `mp_lastMsgId_${charId}`;
+                  if (firstMessageId && parseInt(localStorage.getItem(key) || '0', 10) >= firstMessageId) localStorage.removeItem(key);
+              } catch { /* same best-effort preference repair as saveMessage */ }
+              resolve(delivered);
+          };
+          tx.onerror = tx.onabort = () => reject(tx.error || new Error('本地定时消息投递失败'));
       });
   },
 

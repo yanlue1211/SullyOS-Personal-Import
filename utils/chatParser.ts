@@ -44,7 +44,8 @@ export async function executeLocalScheduledMessages(content:string,charId:string
                 continue;
             }
             const notificationId = Math.floor(Math.random() * 2147483646) + 1;
-            await replyStep(async () => DB.saveScheduledMessage({ notificationId, id: `sched-${Date.now()}-${Math.random()}`, charId, content: msgContent, dueAt: dueTime, createdAt: Date.now() }));
+            const inserted = await replyStep(async () => DB.saveScheduledMessage({ notificationId, id: `sched-${Date.now()}-${Math.random()}`, charId, content: msgContent, dueAt: dueTime, createdAt: Date.now() }));
+            if (inserted === false) continue;
             try {
                 const hasPerm = await replyStep(async () => LocalNotifications.checkPermissions());
                 if (hasPerm.display === 'granted') {

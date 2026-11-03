@@ -1965,76 +1965,71 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   useEffect(() => {
       if (!isDataLoaded || characters.length === 0) return;
       let cancelled = false;
+      let scanning = false;
       const checkAllSchedules = async () => {
-          if (cancelled) return;
-          let hasNewMessage = false;
-          const unreadUpdates: Record<string, number> = {};
+          if (cancelled || scanning) return;
+          scanning = true;
+          try {
+              let hasNewMessage = false;
+              const unreadUpdates: Record<string, number> = {};
 
-          for (const char of characters) {
-              try {
-                  // 用户正在 DateApp 里和这个角色见面 —— 角色之前排好的定时消息
-                  // ([schedule_message] 指令) 这轮先压着不投递（不删不读），
-                  // 等用户离开见面界面后，下一轮 5s 检查会自然送达。
-                  if (activeAppRef.current === AppID.Date && activeCharIdScheduleRef.current === char.id) continue;
-                  // 通话中（含挂起）同理：定时消息这轮先压着，离开通话后下一轮再送达。
-                  if ((activeAppRef.current === AppID.Call && activeCharIdScheduleRef.current === char.id)
-                      || suspendedCallRef.current?.charId === char.id) continue;
-                  const dueMessages = await DB.getDueScheduledMessages(char.id);
-                  if (cancelled) return;
-                  if (dueMessages.length > 0) {
-                      for (const msg of dueMessages) {
-                          await DB.saveMessage({
-                               charId: msg.charId,
-                               role: 'assistant',
-                               type: 'text',
-                               content: msg.content
-                          });
-                          await DB.deleteScheduledMessage(msg.id);
-                      }
+              for (const char of characters) {
+                  try {
+                      // 用户正在 DateApp 里和这个角色见面 —— 角色之前排好的定时消息
+                      // ([schedule_message] 指令) 这轮先压着不投递（不删不读），
+                      // 等用户离开见面界面后，下一轮 5s 检查会自然送达。
+                      if (activeAppRef.current === AppID.Date && activeCharIdScheduleRef.current === char.id) continue;
+                      // 通话中（含挂起）同理：定时消息这轮先压着，离开通话后下一轮再送达。
+                      if ((activeAppRef.current === AppID.Call && activeCharIdScheduleRef.current === char.id)
+                          || suspendedCallRef.current?.charId === char.id) continue;
+                      const dueMessages = await DB.deliverDueScheduledMessages(char.id);
                       if (cancelled) return;
-                      hasNewMessage = true;
-                      // Use refs for latest state (avoids stale closure & unnecessary deps)
-                      const isChattingWithThisChar = activeAppRef.current === AppID.Chat && activeCharIdScheduleRef.current === char.id;
+                      if (dueMessages.length > 0) {
+                          if (cancelled) return;
+                          hasNewMessage = true;
+                          // Use refs for latest state (avoids stale closure & unnecessary deps)
+                          const isChattingWithThisChar = activeAppRef.current === AppID.Chat && activeCharIdScheduleRef.current === char.id;
 
-                      // If not chatting specifically with this char right now, mark as unread
-                      if (!isChattingWithThisChar) {
-                          addToast(`${char.name} 发来了一条消息`, 'success');
-                          unreadUpdates[char.id] = dueMessages.length;
+                          // If not chatting specifically with this char right now, mark as unread
+                          if (!isChattingWithThisChar) {
+                              addToast(`${char.name} 发来了一条消息`, 'success');
+                              unreadUpdates[char.id] = dueMessages.length;
 
-                          // Web Notification
-                          if (!Capacitor.isNativePlatform() && window.Notification && Notification.permission === 'granted') {
-                              try {
-                                  // 通知不是 DOM，icon 只认能直接加载的地址：头像字段可能是 blobref
-                                  // 令牌，原样塞进去就是没图标。先解析（非令牌原样返回），解析不出
-                                  // 来（图已丢）时退回应用默认图标。
-                                  const icon = (await resolveRefToDataUrl(char.avatar || '')) || './icons/icon-192.png';
-                                  const notif = new Notification(char.name, {
-                                      body: dueMessages[0].content,
-                                      icon,
-                                      silent: false
-                                  });
-                                  notif.onclick = () => {
-                                      window.focus();
-                                      setActiveApp(AppID.Chat);
-                                      setActiveCharacterId(char.id);
-                                  };
-                              } catch (e) { /* notification failed */ }
+                              // Web Notification
+                              if (!Capacitor.isNativePlatform() && window.Notification && Notification.permission === 'granted') {
+                                  try {
+                                      // 通知不是 DOM，icon 只认能直接加载的地址：头像字段可能是 blobref
+                                      // 令牌，原样塞进去就是没图标。先解析（非令牌原样返回），解析不出
+                                      // 来（图已丢）时退回应用默认图标。
+                                      const icon = (await resolveRefToDataUrl(char.avatar || '')) || './icons/icon-192.png';
+                                      const notif = new Notification(char.name, {
+                                          body: dueMessages[0].content,
+                                          icon,
+                                          silent: false
+                                      });
+                                      notif.onclick = () => {
+                                          window.focus();
+                                          setActiveApp(AppID.Chat);
+                                          setActiveCharacterId(char.id);
+                                      };
+                                  } catch (e) { /* notification failed */ }
+                              }
                           }
                       }
-                  }
-              } catch (e) { /* schedule check failed */ }
-          }
-          if (hasNewMessage && !cancelled) {
-              setLastMsgTimestamp(Date.now());
-              // Use functional updater to avoid depending on unreadMessages in the effect deps
-              setUnreadMessages(prev => {
-                  const next = { ...prev };
-                  for (const [charId, count] of Object.entries(unreadUpdates)) {
-                      next[charId] = (next[charId] || 0) + count;
-                  }
-                  return next;
-              });
-          }
+                  } catch (e) { /* schedule check failed */ }
+              }
+              if (hasNewMessage && !cancelled) {
+                  setLastMsgTimestamp(Date.now());
+                  // Use functional updater to avoid depending on unreadMessages in the effect deps
+                  setUnreadMessages(prev => {
+                      const next = { ...prev };
+                      for (const [charId, count] of Object.entries(unreadUpdates)) {
+                          next[charId] = (next[charId] || 0) + count;
+                      }
+                      return next;
+                  });
+              }
+          } finally { scanning = false; }
       };
       schedulerRef.current = setInterval(checkAllSchedules, 5000);
       checkAllSchedules();
