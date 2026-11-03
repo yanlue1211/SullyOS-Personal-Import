@@ -14,7 +14,15 @@ test('missing secret, wrong auth, foreign origin, unknown route never reach upst
 test('only fixed read-only upstream and minimal headers; credentials redacted', async () => {
   for (const [route, suffix] of [['balance', 'credit/balance'], ['voices', 'generate/me/voices']]) {
     const r = await handle(req('/probe/' + route, { Origin: env.APP_ORIGIN }), env, async (url, opts) => {
-      assert.equal(url, 'https://www.haimian.com/jd/api/v1/' + suffix);
+      const target = new URL(url);
+      assert.equal(target.origin + target.pathname, 'https://www.haimian.com/jd/api/v1/' + suffix);
+      assert.equal(target.searchParams.has('msToken'), false);
+      assert.equal(target.searchParams.has('a_bogus'), false);
+      assert.equal(target.searchParams.has('official_uid'), false);
+      if (route === 'balance') {
+        assert.equal(target.searchParams.get('aid'), '588628');
+        assert.equal(target.searchParams.get('device_platform'), 'web');
+      } else assert.equal(target.search, '');
       assert.equal(opts.method, 'GET'); assert.equal(opts.redirect, 'manual');
       assert.deepEqual(opts.headers, { Cookie: cookie, Accept: 'application/json' });
       return Response.json({ nested: { access_token: 'private', detail: cookie + env.AUTH_TOKEN }, balance: 123 });
