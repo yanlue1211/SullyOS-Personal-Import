@@ -3,9 +3,9 @@ import JSZip from 'jszip';
 import { DB, openDB } from './db';
 import { WORKROOM_STORES, transactionDone } from '../features/workroom/schema';
 import { WorkroomStorage as W } from '../features/workroom/storage';
-import { shareWork, acceptShare, listShares, proposeIdea, setIdeaStatus } from '../features/workroom/collaboration';
+import { shareWork, deleteReceivedShare, acceptShare, listShares, proposeIdea, setIdeaStatus } from '../features/workroom/collaboration';
 import { buildWorkroomGuide, consumeWorkroomActions } from '../features/workroom/bridge';
-import { exportWorkroomBackup } from '../features/workroom/backup';
+import { exportWorkroomBackup, validateWorkroomBackup } from '../features/workroom/backup';
 import { assembleV2Backup, writeV2Backup } from './backupFormat';
 import { formatMessageForPrompt, isMessageSemanticallyRelevant } from './messageFormat';
 beforeEach(async()=>{
@@ -56,4 +56,34 @@ it('原作品删除后冻结分享仍能接收，完整 ZIP 保留灵感、来�
     await DB.importFullData(await assembleV2Backup(reader as any,JSON.parse(await reader.file('manifest.json')!.async('string'))) as any);
     expect(await exportWorkroomBackup(await openDB())).toEqual(before);expect(await DB.getMessagesByCharId('a',true)).toEqual(messages);
     expect((await listShares('a'))[0].acceptedWorkId).toBe(copy.id);
+});
+
+it('deleted incoming shares preserve delivered history through ZIP restore', async () => {
+    const {work} = await original();
+    const share = await shareWork('c', work.id, 'a');
+    const messages = await DB.getMessagesByCharId('a', true);
+    await deleteReceivedShare('a', share.id);
+    const before = await exportWorkroomBackup(await openDB());
+    expect(before.workroomShares).toEqual([]);
+    expect(before.workroomEvents.some(row => row.event.kind === 'shared' && row.delivery === 'delivered')).toBe(true);
+    expect(validateWorkroomBackup(before)).toEqual(before);
+    const zip = new JSZip();
+    await writeV2Backup(zip as any, {...before, messages});
+    const reader = await JSZip.loadAsync(await zip.generateAsync({type:'uint8array'}));
+    const restored = await assembleV2Backup(reader as any, JSON.parse(await reader.file('manifest.json')!.async('string')));
+    await DB.importFullData(restored as any);
+    expect(await exportWorkroomBackup(await openDB())).toEqual(before);
+    expect(await DB.getMessagesByCharId('a', true)).toEqual(messages);
+    expect(await listShares('a')).toEqual([]);
+    for (const delivery of ['pending','local'] as const) {
+        const invalid = structuredClone(before);
+        invalid.workroomEvents.find(row => row.event.kind === 'shared')!.delivery = delivery;
+        expect(() => validateWorkroomBackup(invalid)).toThrow('造物间事件无效');
+    }
+    const foreign = structuredClone(before);
+    foreign.workroomShares = [{...share, charId:'c'}];
+    expect(() => validateWorkroomBackup(foreign)).toThrow('造物间事件无效');
+    const mismatch = structuredClone(before);
+    mismatch.workroomEvents.find(row => row.event.kind === 'shared')!.event.shareId = 'another-share';
+    expect(() => validateWorkroomBackup(mismatch)).toThrow('造物间事件无效');
 });
