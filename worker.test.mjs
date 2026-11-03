@@ -36,3 +36,16 @@ test('public page contains no credentials; preflight permits only read probe req
   assert.equal((await handle(req('/probe/voices', {}, 'GET'), env)).status, 405);
   assert.equal((await handle(req('/probe/voices', {'X-Haimian-Cookie':''}), env)).status, 400);
 });
+
+test('empty stream POST is accepted, nonempty body never reaches upstream', async () => {
+  const make = body => new Request('https://probe.example/probe/balance', {
+    method: 'POST', headers: { Authorization: 'Bearer ' + env.AUTH_TOKEN, 'X-Haimian-Cookie': cookie }, body, duplex: 'half'
+  });
+  const empty = new ReadableStream({ start(c) { c.enqueue(new Uint8Array(0)); c.close(); } });
+  let calls = 0;
+  const upstream = async () => { calls++; return Response.json({ balance: 1 }); };
+  assert.equal((await handle(make(empty), env, upstream)).status, 200);
+  assert.equal(calls, 1);
+  assert.equal((await handle(make('x'), env, upstream)).status, 400);
+  assert.equal(calls, 1);
+});
