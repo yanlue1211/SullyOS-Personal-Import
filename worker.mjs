@@ -57,11 +57,15 @@ export async function handle(request, env, upstreamFetch = fetch) {
     } finally { reader.releaseLock(); }
     if (hasBytes) return reply({ error: 'body_not_allowed' }, 400);
   }
+  let stage = 'connect';
+  let upstreamStatus;
   try {
     const response = await upstreamFetch('https://www.haimian.com' + ROUTES[url.pathname], {
       method: 'GET', headers: { Cookie: cookie, Accept: 'application/json' },
       redirect: 'manual', signal: AbortSignal.timeout(20000),
     });
+    upstreamStatus = response.status;
+    stage = 'read_response';
     if (response.status >= 300 && response.status < 400) { await response.body?.cancel(); return reply({ error: 'upstream_redirect_refused' }, 502); }
     if (!response.headers.get('Content-Type')?.includes('application/json')) { await response.body?.cancel(); return reply({ error: 'upstream_not_json', upstreamStatus: response.status }, 502); }
     const reader = response.body?.getReader();
@@ -70,9 +74,20 @@ export async function handle(request, env, upstreamFetch = fetch) {
     for (;;) { const { done, value } = await reader.read(); if (done) break; size += value.byteLength; if (size > 1048576) { await reader.cancel(); return reply({ error: 'upstream_response_too_large' }, 502); } chunks.push(value); }
     const bytes = new Uint8Array(size); let offset = 0;
     for (const part of chunks) { bytes.set(part, offset); offset += part.length; }
+    stage = 'parse_json';
     const data = redact(JSON.parse(new TextDecoder().decode(bytes)), cookie, env.AUTH_TOKEN);
     return reply({ verified: false, note: '请根据实际响应确认接口与登录态；HTTP 成功不代表业务成功。', upstreamStatus: response.status, data });
-  } catch { return reply({ error: 'upstream_request_failed' }, 502); }
+  } catch (error) {
+    // Return only fixed categories, never raw exception text or credentials.
+    const name = error?.name;
+    const message = typeof error?.message === 'string' ? error.message : '';
+    const reason = name === 'TimeoutError' || name === 'AbortError' ? 'timeout'
+      : stage === 'parse_json' ? 'invalid_json'
+      : /ByteString|ISO-8859-1|Latin1|header.*character/i.test(message) ? 'invalid_header_characters'
+      : stage === 'read_response' ? 'response_read_failed'
+      : 'connection_failed';
+    return reply({ error: 'upstream_request_failed', stage, reason, ...(upstreamStatus === undefined ? {} : { upstreamStatus }) }, 502);
+  }
 }
 
 export default { fetch: handle };
