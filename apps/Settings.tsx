@@ -495,6 +495,11 @@ const McpServersCard: React.FC<{
 };
 
 const Settings: React.FC = () => {
+  const [exportConfirmation, setExportConfirmation] = useState<{ message: string; resolve: (ok: boolean) => void } | null>(null);
+  const finishExportConfirmation = (ok: boolean) => {
+      exportConfirmation?.resolve(ok);
+      setExportConfirmation(null);
+  };
   const [archivedMediaCleanupOpen,setArchivedMediaCleanupOpen]=useState(false);
   const [recordingManagerOpen, setRecordingManagerOpen] = useState(false);
   const {
@@ -1490,11 +1495,12 @@ const Settings: React.FC = () => {
   };
 
   const handleExport = async (mode: 'text_only' | 'media_only' | 'full') => {
+      if (exportConfirmation || sysOperation.status === 'processing') return;
       trackEvent('导出本地备份', { scope: mode });
       try {
           // 二次确认：整包备份（full / text_only）本就包含你的 API 密钥等设置——这是预期行为，
           // 但绝不能发给别人。media_only 只有媒体、不含密钥，视为可分享。
-          if (typeof window !== 'undefined' && typeof window.confirm === 'function') {
+          {
               const includesSettings = mode !== 'media_only';
               const includesBackend = includesSettings && exportBackendConnection;
               const msg = includesBackend
@@ -1502,7 +1508,7 @@ const Settings: React.FC = () => {
                   : includesSettings
                   ? '该导出数据包含了明文密钥，请不要发送给任何人'
                   : '该导出内容安全，可以用于分享';
-              if (!window.confirm(`${msg}\n\n点「确定」继续导出，「取消」中止。`)) {
+              if (!await new Promise<boolean>(resolve => setExportConfirmation({ message: msg, resolve }))) {
                   trackEvent('取消导出前的密钥确认', { mode });
                   return;
               }
@@ -2136,6 +2142,13 @@ const Settings: React.FC = () => {
 
   return (
     <div className="h-full w-full bg-[#f3f4f8] flex flex-col font-light relative isolate">
+      <Modal isOpen={!!exportConfirmation} title="确认导出备份" onClose={() => finishExportConfirmation(false)} footer={<>
+          <button className="flex-1 py-3 rounded-2xl bg-slate-100" onClick={() => finishExportConfirmation(false)}>取消</button>
+          <button className="flex-1 py-3 rounded-2xl bg-primary text-white" onClick={() => finishExportConfirmation(true)}>继续导出</button>
+      </>}>
+          <p className="text-sm leading-relaxed">{exportConfirmation?.message}</p>
+      </Modal>
+
 
       {/* GLOBAL PROGRESS OVERLAY */}
       {sysOperation.status === 'processing' && (
