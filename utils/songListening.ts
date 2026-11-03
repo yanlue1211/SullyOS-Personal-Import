@@ -3,7 +3,7 @@ import { DB } from './db';
 import { normalizeApiConfig } from './apiConfigNormalize';
 import { neteaseCacheGet } from './neteaseCache';
 import {
-  audioBlobToPayload,
+  songAudioToPayload,
   assertAudioDescription,
   fetchSongAudio,
   fetchSongLyrics,
@@ -82,7 +82,7 @@ export const getOrAnalyzeSongSound = (song: Song, force = false): Promise<string
     publishSongListenStatus('⏳ 正在获取歌曲音频：' + song.name);
     const cfg = loadMusicCfgStandalone();
     const audio = await fetchSongAudio(song, cfg, config.songQuality || 'exhigh');
-    const payload=await audioBlobToPayload(audio.blob,audio.nameHint);
+    const payload=await songAudioToPayload(audio.blob,audio.nameHint);
     publishSongListenStatus('⏳ 已获取音频（' + payload.format + '，' + (payload.bytes / 1048576).toFixed(1) + 'MB），正在生成客观分析…');
     const { describeAudioWithAudioApi } = await import('./audioApi');
     const description = await describeAudioWithAudioApi(payload, config);
@@ -159,7 +159,7 @@ async function runSongListen(charId: string, song: Song, mode: SongListenMode): 
       fetchSongLyrics(song, cfg),
     ]);
     publishSongListenStatus('⏳ 已获取音频（' + (audio.blob.size / 1048576).toFixed(1) + 'MB），正在调用音频模型…');
-    const payload = await audioBlobToPayload(audio.blob, audio.nameHint);
+    const payload = await songAudioToPayload(audio.blob, audio.nameHint);
     const content = await listenToSongAsCharacter({
       char, user, song, audio: payload, lyrics, isTrial: audio.isTrial, mode,
     }, config);

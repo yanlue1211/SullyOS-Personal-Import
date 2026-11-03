@@ -1,5 +1,5 @@
 import type { Song } from '../../../context/MusicContext';
-import { fetchSongAudio, audioBlobToPayload, describeAudioWithAudioApi, isAudioApiReady } from '../../../utils/audioApi';
+import { fetchSongAudio, songAudioToPayload, describeAudioWithAudioApi, isAudioApiReady } from '../../../utils/audioApi';
 import { loadAudioApiConfig, publishSongListenStatus } from '../../../utils/songListening';
 import { loadMusicCfgStandalone } from '../../../context/MusicContext';
 
@@ -11,7 +11,7 @@ export async function analyzeSongSoundPreview(song: Song): Promise<string> {
   if (!isAudioApiReady(config)) throw new Error('请先配置音频 API');
   publishSongListenStatus('⏳ 正在重新分析：' + song.name);
   const audio = await fetchSongAudio(song, loadMusicCfgStandalone(), config.songQuality || 'exhigh');
-  const payload = await audioBlobToPayload(audio.blob, audio.nameHint);
+  const payload = await songAudioToPayload(audio.blob, audio.nameHint);
   const description = await describeAudioWithAudioApi(payload, config);
   publishSongListenStatus('✅ 新分析已生成，等待用户确认：' + song.name);
   return JSON.stringify({
