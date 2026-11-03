@@ -57,10 +57,20 @@ export async function handle(request, env, upstreamFetch = fetch) {
     } finally { reader.releaseLock(); }
     if (hasBytes) return reply({ error: 'body_not_allowed' }, 400);
   }
+  // Fixed web-client metadata observed on the official balance request.
+  // Never persist captured msToken/a_bogus or account identifiers here.
+  const upstreamUrl = new URL('https://www.haimian.com' + ROUTES[url.pathname]);
+  if (url.pathname === '/probe/balance') {
+    upstreamUrl.search = new URLSearchParams({
+      app_name: 'goat', app_name_cn: '海绵音乐', aid: '588628',
+      app_id: '588628', region: 'CN', language: 'zh',
+      app_version: '1.0.0.1667', channel: 'online', device_platform: 'web',
+    }).toString();
+  }
   let stage = 'connect';
   let upstreamStatus;
   try {
-    const response = await upstreamFetch('https://www.haimian.com' + ROUTES[url.pathname], {
+    const response = await upstreamFetch(upstreamUrl.toString(), {
       method: 'GET', headers: { Cookie: cookie, Accept: 'application/json' },
       redirect: 'manual', signal: AbortSignal.timeout(20000),
     });
