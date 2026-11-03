@@ -7,6 +7,7 @@ import HandsFreeCallControl, { type HandsFreeUtterance } from '../features/perso
 import { transcribeAudioWithProvider } from '../utils/speechToText';
 import { captureSpeechTurn } from '../features/personal/calls/handsFree';
 import './CallApp.css';
+import {callHandsFreeWaitReason,isCallPlaybackActive} from '../features/personal/calls/readiness';
 import CallRecordingPlayback, { type CallRecording } from '../features/personal/chatMedia/CallRecordingPlayback';
 import { CALL_RECORDING_GUIDE, VIDEO_NARRATION_GUIDE, VOICE_CALL_NARRATION_GUIDE, stripCallNarration, splitCallNarration } from '../features/personal/chatMedia/callFormat';
 import { audioBlobToPayload, recognizeUserRecording, isAudioApiReady } from '../utils/audioApi';
@@ -60,7 +61,7 @@ import { deleteAvatarModel, inspectAvatarFile, saveAvatarModel } from '../utils/
 import { getLive2DAIActions, prewarmLive2DModelSource, saveLive2DModelFromFiles, saveLive2DModelFromZip, upgradeLive2DAutoPermissions, type Live2DAvatarConfig } from '../utils/live2dModelStore';
 import { preloadLive2DRuntime } from '../utils/live2dCore';
 import { buildThinkingChainPrompt } from '../utils/thinkingChainPrompt';
-import { parseCallAssistantMessage, stripCallTextFormatting, type ParsedCallReply } from '../utils/callReplyFormat';
+import { parseCallAssistantMessage, stripCallTextFormatting, stripCallSourceLabels, type ParsedCallReply } from '../utils/callReplyFormat';
 import { runCallMemoryPalacePostFlow } from '../utils/memoryPalace/callPostFlow';
 import {
   buildAvatarPerformancePrompt,
@@ -429,7 +430,7 @@ const renderSpokenCallLine = (text: string, accent = '#8b5cf6') => {
     return <React.Fragment key={`t-${idx}`}>{part}</React.Fragment>;
   });
 };
-const renderAssistantLine = (text: string, accent = '#8b5cf6') => splitCallNarration(text).map((part, index) => part.kind === 'narration'
+const renderAssistantLine = (text: string, accent = '#8b5cf6') => splitCallNarration(stripCallSourceLabels(text)).map((part, index) => part.kind === 'narration'
   ? <span key={index} className="sully-call-narration block my-2 text-sm italic text-violet-300/90" style={{ fontFamily: 'Georgia, "Noto Serif SC", serif' }}>{part.text}</span>
   : <React.Fragment key={index}>{renderSpokenCallLine(part.text, accent)}</React.Fragment>);
 
@@ -515,6 +516,7 @@ ${currentVoiceActingGuide()}
 ### 历史消息的来源标记（重要）
 
 对话历史里每条消息都带来源标签：[聊天] 是你们平时在手机上打字聊的，[通话] 是打电话/视频时说的，[约会] 是见面时发生的。它们同属一段真实经历，按时间顺序排列。
+来源标签仅用于你理解历史，回复正文与语音中均不要输出 [通话]、[聊天]、[约会] 或其全角写法。
 **你现在正在通话中**——历史末尾连续的 [通话] 消息就是这通${mode === 'video' ? '视频' : '电话'}的现场，对方刚说的话就在那里。之前的 [聊天] [约会] 是背景记忆，可以自然提起，但**不要把话题当成文字聊天的延续**，更不要忘记对方几秒钟前在电话里刚说过的话——真人打电话不会转头就忘。
 
 ### 底线
@@ -1314,7 +1316,7 @@ const CallApp: React.FC = () => {
   // ElevenLabs 使用带字幕的 PCM 流；Fish 使用共享 router；MiniMax 保留原缓存和分段逻辑。
   // 抛错或返回空 url 都表示没有可播放音频，由调用方降级为纯文字。
   const synthesizeCallAudioUrl = async (rawText: string, emotion?: string, playStream = false): Promise<{ url: string; traceIds: string[] }> => {
-    rawText = stripCallNarration(rawText).trim();
+    rawText = stripCallSourceLabels(stripCallNarration(rawText)).trim();
     if (!rawText) throw new Error('这条只有静音旁白，没有可朗读台词');
     if (activeTtsProvider === 'elevenlabs') {
       if (!selectedChar) throw new Error('未选择角色');
@@ -2257,6 +2259,13 @@ ${sentencePlan}`;
       setCallState(prev => (prev === 'speaking' ? 'listening' : prev));
     }, durationMs);
   };
+  // Native ended/pause events and streaming completion can arrive before React's
+  // status label catches up. Reconcile against actual playback once each call tick.
+  const actualCallPlayback = isCallPlaybackActive(audioRef.current,streamingVoice.state?.status,silentSpeechTimerRef.current!==null,isVoiceAudioPriming(audioRef.current!));
+  const handsFreeWaitReason = callHandsFreeWaitReason({inCall:viewMode==='in-call',visible:callPageVisible,modalOpen:showHangupConfirm||showUserCameraModePicker,generating:!!callTextAbortRef.current||callState==='connecting'||callState==='thinking',playbackActive:actualCallPlayback,manualRecording:isListening||callRecordingBusy,transcribing:isTranscribing,draft:draftInput});
+  useEffect(()=>{
+    if(viewMode==='in-call'&&callState==='speaking'&&!actualCallPlayback&&!callTextAbortRef.current){setIsAudioPlaying(false);setCallState('listening');}
+  },[elapsedSeconds,viewMode,callState,actualCallPlayback]);
   useEffect(() => () => {
     clearPerformanceCueTimers();
     clearSilentSpeechTimer();
@@ -2494,6 +2503,7 @@ ${sentencePlan}`;
   };
   const pauseAudio = () => {
     streamingVoice.stop();
+    clearSilentSpeechTimer();
     clearPerformanceCueTimers();
     getAudioFeed().useStreamAnalyser(null);
     getAudioFeed().setActive(false);
@@ -4169,8 +4179,8 @@ ${sentencePlan}`;
       <div className="sully-call-input-tools mx-3 mb-1 flex shrink-0 items-center justify-between gap-2">
       <select aria-label="通话识别方式" value={callInputMode} disabled={handsFreeEnabled||callRecordingBusy||isListening||isTranscribing||sendingBusy} onChange={e=>{setCallInputMode(e.target.value as 'real'|'native');}} className="max-w-[45%] rounded-full border border-white/10 bg-black/25 px-3 py-1.5 text-[11px] text-white/65 outline-none"><option value="native">原生识别</option><option value="real">音频 API · 原话与语气</option></select>
       <HandsFreeCallControl enabled={handsFreeEnabled} onEnabledChange={setHandsFreeEnabled} sessionId={currentSessionId} inputMode={callInputMode} apiConfig={apiConfig} language={voiceLang === 'yue' ? 'yue' : 'zh-CN'}
-        ready={viewMode === 'in-call' && !showHangupConfirm && !showCallPreferences && !showCallSetupGuide && !showUserCameraModePicker && callPageVisible && callState === 'listening' && !isAudioPlaying && !isListening && !callRecordingBusy && !isTranscribing && !draftInput.trim()}
-        onStart={() => { manualCallCapture.current?.controller.abort();sttSessionRef.current?.stop();setIsListening(false);pauseAudio();primeCallAudioFromGesture(true);setCallPreferences(previous=>({...previous,voiceAutoPlay:true})); }} onUtterance={sendHandsFreeUtterance} />
+        ready={!handsFreeWaitReason} waitReason={handsFreeWaitReason}
+        onStart={() => { if(draftInput.trim()){setShowInputPanel(true);addToast('输入框有未发送文字，发送或清空后自动开始收音','info');}manualCallCapture.current?.controller.abort();sttSessionRef.current?.stop();setIsListening(false);primeCallAudioFromGesture(true);setCallPreferences(previous=>({...previous,voiceAutoPlay:true})); }} onUtterance={sendHandsFreeUtterance} />
       </div>
       {showInputPanel && (
         <div className="shrink-0">

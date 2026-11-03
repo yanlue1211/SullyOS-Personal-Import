@@ -20,3 +20,18 @@ it('starts only after opt-in, aborts capture during playback, and ignores a late
  await act(async()=>{host.querySelector('button')!.click();});expect(signal?.aborted).toBe(true);await act(async()=>deliver({audio:new Blob(['wav']),duration:1}));expect(send).not.toHaveBeenCalled();
  await act(async()=>root.unmount());host.remove();
 });
+it('automatically starts the microphone after response completion, sends one captured turn, and rearms after the reply',async()=>{
+ const host=document.createElement('div'),root=createRoot(host);document.body.append(host);
+ let enabled=false,ready=false,resolveCapture:(value:any)=>void=()=>{},signal:AbortSignal|undefined;
+ let finishReply:()=>void=()=>{};const send=vi.fn(()=>new Promise<void>(resolve=>{finishReply=resolve;}));
+ vi.mocked(captureSpeechTurn).mockImplementation(async(_ctx,s,options)=>{signal=s;options?.onStarted?.(()=>{});return new Promise(resolve=>resolveCapture=resolve);});
+ const render=()=>root.render(<HandsFreeCallControl enabled={enabled} onEnabledChange={v=>{enabled=v;render();}} ready={ready} waitReason={ready?'':'等待对方回应'} sessionId="automatic" inputMode="real" apiConfig={{}} onStart={()=>{}} onUtterance={send}/>);
+ const initial=vi.mocked(captureSpeechTurn).mock.calls.length;
+ await act(async()=>render());await act(async()=>host.querySelector('button')!.click());await act(async()=>{await vi.advanceTimersByTimeAsync(1000);});expect(captureSpeechTurn).toHaveBeenCalledTimes(initial);
+ await act(async()=>{ready=true;render();await vi.advanceTimersByTimeAsync(1);});await act(async()=>{await vi.advanceTimersByTimeAsync(601);});
+ expect(host.textContent).toContain('正在收音');expect(signal?.aborted).toBe(false);
+ await act(async()=>resolveCapture({audio:new Blob(['wav']),duration:2}));expect(send).toHaveBeenCalledOnce();
+ await act(async()=>{ready=false;render();});await act(async()=>finishReply());
+ await act(async()=>{ready=true;render();});await act(async()=>{await vi.advanceTimersByTimeAsync(601);});expect(captureSpeechTurn).toHaveBeenCalledTimes(initial+2);expect(host.textContent).toContain('正在收音');
+ await act(async()=>root.unmount());host.remove();
+});
