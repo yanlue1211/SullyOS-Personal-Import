@@ -45,7 +45,18 @@ export async function handle(request, env, upstreamFetch = fetch) {
   if (request.headers.get('Authorization') !== `Bearer ${env.AUTH_TOKEN}`) return reply({ error: 'unauthorized' }, 401);
   const cookie = request.headers.get('X-Haimian-Cookie') || '';
   if (!cookie.trim() || cookie.length > 16000 || /[\r\n\x00]/.test(cookie)) return reply({ error: 'invalid_cookie' }, 400);
-  if (request.body) { await request.body.cancel(); return reply({ error: 'body_not_allowed' }, 400); }
+  if (request.body) {
+    const reader = request.body.getReader();
+    let hasBytes = false;
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value?.byteLength) { hasBytes = true; await reader.cancel(); break; }
+      }
+    } finally { reader.releaseLock(); }
+    if (hasBytes) return reply({ error: 'body_not_allowed' }, 400);
+  }
   try {
     const response = await upstreamFetch('https://www.haimian.com' + ROUTES[url.pathname], {
       method: 'GET', headers: { Cookie: cookie, Accept: 'application/json' },
