@@ -51,7 +51,8 @@ export async function deliver(s:Session):Promise<Session>{
  if(!s.summary?.trim())throw Error('尚无摘要');
  const content=`🌙 月栖 · 夜间记录\n${s.sleepDay} · ${s.scene==='offline'?'月下相依（线下扮演）':'隔屏伴月（线上陪伴）'} · ${s.mode==='story'?'枕月听书':'小羊夜话'} · ${Math.round(s.elapsedMs/60000)}分钟\n【记忆边界：故事为虚构；角色单方讲述不等于已确认事实；沉默不代表睡着。】\n${s.summary}`;
  const cardId=s.cardId??await DB.saveMessageOnce('yueqi:'+s.id,{charId:s.charId,role:'assistant',type:'text',content,metadata:{source:'yueqi',yueqiSessionId:s.id}});
- if(s.cardId)await DB.updateMessage(cardId,content);
+ // A prior delivery may have committed before the session stored its cardId.
+ await DB.updateMessage(cardId,content);
  const next={...s,cardId};await storage.save(next);if(typeof window!=='undefined')window.dispatchEvent(new CustomEvent('yueqi-history-updated',{detail:{charId:s.charId}}));return next;
 }
 

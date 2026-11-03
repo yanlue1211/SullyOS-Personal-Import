@@ -22,3 +22,12 @@ describe('月栖存储与聊天衔接',()=>{
  it('无摘要不写空卡，原始记录仍在',async()=>{const s=addReply(newSession('a','night'),'原始内容','automatic');await storage.save(s);await expect(deliver(s)).rejects.toThrow('尚无摘要');expect((await storage.get(s.id))?.turns).toHaveLength(1);expect(await DB.getMessagesByCharId('a',true)).toHaveLength(0);});
  it('真实 ZIP 全量备份还原完整文字、音频与角色，不新增数据库版本',async()=>{const s=addReply(newSession('a','story'),'完整文字','story');s.clips[0].audio='data:audio/wav;base64,AAAA';await storage.save(s);await DB.saveAssetRaw('unrelated',{untouched:true});const beforeVersion=(await openDB()).version;const zip=new JSZip();await writeV2Backup(zip as any,await DB.exportFullData());const reader=await JSZip.loadAsync(await zip.generateAsync({type:'uint8array'}));const backup=await assembleV2Backup(reader as any,JSON.parse(await reader.file('manifest.json')!.async('string')));await storage.remove(s.id);await DB.importFullData(backup as any);const restored=await storage.get(s.id);expect(restored?.turns).toEqual(s.turns);expect(restored?.clips[0].audio).toBe(s.clips[0].audio);expect(await DB.getAssetRaw('unrelated')).toEqual({untouched:true});expect((await openDB()).version).toBe(beforeVersion);});
 });
+
+it('retries refresh an already committed card even if the restored session lost its cardId',async()=>{
+ const s=newSession('summary-retry-char','story',{status:'ended',summary:'旧摘要'});
+ await deliver(s);
+ const restored={...s,summary:'重新整理后的摘要'};
+ await deliver(restored);
+ const rows=await DB.getMessagesByCharId('summary-retry-char',true);
+ expect(rows).toHaveLength(1);expect(rows[0].content).toContain('重新整理后的摘要');expect(rows[0].content).not.toContain('旧摘要');
+});
