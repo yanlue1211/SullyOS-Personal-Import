@@ -2463,7 +2463,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           }
 
           // 页面内主动消息与私聊使用同一角色默认；旧主动消息副 API 不再参与取值。
-          const api = resolveDialogueApi(currentApiConfig, char, char.activeMsg2Config?.independentApi?.baseUrl ? char.activeMsg2Config.independentApi : undefined);
+          const api = resolveDialogueApi(currentApiConfig, char, currentApiConfig.proactiveApi?.baseUrl ? currentApiConfig.proactiveApi : undefined);
           if (!api.baseUrl) {
               drainQueuedProactive();
               return;

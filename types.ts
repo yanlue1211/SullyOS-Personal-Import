@@ -308,6 +308,8 @@ export interface APIConfig {
   audioApi?: AudioApiConfig;
   /** 朋友圈独立 API；未配置则仍走角色默认对话 API。 */
   momentsApi?: DialogueApiConfig;
+  /** 全角色共用的主动消息 1.0 / 2.0 生成 API；不影响即时对话。 */
+  proactiveApi?: DialogueApiConfig;
   minimaxApiKey?: string;
   minimaxGroupId?: string;
   // 'domestic' → https://api.minimaxi.com (国内站)

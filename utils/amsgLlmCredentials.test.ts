@@ -119,8 +119,8 @@ describe('凭据行取值', () => {
     expect(row?.value.primaryModel).toBe('gpt-global');
   });
 
-  it('独立主动消息 API 仅覆盖定时主动消息，不影响即时对话', () => {
-    const row = buildCharChatCredRow(CHAR, { enabled: true, independentApi: SECONDARY } as any, API);
+  it('全局主动消息 API 覆盖定时主动消息，不影响即时对话', () => {
+    const row = buildCharChatCredRow(CHAR, { enabled: true } as any, {...API, proactiveApi: SECONDARY});
     expect(row?.value).toEqual({
       apiUrl: 'https://alt.example.dev/v1/chat/completions',
       apiKey: 'sk-alt',
