@@ -837,7 +837,7 @@ export async function applyAssistantPostProcessing(
     rawAiContent = await replyStep(() => consumeFriendFeedMainReply(char.id, rawAiContent,
         (directives || []).flatMap(d => d.type === 'friend_feed_reply' ? [d.action] : [])));
     let aiContent = replayedTagPrefix ? `${replayedTagPrefix}${rawAiContent}` : rawAiContent;
-    const heart = extractInnerVoice(aiContent); pendingInnerVoice = heart.innerVoice;
+    const heart = extractInnerVoice(aiContent); pendingInnerVoice = char.innerVoiceEnabled === false ? undefined : heart.innerVoice;
     aiContent = await replyStep(() => consumeWorkroomActions(heart.text, char.id, message => addToast('造物间操作未完成：'+message,'info'), ctx.replyRun?.signal));
     aiContent = normalizeAiContent(aiContent);
     // 先于 lead-in / 二轮渲染消费：否则控制标签会作为普通气泡短暂闪给用户看。

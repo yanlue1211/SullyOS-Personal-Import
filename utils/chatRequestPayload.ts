@@ -31,6 +31,7 @@ import { renderDeepEngagementGuidance } from './memoryPalace/deepEngagement';
 import { renderConversationEngagementGuidance } from './memoryPalace/conversationEngagement';
 import type { ConversationEngagementAnalysis } from './memoryPalace/conversationEngagement';
 import type { DeepEngagementAnalysis } from './memoryPalace/deepEngagement';
+import { usesHumanStyle, usesInnerVoice, INNER_VOICE_FORMAT_REMINDER } from './chatPromptPreferences';
 import { buildChatOutputStylePrompt } from './chatOutputStylePrompt';
 import { buildMcdMiniAppContextBlock } from './mcdToolBridge';
 import type { McdMiniAppSnapshot } from './mcdToolBridge';
@@ -250,6 +251,7 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
         try{return await work();}finally{input.onPreparationStage?.({stage,status:'end',ms:Math.round(performance.now()-started)});}
     };
     const char = { ...input.char, memoryPalaceInjection: '', roomPlatesInjection: '' };
+    const humanStyle = usesHumanStyle(char) || !!input.appPrompt;
     const {
         userProfile, groups, historyMsgs, contextLimit,
         realtimeConfig, innerState,
@@ -404,29 +406,31 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
     input.signal?.throwIfAborted();
     let systemPrompt = parts.stable;
     let volatileTail = parts.volatileState;
-    if(momentsEnabled() && !input.appPrompt && (!input.recallEntryPoint || ['chat_app','proactive_chat','chat_payload'].includes(input.recallEntryPoint))){
+    if(humanStyle && momentsEnabled() && !input.appPrompt && (!input.recallEntryPoint || ['chat_app','proactive_chat','chat_payload'].includes(input.recallEntryPoint))){
         const {chatMomentsContext}=await import('../features/moments/bridge');
         const moments=await chatMomentsContext(char.id,[...historyMsgsForPrompt].reverse().find(m=>m.role==='user')?.id);
         systemPrompt+=moments.stable;volatileTail+=moments.dynamic;
     }
-    if (!input.appPrompt && char.workroomLinkEnabled === true && (!input.recallEntryPoint || ['chat_app','proactive_chat','chat_payload'].includes(input.recallEntryPoint))) {
+    if (humanStyle && !input.appPrompt && char.workroomLinkEnabled === true && (!input.recallEntryPoint || ['chat_app','proactive_chat','chat_payload'].includes(input.recallEntryPoint))) {
         const { buildWorkroomGuide } = await import('../features/workroom/bridge');
         volatileTail += await buildWorkroomGuide(char.id);
     }
-    const sarModulePlan = input.recallEntryPoint === 'chat_app' && !input.appPrompt
+    const sarModulePlan = humanStyle && input.recallEntryPoint === 'chat_app' && !input.appPrompt
         ? getSARModuleRuntimePlan(char, userProfile)
         : undefined;
-    const sarModuleBlock = isChatConversationEntry(input.recallEntryPoint)
+    const sarModuleBlock = humanStyle && isChatConversationEntry(input.recallEntryPoint)
         ? ContextBuilder.buildSARModuleContext(char, userProfile, input.appPrompt ? 'home' : 'chat')
         : '';
     const sarEnvelopeActive = sarModulePlan?.requiresEnvelope === true;
 
     const { prompt: outputStylePrompt, bilingualActive, htmlActive, thinkingActive } = buildChatOutputStylePrompt({
-        charName: char.name,
+        humanStyleEnabled: char.humanStyleEnabled,
+    charName: char.name,
         userName: userProfile?.name,
         ...(!input.appPrompt ? { translationConfig, htmlMode, thinkingChain, sarEnvelopeActive } : {}),
     });
-    systemPrompt += outputStylePrompt;
+    // New fixed heart reminder stays in the prefix; keep the author's output-style placement.
+    systemPrompt = (!input.appPrompt && usesInnerVoice(char) ? INNER_VOICE_FORMAT_REMINDER + '\n' : '') + systemPrompt + outputStylePrompt;
     if (isRealSongListeningEnabled(char)) {
       systemPrompt += `\n### 【真实听歌说明】
 当你与用户一起听音乐时，系统可能在本轮动态上下文提供歌曲的客观声音分析。它是歌曲本身的声音资料，不是你写的日记，也不是你已经发表的评价。你可以基于真实声音信息和当下情境形成自己的感受，但绝不必每轮都谈论音乐；优先自然回应用户。不要照搬分析报告，不要编造没有分析到的乐器或旋律。没有分析结果时，不要假装听清了曲调。听歌日记不是自动任务，只有用户明确要求时才写。\n`;
@@ -513,6 +517,7 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
     // 私聊与 3D 家园共用本地语境分析：它告诉主模型“这句话此刻在做什么”，
     // 不指定具体记忆答案、不改变角色人格，也不进入其他 App 的专属写作提示。
     if (isChatConversationEntry(input.recallEntryPoint)) {
+        if (humanStyle) {
         volatileTail += renderLocalContextGuidance(recallTrace.contextAnalyzer);
         volatileTail += renderInteractionAdaptationGuidance(recallTrace.interactionAdaptation?.analysis);
         const engagementTrace = recallTrace.deepEngagement;
@@ -523,6 +528,7 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
             volatileTail += renderConversationEngagementGuidance(
                 engagementTrace.analysis as ConversationEngagementAnalysis | undefined,
             );
+        }
         }
         if (char.chatCollaborationEnabled) {
             volatileTail += await prepare('collaboration',()=>loadCollaborationFileCabinetBlock(
@@ -535,9 +541,10 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
 
     // 「关于对方的表达」+「回到你自己」必须是易变尾段的最后内容：修复旧版把双语/HTML/
     // 思考链/点单块拼在钢印之后、模型开口前最后读到的是格式说明书的问题。
-    if(!input.appPrompt&&(!input.recallEntryPoint||['chat_app','chat_payload','proactive_chat'].includes(input.recallEntryPoint)))volatileTail+=await oracleContext(char.id);
+    if(humanStyle&&!input.appPrompt&&(!input.recallEntryPoint||['chat_app','chat_payload','proactive_chat'].includes(input.recallEntryPoint)))volatileTail+=await oracleContext(char.id);
     if (input.appPrompt) volatileTail += input.appPrompt.scene;
     volatileTail += parts.recencyTail;
+
     if (sarModuleBlock) volatileTail += sarModuleBlock;
 
     // 结构：[稳定 system] + [历史消息] + [易变状态 system] (+ 末尾 reminder)。
@@ -603,7 +610,7 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
     }
     input.signal?.throwIfAborted();
 
-    if (!input.appPrompt || input.recallEntryPoint === 'home_3d') {
+    if ((humanStyle && !input.appPrompt) || input.recallEntryPoint === 'home_3d') {
         const {homeVisitPrompt}=await import('./homeVisits');
         const visits=await homeVisitPrompt(char);
         if(visits)fullMessages.push({role:'system',content:visits});

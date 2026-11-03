@@ -1739,6 +1739,7 @@ const flushInboxToChatImpl = async (trigger: FlushTrigger, charId?: string): Pro
         // persist the raw inner-voice protocol as a public chat bubble.
         const recoveredVoice = extractInnerVoice(isProactiveStatusDelivery(message)?proactiveResponseText(message.body||''):(message.body||''));
         const recoveredStatus=extractResponseStatus(recoveredVoice.text);
+        const heartEnabled = (await replyStep(() => DB.getCharacter(message.charId)))?.innerVoiceEnabled !== false;
         try {
           if(recoveredVoice.text.trim())await replyStep(async () => (replyRun?.saveMessage ?? DB.saveMessage)({
             charId: message.charId,
@@ -1748,7 +1749,7 @@ const flushInboxToChatImpl = async (trigger: FlushTrigger, charId?: string): Pro
             timestamp: persistTimestamp,
             metadata: {
               source: 'active_msg_2',
-              ...(recoveredStatus?{responseStatus:recoveredStatus}:recoveredVoice.innerVoice ? { innerVoice: recoveredVoice.innerVoice } : {}),
+              ...(recoveredStatus?{responseStatus:recoveredStatus}:heartEnabled && recoveredVoice.innerVoice ? { innerVoice: recoveredVoice.innerVoice } : {}),
               activeMsg2: {
                 messageId: message.messageId,
                 taskId: message.taskId,

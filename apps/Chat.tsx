@@ -1895,6 +1895,15 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
                 deactivateLuckin();
                 break;
             case 'workroom-toggle': { if(char) updateCharacter(char.id,{workroomLinkEnabled:char.workroomLinkEnabled!==true}); break; }
+            case 'human-style-toggle':
+            case 'inner-voice-toggle': {
+                if (!char) break;
+                const key = type === 'human-style-toggle' ? 'humanStyleEnabled' : 'innerVoiceEnabled';
+                const next = char[key] === false;
+                updateCharacter(char.id, { [key]: next });
+                addToast(key === 'humanStyleEnabled' ? (next ? '拟人提示词已开启' : '拟人提示词已关闭：从下一轮使用模型自然表达，已有对话保留') : (next ? '心声已开启' : '心声已关闭：不再生成新心声，旧记录保留'), 'info');
+                break;
+            }
             case 'real-song-listening-toggle': {
                 if (!char) break;
                 const next = !((char as any).realSongListeningEnabled);
@@ -4570,6 +4579,8 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
                     luckinConfigured={luckinConfiguredFlag}
                     luckinActivated={luckinActivated}
                     htmlModeEnabled={!!(char as any).htmlModeEnabled}
+                    humanStyleEnabled={char.humanStyleEnabled !== false}
+                    innerVoiceEnabled={char.innerVoiceEnabled !== false}
                     realSongListeningEnabled={!!(char as any).realSongListeningEnabled}
                     workroomLinkEnabled={char.workroomLinkEnabled === true}
                     showThinkingChain={!!(char as any).showThinkingChain}

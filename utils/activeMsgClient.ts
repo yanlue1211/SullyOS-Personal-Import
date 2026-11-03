@@ -1,3 +1,4 @@
+import { usesHumanStyle, usesInnerVoice, INNER_VOICE_FORMAT_REMINDER, CHAT_EXPRESSION_TAIL_REMINDER } from './chatPromptPreferences';
 import { buildChatOutputStylePrompt, readChatTranslationConfig } from './chatOutputStylePrompt';
 import { resolveDialogueApi } from './characterApi';
 import { isAnthropicEndpoint } from './llmEndpoint';
@@ -846,6 +847,7 @@ export const buildFirePack = async (
     { forFirePack: true },
   );
   const outputStyle = buildChatOutputStylePrompt({
+    humanStyleEnabled: char.humanStyleEnabled,
     charName: char.name,
     userName: userProfile.name,
     translationConfig: readChatTranslationConfig(char.id),
@@ -870,8 +872,15 @@ export const buildFirePack = async (
     ? `- 你的记忆库里存着这些月份的经历：${recallableMonths.join('、')}。想聊起其中某段时，先输出 [[RECALL: 年-月]] 把细节取回来再写，别凭印象编。`
     : null;
 
-  const template = templateStub ? AMSG2_INSTANT_STUB_TEMPLATE : [
-    '你将代表下面这个角色，生成一条“主动发给用户”的私聊消息。',
+  const template = templateStub ? AMSG2_INSTANT_STUB_TEMPLATE : !usesHumanStyle(char) ? [
+    '根据已有对话与本次任务给用户发送消息；无需扮演角色或模拟人类生活。',
+    (usesInnerVoice(char) ? INNER_VOICE_FORMAT_REMINDER + '\n' : '') + systemPrompt + outputStyle.prompt,
+    '【最近对话】', recentTranscript + AMSG_SLOT_SELF_LOG,
+    timeAware ? `【当前时间】${AMSG_SLOT_CURRENT_TIME}${AMSG_SLOT_USER_CLOCK}` : '',
+    AMSG_SLOT_TASK_LIST, AMSG_SLOT_REALTIME_WORLD,
+    '【本次任务】', AMSG_SLOT_TASK_INSTRUCTION,
+  ].join('\n') : [
+    usesHumanStyle(char) ? '你将代表下面这个角色，生成一条“主动发给用户”的私聊消息。' : '根据已有对话与本次任务，主动给用户发送消息。',
     '',
     '【重要规则】',
     '- 这不是回复用户刚刚发来的消息，而是角色主动来找用户聊天。',
@@ -884,6 +893,8 @@ export const buildFirePack = async (
     ...(recallHint ? [recallHint] : []),
     '',
     '【角色系统设定】',
+    CHAT_EXPRESSION_TAIL_REMINDER,
+    usesInnerVoice(char) ? INNER_VOICE_FORMAT_REMINDER : '',
     systemPrompt + outputStyle.prompt,
     `（注意：上面角色设定里的情绪、印象等状态是最近一次聊天时的快照。${timeAware ? '此刻的时间、你正在做什么' : '你此刻正在做什么'}，以下方「当前时刻补充」为准。）`,
     '',
@@ -917,8 +928,7 @@ export const buildFirePack = async (
     // 到点说不说由角色自己判（见 amsgFirePack 的 BEFORE_SPEAK_LINES）。
     ...BEFORE_SPEAK_LINES,
     '',
-    // recency 末位人声锚：上面【角色系统设定】里已带「回到你自己」钢印，但被任务说明压在后面、
-    // 失了 recency。这里在最后一句把它拎回来，让主动消息也从「你这个人」长出来，而不是滑回均值腔。
+    // Preserve the author's short final character-voice anchor.
     `（开口前回到你自己：这条得是 ${char.name} 会发的那一条——语气、用词、节奏都只属于你。哪怕只是随口一句，也要是你。）`,
   ].join('\n');
 
@@ -2648,7 +2658,8 @@ export const ActiveMsgClient = {
       tzId,
       metadata: {
         charId: char.id,
-        charName: char.name,
+        humanStyleEnabled: char.humanStyleEnabled,
+    charName: char.name,
         source: 'active_msg_2',
         // worker 满血链路的 onLLMOutput 拿不到任务顶层的 messageType，靠 metadata 透传
         // 还原 push.messageType（老任务没这字段时 worker 回退 'auto'，收侧只展示不路由）。
@@ -3134,7 +3145,8 @@ export const ActiveMsgClient = {
         : {}),
       metadata: {
         charId: char.id,
-        charName: char.name,
+        humanStyleEnabled: char.humanStyleEnabled,
+    charName: char.name,
         source: 'active_msg_2',
         // push 的 messageType 取自这里（收侧按 'instant' 分轨）。
         amsgMode: 'instant',

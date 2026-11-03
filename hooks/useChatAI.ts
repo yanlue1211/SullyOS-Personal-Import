@@ -958,7 +958,7 @@ export const useChatAI = ({
                     unansweredUserTurn: hasUnansweredUserTurn(currentMsgs, contextMsgs),
                 });
             const promptBuildSkipped = payload.flags.promptBuildSkipped;
-            if (!promptBuildSkipped) {
+            if (!promptBuildSkipped && char.humanStyleEnabled !== false) {
                 try {
                     friendFeedMainTask = await prepareFriendFeedMainTask(char.id,friendFeedUserDisclosure(contextMsgs));
                     if (friendFeedMainTask) fullMessages.splice(Math.max(1, payload.volatileTailIndex), 0,
@@ -992,7 +992,7 @@ export const useChatAI = ({
             //      双跑双扣费. 见下方即时对话分支 + activeMsgRuntime.
             //    走哪条跟着 instantChatRoute（构建 payload 前冻结的同一回合终值）走，这里绝不自己
             //    再判一次，否则可能「按上云把评估打包走了，实际却走本地」，情绪底色悄悄停更。
-            const emotionEvalEnabled = !!(!promptBuildSkipped && !isEmotionEvalSkipped() && isEmotionFeatureOn(char));
+            const emotionEvalEnabled = !!(char.humanStyleEnabled !== false && !promptBuildSkipped && !isEmotionEvalSkipped() && isEmotionFeatureOn(char));
             // 评估跟随全局流式开关（专用情绪 API 自带 stream 字段时以它为准）
             const evalStream: boolean = !!(apiConfig.stream ?? false);
             const emotionApi = emotionEvalEnabled

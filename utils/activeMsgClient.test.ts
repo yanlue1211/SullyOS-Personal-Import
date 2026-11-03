@@ -988,6 +988,24 @@ describe('buildFirePack 的时区参照系与模板（①）', () => {
 
   const pack = (char: any) => buildFirePack(char, user, [], undefined, { all: [], categories: [] });
 
+  it('native-expression template omits character anchors and respects the independent heart switch', async () => {
+    const out = await pack(baseChar({humanStyleEnabled:false,innerVoiceEnabled:false,showThinkingChain:true}));
+    expect(out.template).not.toContain('开口前回到你自己');
+    expect(out.template).not.toContain('你将代表下面这个角色');
+    expect(out.template).not.toContain('本轮心声格式');
+    expect(out.template).not.toContain('【表达提醒】');
+    expect(out.template).toContain('第一人称、现在时');
+    expect(out.template).toContain(AMSG_SLOT_CURRENT_TIME);
+  });
+
+  it('keeps cloud expression and heart format reminders before changing task and history', async () => {
+    const out=await pack(baseChar());
+    expect(out.template.indexOf('【表达提醒】')).toBeLessThan(out.template.indexOf('【本次任务】'));
+    expect(out.template.indexOf('【本轮心声格式】')).toBeLessThan(out.template.indexOf('【最近对话上下文】'));
+    expect(out.template.indexOf('【表达提醒】')).toBeLessThan(out.template.indexOf('【本轮心声格式】'));
+    expect(out.template.indexOf('【本次任务】')).toBeLessThan(out.template.indexOf('开口前回到你自己'));
+  });
+
   it('角色开了自定义时区 → tzId 用角色的', async () => {
     const out = await pack(baseChar({ customTimezoneEnabled: true, customTimezone: 'Asia/Tokyo' }));
     expect(out.tzId).toBe('Asia/Tokyo');

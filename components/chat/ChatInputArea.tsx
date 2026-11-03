@@ -77,6 +77,8 @@ interface ChatInputAreaProps {
     // HTML 模块模式
     htmlModeEnabled?: boolean;
     realSongListeningEnabled?: boolean;
+    humanStyleEnabled?: boolean;
+    innerVoiceEnabled?: boolean;
     workroomLinkEnabled?: boolean;
     // 思考过程展示（会话级）
     showThinkingChain?: boolean;
@@ -109,6 +111,8 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
     luckinActivated = false,
     htmlModeEnabled = false,
     realSongListeningEnabled = false,
+    humanStyleEnabled = true,
+    innerVoiceEnabled = true,
     workroomLinkEnabled = false,
     showThinkingChain = false,
     inputStyle = 'default',
@@ -616,6 +620,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
           </div>
           <span className="text-xs font-bold">{realSongListeningEnabled ? '真实听歌已开' : '真实听歌'}</span>
         </button>,
+        ...([{ key: 'human-style-toggle', label: '拟人提示词', icon: '🌿', enabled: humanStyleEnabled }, { key: 'inner-voice-toggle', label: '心声', icon: '💭', enabled: innerVoiceEnabled }].map(item => <button key={item.key} aria-pressed={item.enabled} onClick={() => onPanelAction(item.key)} className={`flex flex-col items-center gap-2 active:scale-95 transition-transform ${acnh ? 'text-[#725d42]' : isDiscordStyle ? 'text-slate-200' : 'text-slate-600'}`}><span className={`w-14 h-14 rounded-2xl flex items-center justify-center border text-2xl ${item.enabled ? 'bg-emerald-100 border-emerald-300 text-emerald-700' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>{item.icon}</span><span className="text-xs font-bold">{item.label}{item.enabled ? '已开' : '已关'}</span></button>)),
         <button key="html-mode-toggle"
           onClick={() => onPanelAction('html-mode-toggle')}
           onContextMenu={(e) => { e.preventDefault(); onPanelAction('html-mode-settings'); }}

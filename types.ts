@@ -3204,6 +3204,11 @@ export interface CharacterProfile {
   /** 提示音是否「绑定」到白框：true=提示音随白框 CSS 一起分享（写进指令注释）；false/undefined=独立存于 chatSound、白框分享码保持轻量。 */
   chatSoundBound?: boolean;
 
+  /** 普通聊天拟人提示；缺省开启。关闭不删除人设、世界书和历史。 */
+  humanStyleEnabled?: boolean;
+  /** 新回复心声；缺省开启，旧记录保留。 */
+  innerVoiceEnabled?: boolean;
+
   /**
    * 思考过程展示（per-character / 会话级）。
    * - true：把 LLM 返回的 reasoning_content 与 <think>...</think> 抽出来，

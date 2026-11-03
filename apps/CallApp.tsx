@@ -439,6 +439,7 @@ const buildCallPrompt = (
   voiceLang?: string,
   mode: CallMode = 'voice',
   tz?: string,
+  innerVoiceEnabled = true,
 ) => {
   const resolvedCharName = charName || '你的角色';
   // 电话里角色说的「现在几点 / 今天什么日子」是 ta 那边的时间，跟角色自定义时区走
@@ -537,7 +538,7 @@ ${mode === 'video' ? '台词只写说出口的话；屏幕旁白是唯一例外�
 - <语音> 里只写会被朗读的文字；演出标记继续遵守上方「当前引擎规则」，不要混用其它引擎语法，也不要写中文舞台旁白
 - 每条消息只有一个 <语音> 标签，emotion 属性可选；情绪不强就别加
 - 中文部分和 <语音> 部分表达的意思要一致` : '';
-  return [coreContext, timeContext, callPrompt, voiceLangPrompt, INNER_VOICE_SYSTEM, CALL_RECORDING_GUIDE, mode === 'video' ? VIDEO_NARRATION_GUIDE : VOICE_CALL_NARRATION_GUIDE].filter(Boolean).join('\n\n');
+  return [coreContext, timeContext, callPrompt, voiceLangPrompt, innerVoiceEnabled ? INNER_VOICE_SYSTEM : '', CALL_RECORDING_GUIDE, mode === 'video' ? VIDEO_NARRATION_GUIDE : VOICE_CALL_NARRATION_GUIDE].filter(Boolean).join('\n\n');
 };
 const CallApp: React.FC = () => {
   const { closeApp, openApp, characters, activeCharacterId, addToast, apiConfig, updateApiConfig, userProfile, customThemes, suspendCall, suspendedCall, clearSuspendedCall, updateCharacter, characterGroups, groups, realtimeConfig, memoryPalaceConfig } = useOS();
@@ -2068,7 +2069,7 @@ ${sentencePlan}`;
       const characterContext = selectedChar ? (await ContextBuilder.buildCharacterContext({
         char: selectedChar, user: userProfile, history: snapshotHistory.messages,
         timeOptions: { conversational: true, includeUserLocation: true },
-        instructions: core => buildCallPrompt(userName, selectedChar.name, core, voiceLang || undefined, callMode, resolveCharTimeZone(selectedChar)),
+        instructions: core => buildCallPrompt(userName, selectedChar.name, core, voiceLang || undefined, callMode, resolveCharTimeZone(selectedChar), selectedChar.innerVoiceEnabled !== false),
       })) : null;
       const baseCallPrompt = characterContext?.coreContext
         ?? buildCallPrompt(userName, undefined, undefined, voiceLang || undefined, callMode);
@@ -2504,6 +2505,7 @@ ${sentencePlan}`;
           await requestAssistantReply('（电话刚接通。你先开口——像平时接到这个人电话一样自然地说第一句话。不要解释规则，就是最自然的那个“喂”“诶”或者符合你性格的开场。）'),
           callMode === 'video' && selectedChar?.videoCallPerformanceQuality !== 'high',
         );
+        if (selectedChar?.innerVoiceEnabled === false) greetingReply.innerVoice = undefined;
         const greetingText = greetingReply.text;
         setAvatarEmotion(greetingReply.performance.emotion);
         setAvatarPerformance(greetingReply.performance);
@@ -2800,6 +2802,7 @@ ${sentencePlan}`;
         pendingAvatarTouchesRef.current = remainingTouches;
         setPendingAvatarTouchCount(remainingTouches.length);
       }
+      if (selectedChar?.innerVoiceEnabled === false) reply.innerVoice = undefined;
       assistantText = reply.text;
       assistantThinkingChain = reply.thinkingChain;
       assistantInnerVoice = reply.innerVoice;
@@ -2962,6 +2965,7 @@ ${sentencePlan}`;
         await requestAssistantReply(prevUser.text, bubble.dbId),
         callMode === 'video' && selectedChar?.videoCallPerformanceQuality !== 'high',
       );
+      if (selectedChar?.innerVoiceEnabled === false) rerollReply.innerVoice = undefined;
       const rerolled = rerollReply.text;
       setAvatarEmotion(rerollReply.performance.emotion);
       setAvatarPerformance(rerollReply.performance);
@@ -3038,6 +3042,7 @@ ${sentencePlan}`;
         ),
         callMode === 'video' && selectedChar?.videoCallPerformanceQuality !== 'high',
       );
+      if (selectedChar?.innerVoiceEnabled === false) reply.innerVoice = undefined;
       const nudgeTs = Date.now();
       const nudgeBubble: CallBubble = {
         id: `${nudgeTs}-nudge`,

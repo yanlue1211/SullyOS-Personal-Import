@@ -2557,7 +2557,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
               const systemPrompt = payload.systemPrompt;
               const apiMessages = payload.cleanedApiMessages;
               const fullMessages = payload.fullMessages;
-              if (!payload.flags.promptBuildSkipped) {
+              if (!payload.flags.promptBuildSkipped && char.humanStyleEnabled !== false) {
                   try {
                       friendFeedTask = await prepareFriendFeedMainTask(charId);
                       if (friendFeedTask) fullMessages.splice(Math.max(1, payload.volatileTailIndex), 0,
@@ -2567,7 +2567,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
               // 3c. 情绪评估 fire-and-forget — 与主 API 并行，沿用 useChatAI 的 API 选择逻辑：
               //     角色专属情绪 API > 主 apiConfig（与记忆宫殿副 API 完全独立）
-              if (!payload.flags.promptBuildSkipped && !isEmotionEvalSkipped() && isEmotionFeatureOn(char)) {
+              if (char.humanStyleEnabled !== false && !payload.flags.promptBuildSkipped && !isEmotionEvalSkipped() && isEmotionFeatureOn(char)) {
                   const emotionApi = (char.emotionConfig.api?.baseUrl)
                       ? char.emotionConfig.api
                       : { baseUrl: apiConfigRef.current.baseUrl, apiKey: apiConfigRef.current.apiKey, model: apiConfigRef.current.model };
@@ -2823,7 +2823,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                   }
               }
 
-              if (proactiveHeart.innerVoice && lastProactiveAssistantId != null) {
+              if (char.innerVoiceEnabled !== false && proactiveHeart.innerVoice && lastProactiveAssistantId != null) {
                   await DB.updateMessageMetadata(lastProactiveAssistantId, previous => ({ ...(previous || {}), innerVoice: proactiveHeart.innerVoice }));
               }
 
