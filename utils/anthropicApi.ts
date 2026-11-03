@@ -88,7 +88,7 @@ export function toAnthropicRequest(body: any): any {
     // Three explicit 5-minute breakpoints: tools, stable system, history before volatile reminders.
     if (tools.length) tools.at(-1).cache_control = {...ephemeral};
     if (system.length) system.at(-1)!.cache_control = {...ephemeral};
-    if (lastHistoryBlock && !['thinking','redacted_thinking'].includes(lastHistoryBlock.type)) lastHistoryBlock.cache_control = {...ephemeral};
+    // Thinking blocks cannot carry cache_control. Cache the most recent eligible\n    // preceding history block instead, preserving all message content and order.\n    const cacheableHistoryBlock = [...messages].reverse()\n        .flatMap(message => [...message.content].reverse())\n        .find(block => !['thinking','redacted_thinking'].includes(block.type));\n    if (cacheableHistoryBlock && !sawReminder) cacheableHistoryBlock.cache_control = {...ephemeral};\n    else if (lastHistoryBlock && !['thinking','redacted_thinking'].includes(lastHistoryBlock.type)) lastHistoryBlock.cache_control = {...ephemeral};
     const thinking = body.thinking || body.extra_body?.thinking;
     const request: any = {
         model: body.model,
