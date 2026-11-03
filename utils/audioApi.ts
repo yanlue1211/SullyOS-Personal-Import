@@ -42,7 +42,7 @@ const AUDIO_FORMAT_BY_MIME: Record<string, string> = {
   'audio/ogg': 'ogg', 'audio/webm': 'webm',
 };
 
-/** 输入音频的格式名：OpenAI 只认 mp3/wav，Gemini 等兼容端还能收 flac/m4a/ogg 等。 */
+/** 输入音频的格式名：各中转支持范围不同，歌曲识别另经 songAudioToPayload 转成 mp3/wav。 */
 export const audioFormatFromMime = (mime: string, fallbackName = ''): string => {
   const normalized = (mime || '').split(';')[0].trim().toLowerCase();
   if (AUDIO_FORMAT_BY_MIME[normalized]) return AUDIO_FORMAT_BY_MIME[normalized];
@@ -115,6 +115,16 @@ export const audioBlobToPayload = async (blob: Blob, nameHint = ''): Promise<Aud
   }
   return { base64: await blobToBase64(blob), format: audioFormatFromMime(blob.type, nameHint), bytes: blob.size };
 };
+
+/** Only music recognition needs this compatibility copy; stored songs and recordings stay intact. */
+export async function songAudioToPayload(blob:Blob,nameHint=''):Promise<AudioPayload>{
+ const format=audioFormatFromMime(blob.type,nameHint);
+ if(format==='mp3'||format==='wav')return audioBlobToPayload(blob,nameHint);
+ if(blob.size>MAX_AUDIO_BYTES)throw Error('这首歌曲的文件太大，没法发给音频模型');
+ const {convertSongAudioToWav}=await import('./songAudioConversion');
+ const wav=await convertSongAudioToWav(blob,MAX_AUDIO_BYTES,await readAudioDuration(blob));
+ return audioBlobToPayload(wav);
+}
 
 /** Trust the bytes over CDN MIME/extension; reject HTML/JSON error pages. */
 export async function normalizeSongAudio(blob:Blob):Promise<Blob>{
