@@ -11,6 +11,7 @@ describe('hands-free voice turns',()=>{
   expect(gate.update(.001,8200)).toBe('speaking');expect(gate.update(.001,9000)).toBe('complete');
  });
  it('stops late-acquired microphone tracks after cancellation without recording or sending',async()=>{
+  vi.stubGlobal('MediaRecorder',class{});
   const stopped=vi.fn(),controller=new AbortController();let deliver:(s:any)=>void=()=>{};
   vi.stubGlobal('navigator',{mediaDevices:{getUserMedia:vi.fn(()=>new Promise(resolve=>deliver=resolve))}});
   const result=captureSpeechTurn({} as AudioContext,controller.signal);controller.abort();deliver({getTracks:()=>[{stop:stopped}]});

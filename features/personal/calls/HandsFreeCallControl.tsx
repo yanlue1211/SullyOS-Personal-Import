@@ -30,5 +30,8 @@ export default function HandsFreeCallControl({enabled,onEnabledChange,ready,sess
   })();
   return()=>{controller.abort();clearTimeout(timer);};
  },[enabled,ready,sessionId,inputMode,nonce]);
- return <div className="mx-3 my-1 flex items-center justify-between gap-3 rounded-2xl border border-emerald-200/20 bg-emerald-950/30 px-3 py-2 text-white"><span className="min-w-0"><span className="block text-xs text-emerald-100">免手持通话</span><span role="status" className="block text-[10px] text-white/55 truncate max-w-[220px]" title={error || phase}>{error || phase}</span></span><button type="button" aria-pressed={enabled} aria-label={enabled?'关闭免手持':'开启免手持'} onClick={toggle} className={`rounded-full px-3 py-2 text-xs flex items-center gap-1 ${enabled?'bg-emerald-400 text-emerald-950':'bg-white/10 text-white/80'}`}><Microphone size={15}/>{enabled?'已开启':'开启'}</button></div>;
+ return <div className="sully-call-handsfree flex min-w-0 items-center justify-end gap-2">
+  <span role="status" className={error?'max-w-[140px] text-[10px] text-rose-200':'sr-only'}>{error || phase}</span>
+  <button type="button" aria-pressed={enabled} aria-label={enabled?'关闭免手持':'开启免手持'} title={error||phase} onClick={toggle} className={`flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-2 text-[11px] transition active:scale-95 ${enabled?'border-emerald-300/35 bg-emerald-400/15 text-emerald-200':'border-white/10 bg-white/5 text-white/55'}`}><Microphone size={14}/><span>免手持</span><span className={`h-1.5 w-1.5 rounded-full ${enabled?'bg-emerald-300':'bg-white/25'}`}/></button>
+ </div>;
 }

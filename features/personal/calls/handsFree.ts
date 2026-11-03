@@ -1,9 +1,10 @@
-import {encodeMonoWav} from '../chatMedia/recording';
+import {recordingToWav} from '../chatMedia/recording';
 import {startStt,type SttSession} from '../../../utils/speechToText';
 import type {APIConfig} from '../../../types';
 /** Pure silence gate: short pauses/noise never create API requests. */
 export class SpeechTurnGate {
  private lastVoice=0;private voicedMs=0;private previous=0;private started=0;
+ get hasSpeech(){return this.voicedMs>=180;}
  update(rms:number,now:number):'waiting'|'speaking'|'complete'{
   const delta=this.previous?Math.min(100,Math.max(0,now-this.previous)):0;this.previous=now;
   if(rms>=.016){if(!this.started)this.started=now;this.lastVoice=now;this.voicedMs+=delta;}
@@ -14,28 +15,48 @@ export class SpeechTurnGate {
  }
 }
 export function abortError(){return new DOMException('已停止免手持','AbortError');}
-export async function captureSpeechTurn(context:AudioContext,signal:AbortSignal):Promise<{audio:Blob;duration:number}>{
+/** Match Yueqi's fixed recorder: native encoded capture; the analyser only observes silence. */
+export async function captureSpeechTurn(context:AudioContext|undefined,signal:AbortSignal,options:{manual?:boolean;onStarted?:(stop:()=>void)=>void}={}):Promise<{audio?:Blob;duration:number}>{
  signal.throwIfAborted();
- const stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
+ if(typeof MediaRecorder==='undefined')throw new Error('当前浏览器不支持稳定录音，请使用原生识别。');
+ const stream=await navigator.mediaDevices.getUserMedia({audio:true});
  if(signal.aborted){stream.getTracks().forEach(track=>track.stop());throw abortError();}
- try{await context.resume();}catch(error){stream.getTracks().forEach(track=>track.stop());throw error;}
  return new Promise((resolve,reject)=>{
-  const source=context.createMediaStreamSource(stream),processor=context.createScriptProcessor(2048,1,1),silent=context.createGain();silent.gain.value=0;
-  const gate=new SpeechTurnGate();let frames:Float32Array[]=[],pre:Float32Array[]=[],samples=0,closed=false;
-  const cleanup=()=>{if(closed)return;closed=true;processor.onaudioprocess=null;source.disconnect();processor.disconnect();silent.disconnect();stream.getTracks().forEach(track=>track.stop());signal.removeEventListener('abort',abort);};
-  const abort=()=>{cleanup();reject(abortError());};signal.addEventListener('abort',abort,{once:true});
-  processor.onaudioprocess=event=>{
-   if(closed)return;const frame=new Float32Array(event.inputBuffer.getChannelData(0));let sum=0;for(const sample of frame)sum+=sample*sample;
-   const state=gate.update(Math.sqrt(sum/frame.length),performance.now());
-   if(state==='waiting'){frames=[];samples=0;pre.push(frame);if(pre.length>8)pre.shift();return;}
-   if(!frames.length){frames=pre;pre=[];samples=frames.reduce((count,item)=>count+item.length,0);}
-   frames.push(frame);samples+=frame.length;
-   if(state==='complete'){
-    const merged=new Float32Array(samples);let offset=0;for(const item of frames){merged.set(item,offset);offset+=item.length;}
-    cleanup();resolve({audio:encodeMonoWav(merged,context.sampleRate),duration:samples/context.sampleRate});
-   }
-  };
-  source.connect(processor);processor.connect(silent);silent.connect(context.destination);
+  let recorder:MediaRecorder|undefined,source:MediaStreamAudioSourceNode|undefined,ownedContext:AudioContext|undefined;
+  let timer:ReturnType<typeof setInterval>|undefined,closed=false,stopping=false,released=false,parts:Blob[]=[],voiced=false;
+  const started=performance.now();let stoppedAt=started;
+  const release=()=>{if(released)return;released=true;clearInterval(timer);source?.disconnect();stream.getTracks().forEach(track=>track.stop());void ownedContext?.close().catch(()=>{});};
+  const done=(error?:unknown,result?:{audio?:Blob;duration:number})=>{if(closed)return;closed=true;signal.removeEventListener('abort',abort);release();parts=[];error?reject(error):resolve(result!);};
+  const abort=()=>{done(abortError());if(recorder?.state==='recording')recorder.stop();};
+  signal.addEventListener('abort',abort,{once:true});
+  const stop=()=>{if(!closed&&!stopping&&recorder?.state==='recording'){stopping=true;stoppedAt=performance.now();recorder.stop();}};
+  void (async()=>{
+   try{
+    const mimeType=['audio/webm;codecs=opus','audio/mp4','audio/ogg;codecs=opus'].find(type=>MediaRecorder.isTypeSupported(type));
+    recorder=new MediaRecorder(stream,mimeType?{mimeType}:undefined);
+    recorder.ondataavailable=event=>{if(!closed&&event.data.size)parts.push(event.data);};
+    recorder.onerror=()=>{done(new Error('录音中断，请重新录音。'));if(recorder?.state==='recording')recorder.stop();};
+    recorder.onstop=async()=>{
+     release();if(closed)return;
+     if(!options.manual&&!voiced){done(undefined,{duration:0});return;}
+     const blob=new Blob(parts,{type:recorder!.mimeType});parts=[];
+     if(!blob.size){done(new Error('录音太短，请再说一次。'));return;}
+     try{const audio=await recordingToWav(blob);signal.throwIfAborted();done(undefined,{audio,duration:(stoppedAt-started)/1000});}catch(error){done(error);}
+    };
+    let analyser:AnalyserNode|undefined,samples:Float32Array<ArrayBuffer>|undefined;
+    if(!options.manual){
+     const activeContext=context||(ownedContext=new AudioContext());await activeContext.resume();if(closed)return;
+     source=activeContext.createMediaStreamSource(stream);analyser=activeContext.createAnalyser();analyser.fftSize=2048;source.connect(analyser);samples=new Float32Array(analyser.fftSize);
+    }
+    if(closed)return;
+    const gate=new SpeechTurnGate();recorder.start();options.onStarted?.(stop);
+    timer=setInterval(()=>{
+     if(closed||stopping)return;const now=performance.now();
+     if(analyser&&samples){analyser.getFloatTimeDomainData(samples);let sum=0;for(const sample of samples)sum+=sample*sample;const state=gate.update(Math.sqrt(sum/samples.length),now);if(state==='complete'){voiced=true;stoppedAt=now;stop();return;}}
+     if(now-started>=(options.manual?120_000:30_000)){voiced=gate.hasSpeech;stop();}
+    },100);
+   }catch(error){done(error);}
+  })();
   if(signal.aborted)abort();
  });
 }
