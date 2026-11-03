@@ -306,6 +306,8 @@ export interface APIConfig {
   // 可选识图中转：给不支持 image_url 的主模型补视觉能力。
   visionApi?: VisionApiConfig;
   audioApi?: AudioApiConfig;
+  /** 朋友圈独立 API；未配置则仍走角色默认对话 API。 */
+  momentsApi?: DialogueApiConfig;
   minimaxApiKey?: string;
   minimaxGroupId?: string;
   // 'domestic' → https://api.minimaxi.com (国内站)
@@ -474,6 +476,8 @@ export interface ActiveMsg2CharacterConfig {
   tasks?: ActiveMsg2TaskRecord[];
   /** ↓ 角色级共享设置（所有任务共用）。 */
   maxTokens?: number;
+  /** 独立的主动消息 API；未配置则沿用角色/全局主聊天 API。即时对话不受影响。 */
+  independentApi?: DialogueApiConfig;
   /**
    * 「我没回的时候，TA 最多连续主动发几条」。0 = 不限；没设 = 默认值
    * （amsgLimits.DEFAULT_MAX_UNANSWERED_SENDS）。管的是角色自己排的后续
