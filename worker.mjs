@@ -90,4 +90,6 @@ export async function handle(request, env, upstreamFetch = fetch) {
   }
 }
 
-export default { fetch: handle };
+// Cloudflare passes ExecutionContext as the third argument; keep it separate
+// from handle's injectable upstreamFetch used by unit tests.
+export default { fetch(request, env) { return handle(request, env); } };
