@@ -76,7 +76,14 @@ export function validateWorkroomBackup(input: Partial<WorkroomBackup>): Workroom
     for (const row of data.workroomEvents) {
         const event = readWorkroomEvent(row.event, row.charId);
         if (row.raw!==undefined&&(typeof row.raw!=='boolean'||(row.raw&&row.delivery!=='local')))throw Error('游戏原始事件状态无效');
-        if (!event || (event.kind === 'shared' ? !data.workroomShares.some(s => s.id === event.shareId && s.charId === row.charId) : event.subjectId !== row.workId) || !['local', 'pending', 'delivered'].includes(row.delivery)) throw Error('造物间事件无效');
+        if (!event || !['local', 'pending', 'delivered'].includes(row.delivery)) throw Error('造物间事件无效');
+        if (event.kind === 'shared') {
+            const share = data.workroomShares.find(s => s.id === event.shareId);
+            // Deleting an inbox share intentionally keeps its delivered history.
+            // Only completed deliveries may outlive their frozen share snapshot.
+            if (share ? share.charId !== row.charId
+                : row.delivery !== 'delivered' || event.subjectId !== row.workId || event.shareId !== row.workId) throw Error('造物间事件无效');
+        } else if (event.subjectId !== row.workId) throw Error('造物间事件无效');
     }
     for (const turn of data.workroomTurns) {
         if (!['user', 'assistant'].includes(turn.role) || !validText(turn.text, 12000) || !validText(turn.workTitle, 300)
