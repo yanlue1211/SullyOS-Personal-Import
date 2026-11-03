@@ -1,0 +1,51 @@
+/* Match SettingsSection; keep specificity above Moments' generic form/button rules. */
+.sully-background-api.sully-background-api {
+  min-width: 0; padding: 20px; border-radius: 24px;
+  background: #fffefe; border: 1px solid rgba(226,232,240,.8);
+  box-shadow: 0 8px 24px rgba(15,23,42,.05); color: #475569;
+}
+.sully-background-api button { font: inherit; cursor: pointer; }
+.sully-background-api button:disabled { opacity: .5; cursor: default; }
+.sully-background-api .sully-background-api__summary {
+  display: flex; align-items: center; gap: 12px; width: 100%; min-height: 36px;
+  padding: 0; border: 0; background: transparent; text-align: left; color: #475569;
+}
+.sully-background-api__icon { display: flex; flex-shrink: 0; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 13px; color: #28987e; background: #e9faf3; }
+.sully-background-api--moments .sully-background-api__icon { color: #408b9c; background: #eaf7fa; }
+.sully-background-api__heading { flex: 1; min-width: 0; }
+.sully-background-api__title-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.sully-background-api__title { font-size: 14px; font-weight: 600; letter-spacing: .08em; line-height: 1.5; }
+.sully-background-api__badge { padding: 3px 8px; border-radius: 999px; font-size: 10px; line-height: 1.4; background: #f1f5f9; color: #94a3b8; white-space: nowrap; }
+.sully-background-api__badge.is-configured { background: #eaf8f1; color: #4b957b; }
+.sully-background-api__model { display: block; margin-top: 3px; font: 10px/1.6 ui-monospace,monospace; color: #94a3b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sully-background-api__chevron { flex-shrink: 0; color: #cbd5e1; transition: transform .2s; }
+.sully-background-api__chevron.is-open { transform: rotate(180deg); }
+.sully-background-api__body { margin-top: 18px; padding-top: 16px; border-top: 1px solid #f1f5f9; min-width: 0; }
+.sully-background-api .sully-background-api__help { margin: 0 0 16px; font-size: 11px; line-height: 1.8; color: #94a3b8; }
+.sully-background-api .sully-background-api__fields { border: 0; padding: 0; margin: 0; min-width: 0; display: grid; gap: 14px; }
+.sully-background-api .sully-background-api__preset-trigger { display: flex; align-items: center; gap: 8px; width: 100%; padding: 11px 12px; border-radius: 14px; border: 1px solid #d9eee5; background: #f4fbf7; color: #568c77; font-size: 12px; text-align: left; }
+.sully-background-api__preset-trigger small { margin-left: auto; color: #91afa1; font-size: 10px; }
+.sully-background-api__presets { max-height: 220px; overflow-y: auto; border-radius: 14px; padding: 10px; background: #f8faf9; }
+.sully-background-api .sully-background-api__preset { border: 1px solid #e2e8e5; background: white; padding: 8px 10px; border-radius: 10px; font-size: 11px; color: #64776d; overflow-wrap: anywhere; max-width: 100%; }
+.sully-background-api .sully-background-api__preset.is-selected { border-color: #a4d7bd; color: #308466; background: #edf9f1; }
+.sully-background-api__presets p { font-size: 10px; line-height: 1.7; margin: 10px 0 0; color: #94a3b8; }
+.sully-background-api__fields > label { display: grid; gap: 6px; min-width: 0; font-size: 11px; color: #94a3b8; letter-spacing: .02em; }
+.sully-background-api .sully-background-api__fields input,
+.sully-background-api .sully-background-api__fields select,
+.sully-background-api .sully-background-api__model-picker { box-sizing: border-box; width: 100%; min-width: 0; padding: 11px 12px; border: 1px solid #e5eaf0; border-radius: 12px; background: #fafbfc; color: #64748b; font-size: 12px; line-height: 1.5; outline-color: #9dd8bb; }
+.sully-background-api__fields input { font-family: ui-monospace,monospace; }
+.sully-background-api__model-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: -8px; font-size: 11px; color: #94a3b8; }
+.sully-background-api .sully-background-api__model-heading button { display: flex; gap: 5px; align-items: center; border: 0; background: none; padding: 5px 0; color: #498f78; font-size: 10px; }
+.sully-background-api .sully-background-api__model-picker { display: flex; align-items: center; justify-content: space-between; gap: 10px; text-align: left; }
+.sully-background-api__model-picker span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace,monospace; }
+.sully-background-api__model-picker svg { flex-shrink: 0; }
+.sully-background-api .sully-background-api__status,
+.sully-background-api .sully-background-api__error { margin: 12px 0 0; padding: 9px 11px; border-radius: 11px; font-size: 11px; line-height: 1.7; overflow-wrap: anywhere; }
+.sully-background-api .sully-background-api__status { color: #60927b; background: #f1faf5; }
+.sully-background-api .sully-background-api__error { color: #be6b7a; background: #fff3f5; }
+.sully-background-api__actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+.sully-background-api .sully-background-api__actions button { border: 0; border-radius: 13px; padding: 11px 18px; background: #f1f5f9; color: #94a3b8; font-size: 12px; }
+.sully-background-api .sully-background-api__actions .is-primary { background: #64a98d; color: white; box-shadow: 0 4px 12px #64a98d22; }
+.sully-background-api .sully-background-api__reset { display: block; margin: 14px auto 0; padding: 5px; background: none; border: 0; color: #a3acb7; font-size: 10px; }
+@media(max-width:360px) { .sully-background-api.sully-background-api { padding: 16px; } .sully-background-api__title-row { gap: 5px; } .sully-background-api__title { font-size: 13px; } }
+.moments-app .mm-settings .sully-background-api > .sully-background-api__summary { width: 100%; margin: 0; padding: 0; border: 0; background: transparent; color: #475569; font-size: 14px; }

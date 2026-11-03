@@ -2897,7 +2897,7 @@ const Settings: React.FC = () => {
             </div>
         </SettingsSection>
 
-        <BackgroundApiEditor title="主动消息 API" help="所有角色共用，适用于主动消息 1.0 / 2.0；未配置时跟随各角色原有 API，不影响即时聊天。" value={apiConfig.proactiveApi} onSave={value => { updateApiConfig({proactiveApi:value}); syncAmsgLlmCredentials({...apiConfig,proactiveApi:value}); }} />
+        <BackgroundApiEditor presets={apiPresets} inheritedApi={apiConfig} title="主动消息 API" help="所有角色共用，适用于主动消息 1.0 / 2.0；未配置时跟随各角色原有 API，不影响即时聊天。" value={apiConfig.proactiveApi} onSave={value => { updateApiConfig({proactiveApi:value}); syncAmsgLlmCredentials({...apiConfig,proactiveApi:value}); }} />
 
         {/* API 调用记录入口 — 点开看最近 5 天各 App / 角色 / 用途的调用明细 */}
         <button
