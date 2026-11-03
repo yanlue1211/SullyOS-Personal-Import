@@ -43,3 +43,10 @@ it('clears legacy inline audio without deleting its transcript',async()=>{
  await clearAllVoices(plan);const row=(await DB.getMessagesByCharId('a',true)).find(m=>m.id===id)!;
  expect(row.metadata.audioTranscript).toBe('旧录音字幕');expect(row.metadata.audioCleared).toBe(true);expect(row.content).not.toContain('data:');
 });
+it('reclaims abandoned recording blobs while keeping music referenced by another source',async()=>{
+ const orphan=await putImageBlob(new Blob(['abandoned-voice'],{type:'audio/wav'}));
+ const music=await putImageBlob(new Blob(['song'],{type:'audio/mpeg'}));
+ await DB.saveAssetRaw('yueqi:bgm:local',{ref:music});
+ await clearAllVoices(await inspectAllVoices());
+ expect(await getBlobForRef(orphan)).toBeNull();expect(await getBlobForRef(music)).not.toBeNull();
+});
