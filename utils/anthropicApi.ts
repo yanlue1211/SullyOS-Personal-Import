@@ -38,7 +38,6 @@ export function toAnthropicRequest(body: any): any {
     const messages: Array<{role:'user'|'assistant';content:Block[]}> = [];
     const stableHistory: Block[] = [];
     let sawReminder = false;
-    const sharedSystemBlocks: Block[] = [];
     let hasAnnotations = false;
     const append = (role: 'user'|'assistant', blocks: Block[]) => {
         if (!blocks.length) return;
@@ -51,7 +50,6 @@ export function toAnthropicRequest(body: any): any {
             const blocks = contentBlocks(message.content);
             if (!messages.length) {
                 system.push(...blocks);
-                if (['sully_shared_worldbooks','sully_shared_rules'].includes(message.name) && blocks.length) sharedSystemBlocks.push(blocks.at(-1)!);
             }
             else {
                 hasAnnotations = true;
@@ -96,9 +94,8 @@ export function toAnthropicRequest(body: any): any {
         if (tool.type !== 'function' || !tool.function?.name) throw Error('Anthropic 暂仅支持 function 工具');
         return {name:tool.function.name,description:tool.function.description || '',input_schema:tool.function.parameters || {type:'object',properties:{}}};
     });
-    // Spend the four slots on the full personal prefix/history first, then
-    // shared global/rule boundaries. Tools are already included in every later
-    // prefix; a dedicated tool checkpoint is useful only when a slot remains.
+    // Prioritize this character: full system, latest history, then an earlier
+    // history checkpoint for a growing/sliding window. Tools use the remaining slot.
     // Never move annotations or infer their stability from model-visible text.
     const checkpoints = new Set<Block>();
     // All explicit checkpoints use the same TTL. Mixing TTLs would require the
@@ -112,9 +109,8 @@ export function toAnthropicRequest(body: any): any {
     };
     checkpoint(system.at(-1));
     checkpoint(stableHistory.at(-1));
-    for (const block of sharedSystemBlocks) checkpoint(block);
-    checkpoint(tools.at(-1));
     if (stableHistory.length >= 8) checkpoint(stableHistory[Math.floor((stableHistory.length - 1) * 0.7)]);
+    checkpoint(tools.at(-1));
     const thinking = body.thinking || body.extra_body?.thinking;
     const request: any = {
         model: body.model,

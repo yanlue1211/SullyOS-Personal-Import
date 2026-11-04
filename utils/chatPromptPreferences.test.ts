@@ -48,7 +48,7 @@ describe('independent per-character chat prompt preferences', () => {
  });
 });
 
-it('preserves worldbook slots while keeping fixed expression rules ahead of memory and history', async () => {
+it('preserves authored worldbook slots and places expression rules after the character context', async () => {
  const fixed=[0,1,2,3,5,6].map(position=>({id:`order-${position}`,title:`位置${position}`,content:`FIXED_WB_${position}`,constant:true,position,order:100}));
  const char={id:'prefs-order',name:'角色',systemPrompt:'ORDER_PERSONA',memories:[],mountedWorldbooks:[...fixed,
   {id:'order-d1',title:'深度1',content:'DEPTH_ONE',constant:true,position:4,depth:1,role:0},
@@ -62,13 +62,13 @@ it('preserves worldbook slots while keeping fixed expression rules ahead of memo
  expect(stable.indexOf('FIXED_WB_0')).toBeLessThan(stable.indexOf('ORDER_PERSONA'));
  for(const position of [1,2,3,5,6]){
   expect(stable.indexOf('ORDER_PERSONA')).toBeLessThan(stable.indexOf(`FIXED_WB_${position}`));
-  expect(stable.indexOf('### 聊天补充')).toBeLessThan(stable.indexOf(`FIXED_WB_${position}`));
+  expect(stable.indexOf(`FIXED_WB_${position}`)).toBeLessThan(stable.indexOf('### 聊天补充'));
  }
  const at=(marker:string)=>messages.findIndex(message=>String(message.content).includes(marker));
  expect(at('DEPTH_ONE')).toBeLessThan(at('LATEST_USER'));
  expect(at('LATEST_USER')).toBeLessThan(at('DEPTH_ZERO'));
  expect(at('【表达硬性要求')).toBeLessThan(at('LATEST_USER'));
- expect(stable.indexOf('【表达硬性要求')).toBeLessThan(stable.indexOf('ORDER_PERSONA'));
+ expect(stable.indexOf('ORDER_PERSONA')).toBeLessThan(stable.indexOf('【表达硬性要求'));
  expect(stable).toContain('【本轮心声格式】');
  const tail=String(messages[messages.length-1].content);
  expect(tail).toContain('最后，回到你自己');expect(tail).not.toContain('【表达硬性要求');expect(tail).not.toContain('【反煽情');expect(tail).not.toContain('【本轮心声格式】');

@@ -59,6 +59,7 @@ import {resolveDecorationTheme} from '../utils/chatDecoration';
 import {DecorationTab} from '../components/chat/ChatDecorationPanel';
 import ChatAppearanceWardrobe from '../components/chat/ChatAppearanceWardrobe';
 import ChatInputArea from '../components/chat/ChatInputArea';
+import InnerVoiceSettings from '../features/personal/innerVoice/InnerVoiceSettings';
 import ConfirmDialog from '../components/os/ConfirmDialog';
 import { loadChatInputPreferences, saveChatInputPreferences } from '../utils/chatInputPreferences';
 import InstantChatRouteNotice from '../components/chat/InstantChatRouteNotice';
@@ -304,6 +305,7 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
     const [showProactiveModal, setShowProactiveModal] = useState(false);
     const [showActiveMsg2Modal, setShowActiveMsg2Modal] = useState(false);
     const [showThinkingChainModal, setShowThinkingChainModal] = useState(false);
+    const [showInnerVoiceSettings, setShowInnerVoiceSettings] = useState(false);
 
     // Archive Prompts State
     const [archivePrompts, setArchivePrompts] = useState<{id: string, name: string, content: string}[]>(DEFAULT_ARCHIVE_PROMPTS);
@@ -1904,13 +1906,16 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
                 addToast(`${key === 'allowIncomingVoiceCalls' ? '主动语音来电' : '主动视频来电'}${next ? '已允许' : '已关闭'}`, 'info');
                 break;
             }
-            case 'human-style-toggle':
             case 'inner-voice-toggle': {
+                setShowInnerVoiceSettings(true);
+                break;
+            }
+            case 'human-style-toggle': {
                 if (!char) break;
-                const key = type === 'human-style-toggle' ? 'humanStyleEnabled' : 'innerVoiceEnabled';
+                const key = 'humanStyleEnabled';
                 const next = char[key] === false;
                 updateCharacter(char.id, { [key]: next });
-                addToast(key === 'humanStyleEnabled' ? (next ? '拟人提示词已开启' : '拟人提示词已关闭：从下一轮使用模型自然表达，已有对话保留') : (next ? '心声已开启' : '心声已关闭：不再生成新心声，旧记录保留'), 'info');
+                addToast(next ? '拟人提示词已开启' : '拟人提示词已关闭：从下一轮使用模型自然表达，已有对话保留', 'info');
                 break;
             }
             case 'real-song-listening-toggle': {
@@ -2918,7 +2923,7 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
                 setArchiveProgress(`归档中 ${dateStr} (${idx + 1}/${datesToProcess.length})`);
                 const dayMsgs = msgsByDate[dateStr];
                 const rawLog = dayMsgs
-                    .map(m => formatMessageWithTime(m, char.name, userProfile.name, formatTime))
+                    .map(m => formatMessageWithTime(m, char.name, userProfile.name, formatTime, char.innerVoiceMemoryEnabled !== false))
                     .join('\n');
                 
                 let prompt = template;
@@ -3643,7 +3648,7 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
         active: (activeApp === AppID.Chat || !!homePhone) && !!char,
         blocked: isInputFocused || !!input.trim() || showPanel !== 'none' || modalType !== 'none'
             || selectionMode || isSummarizing || collaborationOpen || memoryRepairOpen || favoritesOpen
-            || showProactiveModal || showActiveMsg2Modal || showThinkingChainModal
+            || showProactiveModal || showActiveMsg2Modal || showThinkingChainModal || showInnerVoiceSettings
             || mcdAppOpen || luckinAppOpen || showForwardModal,
         generating: isTyping || instantChatPending || isProactiveComposing,
         onGenerate: handleManualTrigger,
@@ -4602,6 +4607,10 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
                 />
             </div>
 
+
+            {char && showInnerVoiceSettings && <InnerVoiceSettings key={char.id} character={char}
+                onClose={() => setShowInnerVoiceSettings(false)}
+                onSave={patch => updateCharacter(char.id, patch)} />}
 
             {/* Proactive Settings Modal */}
             {char && (
