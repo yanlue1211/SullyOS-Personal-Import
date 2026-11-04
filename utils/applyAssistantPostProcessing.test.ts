@@ -54,7 +54,7 @@ describe('renderAndPersist 引用解析', () => {
         const charId = `c-quote-${Date.now()}`;
         const raw = '[[QUOTE: 引用我说的话]]\n[[SEND_EMOJI: 有点生气]]\n消失了整整三十六个小时';
 
-        // 表情要真存在，否则走的是「名字对不上落降级文本气泡」那条路，
+        // 表情必须来自可用库，否则会产生未发送状态，
         // 第一条 text 会变成降级气泡，验不到这里要验的「引用顺延到正文」。
         await applyAssistantPostProcessing(raw, makeCtx(
             charId,
@@ -275,13 +275,13 @@ describe('SAR Chat 特殊格式气泡对齐', () => {
         expect(messages.map(m => m.metadata?.sarModuleSurface?.surface)).toEqual(['前言。', undefined, '末言。']);
     });
 
-    it('SAR 表情找不到时只降级原文表情，外显不重复发送或执行命令', async () => {
+    it('SAR 表情找不到时只记录未发送状态，外显不重复发送或执行命令', async () => {
         const charId = 'sar-sticker-missing';
         const ctx = surfaceCtx(charId, '[[ACTION:TRANSFER|520]]\n前言。\n[表情：咬你]\n[表情：外显独有]\n末言。', []);
         await applyAssistantPostProcessing('前句。\n[[SEND_EMOJI: 咬你]]\n末句。', ctx);
         const messages = (await DB.getRecentMessagesByCharId(charId, 20)).filter(m => m.role === 'assistant');
-        expect(messages.map(m => m.content)).toEqual(['前句。', '[表情：咬你]', '末句。']);
-        expect(messages.map(m => m.metadata?.sarModuleSurface?.surface)).toEqual(['前言。', undefined, '末言。']);
+        expect(messages.map(m => m.content)).toEqual(['前句。', '末句。']);
+        expect(messages.map(m => m.metadata?.sarModuleSurface?.surface)).toEqual(['前言。', '末言。']);
     });
 
     it('SAR 双语与语音之间的历史表情不拆原子气泡或截掉语音后的末句', async () => {
@@ -606,15 +606,15 @@ describe('directive 重放: life_record / news_card', () => {
 // 表情名对不上时不能静默丢：后台主动消息会把每个 [[SEND_EMOJI]] 切成独立一条 push，
 // 丢了就是整条 0 气泡 —— 而系统横幅（[表情：x]）和未读数照常，用户点进去是空的。
 describe('SEND_EMOJI 名字对不上', () => {
-    it('落一条降级文本气泡，文案与横幅一致', async () => {
+    it('找不到名称时记录未发送状态，不伪装成角色发表情', async () => {
         const charId = `c-emoji-miss-${Date.now()}`;
 
         await applyAssistantPostProcessing('[[SEND_EMOJI: 查无此表情]]', makeCtx(charId, []));
 
-        const bubbles = (await DB.getRecentMessagesByCharId(charId, 50)).filter(m => m.role === 'assistant');
+        const bubbles = await DB.getRecentMessagesByCharId(charId, 50);
         expect(bubbles).toHaveLength(1);
-        expect(bubbles[0].type).toBe('text');
-        expect(bubbles[0].content).toBe('[表情：查无此表情]');
+        expect(bubbles[0]).toMatchObject({role:'system',type:'system',metadata:{emojiSendFailed:{requestedName:'查无此表情'}}});
+        expect(bubbles[0].content).toContain('未发送');
     }, 20000);
 
     it('名字对得上时照常落表情气泡', async () => {
@@ -669,7 +669,7 @@ describe('SEND_EMOJI 名字对不上', () => {
         expect(bubbles[0].content).toBe('blob:emoji-exact-colon');
     }, 20000);
 
-    it('分类前缀存在歧义时不猜 URL，仍保留降级文本', async () => {
+    it('分类前缀存在歧义时不猜 URL，保留未发送状态', async () => {
         const charId = `c-emoji-category-ambiguous-${Date.now()}`;
         const ctx = makeCtx(charId, [], [
             { name: '挥手', url: 'blob:emoji-wave-a', categoryId: 'cat-a' },
@@ -683,10 +683,9 @@ describe('SEND_EMOJI 名字对不上', () => {
 
         await applyAssistantPostProcessing('[[SEND_EMOJI: 小猫: 挥手]]', ctx);
 
-        const bubbles = (await DB.getRecentMessagesByCharId(charId, 50)).filter(m => m.role === 'assistant');
+        const bubbles = await DB.getRecentMessagesByCharId(charId, 50);
         expect(bubbles).toHaveLength(1);
-        expect(bubbles[0].type).toBe('text');
-        expect(bubbles[0].content).toBe('[表情：小猫: 挥手]');
+        expect(bubbles[0]).toMatchObject({role:'system',metadata:{emojiSendFailed:{requestedName:'小猫: 挥手'}}});
     }, 20000);
 });
 
@@ -954,4 +953,21 @@ it('does not expose malformed standalone status JSON as spoken dialogue', async 
     await applyAssistantPostProcessing('{"type":"response_status","kind":"busy"}', {...ctx, instantRender: true});
     expect(ctx.hooks.addToast).toHaveBeenCalledWith('状态卡解析失败，请重试本轮回复。', 'error');
     expect(await DB.getRecentMessagesByCharId(charId, 50)).toHaveLength(0);
+});
+
+describe('library-only sticker delivery',()=>{
+ it('repairs harmless name formatting and stores the real sticker URL in place',async()=>{
+  const id=`emoji-normalized-${Date.now()}`;const ctx=makeCtx(id,[],[{name:'小狗 懵逼',url:'blob:actual-dog'}]);ctx.instantRender=true;
+  await applyAssistantPostProcessing('前一句\n[[SEND_EMOJI:「小狗　懵逼」]]\n后一句',ctx);
+  const rows=(await DB.getRecentMessagesByCharId(id,20)).filter(m=>m.role==='assistant');
+  expect(rows.map(m=>m.type)).toEqual(['text','emoji','text']);expect(rows[1].content).toBe('blob:actual-dog');
+ });
+ it('keeps normal replies and valid stickers while recording unknown names only as undelivered notices',async()=>{
+  const id=`emoji-partial-${Date.now()}`;const ctx=makeCtx(id,[],[{name:'笑死',url:'blob:laugh'}]);ctx.instantRender=true;
+  await applyAssistantPostProcessing('那当我没说\n[表情：有点懵逼]\n[[SEND_EMOJI: 查无此表情]]\n[[SEND_EMOJI:笑死]]',ctx);
+  const rows=await DB.getRecentMessagesByCharId(id,20);
+  expect(rows.filter(m=>m.role==='assistant').map(m=>m.content)).toEqual(['那当我没说','blob:laugh']);
+  expect(rows.filter(m=>m.metadata?.emojiSendFailed)).toHaveLength(1);
+  expect(rows.some(m=>m.role==='assistant'&&m.content.includes('[表情'))).toBe(false);
+ });
 });
