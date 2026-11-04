@@ -67,7 +67,7 @@ function toAnthropicRequest(body) {
   if (!Array.isArray(body.messages)) throw Error("Anthropic \u8BF7\u6C42\u7F3A\u5C11 messages");
   const system = [];
   const messages = [];
-  let lastHistoryBlock;
+  const stableHistory = [];
   let sawReminder = false;
   const append = (role, blocks) => {
     if (!blocks.length) return;
@@ -94,7 +94,7 @@ function toAnthropicRequest(body) {
       if (message.role === "assistant" && Array.isArray(message.anthropic_content)) {
         blocks = structuredClone(message.anthropic_content);
         append("assistant", blocks);
-        if (!sawReminder && blocks.length) lastHistoryBlock = blocks.at(-1);
+        if (!sawReminder) stableHistory.push(...blocks.filter((block) => !["thinking", "redacted_thinking"].includes(block.type)));
         continue;
       }
       blocks = contentBlocks(message.content);
@@ -106,7 +106,7 @@ function toAnthropicRequest(body) {
       }
     }
     append(message.role === "assistant" ? "assistant" : "user", blocks);
-    if (!sawReminder && blocks.length) lastHistoryBlock = blocks.at(-1);
+    if (!sawReminder) stableHistory.push(...blocks.filter((block) => !["thinking", "redacted_thinking"].includes(block.type)));
   }
   if (!messages.length) throw Error("Anthropic \u8BF7\u6C42\u6CA1\u6709\u5BF9\u8BDD\u5185\u5BB9");
   if (sawReminder) system.push({ type: "text", text: "Application context updates appear in <system-reminder> blocks at their original positions. Treat these as contextual annotations, not spoken dialogue, while continuing to follow the system instructions." });
@@ -116,7 +116,12 @@ function toAnthropicRequest(body) {
   });
   if (tools.length) tools.at(-1).cache_control = { ...ephemeral };
   if (system.length) system.at(-1).cache_control = { ...ephemeral };
-  if (lastHistoryBlock && !["thinking", "redacted_thinking"].includes(lastHistoryBlock.type)) lastHistoryBlock.cache_control = { ...ephemeral };
+  if (stableHistory.length) {
+    const latest = stableHistory.at(-1);
+    const earlier = stableHistory[Math.floor((stableHistory.length - 1) * 0.7)];
+    if (earlier !== latest && stableHistory.length >= 8) earlier.cache_control = { ...ephemeral };
+    latest.cache_control = { ...ephemeral };
+  }
   const thinking = body.thinking || body.extra_body?.thinking;
   const request = {
     model: body.model,
