@@ -471,6 +471,22 @@ it('preserves the shared thread cap when multiple new replies are submitted',asy
  p=(await getRow<Post>(post.id))!;
  const targets=p.comments.slice(-2);
  vi.mocked(safeFetchJson).mockImplementation(async(_url,options)=>({choices:[{finish_reason:'stop',message:{content:JSON.stringify({requestId:promptRequest(options).id,browsed:[post.id],actions:targets.map(x=>({kind:'comment',postId:post.id,replyTo:x.id,recipientId:'user',text:'继续'})),post:null,important:[]})}}]}));
- await expect(runActivity('a',{api:global,user:{name:'小雨'} as any})).rejects.toThrow('这个话题已收束');
- expect((await getRow<Post>(post.id))!.comments).toHaveLength(6);
+ await runActivity('a',{api:global,user:{name:'小雨'} as any});
+ expect((await getRow<Post>(post.id))!.comments).toHaveLength(7);
+ expect((await getRow<Seen>(`seen:a:${post.id}`))!.projection.comments).toHaveLength(7);
+});
+it('consumes closed-thread events while preserving another valid reply',async()=>{
+ await interact('user','小雨',post.id,{kind:'comment',text:'旧话题'});
+ let p=(await getRow<Post>(post.id))!; const root=p.comments[0].id;
+ for(let i=0;i<6;i++) await interact('user','小雨',post.id,{kind:'comment',text:'旧回复'+i,replyTo:root});
+ await interact('user','小雨',post.id,{kind:'comment',text:'新话题'});
+ p=(await getRow<Post>(post.id))!; const fresh=p.comments.at(-1)!.id;
+ vi.mocked(safeFetchJson).mockImplementation(async(_url,options)=>({choices:[{finish_reason:'stop',message:{content:JSON.stringify({requestId:promptRequest(options).id,browsed:[post.id],actions:[{kind:'comment',postId:post.id,replyTo:root,recipientId:'user',text:'不应保存'},{kind:'comment',postId:post.id,replyTo:fresh,recipientId:'user',text:'新话题回应'}],post:null,important:[]})}}]}));
+ await runActivity('a',{api:global,user:{name:'小雨'} as any});
+ p=(await getRow<Post>(post.id))!;
+ expect(p.comments.some(x=>x.text==='不应保存')).toBe(false);
+ expect(p.comments.some(x=>x.text==='新话题回应')).toBe(true);
+ expect((await getRow<Seen>(`seen:a:${post.id}`))!.projection.comments).toHaveLength(p.comments.length);
+ expect((await rows('event','a')).filter(x=>(x as any).status==='pending')).toHaveLength(0);
+ expect((await rows('log','a')).map(x=>(x as any).text).join('\n')).toContain('跳过已收束话题1条');
 });
