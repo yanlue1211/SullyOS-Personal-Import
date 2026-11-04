@@ -429,14 +429,22 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
         userName: userProfile?.name,
         ...(!input.appPrompt ? { translationConfig, htmlMode, thinkingChain, sarEnvelopeActive } : {}),
     });
-    // New fixed heart reminder stays in the prefix; keep the author's output-style placement.
-    systemPrompt = (!input.appPrompt && usesInnerVoice(char) ? INNER_VOICE_FORMAT_REMINDER + '\n' : '') + systemPrompt + outputStylePrompt;
+    // A per-character heart switch must not precede the shared global books.
+    // Keep its fixed format reminder immediately after the shared prefix.
+    const formatReminder = !input.appPrompt && usesInnerVoice(char) ? INNER_VOICE_FORMAT_REMINDER + '\n' : '';
+    const sharedLength = parts.sharedPrefix && systemPrompt.startsWith(parts.sharedPrefix) ? parts.sharedPrefix.length : 0;
+    systemPrompt = systemPrompt.slice(0,sharedLength) + formatReminder + systemPrompt.slice(sharedLength) + outputStylePrompt;
     if (isRealSongListeningEnabled(char)) {
       systemPrompt += `\n### 【真实听歌说明】
 当你与用户一起听音乐时，系统可能在本轮动态上下文提供歌曲的客观声音分析。它是歌曲本身的声音资料，不是你写的日记，也不是你已经发表的评价。你可以基于真实声音信息和当下情境形成自己的感受，但绝不必每轮都谈论音乐；优先自然回应用户。不要照搬分析报告，不要编造没有分析到的乐器或旋律。没有分析结果时，不要假装听清了曲调。听歌日记不是自动任务，只有用户明确要求时才写。\n`;
     }
 
-    const messagesWithWorldbookDepth = parts.history;
+    // The history pipeline includes immutable system records (Moments, etc.).
+    // Mark their provenance explicitly; the native adapter must not confuse them
+    // with this request's changing recall/state or later tool reminders.
+    const messagesWithWorldbookDepth = parts.history.map(message =>
+        message.role === 'system' || message.role === 'developer'
+            ? {...message, name:'sully_history_context'} : message);
 
 
     // 用户在聊天功能菜单独立启用；不依赖模型是否生成音乐卡片。
@@ -553,10 +561,19 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
     // 注意：即时对话的 worker 端情绪评估把 messages[0] 当 system、messages[1..]
     // 展平为对话历史 —— 易变尾段会以「[系统]: …」行出现在历史末尾，信息不丢。
     if(input.homePhoneContext) volatileTail += `\n\n${input.homePhoneContext}`;
-    const sharedPrefix = parts.sharedPrefix ? (!input.appPrompt && usesInnerVoice(char) ? INNER_VOICE_FORMAT_REMINDER + '\n' : '') + parts.sharedPrefix : '';
-    const stableMessages: Array<{role:string;content:any;name?:string}> = sharedPrefix && systemPrompt.startsWith(sharedPrefix)
-        ? [{role:'system',name:'sully_shared_worldbooks',content:sharedPrefix},{role:'system',content:systemPrompt.slice(sharedPrefix.length)}]
-        : [{role:'system',content:systemPrompt}];
+    const sharedPrefix = parts.sharedPrefix || '';
+    const globalPrefix = parts.sharedWorldbookPrefix || '';
+    const stableMessages: Array<{role:string;content:any;name?:string}> = [];
+    let personalPrompt = systemPrompt;
+    if (sharedPrefix && personalPrompt.startsWith(sharedPrefix)) {
+        if (globalPrefix && sharedPrefix.startsWith(globalPrefix)) {
+            stableMessages.push({role:'system',name:'sully_shared_worldbooks',content:globalPrefix});
+        }
+        const sharedRules = sharedPrefix.slice(globalPrefix ? globalPrefix.length : 0);
+        if (sharedRules) stableMessages.push({role:'system',name:'sully_shared_rules',content:sharedRules});
+        personalPrompt = personalPrompt.slice(sharedPrefix.length);
+    }
+    if (personalPrompt) stableMessages.push({role:'system',content:personalPrompt});
     let fullMessages: Array<{ role: string; content: any; name?:string }> = [
         ...stableMessages,
         ...messagesWithWorldbookDepth,

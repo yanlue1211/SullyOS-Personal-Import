@@ -44,17 +44,30 @@ describe('global / personal worldbooks',()=>{
   expect(result.sharedWorldbookPrefix).not.toContain('shared trigger');expect(result.coreContext).toContain('shared trigger');expect(result.history.at(-1)?.content).toContain('shared depth');
  });
  it('builds matching real chat global blocks for different roles without dropping role or history checkpoints',async()=>{
-  const library=[book('chat-common',{scope:'global',globalEnabled:true})];const payload=async(id:string,humanStyleEnabled=true)=>buildChatRequestPayload({char:{...reconcileWorldbookMounts(char(id),library),humanStyleEnabled},userProfile:{name:'User'} as any,groups:[],emojis:[],categories:[],historyMsgs:[{id:1,charId:id,role:'user',content:'hello',type:'text',timestamp:Date.now()}] as any,contextLimit:20,realtimeConfig:{weatherEnabled:false,newsEnabled:false} as any});
-  const a=await payload('A'),b=await payload('B');expect(a.fullMessages[0]).toEqual(b.fullMessages[0]);expect(a.fullMessages[0]).toMatchObject({name:'sully_shared_worldbooks'});expect(a.fullMessages[1].content).toContain('identity A');expect(a.fullMessages[a.volatileTailIndex].role).toBe('system');
+  const library=[book('chat-common',{scope:'global',globalEnabled:true})];const payload=async(id:string,humanStyleEnabled=true)=>buildChatRequestPayload({char:{...reconcileWorldbookMounts(char(id),library),humanStyleEnabled,impression:{personality_core:{summary:`private impression ${id}`}} as any},userProfile:{name:'User',bio:'shared user bio'} as any,groups:[],emojis:[],categories:[],historyMsgs:[{id:1,charId:id,role:'user',content:'hello',type:'text',timestamp:Date.now()}] as any,contextLimit:20,realtimeConfig:{weatherEnabled:false,newsEnabled:false} as any});
+  const a=await payload('A'),b=await payload('B');expect(a.fullMessages[0]).toEqual(b.fullMessages[0]);expect(a.fullMessages[0]).toMatchObject({name:'sully_shared_worldbooks'});expect(a.fullMessages[1]).toEqual(b.fullMessages[1]);expect(a.fullMessages[1]).toMatchObject({name:'sully_shared_rules'});expect(a.fullMessages[1].content).toContain('聊天 App 行为规范');expect(a.fullMessages[1].content).toContain('### 互动对象 (User)');expect(a.systemPrompt.match(/### 互动对象 \(User\)/g)).toHaveLength(1);expect(a.fullMessages[2].content).not.toContain('### 互动对象 (User)');expect(a.fullMessages[2].content).toContain('identity A');expect(a.fullMessages[2].content).toContain('private impression A');expect(a.fullMessages[1].content).toContain('shared user bio');expect(a.fullMessages[1].content).not.toContain('private impression');expect(a.fullMessages[a.volatileTailIndex].role).toBe('system');
   const native=toAnthropicRequest({model:'c',messages:a.fullMessages});expect(native.system[0].cache_control).toEqual({type:'ephemeral'});
   const natural=await payload('natural',false);expect(natural.fullMessages[0].content).toContain('shared chat-common');expect(natural.systemPrompt).not.toContain('identity natural');
  });
- it('does not evict existing tool, system and history checkpoints to add sharing',()=>{
+ it('keeps global cache identity independent of per-character voice and heart switches',async()=>{
+  const library=[book('feature-global',{scope:'global',globalEnabled:true})];
+  const make=(id:string,enabled:boolean)=>buildChatRequestPayload({char:{...reconcileWorldbookMounts(char(id),library),humanStyleEnabled:true,chatVoiceEnabled:enabled,innerVoiceEnabled:enabled},userProfile:{name:'User'} as any,groups:[],emojis:[],categories:[],historyMsgs:[{id:1,charId:id,role:'user',type:'text',content:'hello',timestamp:1}] as any,contextLimit:20,realtimeConfig:{weatherEnabled:false,newsEnabled:false} as any});
+  const enabled=await make('enabled',true),disabled=await make('disabled',false);
+  expect(enabled.fullMessages[0]).toEqual(disabled.fullMessages[0]);
+  expect(enabled.fullMessages[0].content).not.toContain('本轮心声格式');
+  const rules=(p:any)=>p.fullMessages.find((m:any)=>m.name==='sully_shared_rules').content;
+  expect(rules(enabled)).toContain('用户开启了语音消息功能');
+  expect(rules(disabled)).toContain('语音消息功能当前未开启');
+  expect(rules(disabled)).not.toContain('用户开启了语音消息功能');
+  expect(enabled.systemPrompt).toContain('本轮心声格式');
+  expect(disabled.systemPrompt).not.toContain('本轮心声格式');
+ });
+ it('reserves shared and complete personal checkpoints before optional earlier history',()=>{
   const messages=[{role:'system',name:'sully_shared_worldbooks',content:'globals'},{role:'system',content:'identity'},...Array.from({length:12},(_,i)=>({role:i%2?'assistant':'user',content:`history-${i}`})),{role:'system',content:'live'}];
   const out=toAnthropicRequest({model:'c',messages,tools:[{type:'function',function:{name:'lookup'}}]});
-  expect(out.system[0]).not.toHaveProperty('cache_control');expect(out.tools[0]).toHaveProperty('cache_control');
+  expect(out.system[0]).toHaveProperty('cache_control');expect(out.tools[0]).toHaveProperty('cache_control');
   expect(out.system.at(-1)).toHaveProperty('cache_control');
-  expect(out.messages.flatMap((m:any)=>m.content).filter((b:any)=>b.cache_control).map((b:any)=>b.text)).toEqual(['history-7','history-11']);
+  expect(out.messages.flatMap((m:any)=>m.content).filter((b:any)=>b.cache_control).map((b:any)=>b.text)).toEqual(['history-11']);
  });
  it('retains scope, exceptions, effective mounts and old-format compatibility in actual backup assembly',async()=>{
   const global=book('roundtrip',{scope:'global',globalEnabled:true});const c=reconcileWorldbookMounts({...char('backup'),disabledGlobalWorldbookIds:[global.id]},[global]);const zip=new JSZip();

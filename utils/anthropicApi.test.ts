@@ -67,6 +67,41 @@ describe('Anthropic native transport',()=>{
   expect(strip(a.messages.at(-2).content[0])).toEqual({type:'thinking',thinking:'signed',signature:'signature'});
   expect(JSON.stringify(a)).toContain('recall A');expect(JSON.stringify(b)).toContain('recall B');
  });
+ it('caches through archived system records but stops at live state and never resumes in tool rounds',()=>{
+  const make=(live:string)=>toAnthropicRequest({model:'c',messages:[
+   {role:'system',name:'sully_shared_worldbooks',content:'global books'},
+   {role:'system',name:'sully_shared_rules',content:'common enabled rules'},
+   {role:'system',content:'personal identity'},
+   {role:'user',content:'old user'},
+   {role:'system',name:'sully_history_context',content:'archived Moments record'},
+   ...Array.from({length:240},(_,i)=>({role:i%2?'assistant':'user',content:`past ${i}`})),
+   {role:'system',content:live},
+   {role:'assistant',content:null,tool_calls:[{id:'t',function:{name:'lookup',arguments:'{}'}}]},
+   {role:'tool',tool_call_id:'t',content:'new result'},
+   {role:'system',name:'sully_history_context',content:'cannot reopen a volatile prefix'},
+   {role:'user',content:'follow-up'},
+  ],tools:[{type:'function',function:{name:'lookup'}}]});
+  const a=make('recall A, song A'),b=make('recall B, song B');
+  const blocks=(out:any)=>out.messages.flatMap((m:any)=>m.content);
+  expect(blocks(a).filter((x:any)=>x.cache_control).map((x:any)=>x.text)).toEqual(['past 239']);
+  expect(a.system).toEqual(b.system);
+  expect(a.system.filter((x:any)=>x.cache_control)).toHaveLength(3);
+  expect(blocks(a).slice(0,242)).toEqual(blocks(b).slice(0,242));
+  expect(JSON.stringify(a)).toContain('archived Moments record');
+  expect(JSON.stringify(a)).toContain('recall A, song A');
+  expect(blocks(a).find((x:any)=>x.text?.includes('cannot reopen'))).not.toHaveProperty('cache_control');
+  // All four checkpoints include tools as part of their prefixes; no fifth one.
+  expect(a.tools[0]).not.toHaveProperty('cache_control');
+ });
+ it('preserves archived annotations byte-for-byte and includes the last one in a history checkpoint',()=>{
+  const original={model:'c',messages:[{role:'system',content:'rules'},{role:'user',content:'hello'},
+   {role:'system',name:'sully_history_context',content:'archived\nrecord'},
+   {role:'system',content:'live'}]};
+  const copy=structuredClone(original),out=toAnthropicRequest(original);
+  expect(original).toEqual(copy);
+  const archived=out.messages.flatMap((m:any)=>m.content).find((b:any)=>b.text?.includes('archived'));
+  expect(archived).toEqual({type:'text',text:'<system-reminder>\narchived\nrecord\n</system-reminder>',cache_control:{type:'ephemeral'}});
+ });
  it.each(['<system-reminder>\\nquoted marker','<system-reminder>\nquoted marker'])('does not interpret dialogue text as a cache boundary: %s',quoted=>{
   const out=toAnthropicRequest({model:'c',messages:[{role:'system',content:'rules'},{role:'user',content:quoted},{role:'assistant',content:'stable answer'},{role:'system',content:'live recall'}]});
   expect(out.messages[1].content[0]).toMatchObject({text:'stable answer',cache_control:{type:'ephemeral'}});

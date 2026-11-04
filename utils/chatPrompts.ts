@@ -330,7 +330,7 @@ export const ChatPrompts = {
         // 刚才一起听途中歌被切了（char 还没重新加入）—— 注入"察觉换歌"提示。
         recentTrackSwitch?: { songName: string; artists: string } | null,
         promptOptions?: PromptBuildOptions,
-    ): Promise<{ stable: string; sharedPrefix?: string; volatileState: string; recencyTail: string; history: import('./context').ContextMessage[] }> => {
+    ): Promise<{ stable: string; sharedPrefix?: string; sharedWorldbookPrefix?: string; volatileState: string; recencyTail: string; history: import('./context').ContextMessage[] }> => {
         // 主动消息的模板是最后一次聊天时打好、到点才渲染的，凡是「打包这一刻」的状态
         // 到触发时都已经过期，一律不烤进模板。见 PromptBuildOptions 的清单。
         const forFirePack = promptOptions?.forFirePack === true;
@@ -367,11 +367,12 @@ export const ChatPrompts = {
         if (!forFirePack && !timelyByWorker && char.timeAwarenessEnabled !== false && config.userHolidays?.enabled) {
             await RealtimeContextManager.getUserHoliday(config, userProfile.name);
         }
+        const shareUserProfile = humanStyle && promptOptions?.appRules === undefined;
         const hasGlobalBooks = char.mountedWorldbooks?.some(book=>book.globalMount) === true;
         const context = humanStyle || hasGlobalBooks ? await ContextBuilder.buildCharacterContext({
             char: humanStyle ? char : {...char,mountedWorldbooks:char.mountedWorldbooks?.filter(book=>book.globalMount)}, user: userProfile, history: promptOptions?.history,
             timeOptions: { worldbookMessages: currentMsgs, userHolidays: config.userHolidays, skipUserHoliday: forFirePack || timelyByWorker },
-            layout: { deferVolatile: true },
+            layout: { deferVolatile: true, deferUserProfile: shareUserProfile },
         }) : { coreContext: '', sharedWorldbookPrefix:'', globalWorldbookRemainder:'', history: promptOptions?.history || [] };
         let baseSystemPrompt = humanStyle ? context.coreContext : (context.sharedWorldbookPrefix || '') + MINIMAL_THINKING_PROMPT + buildNaturalChatMemoryContext(char) + (context.globalWorldbookRemainder || '');
         timings.buildCoreContext = Math.round(performance.now() - coreT0);
@@ -657,6 +658,7 @@ ${uname} 的化身正挂在《彼方》的【${roomName}】${act ? `，状态写
             volatileState = ContextBuilder.buildTimeAwarenessBlock(char);
         }
 
+        let chatRules = '';
         if (promptOptions?.appRules !== undefined) {
             baseSystemPrompt += promptOptions.appRules;
         } else {
@@ -690,7 +692,7 @@ ${uname} 的化身正挂在《彼方》的【${roomName}】${act ? `，状态写
         const scheduleMessageTagEnabled = !forFirePack
             && !(timelyByWorker && isAmsg2EnabledForChar(char));
 
-        baseSystemPrompt += `### 聊天 App 行为规范 (Chat App Rules)
+        chatRules += `### 聊天 App 行为规范 (Chat App Rules)
 ${humanStyle ? `**TOP 1｜ChatApp 格式（本节最高优先级）**：你是发消息的真实存在，以自然短句、短气泡为主；一个气泡一行，气泡间直接另起一行（使用真实换行，不要用反斜杠和字母 n 代替换行）。
             **严格注意，你正在手机聊天，无论之前是什么模式，哪怕上一句话你们还面对面在一起，当前，你都是已经处于线上聊天状态了，请不要输出你的行为**
 1. **沉浸感**: 保持角色扮演。使用适合即时通讯(IM)的口语化风格。
@@ -997,7 +999,7 @@ ${xhsEnabled ? `${[notionEnabled, feishuEnabled, notionNotesEnabled].filter(Bool
 `;
 
         if (char.chatCollaborationEnabled) {
-            baseSystemPrompt += `
+            chatRules += `
 
 ### 协同功能
 你在普通聊天。需要处理文件时，可引导${userProfile.name}从 ChatApp 加号页进入“协同工作”；不要在这里假装制作。系统另给已有文件标题，可按规则发送。
@@ -1028,7 +1030,7 @@ ${xhsEnabled ? `${[notionEnabled, feishuEnabled, notionNotesEnabled].filter(Bool
             const voiceLang = char.chatVoiceLang || '';
             const langLabel = voiceLang ? voiceLanguagePromptLabel(voiceLang) : '';
             if (voiceLang) {
-                baseSystemPrompt += `\n\n### 🎤 语音消息功能
+                chatRules += `\n\n### 🎤 语音消息功能
 
 用户开启了语音消息功能，语音语种为：${langLabel}（${voiceLang}）。
 
@@ -1059,7 +1061,7 @@ ${xhsEnabled ? `${[notionEnabled, feishuEnabled, notionNotesEnabled].filter(Bool
 
 ${voiceActingGuide()}`;
             } else {
-                baseSystemPrompt += `\n\n### 🎤 语音消息功能
+                chatRules += `\n\n### 🎤 语音消息功能
 
 用户开启了语音消息功能。
 整轮回复只构思一次：语音是这轮消息中的一种气泡，不是额外再独立回复一遍。先决定每句话用文字还是语音，同一个信息只发一次；语音已有内置转文字，无需在标签外抄写或改写语音内容。
@@ -1087,7 +1089,7 @@ ${voiceActingGuide()}`;
             }
         } else {
             // Voice is disabled — explicitly prohibit voice tags to prevent inertia from call/date history
-            baseSystemPrompt += `\n\n[系统提示: 语音消息功能当前未开启。严禁使用 <语音>...</语音> 和 <字幕>...</字幕> 标签。所有回复必须是纯文字消息。]`;
+            chatRules += `\n\n[系统提示: 语音消息功能当前未开启。严禁使用 <语音>...</语音> 和 <字幕>...</字幕> 标签。所有回复必须是纯文字消息。]`;
         }
 
         }
@@ -1116,11 +1118,19 @@ ${voiceActingGuide()}`;
         const globalPrefix = context.sharedWorldbookPrefix || '';
         const expressionPrefix = promptOptions?.appRules === undefined ? expressionRules + '\n' : '';
         const callGuide = promptOptions?.appRules === undefined ? incomingCallGuide(char) : '';
-        const sharedPrefix = globalPrefix && !promptOptions?.appRules ? expressionPrefix + globalPrefix : '';
-        const stableCore = sharedPrefix
-            ? globalPrefix + callGuide + baseSystemPrompt.slice(globalPrefix.length)
-            : callGuide + baseSystemPrompt;
-        return { sharedPrefix, stable: expressionPrefix + stableCore + (promptOptions?.appRules !== undefined ? '' : VIRTUAL_MEDIA_GUIDE + RECORDING_HISTORY_GUIDE + (usesInnerVoice(char) ? INNER_VOICE_SYSTEM : '') + (humanStyle ? (forFirePack||promptOptions?.responseStatusEnabled===false?PROACTIVE_STATUS_SYSTEM:RESPONSE_STATUS_SYSTEM) : '')), volatileState, recencyTail, history: context.history };
+        const mediaRules = promptOptions?.appRules !== undefined ? '' : VIRTUAL_MEDIA_GUIDE + RECORDING_HISTORY_GUIDE + (usesInnerVoice(char) ? INNER_VOICE_SYSTEM : '') + (humanStyle ? (forFirePack||promptOptions?.responseStatusEnabled===false?PROACTIVE_STATUS_SYSTEM:RESPONSE_STATUS_SYSTEM) : '');
+        // Same enabled features produce identical public rules across characters.
+        // Keep global books first so different voice/app settings can still share
+        // them. Personal identity/worldbooks and all their bindings stay intact.
+        const shareRules = humanStyle && promptOptions?.appRules === undefined;
+        const sharedWorldbookPrefix = globalPrefix && promptOptions?.appRules === undefined ? expressionPrefix + globalPrefix : '';
+        const sharedPrefix = shareRules
+            ? expressionPrefix + globalPrefix + ContextBuilder.buildUserProfileContext(userProfile) + chatRules + mediaRules
+            : sharedWorldbookPrefix;
+        const stable = shareRules
+            ? sharedPrefix + callGuide + baseSystemPrompt.slice(globalPrefix.length)
+            : expressionPrefix + (globalPrefix ? globalPrefix + callGuide + baseSystemPrompt.slice(globalPrefix.length) : callGuide + baseSystemPrompt) + chatRules + mediaRules;
+        return { sharedPrefix, sharedWorldbookPrefix, stable, volatileState, recencyTail, history: context.history };
     },
 
     // 格式化消息历史

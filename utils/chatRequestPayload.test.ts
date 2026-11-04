@@ -6,6 +6,7 @@ import { RealtimeContextManager } from './realtimeContext';
 import { installSARModuleOnCharacter, installSARModuleOnUser } from './vrWorld/sarModuleRuntime';
 import { SAR_MODULE_CATALOG } from './vrWorld/sarModuleShop';
 import { ChatPrompts } from './chatPrompts';
+import { toAnthropicRequest } from './anthropicApi';
 
 // 即时对话（这一轮交给用户自己的 amsg worker 生成）那份 prompt 里，凡是 worker 到点
 // 会自己补一遍的时效段，前端就不再烤进去：当前时间块、【真实世界感知系统】（节日 /
@@ -47,6 +48,25 @@ it.each([false,true])('adds home phone background only to this request (worker=%
     const normal=await buildChatRequestPayload(input);
     expect(joinMessages(normal.fullMessages)).not.toContain(background);
     expect(input.char).not.toHaveProperty('homePhoneContext');
+});
+
+it('marks archived system records by provenance and caches all later history before changing state', async () => {
+    const input=baseInput();
+    input.historyMsgs=[
+        {id:1,charId:input.char.id,role:'user',type:'text',content:'early',timestamp:1},
+        {id:2,charId:input.char.id,role:'system',type:'moments_card',content:'archived Moments event',timestamp:2},
+        {id:3,charId:input.char.id,role:'assistant',type:'text',content:'later stable answer',timestamp:3},
+        {id:4,charId:input.char.id,role:'user',type:'text',content:'latest input',timestamp:4},
+    ] as any;
+    const payload=await buildChatRequestPayload(input);
+    const archived=payload.fullMessages.find(m=>String(m.content).includes('archived Moments event'));
+    expect(archived).toMatchObject({role:'system',name:'sully_history_context',content:'archived Moments event'});
+    expect(input.historyMsgs[1]).not.toHaveProperty('name');
+    const native=toAnthropicRequest({model:'c',messages:payload.fullMessages});
+    const blocks=native.messages.flatMap((m:any)=>m.content);
+    const cached=blocks.filter((b:any)=>b.cache_control);
+    expect(cached.at(-1).text).toContain('latest input');
+    expect(blocks.find((b:any)=>b.text?.includes('[System: 实时状态'))).not.toHaveProperty('cache_control');
 });
 
 it('本地仅节假日感知可独立注入一句，云端生成不烤进本地提醒', async () => {

@@ -37,7 +37,8 @@ export function toAnthropicRequest(body: any): any {
     const messages: Array<{role:'user'|'assistant';content:Block[]}> = [];
     const stableHistory: Block[] = [];
     let sawReminder = false;
-    let sharedSystemBlock: Block | undefined;
+    const sharedSystemBlocks: Block[] = [];
+    let hasAnnotations = false;
     const append = (role: 'user'|'assistant', blocks: Block[]) => {
         if (!blocks.length) return;
         const previous = messages.at(-1);
@@ -49,11 +50,16 @@ export function toAnthropicRequest(body: any): any {
             const blocks = contentBlocks(message.content);
             if (!messages.length) {
                 system.push(...blocks);
-                if (message.name === 'sully_shared_worldbooks') sharedSystemBlock = blocks.at(-1);
+                if (['sully_shared_worldbooks','sully_shared_rules'].includes(message.name) && blocks.length) sharedSystemBlocks.push(blocks.at(-1)!);
             }
             else {
-                sawReminder = true;
-                append('user', [{type:'text',text:'<system-reminder>\n' + blocks.map(block => block.text || '').join('\n') + '\n</system-reminder>'}]);
+                hasAnnotations = true;
+                // Only the request builder may identify archived system records.
+                // Unknown annotations remain volatile for older callers/tool loops.
+                if (message.name !== 'sully_history_context') sawReminder = true;
+                const annotation = {type:'text',text:'<system-reminder>\n' + blocks.map(block => block.text || '').join('\n') + '\n</system-reminder>'};
+                append('user', [annotation]);
+                if (!sawReminder) stableHistory.push(annotation);
             }
             continue;
         }
@@ -84,32 +90,27 @@ export function toAnthropicRequest(body: any): any {
     if (!messages.length) throw Error('Anthropic 请求没有对话内容');
     // This standard payload keeps system at the top level. Explain the annotation once
     // in the stable system prefix, while keeping the changing text after history.
-    if (sawReminder) system.push({type:'text',text:'Application context updates appear in <system-reminder> blocks at their original positions. Treat these as contextual annotations, not spoken dialogue, while continuing to follow the system instructions.'});
+    if (hasAnnotations) system.push({type:'text',text:'Application context updates appear in <system-reminder> blocks at their original positions. Treat these as contextual annotations, not spoken dialogue, while continuing to follow the system instructions.'});
     const tools = (body.tools || []).map((tool: any) => {
         if (tool.type !== 'function' || !tool.function?.name) throw Error('Anthropic 暂仅支持 function 工具');
         return {name:tool.function.name,description:tool.function.description || '',input_schema:tool.function.parameters || {type:'object',properties:{}}};
     });
-    // Up to four explicit 5-minute breakpoints: tools, system, and two history checkpoints.
-    if (tools.length) tools.at(-1).cache_control = {...ephemeral};
-    if (system.length) system.at(-1)!.cache_control = {...ephemeral};
-    // Keep an earlier history checkpoint in addition to the latest one. This lets
-    // a stable history prefix survive changes near the end of a conversation.
-    // Anthropic permits up to four explicit breakpoints (tools + system + 2 history).
-    // Only use blocks before the first volatile system reminder.
-    // Track source-message boundaries while converting above. Do not infer them
-    // from text: a literal \n differs from a newline, and dialogue may quote the tag.
-    if (stableHistory.length) {
-        const latest = stableHistory.at(-1)!;
-        const earlier = stableHistory[Math.floor((stableHistory.length - 1) * 0.7)];
-        if (earlier !== latest && stableHistory.length >= 8) earlier.cache_control = {...ephemeral};
-        latest.cache_control = {...ephemeral};
-    }
-    // Preserve all existing checkpoints. Add sharing only when a slot remains;
-    // tools + system + two history checkpoints already consume the four slots.
-    const checkpointCount = tools.filter((tool:any)=>tool.cache_control).length
-        + system.filter(block=>block.cache_control).length
-        + stableHistory.filter(block=>block.cache_control).length;
-    if (sharedSystemBlock && !sharedSystemBlock.cache_control && checkpointCount < 4) sharedSystemBlock.cache_control = {...ephemeral};
+    // Spend the four slots on the full personal prefix/history first, then
+    // shared global/rule boundaries. Tools are already included in every later
+    // prefix; a dedicated tool checkpoint is useful only when a slot remains.
+    // Never move annotations or infer their stability from model-visible text.
+    const checkpoints = new Set<Block>();
+    const checkpoint = (block: Block | undefined) => {
+        if (block && checkpoints.size < 4 && !['thinking','redacted_thinking'].includes(block.type)) {
+            checkpoints.add(block);
+            block.cache_control = {...ephemeral};
+        }
+    };
+    checkpoint(system.at(-1));
+    checkpoint(stableHistory.at(-1));
+    for (const block of sharedSystemBlocks) checkpoint(block);
+    checkpoint(tools.at(-1));
+    if (stableHistory.length >= 8) checkpoint(stableHistory[Math.floor((stableHistory.length - 1) * 0.7)]);
     const thinking = body.thinking || body.extra_body?.thinking;
     const request: any = {
         model: body.model,

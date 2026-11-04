@@ -69,7 +69,8 @@ function toAnthropicRequest(body) {
   const messages = [];
   const stableHistory = [];
   let sawReminder = false;
-  let sharedSystemBlock;
+  const sharedSystemBlocks = [];
+  let hasAnnotations = false;
   const append = (role, blocks) => {
     if (!blocks.length) return;
     const previous = messages.at(-1);
@@ -81,10 +82,13 @@ function toAnthropicRequest(body) {
       const blocks2 = contentBlocks(message.content);
       if (!messages.length) {
         system.push(...blocks2);
-        if (message.name === "sully_shared_worldbooks") sharedSystemBlock = blocks2.at(-1);
+        if (["sully_shared_worldbooks", "sully_shared_rules"].includes(message.name) && blocks2.length) sharedSystemBlocks.push(blocks2.at(-1));
       } else {
-        sawReminder = true;
-        append("user", [{ type: "text", text: "<system-reminder>\n" + blocks2.map((block) => block.text || "").join("\n") + "\n</system-reminder>" }]);
+        hasAnnotations = true;
+        if (message.name !== "sully_history_context") sawReminder = true;
+        const annotation = { type: "text", text: "<system-reminder>\n" + blocks2.map((block) => block.text || "").join("\n") + "\n</system-reminder>" };
+        append("user", [annotation]);
+        if (!sawReminder) stableHistory.push(annotation);
       }
       continue;
     }
@@ -112,21 +116,23 @@ function toAnthropicRequest(body) {
     if (!sawReminder) stableHistory.push(...blocks.filter((block) => !["thinking", "redacted_thinking"].includes(block.type)));
   }
   if (!messages.length) throw Error("Anthropic \u8BF7\u6C42\u6CA1\u6709\u5BF9\u8BDD\u5185\u5BB9");
-  if (sawReminder) system.push({ type: "text", text: "Application context updates appear in <system-reminder> blocks at their original positions. Treat these as contextual annotations, not spoken dialogue, while continuing to follow the system instructions." });
+  if (hasAnnotations) system.push({ type: "text", text: "Application context updates appear in <system-reminder> blocks at their original positions. Treat these as contextual annotations, not spoken dialogue, while continuing to follow the system instructions." });
   const tools = (body.tools || []).map((tool) => {
     if (tool.type !== "function" || !tool.function?.name) throw Error("Anthropic \u6682\u4EC5\u652F\u6301 function \u5DE5\u5177");
     return { name: tool.function.name, description: tool.function.description || "", input_schema: tool.function.parameters || { type: "object", properties: {} } };
   });
-  if (tools.length) tools.at(-1).cache_control = { ...ephemeral };
-  if (system.length) system.at(-1).cache_control = { ...ephemeral };
-  if (stableHistory.length) {
-    const latest = stableHistory.at(-1);
-    const earlier = stableHistory[Math.floor((stableHistory.length - 1) * 0.7)];
-    if (earlier !== latest && stableHistory.length >= 8) earlier.cache_control = { ...ephemeral };
-    latest.cache_control = { ...ephemeral };
-  }
-  const checkpointCount = tools.filter((tool) => tool.cache_control).length + system.filter((block) => block.cache_control).length + stableHistory.filter((block) => block.cache_control).length;
-  if (sharedSystemBlock && !sharedSystemBlock.cache_control && checkpointCount < 4) sharedSystemBlock.cache_control = { ...ephemeral };
+  const checkpoints = /* @__PURE__ */ new Set();
+  const checkpoint = (block) => {
+    if (block && checkpoints.size < 4 && !["thinking", "redacted_thinking"].includes(block.type)) {
+      checkpoints.add(block);
+      block.cache_control = { ...ephemeral };
+    }
+  };
+  checkpoint(system.at(-1));
+  checkpoint(stableHistory.at(-1));
+  for (const block of sharedSystemBlocks) checkpoint(block);
+  checkpoint(tools.at(-1));
+  if (stableHistory.length >= 8) checkpoint(stableHistory[Math.floor((stableHistory.length - 1) * 0.7)]);
   const thinking = body.thinking || body.extra_body?.thinking;
   const request = {
     model: body.model,
@@ -1441,7 +1447,7 @@ function pickStaleStoppedReplyKeys(rows, nowMs = Date.now(), protectKey) {
 // worker/amsg/src/index.ts
 import { DurableObject } from "cloudflare:workers";
 
-// ../sully/node_modules/.pnpm/@rei-standard+amsg-server@3.1.0_@neondatabase+serverless@1.1.0_pg@8.22.0/node_modules/@rei-standard/amsg-server/dist/chunk-GN44PST5.mjs
+// node_modules/.pnpm/@rei-standard+amsg-server@3.1.0_@neondatabase+serverless@1.1.0_pg@8.22.0/node_modules/@rei-standard/amsg-server/dist/chunk-GN44PST5.mjs
 var UPDATABLE_COLUMNS = /* @__PURE__ */ new Set([
   "user_id",
   "uuid",
@@ -1460,7 +1466,7 @@ var UPDATABLE_COLUMNS = /* @__PURE__ */ new Set([
 var TASK_DELIVERY_COLUMNS = "id, user_id, uuid, encrypted_payload, message_type, next_send_at, retry_after, status, retry_count";
 var TASK_DETAIL_COLUMNS = "id, user_id, uuid, encrypted_payload, message_type, next_send_at, status, retry_count, last_error, created_at, updated_at";
 
-// ../sully/node_modules/.pnpm/@rei-standard+amsg-shared@0.4.0/node_modules/@rei-standard/amsg-shared/dist/index.mjs
+// node_modules/.pnpm/@rei-standard+amsg-shared@0.4.0/node_modules/@rei-standard/amsg-shared/dist/index.mjs
 var TEXT_ENCODER = new TextEncoder();
 var TEXT_DECODER = new TextDecoder("utf-8", { fatal: false });
 function toUint8(buf) {
@@ -2653,7 +2659,7 @@ function stringifyDecisionForError(value) {
   }
 }
 
-// ../sully/node_modules/.pnpm/@rei-standard+amsg-server@3.1.0_@neondatabase+serverless@1.1.0_pg@8.22.0/node_modules/@rei-standard/amsg-server/dist/chunk-A4LPROFY.mjs
+// node_modules/.pnpm/@rei-standard+amsg-server@3.1.0_@neondatabase+serverless@1.1.0_pg@8.22.0/node_modules/@rei-standard/amsg-server/dist/chunk-A4LPROFY.mjs
 var DAY_MS = 24 * 60 * 60 * 1e3;
 var MAX_LISTED_SKIPPED_OCCURRENCES = 32;
 var MAX_ADJUST_STEPS = 32;
@@ -16712,7 +16718,7 @@ function extractFriendFeedReplyTags(raw, namespace = "FRIEND_FEED_REPLY") {
   return { text: text2 + raw.slice(cursor), actions };
 }
 
-// ../sully/node_modules/.pnpm/@rei-standard+amsg-instant@0.11.0/node_modules/@rei-standard/amsg-instant/dist/index.mjs
+// node_modules/.pnpm/@rei-standard+amsg-instant@0.11.0/node_modules/@rei-standard/amsg-instant/dist/index.mjs
 var WEB_PUSH_MAX_BODY_BYTES2 = 4096;
 var WEB_PUSH_ENCRYPTION_OVERHEAD_BYTES2 = 16 + 4 + 1 + 65 + 1 + 16;
 var MAX_PUSH_PAYLOAD_BYTES2 = WEB_PUSH_MAX_BODY_BYTES2 - WEB_PUSH_ENCRYPTION_OVERHEAD_BYTES2;

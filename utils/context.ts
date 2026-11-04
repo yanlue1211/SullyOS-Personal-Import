@@ -40,6 +40,9 @@ const stripMemoryPalaceDateStamps = (text: string): string => text
 
 export interface EmotionContextOptions { surface?: 'chat' | 'home'; innerState?: string }
 export const ContextBuilder = {
+    /** Only account-level facts; private impressions remain in character context. */
+    buildUserProfileContext: (user: UserProfile): string =>
+        `### 互动对象 (User)\n- 名字: ${user.name}\n- 设定/备注: ${user.bio || '无'}\n\n`,
     /** 所有入口共用：只读取现有日程，不触发生成；按角色当地日期读取。 */
     buildCurrentScheduleContext: async (
         char: CharacterProfile,
@@ -570,6 +573,8 @@ const renderCoreContext = async (
              * 只有聊天主路径（chatPrompts.buildSystemPromptParts）用；其他 App 不传，行为不变。
              */
             deferVolatile?: boolean;
+            /** ChatApp emits these account-level fields once in its shared prefix. */
+            deferUserProfile?: boolean;
             emotion?: EmotionContextOptions;
         },
     ): Promise<string> => {
@@ -615,9 +620,7 @@ const renderCoreContext = async (
         // 3. 用户画像 (User Profile)
         // 群聊场景下：用户画像已在共享场景块顶部，这里跳过避免重复
         if (!groupOptions?.skipUserProfile) {
-            context += `### 互动对象 (User)\n`;
-            context += `- 名字: ${user.name}\n`;
-            context += `- 设定/备注: ${user.bio || '无'}\n\n`;
+            if (!layout?.deferUserProfile) context += ContextBuilder.buildUserProfileContext(user);
             if (timeOptions?.includeUserLocation && !timeOptions.skipTimeAwareness) {
                 context += await getUserLocationContext(user.name, char.id);
             }
