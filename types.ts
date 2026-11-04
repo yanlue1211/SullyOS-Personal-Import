@@ -3221,13 +3221,13 @@ export interface CharacterProfile {
   allowIncomingVoiceCalls?: boolean;
   allowIncomingVideoCalls?: boolean;
   /** 新回复心声；缺省开启，旧记录保留。 */
-  innerVoiceEnabled?: boolean;  /** Historical hearts in chat context; missing preserves prior behavior. */
+  innerVoiceEnabled?: boolean;
+  /** Historical hearts in chat context; missing preserves prior behavior. */
   innerVoiceContextEnabled?: boolean;
   /** Hearts in future memory extraction; does not rewrite existing memories. */
   innerVoiceMemoryEnabled?: boolean;
   /** Additional heart content instructions; protocol stays fixed. */
   innerVoiceCustomPrompt?: string;
-
 
   /**
    * 思考过程展示（per-character / 会话级）。

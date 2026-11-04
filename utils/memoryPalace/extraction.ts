@@ -423,9 +423,9 @@ export async function extractMemoriesFromBuffer(
     pinnedMemories?: PinnedMemoryRef[],
 ): Promise<BufferExtractionResult> {
     if (messages.length === 0) return { memories: [], crossTimeLinks: [], eventBoxHints: [], unpinIds: [], corrections: [] };
+
     const character = await DB.getCharacter(charId);
     if (character?.innerVoiceMemoryEnabled === false) messages = memoryMessagesWithoutInnerVoice(messages);
-
 
     const batches = splitExtractionMessages(messages, charName, userName || '用户');
     if (batches.length > 1) {

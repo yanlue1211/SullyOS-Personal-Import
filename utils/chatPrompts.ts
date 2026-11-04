@@ -1116,13 +1116,14 @@ ${voiceActingGuide()}`;
             .sort((a, b) => b[1] - a[1])
             .map(([k, v]) => `${k}=${v}ms`)
             .join(' ');
-        console.log(`⏱ [buildSystemPrompt] total=${perfTotal}ms | stable=${baseSystemPrompt.length}ch volatile=${volatileState.expressionRules + '\n' : '';
-        const callGuide = promptOptions?.appRules === undefined ? i        const mediaRules = promptOptions?.appRules !== undefined ? '' : VIRTUAL_MEDIA_GUIDE + RECORDING_HISTORY_GUIDE + (usesInnerVoice(char) ? buildInnerVoiceSystem(char) : '') + (humanStyle ? (forFirePack||promptOptions?.responseStatusEnabled===false?PROACTIVE_STATUS_SYSTEM:RESPONSE_STATUS_SYSTEM) : '');
+        console.log(`⏱ [buildSystemPrompt] total=${perfTotal}ms | stable=${baseSystemPrompt.length}ch volatile=${volatileState.length}ch | ${timingStr}`);
+
+        const callGuide = promptOptions?.appRules === undefined ? incomingCallGuide(char) : '';
+        const mediaRules = promptOptions?.appRules !== undefined ? '' : VIRTUAL_MEDIA_GUIDE + RECORDING_HISTORY_GUIDE + (usesInnerVoice(char) ? buildInnerVoiceSystem(char) : '') + (humanStyle ? (forFirePack||promptOptions?.responseStatusEnabled===false?PROACTIVE_STATUS_SYSTEM:RESPONSE_STATUS_SYSTEM) : '');
         // Author's layout: character/worldbooks/user/memories, then chat and feature rules.
         // Cache the whole character prefix; no account-wide sharing rearrangements.
         const stable = baseSystemPrompt + expressionRules + '\n' + callGuide + chatRules + mediaRules;
         return { stable, volatileState, recencyTail, history: context.history };
- history: context.history };
     },
 
     // 格式化消息历史
@@ -1510,8 +1511,9 @@ ${voiceActingGuide()}`;
                     // 复用 normalizeMessageContent 翻成完整文本，让角色"记得"一起玩过/写过什么。
                     content = `${timeStr} ${normalizeMessageContent(m, char?.name || '你', userProfile?.name || '用户')}`;
                 }
-                else content = `${timeStr                return { role: m.role, content: typeof content === 'string' ? (content + (m.role === 'assistant' && usesInnerVoiceContext(char) ? innerVoiceContext(m.metadata?.innerVoice) : '')).trimStart() : content };
-')).trimStart() : content };
+                else content = `${timeStr} ${sourceTag} ${content}`;
+
+                return { role: m.role, content: typeof content === 'string' ? (content + (m.role === 'assistant' && usesInnerVoiceContext(char) ? innerVoiceContext(m.metadata?.innerVoice) : '')).trimStart() : content };
             }),
             historySlice // Return original slice for Quote lookup
         };

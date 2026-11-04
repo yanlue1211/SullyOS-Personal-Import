@@ -2922,8 +2922,8 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
                 const dateStr = datesToProcess[idx];
                 setArchiveProgress(`归档中 ${dateStr} (${idx + 1}/${datesToProcess.length})`);
                 const dayMsgs = msgsByDate[dateStr];
-                const rawLog = day                    .map(m => formatMessageWithTime(m, char.name, userProfile.name, formatTime, char.innerVoiceMemoryEnabled !== false))
-me))
+                const rawLog = dayMsgs
+                    .map(m => formatMessageWithTime(m, char.name, userProfile.name, formatTime, char.innerVoiceMemoryEnabled !== false))
                     .join('\n');
                 
                 let prompt = template;
@@ -3647,8 +3647,8 @@ me))
         conversationId: activeCharacterId || null,
         active: (activeApp === AppID.Chat || !!homePhone) && !!char,
         blocked: isInputFocused || !!input.trim() || showPanel !== 'none' || modalType !== 'none'
-            || selectionMode || isSummarizing || collaborationOpen || memoryRepairOpen || favorites            || showProactiveModal || showActiveMsg2Modal || showThinkingChainModal || showInnerVoiceSettings
-odal
+            || selectionMode || isSummarizing || collaborationOpen || memoryRepairOpen || favoritesOpen
+            || showProactiveModal || showActiveMsg2Modal || showThinkingChainModal || showInnerVoiceSettings
             || mcdAppOpen || luckinAppOpen || showForwardModal,
         generating: isTyping || instantChatPending || isProactiveComposing,
         onGenerate: handleManualTrigger,
@@ -4604,13 +4604,13 @@ odal
                     sendButtonStyle={osTheme.chatSendButtonStyle}
                     chromeStyle={osTheme.chatChromeStyle}
                     acnh={acnh}
-                            {char && showInnerVoiceSettings && <InnerVoiceSettings key={char.id} character={char}
-                onClose={() => setShowInnerVoiceSettings(false)}
-                onSave={patch => updateCharacter(char.id, patch)} />}
-
-/>
+                />
             </div>
 
+
+            {char && showInnerVoiceSettings && <InnerVoiceSettings key={char.id} character={char}
+                onClose={() => setShowInnerVoiceSettings(false)}
+                onSave={patch => updateCharacter(char.id, patch)} />}
 
             {/* Proactive Settings Modal */}
             {char && (
