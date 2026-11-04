@@ -577,7 +577,7 @@ export const useChatAI = ({
 
     const [lastDigestResult, setLastDigestResult] = useState<DigestResult | null>(null);
     const [lastTokenUsage, setLastTokenUsage] = useState<number | null>(null);
-    const [tokenBreakdown, setTokenBreakdown] = useState<{ prompt: number; completion: number; total: number; msgCount: number; pass: string } | null>(null);
+    const [tokenBreakdown, setTokenBreakdown] = useState<{ prompt: number; completion: number; total: number; cacheRead: number | null; cacheWrite: number | null; msgCount: number; pass: string } | null>(null);
     const [lastSystemPrompt, setLastSystemPrompt] = useState<string>('');
 
     // 意识流：由副 API 的情绪评估同轮产出（innerState 字段）
@@ -644,6 +644,9 @@ export const useChatAI = ({
                 prompt: data.usage.prompt_tokens || 0,
                 completion: data.usage.completion_tokens || 0,
                 total: data.usage.total_tokens,
+                cacheRead: data.usage.cache_read_input_tokens ?? data.usage.prompt_tokens_details?.cached_tokens ?? null,
+                cacheWrite: data.usage.cache_creation_input_tokens ??
+                    (data.usage.cache_creation ? ((data.usage.cache_creation.ephemeral_5m_input_tokens || 0) + (data.usage.cache_creation.ephemeral_1h_input_tokens || 0)) : null),
                 msgCount,
                 pass
             };
