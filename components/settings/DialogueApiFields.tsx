@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import type { DialogueApiConfig } from '../../types';
 import { llmApiType } from '../../utils/llmEndpoint';
+import { getAnthropicCacheTtl, setAnthropicCacheTtl, type AnthropicCacheTtl } from '../../utils/anthropicCacheTtl';
 
 export default function DialogueApiFields({ value, onChange, fetchModels, isLoadingModels, openModelPicker }: {
  value: DialogueApiConfig; onChange: (patch: Partial<DialogueApiConfig>) => void;
@@ -8,6 +9,7 @@ export default function DialogueApiFields({ value, onChange, fetchModels, isLoad
 }) {
  const { baseUrl: localUrl, apiKey: localKey, model: localModel, stream: localStream = false, temperature: localTemperature = 0.85 } = value;
  const [showApiAdvanced, setShowApiAdvanced] = useState(false);
+ const [cacheTtl, setCacheTtl] = useState<AnthropicCacheTtl>(getAnthropicCacheTtl);
  const setLocalUrl = (baseUrl: string) => onChange({ baseUrl });
  const setLocalKey = (apiKey: string) => onChange({ apiKey });
  const setLocalTemperature = (temperature: number) => onChange({ temperature });
@@ -17,7 +19,18 @@ export default function DialogueApiFields({ value, onChange, fetchModels, isLoad
                         <option value="openai">OpenAI 兼容</option><option value="anthropic">Anthropic 原生 Messages</option>
                     </select>
                 </label>
-                {llmApiType(value) === 'anthropic' && <p className="text-[10px] text-slate-400 leading-relaxed">直连服务商，启用 5 分钟 Prompt Caching；首次写入缓存也会计费，能否命中取决于模型、长度与前缀是否相同。支持填写根地址、/v1 或完整 /v1/messages。主动消息 2.0 在 Worker 自动更新完成后可用，无需手动重连。</p>}
+                {llmApiType(value) === 'anthropic' && <div className="rounded-xl border border-slate-200/60 bg-white/40 px-3 py-3 space-y-2">
+                    <label className="flex items-center justify-between gap-3 text-xs text-slate-500">
+                        <span>Prompt 缓存时效</span>
+                        <select aria-label="Anthropic 缓存时效" value={cacheTtl}
+                            onChange={e => { const ttl = e.target.value as AnthropicCacheTtl; setCacheTtl(ttl); setAnthropicCacheTtl(ttl); }}
+                            className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700">
+                            <option value="5m">5 分钟（经济）</option>
+                            <option value="1h">1 小时（长效）</option>
+                        </select>
+                    </label>
+                    <p className="text-[10px] text-slate-400 leading-relaxed">这是本设备所有 Anthropic 原生请求共用的时效设置；不影响 OpenAI 兼容接口。5 分钟写入约为正常输入费的 1.25 倍，1 小时写入约为 2 倍，缓存命中读取通常为 0.1 倍。时效从请求开始计算，生成时间也计入。中转站须支持 ttl=1h，否则请切回 5 分钟。修改后从下一次请求生效。</p>
+                </div>}
                 <div className="group">
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block pl-1">URL</label>
                     <input type="text" value={localUrl} onChange={(e) => setLocalUrl(e.target.value)} placeholder="https://..." className="w-full bg-white/50 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono focus:bg-white transition-all" />
