@@ -6,6 +6,8 @@
  */
 
 import type { Message } from '../../types';
+import { DB } from '../db';
+import { memoryMessagesWithoutInnerVoice } from '../../features/personal/innerVoice/protocol';
 import type { MemoryEntity, MemoryNode, MemoryRoom } from './types';
 import type { LightLLMConfig } from './pipeline';
 import { safeFetchJson } from '../safeApi';
@@ -421,6 +423,9 @@ export async function extractMemoriesFromBuffer(
     pinnedMemories?: PinnedMemoryRef[],
 ): Promise<BufferExtractionResult> {
     if (messages.length === 0) return { memories: [], crossTimeLinks: [], eventBoxHints: [], unpinIds: [], corrections: [] };
+    const character = await DB.getCharacter(charId);
+    if (character?.innerVoiceMemoryEnabled === false) messages = memoryMessagesWithoutInnerVoice(messages);
+
 
     const batches = splitExtractionMessages(messages, charName, userName || '用户');
     if (batches.length > 1) {

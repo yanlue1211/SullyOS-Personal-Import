@@ -415,13 +415,14 @@ export function formatMessageForPrompt(
     msg: Message,
     charName: string,
     userName: string,
+    includeInnerVoice = true,
 ): string {
     const sender = msg.metadata?.homeSharedOwnerId
         ? (msg.metadata.homeContextKind === 'speech' ? msg.metadata.homeActorName || '角色' : '家园记录')
         : msg.role === 'user' ? userName
         : msg.role === 'system' ? '[系统]'
         : charName;
-    return `[${sender}]: ${normalizeMessageContent(msg, charName, userName)}${msg.role === 'assistant' ? innerVoiceMemoryContext(msg.metadata?.innerVoice) : ''}`;
+    return `[${sender}]: ${normalizeMessageContent(msg, charName, userName)}${msg.role === 'assistant' && includeInnerVoice ? innerVoiceMemoryContext(msg.metadata?.innerVoice) : ''}`;
 }
 
 /** 带时间戳的版本（归档常用）：`[HH:MM] 发送者: 内容` */
@@ -430,6 +431,7 @@ export function formatMessageWithTime(
     charName: string,
     userName: string,
     timeFormatter: (ts: number) => string,
+    includeInnerVoice = true,
 ): string {
     const sender = msg.metadata?.homeSharedOwnerId
         ? (msg.metadata.homeContextKind === 'speech' ? msg.metadata.homeActorName || '角色' : '家园记录')
@@ -438,7 +440,7 @@ export function formatMessageWithTime(
         : charName;
     const time = msg.timestamp > 0 ? timeFormatter(msg.timestamp) : '';
     const prefix = time ? `[${time}] ` : '';
-    return `${prefix}${sender}: ${normalizeMessageContent(msg, charName, userName)}${msg.role === 'assistant' ? innerVoiceMemoryContext(msg.metadata?.innerVoice) : ''}`;
+    return `${prefix}${sender}: ${normalizeMessageContent(msg, charName, userName)}${msg.role === 'assistant' && includeInnerVoice ? innerVoiceMemoryContext(msg.metadata?.innerVoice) : ''}`;
 }
 
 /**

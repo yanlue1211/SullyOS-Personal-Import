@@ -3,6 +3,8 @@ import type { CharacterProfile } from '../types';
 /** Undefined preserves existing characters. These switches never mutate history. */
 export const usesHumanStyle = (char: Pick<CharacterProfile, 'humanStyleEnabled'>) => char.humanStyleEnabled !== false;
 export const usesInnerVoice = (char: Pick<CharacterProfile, 'innerVoiceEnabled'>) => char.innerVoiceEnabled !== false;
+export const usesInnerVoiceContext = (char: Pick<CharacterProfile, 'innerVoiceContextEnabled'>) => char.innerVoiceContextEnabled !== false;
+export const usesInnerVoiceMemory = (char: Pick<CharacterProfile, 'innerVoiceMemoryEnabled'>) => char.innerVoiceMemoryEnabled !== false;
 export const MINIMAL_THINKING_PROMPT = `【以下要求仅适用于心象，不改变正文】
 心象全程使用中文；不要求模拟人类生活或强制情绪化。
 ### Thinking 写法总则

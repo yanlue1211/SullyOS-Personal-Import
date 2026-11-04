@@ -4,11 +4,11 @@ import { RESPONSE_STATUS_SYSTEM, PROACTIVE_STATUS_SYSTEM } from '../features/per
 import { incomingCallGuide } from '../features/personal/calls/incoming';
 import { commerceContext } from './personalCommerce';
 import { getShareCardImageUrls } from './shareCardImages';
-import { INNER_VOICE_SYSTEM, innerVoiceContext } from '../features/personal/innerVoice/protocol';
+import { buildInnerVoiceSystem, innerVoiceContext } from '../features/personal/innerVoice/protocol';
 import { VIRTUAL_MEDIA_GUIDE, RECORDING_HISTORY_GUIDE } from '../features/personal/chatMedia/format';
 import {weatherForCharacter} from './characterWeather';
 import {secretNoteContext} from './secretNote';
-import { usesHumanStyle, usesInnerVoice, PERSONAL_CHAT_SUPPLEMENT, ANTI_CONTRAST_PROMPT, ANTI_EMPTY_GRATITUDE_PROMPT, MINIMAL_THINKING_PROMPT, buildNaturalChatMemoryContext } from './chatPromptPreferences';
+import { usesHumanStyle, usesInnerVoice, usesInnerVoiceContext, PERSONAL_CHAT_SUPPLEMENT, ANTI_CONTRAST_PROMPT, ANTI_EMPTY_GRATITUDE_PROMPT, MINIMAL_THINKING_PROMPT, buildNaturalChatMemoryContext } from './chatPromptPreferences';
 import { buildCharacterResponsePrinciples } from './characterResponsePrinciples';
 import { expandHomeContextHistory } from './homeContextSegments';
 import { hasReliableMessageTimestamp, protectPendingChatTurn } from './storyTheaterTimeline';
@@ -368,12 +368,11 @@ export const ChatPrompts = {
         if (!forFirePack && !timelyByWorker && char.timeAwarenessEnabled !== false && config.userHolidays?.enabled) {
             await RealtimeContextManager.getUserHoliday(config, userProfile.name);
         }
-        const shareUserProfile = humanStyle && promptOptions?.appRules === undefined;
         const hasGlobalBooks = char.mountedWorldbooks?.some(book=>book.globalMount) === true;
         const context = humanStyle || hasGlobalBooks ? await ContextBuilder.buildCharacterContext({
             char: humanStyle ? char : {...char,mountedWorldbooks:char.mountedWorldbooks?.filter(book=>book.globalMount)}, user: userProfile, history: promptOptions?.history,
             timeOptions: { worldbookMessages: currentMsgs, userHolidays: config.userHolidays, skipUserHoliday: forFirePack || timelyByWorker },
-            layout: { deferVolatile: true, deferUserProfile: shareUserProfile },
+            layout: { deferVolatile: true },
         }) : { coreContext: '', sharedWorldbookPrefix:'', globalWorldbookRemainder:'', history: promptOptions?.history || [] };
         let baseSystemPrompt = humanStyle ? context.coreContext : (context.sharedWorldbookPrefix || '') + MINIMAL_THINKING_PROMPT + buildNaturalChatMemoryContext(char) + (context.globalWorldbookRemainder || '');
         timings.buildCoreContext = Math.round(performance.now() - coreT0);
@@ -1117,24 +1116,13 @@ ${voiceActingGuide()}`;
             .sort((a, b) => b[1] - a[1])
             .map(([k, v]) => `${k}=${v}ms`)
             .join(' ');
-        console.log(`⏱ [buildSystemPrompt] total=${perfTotal}ms | stable=${baseSystemPrompt.length}ch volatile=${volatileState.length}ch | ${timingStr}`);
-
-        const globalPrefix = context.sharedWorldbookPrefix || '';
-        const expressionPrefix = promptOptions?.appRules === undefined ? expressionRules + '\n' : '';
-        const callGuide = promptOptions?.appRules === undefined ? incomingCallGuide(char) : '';
-        const mediaRules = promptOptions?.appRules !== undefined ? '' : VIRTUAL_MEDIA_GUIDE + RECORDING_HISTORY_GUIDE + (usesInnerVoice(char) ? INNER_VOICE_SYSTEM : '') + (humanStyle ? (forFirePack||promptOptions?.responseStatusEnabled===false?PROACTIVE_STATUS_SYSTEM:RESPONSE_STATUS_SYSTEM) : '');
-        // Same enabled features produce identical public rules across characters.
-        // Keep global books first so different voice/app settings can still share
-        // them. Personal identity/worldbooks and all their bindings stay intact.
-        const shareRules = humanStyle && promptOptions?.appRules === undefined;
-        const sharedWorldbookPrefix = globalPrefix && promptOptions?.appRules === undefined ? expressionPrefix + globalPrefix : '';
-        const sharedPrefix = shareRules
-            ? expressionPrefix + globalPrefix + ContextBuilder.buildUserProfileContext(userProfile) + chatRules + mediaRules
-            : sharedWorldbookPrefix;
-        const stable = shareRules
-            ? sharedPrefix + callGuide + baseSystemPrompt.slice(globalPrefix.length)
-            : expressionPrefix + (globalPrefix ? globalPrefix + callGuide + baseSystemPrompt.slice(globalPrefix.length) : callGuide + baseSystemPrompt) + chatRules + mediaRules;
-        return { sharedPrefix, sharedWorldbookPrefix, stable, volatileState, recencyTail, history: context.history };
+        console.log(`⏱ [buildSystemPrompt] total=${perfTotal}ms | stable=${baseSystemPrompt.length}ch volatile=${volatileState.expressionRules + '\n' : '';
+        const callGuide = promptOptions?.appRules === undefined ? i        const mediaRules = promptOptions?.appRules !== undefined ? '' : VIRTUAL_MEDIA_GUIDE + RECORDING_HISTORY_GUIDE + (usesInnerVoice(char) ? buildInnerVoiceSystem(char) : '') + (humanStyle ? (forFirePack||promptOptions?.responseStatusEnabled===false?PROACTIVE_STATUS_SYSTEM:RESPONSE_STATUS_SYSTEM) : '');
+        // Author's layout: character/worldbooks/user/memories, then chat and feature rules.
+        // Cache the whole character prefix; no account-wide sharing rearrangements.
+        const stable = baseSystemPrompt + expressionRules + '\n' + callGuide + chatRules + mediaRules;
+        return { stable, volatileState, recencyTail, history: context.history };
+ history: context.history };
     },
 
     // 格式化消息历史
@@ -1522,9 +1510,8 @@ ${voiceActingGuide()}`;
                     // 复用 normalizeMessageContent 翻成完整文本，让角色"记得"一起玩过/写过什么。
                     content = `${timeStr} ${normalizeMessageContent(m, char?.name || '你', userProfile?.name || '用户')}`;
                 }
-                else content = `${timeStr} ${sourceTag} ${content}`;
-
-                return { role: m.role, content: typeof content === 'string' ? (content + (m.role === 'assistant' && usesInnerVoice(char) && usesHumanStyle(char) ? innerVoiceContext(m.metadata?.innerVoice) : '')).trimStart() : content };
+                else content = `${timeStr                return { role: m.role, content: typeof content === 'string' ? (content + (m.role === 'assistant' && usesInnerVoiceContext(char) ? innerVoiceContext(m.metadata?.innerVoice) : '')).trimStart() : content };
+')).trimStart() : content };
             }),
             historySlice // Return original slice for Quote lookup
         };

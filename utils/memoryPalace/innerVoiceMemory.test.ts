@@ -49,3 +49,14 @@ it('allows empty undercurrent and preserves existing records without hearts unch
  expect(formatMessageForPrompt(old,'角色','用户')).toBe('[角色]: 回来就好。');
  expect(formatMessageWithTime(old,'角色','用户',()=> '16:00')).toBe('[16:00] 角色: 回来就好。');
 });
+
+it('omits hearts from actual palace extraction when the saved character opts out',async()=>{
+ const {DB}=await import('../db');
+ await DB.saveCharacter({id:'heart-memory-off',name:'角色',innerVoiceMemoryEnabled:false} as any);
+ const original=row({charId:'heart-memory-off'});
+ await extractMemoriesFromBuffer([original],'heart-memory-off','角色',config,undefined,'用户');
+ const request=JSON.parse(String(vi.mocked(safeFetchJson).mock.calls[0][1]?.body));
+ const input=request.messages.find((m:any)=>m.role==='user').content;
+ expect(input).toContain('回来就好。');expect(input).not.toContain(heart.thoughts);
+ expect(original.metadata?.innerVoice).toEqual(heart);
+});

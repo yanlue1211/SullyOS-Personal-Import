@@ -15,7 +15,7 @@ it('leaves shared and personal stable prefixes byte-identical; reminder goes onl
  const build=()=>ChatPrompts.buildSystemPromptParts(char,user,[],emojis,[],history,{weatherEnabled:false,newsEnabled:false} as any);
  vi.mocked(buildEmojiNameReminder).mockReturnValue('');const before=await build();
  vi.mocked(buildEmojiNameReminder).mockReturnValue(reminder);const after=await build();
- for(const key of ['stable','sharedPrefix','sharedWorldbookPrefix','volatileState','history'] as const)expect(after[key]).toEqual(before[key]);
+ for(const key of ['stable','volatileState','history'] as const)expect(after[key]).toEqual(before[key]);
  expect(after.recencyTail).toBe(reminder+before.recencyTail);
  expect(after.stable).not.toContain('[表情包名称校验]');
 });

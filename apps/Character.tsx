@@ -647,8 +647,8 @@ const Character: React.FC = () => {
           if (dayMsgs.length === 0) { addToast(`${dateStr} 当天无消息可总结`, 'info'); return; }
 
           const timeFmt = (ts: number) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
-          const rawLog = dayMsgs
-              .map(m => formatMessageWithTime(m, formData.name, userProfile.name, timeFmt))
+          const rawLog = dayMsgs              .map(m => formatMessageWithTime(m, formData.name, userProfile.name, timeFmt, formData.innerVoiceMemoryEnabled !== false))
+
               .join('\n');
 
           // 模板优先级：override（弹窗现场选）→ 当前 state → 默认 preset
@@ -832,8 +832,8 @@ const Character: React.FC = () => {
                 
                 const dayMsgs = msgsByDate[date];
                 const timeFmt = (ts: number) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
-                const rawLog = dayMsgs
-                    .map(m => formatMessageWithTime(m, formData.name, userProfile.name, timeFmt))
+                const rawLog = dayMsgs                    .map(m => formatMessageWithTime(m, formData.name, userProfile.name, timeFmt, formData.innerVoiceMemoryEnabled !== false))
+
                     .join('\n');
 
                 // Use selected template (same as ChatApp) with variable substitution
@@ -943,8 +943,8 @@ const Character: React.FC = () => {
           // 与聊天时角色能看到的记忆完全一致，不再额外抓取。
           // 重置模式下大幅减少近期聊天的数量，避免近因偏差
           const recentMsgs = await loadCharacterContextMessages(formData).then(messages => messages.slice(-(type === 'initial' ? 15 : 50)));
-          const msgText = recentMsgs
-              .map(m => formatMessageForPrompt(m, charName, boundUser.name))
+          const msgText = recentMsgs              .map(m => formatMessageForPrompt(m, charName, boundUser.name, formData.innerVoiceMemoryEnabled !== false))
+
               .join('\n');
 
           if (msgText) messagesToAnalyze += `\n【最近的聊天记录 (Recent Chats - 仅用于检测近期变化)】:\n${msgText}\n`;

@@ -79,7 +79,7 @@ describe('Anthropic native transport',()=>{
    ]});
    const blocks=[...(out.system || []),...out.messages.flatMap((m:any)=>m.content),...(out.tools || [])];
    const tagged=blocks.filter((b:any)=>b.cache_control);
-   expect(tagged).toHaveLength(4);
+   expect(tagged).toHaveLength(3);
    expect(tagged.every((b:any)=>b.cache_control.type==='ephemeral'&&b.cache_control.ttl==='1h')).toBe(true);
   } finally {
    vi.unstubAllGlobals();
@@ -101,15 +101,15 @@ describe('Anthropic native transport',()=>{
   ],tools:[{type:'function',function:{name:'lookup'}}]});
   const a=make('recall A, song A'),b=make('recall B, song B');
   const blocks=(out:any)=>out.messages.flatMap((m:any)=>m.content);
-  expect(blocks(a).filter((x:any)=>x.cache_control).map((x:any)=>x.text)).toEqual(['past 239']);
+  expect(blocks(a).filter((x:any)=>x.cache_control).map((x:any)=>x.text)).toEqual(['past 166','past 239']);
   expect(a.system).toEqual(b.system);
-  expect(a.system.filter((x:any)=>x.cache_control)).toHaveLength(3);
+  expect(a.system.filter((x:any)=>x.cache_control)).toHaveLength(1);
   expect(blocks(a).slice(0,242)).toEqual(blocks(b).slice(0,242));
   expect(JSON.stringify(a)).toContain('archived Moments record');
   expect(JSON.stringify(a)).toContain('recall A, song A');
   expect(blocks(a).find((x:any)=>x.text?.includes('cannot reopen'))).not.toHaveProperty('cache_control');
   // All four checkpoints include tools as part of their prefixes; no fifth one.
-  expect(a.tools[0]).not.toHaveProperty('cache_control');
+  expect(a.tools[0]).toHaveProperty('cache_control');
  });
  it('preserves archived annotations byte-for-byte and includes the last one in a history checkpoint',()=>{
   const original={model:'c',messages:[{role:'system',content:'rules'},{role:'user',content:'hello'},
