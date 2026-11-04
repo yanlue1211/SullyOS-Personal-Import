@@ -35,7 +35,7 @@ export function toAnthropicRequest(body: any): any {
     if (!Array.isArray(body.messages)) throw Error('Anthropic 请求缺少 messages');
     const system: Block[] = [];
     const messages: Array<{role:'user'|'assistant';content:Block[]}> = [];
-    let lastHistoryBlock: Block | undefined;
+    const stableHistory: Block[] = [];
     let sawReminder = false;
     const append = (role: 'user'|'assistant', blocks: Block[]) => {
         if (!blocks.length) return;
@@ -62,7 +62,7 @@ export function toAnthropicRequest(body: any): any {
             if (message.role === 'assistant' && Array.isArray(message.anthropic_content)) {
                 blocks = structuredClone(message.anthropic_content);
                 append('assistant',blocks);
-                if (!sawReminder && blocks.length) lastHistoryBlock=blocks.at(-1);
+                if (!sawReminder) stableHistory.push(...blocks.filter(block => !['thinking','redacted_thinking'].includes(block.type)));
                 continue;
             }
             blocks = contentBlocks(message.content);
@@ -75,7 +75,7 @@ export function toAnthropicRequest(body: any): any {
             }
         }
         append(message.role === 'assistant' ? 'assistant' : 'user', blocks);
-        if (!sawReminder && blocks.length) lastHistoryBlock = blocks.at(-1);
+        if (!sawReminder) stableHistory.push(...blocks.filter(block => !['thinking','redacted_thinking'].includes(block.type)));
     }
     if (!messages.length) throw Error('Anthropic 请求没有对话内容');
     // This standard payload keeps system at the top level. Explain the annotation once
@@ -85,21 +85,15 @@ export function toAnthropicRequest(body: any): any {
         if (tool.type !== 'function' || !tool.function?.name) throw Error('Anthropic 暂仅支持 function 工具');
         return {name:tool.function.name,description:tool.function.description || '',input_schema:tool.function.parameters || {type:'object',properties:{}}};
     });
-    // Three explicit 5-minute breakpoints: tools, stable system, history before volatile reminders.
+    // Up to four explicit 5-minute breakpoints: tools, system, and two history checkpoints.
     if (tools.length) tools.at(-1).cache_control = {...ephemeral};
     if (system.length) system.at(-1)!.cache_control = {...ephemeral};
     // Keep an earlier history checkpoint in addition to the latest one. This lets
     // a stable history prefix survive changes near the end of a conversation.
     // Anthropic permits up to four explicit breakpoints (tools + system + 2 history).
     // Only use blocks before the first volatile system reminder.
-    const stableHistory: Block[] = [];
-    for (const message of messages) {
-        for (const block of message.content) {
-            if (block.type === 'text' && block.text?.startsWith('<system-reminder>\\n')) break;
-            if (!['thinking','redacted_thinking'].includes(block.type)) stableHistory.push(block);
-        }
-        if (message.content.some(block => block.type === 'text' && block.text?.startsWith('<system-reminder>\\n'))) break;
-    }
+    // Track source-message boundaries while converting above. Do not infer them
+    // from text: a literal \n differs from a newline, and dialogue may quote the tag.
     if (stableHistory.length) {
         const latest = stableHistory.at(-1)!;
         const earlier = stableHistory[Math.floor((stableHistory.length - 1) * 0.7)];

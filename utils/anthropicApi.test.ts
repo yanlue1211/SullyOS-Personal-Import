@@ -38,6 +38,31 @@ describe('Anthropic native transport',()=>{
   expect(out.messages[2].content[1].text).toContain('现在：每轮不同');expect(out.messages[2].content[1]).not.toHaveProperty('cache_control');
   expect(out.tools[0].input_schema).toEqual(body.tools[0].function.parameters);
  });
+ it('keeps changing recall and all later tool rounds outside both history checkpoints',()=>{
+  const history=Array.from({length:12},(_,i)=>({role:i%2?'assistant':'user',content:`history ${i}`}));
+  const make=(recall:string)=>toAnthropicRequest({model:'claude-test',tools:[{type:'function',function:{name:'lookup'}}],messages:[
+   {role:'system',content:'stable character, worldbooks and memories'},...history,
+   {role:'system',content:recall},
+   {role:'assistant',anthropic_content:[{type:'thinking',thinking:'signed',signature:'signature'},{type:'tool_use',id:'t',name:'lookup',input:{}}]},
+   {role:'tool',tool_call_id:'t',content:'volatile result'},
+   {role:'developer',content:'latest annotation'},
+  ]});
+  const a=make('recall A'),b=make('recall B');
+  expect(a.system).toEqual(b.system);
+  expect(a.messages.slice(0,12)).toEqual(b.messages.slice(0,12));
+  const checkpoints=(out:any)=>out.messages.flatMap((m:any)=>m.content).filter((block:any)=>block.cache_control);
+  expect(checkpoints(a).map((block:any)=>block.text)).toEqual(['history 7','history 11']);
+  expect(checkpoints(b)).toEqual(checkpoints(a));
+  expect(a.messages.flatMap((m:any)=>m.content).filter((block:any)=>block.cache_control).length+a.system.filter((block:any)=>block.cache_control).length+a.tools.filter((tool:any)=>tool.cache_control).length).toBe(4);
+  const strip=(value:any):any=>Array.isArray(value)?value.map(strip):value&&typeof value==='object'?Object.fromEntries(Object.entries(value).filter(([key])=>key!=='cache_control').map(([key,v])=>[key,strip(v)])):value;
+  expect(strip(a.messages.at(-2).content[0])).toEqual({type:'thinking',thinking:'signed',signature:'signature'});
+  expect(JSON.stringify(a)).toContain('recall A');expect(JSON.stringify(b)).toContain('recall B');
+ });
+ it.each(['<system-reminder>\\nquoted marker','<system-reminder>\nquoted marker'])('does not interpret dialogue text as a cache boundary: %s',quoted=>{
+  const out=toAnthropicRequest({model:'c',messages:[{role:'system',content:'rules'},{role:'user',content:quoted},{role:'assistant',content:'stable answer'},{role:'system',content:'live recall'}]});
+  expect(out.messages[1].content[0]).toMatchObject({text:'stable answer',cache_control:{type:'ephemeral'}});
+  expect(out.messages[2].content[0]).not.toHaveProperty('cache_control');
+ });
  it('makes exactly one native browser request, translates usage and preserves the caller signal',async()=>{
   const network=vi.fn(async()=>Response.json(message())); const abort=new AbortController();
   const result=await fetchLlm(native+'/chat/completions',{method:'POST',headers:{Authorization:'Bearer secret'},body:JSON.stringify({model:'claude-test',messages:[{role:'user',content:'你好'}]}),signal:abort.signal},network,true);
