@@ -29,6 +29,9 @@ describe('hands-free voice turns',()=>{
   for(let t=600;t<=1500;t+=100)gate.update(.008,t);
   expect(gate.hasSpeech).toBe(true);expect(gate.update(.0005,3900)).toBe('complete');
  });
+ it('keeps a brief acknowledgement while ignoring a single noise spike',()=>{
+  const gate=new SpeechTurnGate();calibrate(gate);gate.update(.03,600);gate.update(.03,700);expect(gate.hasSpeech).toBe(true);expect(gate.update(.001,3100)).toBe('complete');
+ });
  it('stops late-acquired microphone tracks after cancellation without recording or sending',async()=>{
   vi.stubGlobal('MediaRecorder',class{});
   const stopped=vi.fn(),controller=new AbortController();let deliver:(s:any)=>void=()=>{};

@@ -8,7 +8,7 @@ export class SpeechTurnGate {
  private lastVoice = 0; private voicedMs = 0; private candidateMs = 0;
  private active = false; private peak = .02;
  remainingMs = TURN_PAUSE_MS;
- get hasSpeech() { return this.voicedMs >= 240; }
+ get hasSpeech() { return this.voicedMs >= 180; }
  update(rms: number, now: number): CaptureProgress['state'] {
   rms = Number.isFinite(rms) ? Math.max(0, rms) : 0;
   const delta = this.previous === undefined ? 0 : Math.min(150, Math.max(0, now - this.previous));
@@ -27,7 +27,8 @@ export class SpeechTurnGate {
    this.candidateMs += delta;
    // Reject one-off clicks/breath spikes; a resuming voice must persist briefly.
    if (this.candidateMs >= 120) {
-    this.active = true; this.voicedMs += delta; this.lastVoice = now;
+    this.voicedMs += this.active ? delta : this.candidateMs;
+    this.active = true; this.lastVoice = now;
     this.peak = Math.max(rms, this.peak * .99);
    }
   } else {
