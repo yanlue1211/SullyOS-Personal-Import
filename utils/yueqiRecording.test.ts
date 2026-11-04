@@ -49,7 +49,7 @@ it('cancellation before stop discards the recording',async()=>{
 });
 it('cancellation during recognition suppresses late transcript and tone',async()=>{
  let resolve:any;vi.mocked(recognizeUserRecording).mockImplementationOnce(()=>new Promise(r=>resolve=r));
- const c=cb();const cancel=await handsFree({} as any,c,{manual:true,audioApi:api});cancel.finish!();await settle();cancel();resolve({transcript:'迟到结果',analysis:'语气'});await settle();expect(c.text).not.toHaveBeenCalled();expect(stop).toHaveBeenCalledTimes(1);
+ const c=cb();const cancel=await handsFree({} as any,c,{manual:true,audioApi:api});cancel.finish!();await settle();expect(c.speech).toHaveBeenLastCalledWith(true);cancel();resolve({transcript:'迟到结果',analysis:'语气'});await settle();expect(c.text).not.toHaveBeenCalled();expect(stop).toHaveBeenCalledTimes(1);
 });
 it('silent automatic recordings release the microphone at the time limit without sending noise',async()=>{
  level=0;const c=cb();await handsFree({} as any,c,{audioApi:api});await vi.advanceTimersByTimeAsync(30000);await settle();expect(c.end).toHaveBeenCalledTimes(1);expect(recordingToWav).not.toHaveBeenCalled();expect(stop).toHaveBeenCalledTimes(1);

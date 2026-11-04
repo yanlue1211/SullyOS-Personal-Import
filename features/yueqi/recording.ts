@@ -27,7 +27,7 @@ export async function recordVoice(api: APIConfig, cb: Callbacks, options: {
                 onStarted: finish => { stop = finish; if (finishRequested) finish(); },
                 onProgress: progress => {
                     if (controller.signal.aborted) return;
-                    cb.speech(progress.state === 'speaking' || progress.state === 'pausing');
+                    cb.speech(progress.state === 'speaking' || progress.state === 'pausing' || progress.state === 'complete');
                     options.progress?.(progress);
                 },
             });

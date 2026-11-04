@@ -11,7 +11,7 @@ export async function handsFree(api:APIConfig,cb:{text:(text:string,analysis?:st
  let cancelled=false;
  if(!options.audioApi&&resolveSttProvider(api)==='browser'){
   const controller=new AbortController();let finish:(()=>void)|undefined,wantsFinish=false;
-  void captureBrowserSpeech(api,'zh-CN',controller.signal,{onStarted:stop=>{finish=stop;if(wantsFinish)stop();},onProgress:progress=>{options.progress?.(progress);cb.speech(progress.state==='speaking'||progress.state==='pausing');}})
+  void captureBrowserSpeech(api,'zh-CN',controller.signal,{onStarted:stop=>{finish=stop;if(wantsFinish)stop();},onProgress:progress=>{options.progress?.(progress);cb.speech(progress.state==='speaking'||progress.state==='pausing'||progress.state==='complete');}})
    .then(text=>{if(!cancelled&&text.trim())cb.text(text);}).catch(error=>{if(!cancelled)cb.error(error);}).finally(()=>{if(!cancelled)cb.end();});
   const cancel:CaptureCancel=()=>{cancelled=true;controller.abort();};cancel.finish=()=>{wantsFinish=true;finish?.();};return cancel;
  }
