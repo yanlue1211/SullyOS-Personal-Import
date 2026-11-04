@@ -67,6 +67,24 @@ describe('Anthropic native transport',()=>{
   expect(strip(a.messages.at(-2).content[0])).toEqual({type:'thinking',thinking:'signed',signature:'signature'});
   expect(JSON.stringify(a)).toContain('recall A');expect(JSON.stringify(b)).toContain('recall B');
  });
+ it('honors the opt-in 1-hour cache lifetime on all explicit breakpoints',()=>{
+  vi.stubGlobal('localStorage',{getItem:(key:string)=>key==='sully_anthropic_prompt_cache_ttl'?'1h':null});
+  try {
+   const out=toAnthropicRequest({model:'claude-test',messages:[
+    {role:'system',name:'sully_shared_worldbooks',content:'global stable rules'},
+    {role:'system',name:'sully_shared_rules',content:'common rules'},
+    {role:'system',content:'personal identity'},
+    ...Array.from({length:24},(_,i)=>({role:i%2?'assistant':'user',content:`history ${i}`})),
+    {role:'system',content:'volatile recall'}
+   ]});
+   const blocks=[...(out.system || []),...out.messages.flatMap((m:any)=>m.content),...(out.tools || [])];
+   const tagged=blocks.filter((b:any)=>b.cache_control);
+   expect(tagged).toHaveLength(4);
+   expect(tagged.every((b:any)=>b.cache_control.type==='ephemeral'&&b.cache_control.ttl==='1h')).toBe(true);
+  } finally {
+   vi.unstubAllGlobals();
+  }
+ });
  it('caches through archived system records but stops at live state and never resumes in tool rounds',()=>{
   const make=(live:string)=>toAnthropicRequest({model:'c',messages:[
    {role:'system',name:'sully_shared_worldbooks',content:'global books'},
