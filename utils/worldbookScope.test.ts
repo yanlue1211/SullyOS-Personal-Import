@@ -60,7 +60,7 @@ describe('global / personal worldbooks',()=>{
   const native=toAnthropicRequest({model:'c',messages:a.fullMessages});expect(native.system.at(-1).cache_control).toEqual({type:'ephemeral'});
   const natural=await payload('natural',false);expect(natural.fullMessages[0].content).toContain('shared chat-common');expect(natural.systemPrompt).not.toContain('identity natural');
  });
- it('keeps global content while applying each character's voice and heart switches',async()=>{
+ it('keeps global content while applying per-character voice and heart switches',async()=>{
   const library=[book('feature-global',{scope:'global',globalEnabled:true})];
   const make=(id:string,enabled:boolean)=>buildChatRequestPayload({char:{...reconcileWorldbookMounts(char(id),library),humanStyleEnabled:true,chatVoiceEnabled:enabled,innerVoiceEnabled:enabled},userProfile:{name:'User'} as any,groups:[],emojis:[],categories:[],historyMsgs:[{id:1,charId:id,role:'user',type:'text',content:'hello',timestamp:1}] as any,contextLimit:20,realtimeConfig:{weatherEnabled:false,newsEnabled:false} as any});
   const enabled=await make('enabled',true),disabled=await make('disabled',false);

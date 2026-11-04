@@ -5,7 +5,7 @@ import { ChatPrompts } from './chatPrompts';
 import { buildInnerVoiceSystem, memoryMessagesWithoutInnerVoice } from '../features/personal/innerVoice/protocol';
 import { formatMessageForPrompt, formatMessageWithTime } from './messageFormat';
 
-vi.mock('./memoryPalace/pipeline', async original => ({...await original<any>(), injectMemoryPalace: vi.fn(async (character:any) => {character.memoryPalaceInjection='RECALL_SENTINEL';})}));
+vi.mock('./memoryPalace/pipeline', async original => ({...await original<any>(), injectMemoryPalace: vi.fn(async (character:any) => {character.memoryPalaceInjection='RECALL_SENTINEL'; return {}; })}));
 const heart = {state:'STATE_SENTINEL',thoughts:'HEART_SENTINEL',undercurrent:''};
 const message = {id:1,charId:'order-heart',role:'assistant',type:'text',content:'BODY_SENTINEL',timestamp:1,metadata:{innerVoice:heart}} as any;
 it('independently controls historical hearts without removing speech or mutating saved data', () => {
