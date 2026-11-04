@@ -1,3 +1,4 @@
+import {type CaptureProgress} from '../personal/audio/speechTurn';
 import {addReply,compact,generate,synthesize,summarize,deliver,type Environment} from './generate';
 import {elapsed,nextInterval,type Session} from './model';
 import {storage} from './storage';
@@ -7,12 +8,13 @@ import {startStt,type SttSession} from '../../utils/speechToText';
 /** App navigation does not destroy the player; there is only one voice and one scheduler. */
 class MoonPlayer {
  session:Session|null=null; env:Environment|null=null; voice:HTMLAudioElement|null=null; music:HTMLAudioElement|null=null;
+ captureProgress:CaptureProgress|undefined;
  recognitionMode:'auto'|'audio'|'native'='auto';transcribing=false;private audioCapture:CaptureCancel|null=null;
  usesAudioApi(){return this.recognitionMode!=='native'&&isAudioApiReady(this.env?.api.audioApi);}
  async setRecognitionMode(mode:'audio'|'native'){this.stopListening();this.recognitionMode=mode;await (await import('../../utils/db')).DB.saveAssetRaw('yueqi:input',{mode});this.maybeListen();this.emit();}
  notice=''; busy=false; listening=false; handsFree=false; editing=false; voiceVolume=.85; musicVolume=.35; duckVolume=.12;
  musicAfter:'stop'|'continue'='stop'; musicMode:'loop'|'sequence'='loop'; playlist:{id:string;name:string;audio:string}[]=[]; musicIndex=0;musicStopAt=0;private musicStopTimer:ReturnType<typeof setTimeout>|null=null;
- private listeners=new Set<()=>void>();private abort:AbortController|null=null;private stt:SttSession|null=null;private sttEpoch=0;private cancelAuto:(()=>void)|null=null;private speechActive=false;private listenTimer:ReturnType<typeof setTimeout>|null=null;
+ private listeners=new Set<()=>void>();private abort:AbortController|null=null;private stt:SttSession|null=null;private sttEpoch=0;private cancelAuto:CaptureCancel|null=null;private speechActive=false;private listenTimer:ReturnType<typeof setTimeout>|null=null;
  private timer:ReturnType<typeof setInterval>|null=null;private nextAt=0;private frame=0;private saveAt=0;private revision=0;private voiceEpoch=0;private inputEpoch=0;private sending=false;private playbackPaused=true;
  subscribe=(fn:()=>void)=>{this.listeners.add(fn);return()=>{this.listeners.delete(fn);};};
  snapshot=()=>this.revision;
@@ -82,7 +84,7 @@ class MoonPlayer {
   }
   this.emit();},1000);}
  setEditing(value:boolean){this.editing=value;if(!value)this.maybeListen();this.nextAt=Date.now()+(this.session?nextInterval(this.session):300000);if(value)this.stopListening();this.emit();}
- async record(){if(this.transcribing)return;if(this.listening){if(this.audioCapture){this.audioCapture.finish?.();return;}if(this.cancelAuto)this.setHandsFree(false);else this.stt?.stop();return;}if(this.voice||this.busy||this.session?.status!=='active')return;if(this.recognitionMode==='audio'&&!this.usesAudioApi())throw Error('请先在设置中启用并配置音频 API');if(this.usesAudioApi())await this.listenAudio();else await this.listen(false);}
+ async record(){if(this.transcribing)return;if(this.listening){if(this.audioCapture){this.audioCapture.finish?.();return;}if(this.cancelAuto)this.cancelAuto.finish?.();else this.stt?.stop();return;}if(this.voice||this.busy||this.session?.status!=='active')return;if(this.recognitionMode==='audio'&&!this.usesAudioApi())throw Error('请先在设置中启用并配置音频 API');if(this.usesAudioApi())await this.listenAudio();else await this.listen(false);}
  private async listenAudio(){
   if(!this.env)return;const epoch=++this.sttEpoch;this.listening=true;this.speechActive=true;this.emit();
   try{const capture=await handsFree(this.env.api,{
@@ -90,7 +92,7 @@ class MoonPlayer {
    text:(text,analysis)=>{if(epoch!==this.sttEpoch)return;this.listening=false;this.transcribing=false;void this.send(text,analysis,'audio').catch(e=>this.fail(e));},
    error:error=>{if(epoch===this.sttEpoch){this.handsFree=false;this.stopListening();this.fail(error);}},
    end:()=>{if(epoch===this.sttEpoch){this.listening=false;this.transcribing=false;this.speechActive=false;this.audioCapture=null;this.emit();}},
-  },{audioApi:this.env.api.audioApi,manual:true,transcribing:()=>{if(epoch===this.sttEpoch){this.transcribing=true;this.emit();}}});
+  },{audioApi:this.env.api.audioApi,manual:true,progress:progress=>{if(epoch===this.sttEpoch){this.captureProgress=progress;this.emit();}},transcribing:()=>{if(epoch===this.sttEpoch){this.captureProgress=undefined;this.transcribing=true;this.emit();}}});
   if(epoch!==this.sttEpoch)capture();else this.audioCapture=capture;
   }catch(e){if(epoch===this.sttEpoch){this.stopListening();this.fail(e);}}
  }
@@ -99,7 +101,7 @@ class MoonPlayer {
   onError:message=>{if(epoch!==this.sttEpoch)return;this.handsFree=false;this.fail(message);},
   onEnd:()=>{if(epoch!==this.sttEpoch)return;this.listening=false;this.speechActive=false;this.stt=null;this.emit();},
  },this.env.api);if(epoch!==this.sttEpoch)stt.stop();else this.stt=stt;}catch(e){this.listening=false;this.handsFree=false;this.fail(e);}}
- stopListening(){this.sttEpoch++;this.audioCapture?.();this.audioCapture=null;this.transcribing=false;if(this.listenTimer)clearTimeout(this.listenTimer);this.listenTimer=null;this.cancelAuto?.();this.cancelAuto=null;this.stt?.stop();this.stt=null;this.listening=false;this.speechActive=false;}
+ stopListening(){this.captureProgress=undefined;this.sttEpoch++;this.audioCapture?.();this.audioCapture=null;this.transcribing=false;if(this.listenTimer)clearTimeout(this.listenTimer);this.listenTimer=null;this.cancelAuto?.();this.cancelAuto=null;this.stt?.stop();this.stt=null;this.listening=false;this.speechActive=false;}
  setHandsFree(enabled:boolean){this.handsFree=enabled;this.stopListening();this.maybeListen();this.emit();}
  private maybeListen(){
   if(!this.handsFree||this.busy||this.voice||this.editing||this.listening||this.session?.status!=='active'||!this.env)return;
@@ -114,8 +116,8 @@ class MoonPlayer {
    speech:active=>{if(epoch===this.sttEpoch)this.speechActive=active;},
    text:(text,analysis)=>{if(epoch!==this.sttEpoch)return;const kind=this.usesAudioApi()?'audio':'native';this.listening=false;this.speechActive=false;this.stopListening();void this.send(text,analysis,kind).catch(e=>this.fail(e));},
    error:error=>{if(epoch!==this.sttEpoch)return;this.handsFree=false;this.stopListening();this.fail(error);},
-   end:()=>{if(epoch!==this.sttEpoch)return;this.listening=false;this.speechActive=false;this.cancelAuto=null;this.maybeListen();this.emit();},
-  },{audioApi:this.usesAudioApi()?this.env.api.audioApi:undefined,transcribing:()=>{if(epoch===this.sttEpoch){this.transcribing=true;this.emit();}}});if(epoch!==this.sttEpoch)cancel();else this.cancelAuto=cancel;}catch(e){if(epoch===this.sttEpoch){this.handsFree=false;this.stopListening();this.fail(e);}}
+   end:()=>{if(epoch!==this.sttEpoch)return;this.listening=false;this.captureProgress=undefined;this.transcribing=false;this.speechActive=false;this.cancelAuto=null;this.maybeListen();this.emit();},
+  },{audioApi:this.usesAudioApi()?this.env.api.audioApi:undefined,progress:progress=>{if(epoch===this.sttEpoch){this.captureProgress=progress;this.emit();}},transcribing:()=>{if(epoch===this.sttEpoch){this.captureProgress=undefined;this.transcribing=true;this.emit();}}});if(epoch!==this.sttEpoch)cancel();else this.cancelAuto=cancel;}catch(e){if(epoch===this.sttEpoch){this.handsFree=false;this.stopListening();this.fail(e);}}
  }
 
  private duck(speaking:boolean){if(!this.music)return;cancelAnimationFrame(this.frame);const a=this.music,from=a.volume,to=speaking?this.duckVolume:this.musicVolume,start=performance.now();const tick=(now:number)=>{const p=Math.min(1,(now-start)/650);a.volume=Math.max(0,Math.min(1,from+(to-from)*p));if(p<1)this.frame=requestAnimationFrame(tick);};this.frame=requestAnimationFrame(tick);}

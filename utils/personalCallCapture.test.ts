@@ -27,7 +27,7 @@ it('click-to-stop records natively, converts only after stop, and needs no live 
  const result=await promise;expect(result.audio?.type).toBe('audio/wav');expect(result.duration).toBeCloseTo(2.1);expect(tracks).toHaveBeenCalledOnce();expect(recordingToWav).toHaveBeenCalledOnce();
 });
 it('automatic capture only observes silence and preserves actual speech through the native recorder',async()=>{
- const promise=captureSpeechTurn(undefined,new AbortController().signal);await flush();await vi.advanceTimersByTimeAsync(600);level=0;await vi.advanceTimersByTimeAsync(1500);
+ level=0;const promise=captureSpeechTurn(undefined,new AbortController().signal);await flush();await vi.advanceTimersByTimeAsync(700);level=.1;await vi.advanceTimersByTimeAsync(700);level=0;await vi.advanceTimersByTimeAsync(2500);
  expect((await promise).audio?.type).toBe('audio/wav');expect(tracks).toHaveBeenCalledOnce();
 });
 it('an all-silent automatic turn ends without sending an audio API request',async()=>{
@@ -42,4 +42,10 @@ it('late decoding after cancellation never delivers audio',async()=>{
  vi.mocked(recordingToWav).mockImplementationOnce(()=>new Promise(resolve=>deliver=resolve));
  const controller=new AbortController(),promise=captureSpeechTurn(undefined,controller.signal,{manual:true,onStarted:fn=>stop=fn});await flush();stop!();await flush();
  const rejected=expect(promise).rejects.toHaveProperty('name','AbortError');controller.abort();deliver(new Blob(['late']));await rejected;expect(tracks).toHaveBeenCalledOnce();
+});
+
+it('the explicit finish button submits one automatic turn without waiting for the silence gate',async()=>{
+ level=0;let stop:(()=>void)|undefined;
+ const promise=captureSpeechTurn(undefined,new AbortController().signal,{onStarted:fn=>stop=fn});await flush();await vi.advanceTimersByTimeAsync(800);stop!();
+ expect((await promise).audio?.type).toBe('audio/wav');expect(tracks).toHaveBeenCalledOnce();
 });

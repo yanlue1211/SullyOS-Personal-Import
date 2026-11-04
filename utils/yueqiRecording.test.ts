@@ -39,8 +39,8 @@ it('manual capture uses the working chat recorder and conversion without a live 
  expect(recordingToWav).toHaveBeenCalledTimes(1);expect(c.text).toHaveBeenCalledWith('盖好被子了','声音轻柔');expect(stop).toHaveBeenCalledTimes(1);expect(c.end).toHaveBeenCalledTimes(1);
 });
 it('automatic mode observes silence without collecting PCM and finishes after speech',async()=>{
- const c=cb();await handsFree({} as any,c,{audioApi:api});
- await vi.advanceTimersByTimeAsync(500);level=0;await vi.advanceTimersByTimeAsync(1700);await settle();
+ level=0;const c=cb();await handsFree({} as any,c,{audioApi:api});
+ await vi.advanceTimersByTimeAsync(700);level=.1;await vi.advanceTimersByTimeAsync(700);level=0;await vi.advanceTimersByTimeAsync(2500);await settle();
  expect(c.text).toHaveBeenCalledWith('盖好被子了','声音轻柔');expect(stop).toHaveBeenCalledTimes(1);
 });
 it('cancellation before stop discards the recording',async()=>{
@@ -49,7 +49,7 @@ it('cancellation before stop discards the recording',async()=>{
 });
 it('cancellation during recognition suppresses late transcript and tone',async()=>{
  let resolve:any;vi.mocked(recognizeUserRecording).mockImplementationOnce(()=>new Promise(r=>resolve=r));
- const c=cb();const cancel=await handsFree({} as any,c,{manual:true,audioApi:api});cancel.finish!();await settle();cancel();resolve({transcript:'迟到结果',analysis:'语气'});await settle();expect(c.text).not.toHaveBeenCalled();expect(stop).toHaveBeenCalledTimes(1);
+ const c=cb();const cancel=await handsFree({} as any,c,{manual:true,audioApi:api});cancel.finish!();await settle();expect(c.speech).toHaveBeenLastCalledWith(true);cancel();resolve({transcript:'迟到结果',analysis:'语气'});await settle();expect(c.text).not.toHaveBeenCalled();expect(stop).toHaveBeenCalledTimes(1);
 });
 it('silent automatic recordings release the microphone at the time limit without sending noise',async()=>{
  level=0;const c=cb();await handsFree({} as any,c,{audioApi:api});await vi.advanceTimersByTimeAsync(30000);await settle();expect(c.end).toHaveBeenCalledTimes(1);expect(recordingToWav).not.toHaveBeenCalled();expect(stop).toHaveBeenCalledTimes(1);
