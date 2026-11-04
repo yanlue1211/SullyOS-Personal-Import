@@ -12,6 +12,8 @@ interface TokenBreakdown {
     prompt: number;
     completion: number;
     total: number;
+    cacheRead?: number | null;
+    cacheWrite?: number | null;
     msgCount: number;
     pass: string;
 }
@@ -95,6 +97,17 @@ const ChatHeaderShell: React.FC<ChatHeaderShellProps> = ({
     chromeStyle = 'soft',
     acnh = false,
 }) => {
+    // Compact enough for narrow chat headers, with exact counts available on long-press / hover.
+    const shortTokens = (value: number | null | undefined): string => {
+        if (value == null || !Number.isFinite(value)) return '—';
+        if (value >= 10_000) return `${(value / 1000).toFixed(1)}k`;
+        return value.toLocaleString('en-US');
+    };
+    const tokenPillText = lastTokenUsage == null ? '' :
+        `总${shortTokens(lastTokenUsage)} · 读${shortTokens(tokenBreakdown?.cacheRead)} · 写${shortTokens(tokenBreakdown?.cacheWrite)}`;
+    const tokenPillTitle = tokenBreakdown
+        ? `总 Token: ${tokenBreakdown.total.toLocaleString()} | 输入: ${tokenBreakdown.prompt.toLocaleString()} | 输出: ${tokenBreakdown.completion.toLocaleString()} | 缓存读取: ${tokenBreakdown.cacheRead?.toLocaleString() ?? '未返回'} | 缓存创建: ${tokenBreakdown.cacheWrite?.toLocaleString() ?? '未返回'} | 消息: ${tokenBreakdown.msgCount} | 请求阶段: ${tokenBreakdown.pass}`
+        : '';
     const buffs: CharacterBuff[] = hideBuffs ? [] : (activeCharacter.activeBuffs || []);
     const [openBuff, setOpenBuff] = useState<CharacterBuff | null>(null);
     const [isBuffListExpanded, setIsBuffListExpanded] = useState(false);
@@ -331,8 +344,8 @@ const ChatHeaderShell: React.FC<ChatHeaderShellProps> = ({
     const floatingStatusNodes = (lastTokenUsage || isEmotionEvaluating || isMemoryPalaceProcessing) ? (
         <div className={`absolute ${extraAction ? 'right-20' : 'right-12'} top-1/2 -translate-y-1/2 flex items-center gap-1.5 pointer-events-none`}>
             {lastTokenUsage && (
-                <div className={`sully-chat-token text-[9px] px-1.5 py-0.5 rounded-md font-mono border ${isDarkHeader ? 'bg-slate-800 text-slate-300 border-white/10' : isPixelHeader ? 'bg-[#fff7ed] text-[#8f674a] border-[#8f674a]/20' : 'bg-slate-100/95 text-slate-400 border-slate-200'}`}>
-                    {lastTokenUsage}
+                <div className={`sully-chat-token text-[9px] px-1.5 py-0.5 rounded-md font-mono border whitespace-nowrap ${isDarkHeader ? 'bg-slate-800 text-slate-300 border-white/10' : isPixelHeader ? 'bg-[#fff7ed] text-[#8f674a] border-[#8f674a]/20' : 'bg-slate-100/95 text-slate-400 border-slate-200'}`} title={tokenPillTitle}>
+                    {tokenPillText}
                 </div>
             )}
             {isEmotionEvaluating && (
@@ -371,8 +384,8 @@ const ChatHeaderShell: React.FC<ChatHeaderShellProps> = ({
                 <div className="sully-chat-status flex items-center gap-2 flex-wrap">
                     {onlineStatusNode}
                     {lastTokenUsage && (
-                        <div className={`sully-chat-token text-[9px] px-1.5 py-0.5 rounded-md font-mono border ${isDarkHeader ? 'bg-slate-800 text-slate-300 border-white/10' : isPixelHeader ? 'bg-[#fff7ed] text-[#8f674a] border-[#8f674a]/20' : 'bg-slate-100 text-slate-400 border-slate-200'}`} title={tokenBreakdown ? `prompt: ${tokenBreakdown.prompt} | completion: ${tokenBreakdown.completion} | msgs: ${tokenBreakdown.msgCount} | pass: ${tokenBreakdown.pass}` : ''}>
-                            {lastTokenUsage}
+                        <div className={`sully-chat-token text-[9px] px-1.5 py-0.5 rounded-md font-mono border whitespace-nowrap ${isDarkHeader ? 'bg-slate-800 text-slate-300 border-white/10' : isPixelHeader ? 'bg-[#fff7ed] text-[#8f674a] border-[#8f674a]/20' : 'bg-slate-100 text-slate-400 border-slate-200'}`} title={tokenPillTitle}>
+                            {tokenPillText}
                         </div>
                     )}
                     {isEmotionEvaluating && (
