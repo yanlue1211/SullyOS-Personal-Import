@@ -6,7 +6,7 @@ export class SpeechTurnGate {
  private previous: number | undefined; private calibrationStart: number | undefined;
  private calibration: number[] = []; private noise = .002;
  private lastVoice = 0; private voicedMs = 0; private candidateMs = 0;
- private active = false; private peak = .02;
+ private active = false;
  remainingMs = TURN_PAUSE_MS;
  get hasSpeech() { return this.voicedMs >= 180; }
  update(rms: number, now: number): CaptureProgress['state'] {
@@ -21,7 +21,7 @@ export class SpeechTurnGate {
    this.calibration = [];
   }
   const threshold = this.active
-   ? Math.max(.0035, this.noise * 1.8 + .001, this.peak * .1)
+   ? Math.max(.0035, this.noise * 1.8 + .001)
    : Math.max(.005, this.noise * 2.5 + .002);
   if (rms >= threshold) {
    this.candidateMs += delta;
@@ -29,7 +29,6 @@ export class SpeechTurnGate {
    if (this.candidateMs >= 120) {
     this.voicedMs += this.active ? delta : this.candidateMs;
     this.active = true; this.lastVoice = now;
-    this.peak = Math.max(rms, this.peak * .99);
    }
   } else {
    this.candidateMs = 0;

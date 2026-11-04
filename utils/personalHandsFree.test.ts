@@ -11,7 +11,7 @@ describe('hands-free voice turns',()=>{
  });
  it('waits through a mid-sentence pause and restarts countdown when quiet speech resumes',()=>{
   const gate=new SpeechTurnGate();calibrate(gate);
-  for(let t=600;t<=1300;t+=100)gate.update(.03,t);
+  for(let t=600;t<=1300;t+=100)gate.update(.3,t);
   for(let t=1400;t<=3200;t+=100)expect(gate.update(.001,t)).not.toBe('complete');
   for(let t=3300;t<=4000;t+=100)gate.update(.008,t);
   expect(gate.update(.001,5000)).toBe('pausing');expect(gate.remainingMs).toBe(1400);
