@@ -1,0 +1,24 @@
+name: Emoji delivery and cache boundary verification
+on:
+  push:
+    branches: [personal/emoji-library-names]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NODE_OPTIONS: '--max-old-space-size=4096'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec vitest run utils/emojiNameResolver.test.ts utils/emojiCacheBoundary.test.ts utils/applyAssistantPostProcessing.test.ts utils/chatPrompts.emojiVisibility.test.ts utils/chatRequestPayload.test.ts utils/anthropicApi.test.ts
+      - run: pnpm run build

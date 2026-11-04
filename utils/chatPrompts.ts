@@ -1,3 +1,4 @@
+import { buildEmojiNameReminder } from './emojiNameResolver';
 import {readRealMedia,realMediaContent} from '../features/experience/format';
 import { RESPONSE_STATUS_SYSTEM, PROACTIVE_STATUS_SYSTEM } from '../features/personal/responseStatus/protocol';
 import { incomingCallGuide } from '../features/personal/calls/incoming';
@@ -1104,7 +1105,10 @@ ${voiceActingGuide()}`;
         const expressionRules = humanStyle && promptOptions?.appRules === undefined
             ? PERSONAL_CHAT_SUPPLEMENT + '\n' + ANTI_CONTRAST_PROMPT + '\n' + ANTI_EMPTY_GRATITUDE_PROMPT
             : '';
-        const recencyTail = humanStyle ? buildCharacterResponsePrinciples(char.name, userProfile.name) : '';
+        // Short delivery reminder stays in the existing uncached tail. Keep shared/stable
+        // prompt bytes, worldbook ordering and cache breakpoints unchanged.
+        const emojiNameReminder = promptOptions?.appRules === undefined && emojis.length > 0 ? buildEmojiNameReminder() : '';
+        const recencyTail = emojiNameReminder + (humanStyle ? buildCharacterResponsePrinciples(char.name, userProfile.name) : '');
 
         if (!humanStyle && char.memoryPalaceEnabled && char.memoryPalaceInjection) volatileState += '\n' + char.memoryPalaceInjection;
 
