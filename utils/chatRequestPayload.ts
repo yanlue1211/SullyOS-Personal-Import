@@ -143,7 +143,7 @@ export interface BuildChatPayloadResult {
     /** 已剥离双语标签的历史消息（emotion eval 也吃这份） */
     cleanedApiMessages: Array<{ role: string; content: any }>;
     /** [system, ...cleanedApiMessages, 末尾 bilingual reminder?] —— 主 API 直接发这个 */
-    fullMessages: Array<{ role: string; content: any }>;
+    fullMessages: Array<{ role: string; content: any; name?:string }>;
     /**
      * fullMessages 里易变尾段那条 system 的下标；想插在钢印**之前**的块按它定位。
      *
@@ -553,8 +553,12 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
     // 注意：即时对话的 worker 端情绪评估把 messages[0] 当 system、messages[1..]
     // 展平为对话历史 —— 易变尾段会以「[系统]: …」行出现在历史末尾，信息不丢。
     if(input.homePhoneContext) volatileTail += `\n\n${input.homePhoneContext}`;
-    let fullMessages: Array<{ role: string; content: any }> = [
-        { role: 'system', content: systemPrompt },
+    const sharedPrefix = parts.sharedPrefix ? (!input.appPrompt && usesInnerVoice(char) ? INNER_VOICE_FORMAT_REMINDER + '\n' : '') + parts.sharedPrefix : '';
+    const stableMessages: Array<{role:string;content:any;name?:string}> = sharedPrefix && systemPrompt.startsWith(sharedPrefix)
+        ? [{role:'system',name:'sully_shared_worldbooks',content:sharedPrefix},{role:'system',content:systemPrompt.slice(sharedPrefix.length)}]
+        : [{role:'system',content:systemPrompt}];
+    let fullMessages: Array<{ role: string; content: any; name?:string }> = [
+        ...stableMessages,
         ...messagesWithWorldbookDepth,
         { role: 'system', content: volatileTail },
     ];
@@ -585,7 +589,7 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
     // ChatApp refreshes this same block inside its tool loop. Home has one request,
     // so take the same task/receipt snapshot here, before the live-state tail.
     let amsg2ExpiredNoticeIds: string[] | undefined;
-    let volatileTailIndex = 1 + messagesWithWorldbookDepth.length;
+    let volatileTailIndex = stableMessages.length + messagesWithWorldbookDepth.length;
     if (input.recallEntryPoint === 'home_3d' && char.activeMsg2Config?.enabled) {
         await prepare('tasks',async()=>{
         const { isAmsg2GlobalReady } = await import('./amsg2ToolBridge');

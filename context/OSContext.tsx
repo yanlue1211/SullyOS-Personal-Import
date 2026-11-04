@@ -1,3 +1,4 @@
+import { reconcileWorldbookMounts } from '../utils/worldbookScope';
 import { consumeIncomingCallInvites } from '../features/personal/calls/incoming';
 import {SONGWRITING_UPDATED} from '../features/songwriting/model';
 import {streamMoments} from '../features/moments/backup';
@@ -3456,7 +3457,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     // 新角色的情绪独立配置，默认关闭，由用户明确开启。
     // 注意：memoryPalaceEnabled 不在这里默认开 —— 那是用户在记忆宫殿 App 显式 opt-in
     // 的功能，自动开会替用户决策。
-    const newChar: CharacterProfile = {
+    const newCharBase: CharacterProfile = {
       id: `char-${Date.now()}`,
       name,
       avatar: generateAvatar(name),
@@ -3469,6 +3470,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       emotionIndependent: true,
       emotionConfig: { enabled: false },
     };
+    const newChar = reconcileWorldbookMounts(newCharBase, worldbooks);
     setCharacters(prev => [...prev, newChar]);
     setActiveCharacterId(newChar.id);
     await DB.saveCharacter(newChar);
@@ -3477,7 +3479,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   const updateCharacter = async (id: string, updates: Partial<CharacterProfile> | ((prev: CharacterProfile) => Partial<CharacterProfile>)) => {
     if (typeof updates !== 'function' && Object.keys(updates).some(key => ['chatAppearance','chatFineTune','bubbleStyle','chatBackground','chromeCustomCss','chatSound','chatSoundBound','chatDecorationCssIsolated'].includes(key))) stopBeautyUsage('chat:' + id);
     setCharacters(prev => {
-      const updated = prev.map(c => c.id === id ? normalizeCharacterImpression({ ...c, ...(typeof updates === 'function' ? updates(c) : updates) }) : c);
+      const updated = prev.map(c => c.id === id ? reconcileWorldbookMounts(normalizeCharacterImpression({ ...c, ...(typeof updates === 'function' ? updates(c) : updates) }), worldbooks) : c);
       const target = updated.find(c => c.id === id);
       if (target) {
         const before = prev.find(c => c.id === id);

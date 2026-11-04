@@ -69,6 +69,7 @@ function toAnthropicRequest(body) {
   const messages = [];
   const stableHistory = [];
   let sawReminder = false;
+  let sharedSystemBlock;
   const append = (role, blocks) => {
     if (!blocks.length) return;
     const previous = messages.at(-1);
@@ -78,8 +79,10 @@ function toAnthropicRequest(body) {
   for (const message of body.messages) {
     if (message.role === "system" || message.role === "developer") {
       const blocks2 = contentBlocks(message.content);
-      if (!messages.length) system.push(...blocks2);
-      else {
+      if (!messages.length) {
+        system.push(...blocks2);
+        if (message.name === "sully_shared_worldbooks") sharedSystemBlock = blocks2.at(-1);
+      } else {
         sawReminder = true;
         append("user", [{ type: "text", text: "<system-reminder>\n" + blocks2.map((block) => block.text || "").join("\n") + "\n</system-reminder>" }]);
       }
@@ -122,6 +125,8 @@ function toAnthropicRequest(body) {
     if (earlier !== latest && stableHistory.length >= 8) earlier.cache_control = { ...ephemeral };
     latest.cache_control = { ...ephemeral };
   }
+  const checkpointCount = tools.filter((tool) => tool.cache_control).length + system.filter((block) => block.cache_control).length + stableHistory.filter((block) => block.cache_control).length;
+  if (sharedSystemBlock && !sharedSystemBlock.cache_control && checkpointCount < 4) sharedSystemBlock.cache_control = { ...ephemeral };
   const thinking = body.thinking || body.extra_body?.thinking;
   const request = {
     model: body.model,
@@ -154,8 +159,11 @@ function toAnthropicRequest(body) {
   return request;
 }
 function anthropicUsage(usage = {}) {
-  const input = usage.input_tokens || 0, read = usage.cache_read_input_tokens || 0, write = usage.cache_creation_input_tokens || 0;
-  return { ...usage, prompt_tokens: input + read + write, completion_tokens: usage.output_tokens || 0, total_tokens: input + read + write + (usage.output_tokens || 0), prompt_tokens_details: { cached_tokens: read }, cache_creation_input_tokens: write };
+  const input = usage.input_tokens || 0, read = usage.cache_read_input_tokens || 0;
+  const relayInclusive = Object.hasOwn(usage, "claude_cache_creation_5_m_tokens") || Object.hasOwn(usage, "claude_cache_creation_1_h_tokens");
+  const write = usage.cache_creation_input_tokens ?? (usage.claude_cache_creation_5_m_tokens || 0) + (usage.claude_cache_creation_1_h_tokens || 0);
+  const prompt = relayInclusive ? input : input + read + write;
+  return { ...usage, prompt_tokens: prompt, completion_tokens: usage.output_tokens || 0, total_tokens: prompt + (usage.output_tokens || 0), prompt_tokens_details: { cached_tokens: read }, cache_creation_input_tokens: write };
 }
 function fromAnthropicMessage(message) {
   if (message.type === "error") throw Error(message.error?.message || "Anthropic \u8FD4\u56DE\u9519\u8BEF");
@@ -1433,7 +1441,7 @@ function pickStaleStoppedReplyKeys(rows, nowMs = Date.now(), protectKey) {
 // worker/amsg/src/index.ts
 import { DurableObject } from "cloudflare:workers";
 
-// node_modules/.pnpm/@rei-standard+amsg-server@3.1.0_@neondatabase+serverless@1.1.0_pg@8.22.0/node_modules/@rei-standard/amsg-server/dist/chunk-GN44PST5.mjs
+// ../sully/node_modules/.pnpm/@rei-standard+amsg-server@3.1.0_@neondatabase+serverless@1.1.0_pg@8.22.0/node_modules/@rei-standard/amsg-server/dist/chunk-GN44PST5.mjs
 var UPDATABLE_COLUMNS = /* @__PURE__ */ new Set([
   "user_id",
   "uuid",
@@ -1452,7 +1460,7 @@ var UPDATABLE_COLUMNS = /* @__PURE__ */ new Set([
 var TASK_DELIVERY_COLUMNS = "id, user_id, uuid, encrypted_payload, message_type, next_send_at, retry_after, status, retry_count";
 var TASK_DETAIL_COLUMNS = "id, user_id, uuid, encrypted_payload, message_type, next_send_at, status, retry_count, last_error, created_at, updated_at";
 
-// node_modules/.pnpm/@rei-standard+amsg-shared@0.4.0/node_modules/@rei-standard/amsg-shared/dist/index.mjs
+// ../sully/node_modules/.pnpm/@rei-standard+amsg-shared@0.4.0/node_modules/@rei-standard/amsg-shared/dist/index.mjs
 var TEXT_ENCODER = new TextEncoder();
 var TEXT_DECODER = new TextDecoder("utf-8", { fatal: false });
 function toUint8(buf) {
@@ -2645,7 +2653,7 @@ function stringifyDecisionForError(value) {
   }
 }
 
-// node_modules/.pnpm/@rei-standard+amsg-server@3.1.0_@neondatabase+serverless@1.1.0_pg@8.22.0/node_modules/@rei-standard/amsg-server/dist/chunk-A4LPROFY.mjs
+// ../sully/node_modules/.pnpm/@rei-standard+amsg-server@3.1.0_@neondatabase+serverless@1.1.0_pg@8.22.0/node_modules/@rei-standard/amsg-server/dist/chunk-A4LPROFY.mjs
 var DAY_MS = 24 * 60 * 60 * 1e3;
 var MAX_LISTED_SKIPPED_OCCURRENCES = 32;
 var MAX_ADJUST_STEPS = 32;
@@ -16704,7 +16712,7 @@ function extractFriendFeedReplyTags(raw, namespace = "FRIEND_FEED_REPLY") {
   return { text: text2 + raw.slice(cursor), actions };
 }
 
-// node_modules/.pnpm/@rei-standard+amsg-instant@0.11.0/node_modules/@rei-standard/amsg-instant/dist/index.mjs
+// ../sully/node_modules/.pnpm/@rei-standard+amsg-instant@0.11.0/node_modules/@rei-standard/amsg-instant/dist/index.mjs
 var WEB_PUSH_MAX_BODY_BYTES2 = 4096;
 var WEB_PUSH_ENCRYPTION_OVERHEAD_BYTES2 = 16 + 4 + 1 + 65 + 1 + 16;
 var MAX_PUSH_PAYLOAD_BYTES2 = WEB_PUSH_MAX_BODY_BYTES2 - WEB_PUSH_ENCRYPTION_OVERHEAD_BYTES2;

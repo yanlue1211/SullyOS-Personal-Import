@@ -1,3 +1,4 @@
+import { reconcileWorldbookMounts } from './worldbookScope';
 import {createMomentsStore} from '../features/moments/schema';
 import {exportMoments,restoreMoments,validateMomentsBackup} from '../features/moments/backup';
 import { createWorkroomMessage } from './workroomEvent';
@@ -633,7 +634,8 @@ export const DB = {
 
   saveCharacter: async (character: CharacterProfile): Promise<void> => {
     const db = await openDB();
-    return persistCharacterWithHomeMessages(db, character, clearStaleMemoryMirror);
+    const library = await DB.getAllWorldbooks();
+    return persistCharacterWithHomeMessages(db, reconcileWorldbookMounts(character, library), clearStaleMemoryMirror);
   },
 
   /** An asynchronous evaluation updates only emotion fields, never its stale home/history snapshot. */
@@ -2692,17 +2694,20 @@ export const DB = {
                       library.put(next);
                   }
               }
+              const latestLibrary = (request.result as Worldbook[]).filter(book => updates !== null || !targets.has(book.id)).map(book => books.find(next => next.id === book.id) || book);
               const replacements = new Map(books.map(book => [book.id, toMountedWorldbook(book)]));
               const chars = charactersStore.getAll();
               chars.onsuccess = () => {
                   for (const char of chars.result as CharacterProfile[]) {
                       const mounted = char.mountedWorldbooks || [];
-                      if (!mounted.some(book => updates === null ? targets.has(book.id) : replacements.has(book.id))) continue;
+                      const relevant = mounted.some(book => updates === null ? targets.has(book.id) : replacements.has(book.id));
                       const next = { ...char, mountedWorldbooks: updates === null
                           ? mounted.filter(book => !targets.has(book.id))
-                          : mounted.map(book => replacements.get(book.id) || book) };
-                      changedCharacters.push(next);
-                      charactersStore.put(next);
+                          : mounted.map(book => replacements.has(book.id) ? { ...replacements.get(book.id)!, ...(book.globalMount ? {globalMount:true, personalMount:book.personalMount} : {}) } : book) };
+                      const effective = reconcileWorldbookMounts(next, latestLibrary);
+                      if (!relevant && effective === next) continue;
+                      changedCharacters.push(effective);
+                      charactersStore.put(effective);
                   }
               };
           };
@@ -4329,6 +4334,7 @@ export const DB = {
       await runSection('世界书', data.worldbooks !== undefined, async () => {
           await clearAndAdd(STORE_WORLDBOOKS, data.worldbooks, '世界书', false);
           data.worldbooks = undefined as any;
+          await DB.mutateWorldbooks([], {});
       }, data.worldbooks?.length || 0);
       await runSection('剧情剧场', data.storyTheaters !== undefined, async () => {
           await clearAndAdd(STORE_STORY_THEATERS, data.storyTheaters, '剧情剧场', false);

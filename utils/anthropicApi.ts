@@ -37,6 +37,7 @@ export function toAnthropicRequest(body: any): any {
     const messages: Array<{role:'user'|'assistant';content:Block[]}> = [];
     const stableHistory: Block[] = [];
     let sawReminder = false;
+    let sharedSystemBlock: Block | undefined;
     const append = (role: 'user'|'assistant', blocks: Block[]) => {
         if (!blocks.length) return;
         const previous = messages.at(-1);
@@ -46,7 +47,10 @@ export function toAnthropicRequest(body: any): any {
     for (const message of body.messages) {
         if (message.role === 'system' || message.role === 'developer') {
             const blocks = contentBlocks(message.content);
-            if (!messages.length) system.push(...blocks);
+            if (!messages.length) {
+                system.push(...blocks);
+                if (message.name === 'sully_shared_worldbooks') sharedSystemBlock = blocks.at(-1);
+            }
             else {
                 sawReminder = true;
                 append('user', [{type:'text',text:'<system-reminder>\n' + blocks.map(block => block.text || '').join('\n') + '\n</system-reminder>'}]);
@@ -100,6 +104,12 @@ export function toAnthropicRequest(body: any): any {
         if (earlier !== latest && stableHistory.length >= 8) earlier.cache_control = {...ephemeral};
         latest.cache_control = {...ephemeral};
     }
+    // Preserve all existing checkpoints. Add sharing only when a slot remains;
+    // tools + system + two history checkpoints already consume the four slots.
+    const checkpointCount = tools.filter((tool:any)=>tool.cache_control).length
+        + system.filter(block=>block.cache_control).length
+        + stableHistory.filter(block=>block.cache_control).length;
+    if (sharedSystemBlock && !sharedSystemBlock.cache_control && checkpointCount < 4) sharedSystemBlock.cache_control = {...ephemeral};
     const thinking = body.thinking || body.extra_body?.thinking;
     const request: any = {
         model: body.model,
@@ -135,8 +145,15 @@ export function toAnthropicRequest(body: any): any {
 }
 
 export function anthropicUsage(usage: any = {}): any {
-    const input = usage.input_tokens || 0, read = usage.cache_read_input_tokens || 0, write = usage.cache_creation_input_tokens || 0;
-    return {...usage,prompt_tokens:input+read+write,completion_tokens:usage.output_tokens || 0,total_tokens:input+read+write+(usage.output_tokens || 0),prompt_tokens_details:{cached_tokens:read},cache_creation_input_tokens:write};
+    const input = usage.input_tokens || 0, read = usage.cache_read_input_tokens || 0;
+    // This relay's converted responses explicitly expose claude_cache_creation_*
+    // fields and report inclusive input_tokens. Native responses are exclusive.
+    // Never guess from the relative sizes: a large native uncached tail is valid.
+    const relayInclusive = Object.hasOwn(usage, 'claude_cache_creation_5_m_tokens')
+        || Object.hasOwn(usage, 'claude_cache_creation_1_h_tokens');
+    const write = usage.cache_creation_input_tokens ?? ((usage.claude_cache_creation_5_m_tokens || 0) + (usage.claude_cache_creation_1_h_tokens || 0));
+    const prompt = relayInclusive ? input : input + read + write;
+    return {...usage,prompt_tokens:prompt,completion_tokens:usage.output_tokens || 0,total_tokens:prompt+(usage.output_tokens || 0),prompt_tokens_details:{cached_tokens:read},cache_creation_input_tokens:write};
 }
 
 export function fromAnthropicMessage(message: any): any {

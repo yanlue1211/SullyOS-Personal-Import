@@ -1,3 +1,4 @@
+import { newGlobalWorldbook } from '../../utils/worldbookScope';
 import {BUBBLE_SELECTOR_GROUPS,WHITEBOX_SELECTOR_GROUPS,PSYCHE_SELECTOR_GROUPS,WHITEBOX_DESIGN_RULES,WHITEBOX_OPTIONAL_CARD_REFERENCE,WHITEBOX_LAYOUT_REFERENCE,WHITEBOX_SCOPE_REGEX,WHITEBOX_SCOPE_HINT} from '../../utils/chatWhitebox';
 import type {
   BubbleStyle,
@@ -332,7 +333,7 @@ export const installableToWorldbooks = (artifact: CollaborationInstallableArtifa
   const category = typeof payload.category === 'string' && payload.category.trim()
     ? payload.category.trim().slice(0, 50)
     : artifact.title.trim().slice(0, 50) || '协同制作';
-  return parseStandardWorldbook(JSON.stringify({ entries: normalizedEntries }), category, now);
+  return parseStandardWorldbook(JSON.stringify({ entries: normalizedEntries }), category, now).map(newGlobalWorldbook);
 };
 
 /** @deprecated Prefer installableToWorldbooks; retained for older single-entry callers. */

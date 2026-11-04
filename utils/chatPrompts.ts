@@ -330,7 +330,7 @@ export const ChatPrompts = {
         // 刚才一起听途中歌被切了（char 还没重新加入）—— 注入"察觉换歌"提示。
         recentTrackSwitch?: { songName: string; artists: string } | null,
         promptOptions?: PromptBuildOptions,
-    ): Promise<{ stable: string; volatileState: string; recencyTail: string; history: import('./context').ContextMessage[] }> => {
+    ): Promise<{ stable: string; sharedPrefix?: string; volatileState: string; recencyTail: string; history: import('./context').ContextMessage[] }> => {
         // 主动消息的模板是最后一次聊天时打好、到点才渲染的，凡是「打包这一刻」的状态
         // 到触发时都已经过期，一律不烤进模板。见 PromptBuildOptions 的清单。
         const forFirePack = promptOptions?.forFirePack === true;
@@ -367,12 +367,13 @@ export const ChatPrompts = {
         if (!forFirePack && !timelyByWorker && char.timeAwarenessEnabled !== false && config.userHolidays?.enabled) {
             await RealtimeContextManager.getUserHoliday(config, userProfile.name);
         }
-        const context = humanStyle ? await ContextBuilder.buildCharacterContext({
-            char, user: userProfile, history: promptOptions?.history,
+        const hasGlobalBooks = char.mountedWorldbooks?.some(book=>book.globalMount) === true;
+        const context = humanStyle || hasGlobalBooks ? await ContextBuilder.buildCharacterContext({
+            char: humanStyle ? char : {...char,mountedWorldbooks:char.mountedWorldbooks?.filter(book=>book.globalMount)}, user: userProfile, history: promptOptions?.history,
             timeOptions: { worldbookMessages: currentMsgs, userHolidays: config.userHolidays, skipUserHoliday: forFirePack || timelyByWorker },
             layout: { deferVolatile: true },
-        }) : { coreContext: '', history: promptOptions?.history || [] };
-        let baseSystemPrompt = humanStyle ? context.coreContext : MINIMAL_THINKING_PROMPT + buildNaturalChatMemoryContext(char);
+        }) : { coreContext: '', sharedWorldbookPrefix:'', globalWorldbookRemainder:'', history: promptOptions?.history || [] };
+        let baseSystemPrompt = humanStyle ? context.coreContext : (context.sharedWorldbookPrefix || '') + MINIMAL_THINKING_PROMPT + buildNaturalChatMemoryContext(char) + (context.globalWorldbookRemainder || '');
         timings.buildCoreContext = Math.round(performance.now() - coreT0);
 
         // ── 易变状态段（volatileState）──
@@ -1112,7 +1113,14 @@ ${voiceActingGuide()}`;
             .join(' ');
         console.log(`⏱ [buildSystemPrompt] total=${perfTotal}ms | stable=${baseSystemPrompt.length}ch volatile=${volatileState.length}ch | ${timingStr}`);
 
-        return { stable: (promptOptions?.appRules === undefined ? expressionRules + '\n' : '') + (promptOptions?.appRules === undefined ? incomingCallGuide(char) : '') + baseSystemPrompt + (promptOptions?.appRules !== undefined ? '' : VIRTUAL_MEDIA_GUIDE + RECORDING_HISTORY_GUIDE + (usesInnerVoice(char) ? INNER_VOICE_SYSTEM : '') + (humanStyle ? (forFirePack||promptOptions?.responseStatusEnabled===false?PROACTIVE_STATUS_SYSTEM:RESPONSE_STATUS_SYSTEM) : '')), volatileState, recencyTail, history: context.history };
+        const globalPrefix = context.sharedWorldbookPrefix || '';
+        const expressionPrefix = promptOptions?.appRules === undefined ? expressionRules + '\n' : '';
+        const callGuide = promptOptions?.appRules === undefined ? incomingCallGuide(char) : '';
+        const sharedPrefix = globalPrefix && !promptOptions?.appRules ? expressionPrefix + globalPrefix : '';
+        const stableCore = sharedPrefix
+            ? globalPrefix + callGuide + baseSystemPrompt.slice(globalPrefix.length)
+            : callGuide + baseSystemPrompt;
+        return { sharedPrefix, stable: expressionPrefix + stableCore + (promptOptions?.appRules !== undefined ? '' : VIRTUAL_MEDIA_GUIDE + RECORDING_HISTORY_GUIDE + (usesInnerVoice(char) ? INNER_VOICE_SYSTEM : '') + (humanStyle ? (forFirePack||promptOptions?.responseStatusEnabled===false?PROACTIVE_STATUS_SYSTEM:RESPONSE_STATUS_SYSTEM) : '')), volatileState, recencyTail, history: context.history };
     },
 
     // 格式化消息历史

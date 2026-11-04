@@ -1,5 +1,5 @@
 import {afterEach,describe,expect,it,vi} from 'vitest';
-import {anthropicContinuation,fetchLlm,fromAnthropicMessage,installAnthropicFetch,toAnthropicRequest} from './anthropicApi';
+import {anthropicContinuation,anthropicUsage,fetchLlm,fromAnthropicMessage,installAnthropicFetch,toAnthropicRequest} from './anthropicApi';
 import {normalizeLlmBaseUrl} from './llmEndpoint';
 import {normalizeApiConfig} from './apiConfigNormalize';
 import {configFromPreset} from './apiPresetSwitch';
@@ -10,6 +10,15 @@ import {extractApiTokenUsage} from './apiCallLog';
 import {callLlm as sdkCallLlm,extractAssistantMessage} from '@rei-standard/amsg-shared';
 
 const native='https://api.anthropic.com/v1/messages';
+it('normalizes both observed relay accounting dialects without double counting cache reads',()=>{
+ const nativeUsage={input_tokens:6876,cache_read_input_tokens:21080,cache_creation_input_tokens:0,output_tokens:16};
+ const inclusive={input_tokens:27957,cache_read_input_tokens:21081,cache_creation_input_tokens:0,output_tokens:16,claude_cache_creation_5_m_tokens:0,claude_cache_creation_1_h_tokens:0};
+ expect(extractApiTokenUsage({usage:anthropicUsage(nativeUsage)})).toEqual({prompt:27956,completion:16,total:27972,cached:21080,cacheWrite:0});
+ expect(extractApiTokenUsage({usage:anthropicUsage(inclusive)})).toEqual({prompt:27957,completion:16,total:27973,cached:21081,cacheWrite:0});
+ expect(anthropicUsage({input_tokens:3000,cache_read_input_tokens:100,cache_creation_input_tokens:200}).prompt_tokens).toBe(3300);
+ expect(anthropicUsage({input_tokens:3000,claude_cache_creation_5_m_tokens:100,claude_cache_creation_1_h_tokens:200}).cache_creation_input_tokens).toBe(300);
+ expect(inclusive.input_tokens).toBe(27957);
+});
 const message=(content:any[]=[{type:'text',text:'你好'}])=>({type:'message',id:'msg-test',model:'claude-test',role:'assistant',content,stop_reason:'end_turn',usage:{input_tokens:5,output_tokens:7,cache_read_input_tokens:1000,cache_creation_input_tokens:200}});
 const sse=(events:any[],close=true)=>new Response(new ReadableStream<Uint8Array>({start(controller){const encoded=new TextEncoder().encode(events.map(event=>`event: ${event.type}\r\ndata: ${JSON.stringify(event)}\r\n\r\n`).join(''));for(let i=0;i<encoded.length;i+=7)controller.enqueue(encoded.slice(i,i+7));if(close)controller.close();}}),{headers:{'content-type':'text/event-stream'}});
 const originalFetch=globalThis.fetch;

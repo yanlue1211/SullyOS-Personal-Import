@@ -303,7 +303,7 @@ export const ContextBuilder = {
         const wbMounts = new Map<string, { memberNames: string[]; entry: MountedWorldbook }>();
         for (const m of members) {
             for (const wb of (m.mountedWorldbooks || [])) {
-                if (!wb.id) continue;
+                if (!wb.id || (wb.globalMount && wb.disable)) continue;
                 const existing = wbMounts.get(wb.id);
                 if (existing) existing.memberNames.push(m.name);
                 else wbMounts.set(wb.id, { memberNames: [m.name], entry: wb });
@@ -762,8 +762,24 @@ async function resolveCharacterContext(input: CharacterContextInput) {
         (char.mountedWorldbooks || []).filter(book => !groupOptions?.skipWorldbookIds?.has(book.id)),
         history ?? timeOptions?.worldbookMessages ?? [], char.name, user.name,
     );
-    const sections = splitWorldbookSections(entries);
-    const rawCoreContext = await renderCoreContext(
+    // Only newly opted-in global, unconditional and role-independent entries
+    // can move into a shared prefix. Legacy and conditional/depth entries retain
+    // the author's existing placement and activation pipeline.
+    const cacheStable = (entry: typeof entries[number]) => (entry.book.constant ?? !(entry.book.key?.length))
+        && (!entry.book.useProbability || (entry.book.probability ?? 100) >= 100)
+        && entry.position !== 4 && !/{{\s*char\s*}}/i.test(entry.book.content);
+    const globalCandidates = entries.filter(entry => 'globalMount' in entry.book && entry.book.globalMount === true && cacheStable(entry));
+    const armor = entries.filter(entry => entry.position === 0 && String(entry.book.category || '').startsWith('破甲'));
+    // Existing priority worldbooks stay ahead of the new global block, even when
+    // individually mounted. Unstable priority entries opt this request out.
+    const sharedEntries = globalCandidates.length && armor.every(cacheStable)
+        ? [...new Map([...armor,...globalCandidates].map(entry=>[entry.book.id,entry])).values()]
+        : [];
+    sharedEntries.sort((a,b) => Number(!String(a.book.category || '').startsWith('破甲')) - Number(!String(b.book.category || '').startsWith('破甲')) || a.order-b.order || a.book.id.localeCompare(b.book.id));
+    const sharedIds = new Set(sharedEntries.map(entry=>entry.book.id));
+    const sharedWorldbookPrefix = formatWorldbookSection(sharedEntries, '全局世界书 (Global Worldbooks)');
+    const sections = splitWorldbookSections(entries.filter(entry=>!sharedIds.has(entry.book.id)));
+    const rawCoreContext = sharedWorldbookPrefix + await renderCoreContext(
         history === undefined ? sections : { ...sections, atDepth: [] },
         char, user, input.includeDetailedMemories, input.memoryPalaceContext,
         groupOptions, timeOptions, input.layout,
@@ -771,14 +787,17 @@ async function resolveCharacterContext(input: CharacterContextInput) {
     const coreContext = typeof input.instructions === 'function'
         ? input.instructions(rawCoreContext)
         : [rawCoreContext, input.instructions].filter(Boolean).join('\n\n');
-    return { coreContext, sections };
+    const globalWorldbookRemainder = formatWorldbookSection(entries.filter(entry=>'globalMount' in entry.book && entry.book.globalMount && !sharedIds.has(entry.book.id) && entry.position!==4), '全局世界书 · 条件条目');
+    return { coreContext, sections, sharedWorldbookPrefix, globalWorldbookRemainder };
 }
 
 async function buildCharacterContext(input: CharacterContextInput) {
-    const { coreContext, sections } = await resolveCharacterContext(input);
+    const { coreContext, sections, sharedWorldbookPrefix, globalWorldbookRemainder } = await resolveCharacterContext(input);
     const preparedHistory = input.history === undefined ? [] : injectWorldbookDepthEntries(input.history, sections.atDepth);
     return {
         coreContext,
+        sharedWorldbookPrefix,
+        globalWorldbookRemainder,
         history: preparedHistory,
         messages: [{ role: 'system', content: coreContext }, ...preparedHistory],
     };

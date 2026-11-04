@@ -1161,6 +1161,8 @@ export interface WorldbookEntryConfig {
 }
 
 export interface MountedWorldbook extends WorldbookEntryConfig {
+    globalMount?: boolean;
+    personalMount?: boolean;
     id: string;
     title: string;
     content: string;
@@ -1168,6 +1170,8 @@ export interface MountedWorldbook extends WorldbookEntryConfig {
 }
 
 export interface Worldbook extends WorldbookEntryConfig {
+    scope?: 'global' | 'personal';
+    globalEnabled?: boolean;
     id: string;
     title: string;
     content: string; 
@@ -2952,6 +2956,7 @@ export interface CharacterProfile {
   writerPersonaGeneratedAt?: number;
 
   mountedWorldbooks?: MountedWorldbook[];
+  disabledGlobalWorldbookIds?: string[];
 
   /** 角色对用户的私密印象；其中的性格、MBTI 和喜好属于用户，不是角色本人。 */
   impression?: UserImpression;

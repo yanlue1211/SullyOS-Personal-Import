@@ -3531,8 +3531,8 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
         }
         const target = characters.find(item => item.id === targetCharacterId);
         return target
-            ? `世界书「${String(artifact.payload.category || artifact.title)}」的 ${books.length} 条内容已保存并挂载给 ${target.name}`
-            : `世界书已保存到世界书库，共 ${books.length} 条`;
+            ? `世界书「${String(artifact.payload.category || artifact.title)}」的 ${books.length} 条内容已存入全局板块（未开启），并保留本次给 ${target.name} 的个人挂载`
+            : `世界书已保存到全局板块（未开启），共 ${books.length} 条`;
     }, [addCharacter, addCustomTheme, addWorldbook, characters, osTheme, saveAppearancePreset, updateCharacter, updateTheme]);
 
     // hideBeforeMessageId 不在视觉层过滤：用户依旧能往上翻到旧消息，只是 LLM 拉不到。

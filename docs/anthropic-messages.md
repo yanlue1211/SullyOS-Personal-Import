@@ -38,3 +38,9 @@
 官方资料：[TypeScript SDK 浏览器选项](https://platform.claude.com/docs/en/cli-sdks-libraries/sdks/typescript)、[Prompt Caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching)、[Messages 流式事件](https://platform.claude.com/docs/en/build-with-claude/streaming)。
 
 思考参数依据：[官方 Extended thinking 迁移说明](https://platform.claude.com/docs/en/build-with-claude/extended-thinking)。4.7 及后续模型拒绝旧手动预算；4.6 建议改用 adaptive，4.5 及更早模型不能直接改用 adaptive。
+
+## 2026-11-04 实测计数兼容
+
+本次授权中转的实际响应有两种口径：原生形态的 `input_tokens` 不含缓存；含 `claude_cache_creation_5_m_tokens` / `claude_cache_creation_1_h_tokens` 字段的转换形态已经把缓存计入 `input_tokens`。转换器按该显式字段识别此已观测口径，不按大小猜测；原响应字段保留，统一的 `prompt_tokens` 只计算一次缓存。未知渠道仍沿用原生协议口径。
+
+账单对照：37,329 总输入、64 输出，无缓存 $0.150596；普通输入 7,177、缓存读取 30,152、64 输出 $0.042048。27,967 总输入（已包含 21,091 缓存读取）、64 输出 $0.037220。上述金额为用户提供的本渠道账单，不是通用价格承诺。
