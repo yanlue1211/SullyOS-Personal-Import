@@ -22,13 +22,13 @@ beforeEach(()=>{(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;vi.useFakeTime
 });
 afterEach(()=>{vi.useRealTimers();vi.unstubAllGlobals();vi.restoreAllMocks();});
 it('one enable click starts real capture with input hidden, silence submits once, reply completion restarts capture',async()=>{
- const host=document.createElement('div');document.body.append(host);const root=createRoot(host);let enabled=false,playing=false,generating=false;
+ level=0;const host=document.createElement('div');document.body.append(host);const root=createRoot(host);let enabled=false,playing=false,generating=false;
  const send=vi.fn(async()=>{generating=true;render();});
  const render=()=>{const wait=callHandsFreeWaitReason({inCall:true,visible:true,modalOpen:false,generating,playbackActive:playing,manualRecording:false,transcribing:false,draft:''});root.render(<HandsFreeCallControl enabled={enabled} onEnabledChange={v=>{enabled=v;render();}} ready={!wait} waitReason={wait} sessionId="actual-recorder" inputMode="real" apiConfig={{}} onStart={()=>{}} onUtterance={send}/>);};
  await act(async()=>render());await act(async()=>host.querySelector('button')!.click());await act(async()=>{await vi.advanceTimersByTimeAsync(601);});
- expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledOnce();expect(start).toHaveBeenCalledOnce();expect(host.textContent).toContain('正在收音');
- await act(async()=>{await vi.advanceTimersByTimeAsync(600);});level=0;await act(async()=>{await vi.advanceTimersByTimeAsync(1600);});expect(send).toHaveBeenCalledOnce();expect(stopTrack).toHaveBeenCalledOnce();
+ expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledOnce();expect(start).toHaveBeenCalledOnce();expect(host.textContent).toContain('先安静半秒');
+ await act(async()=>{await vi.advanceTimersByTimeAsync(700);});level=.1;await act(async()=>{await vi.advanceTimersByTimeAsync(700);});level=0;await act(async()=>{await vi.advanceTimersByTimeAsync(2500);});expect(send).toHaveBeenCalledOnce();expect(stopTrack).toHaveBeenCalledOnce();
  await act(async()=>{generating=false;playing=true;render();});await act(async()=>{await vi.advanceTimersByTimeAsync(1000);});expect(start).toHaveBeenCalledOnce();
- await act(async()=>{playing=false;render();});await act(async()=>{await vi.advanceTimersByTimeAsync(601);});expect(start).toHaveBeenCalledTimes(2);expect(host.textContent).toContain('正在收音');
+ await act(async()=>{playing=false;render();});await act(async()=>{await vi.advanceTimersByTimeAsync(601);});expect(start).toHaveBeenCalledTimes(2);expect(host.textContent).toContain('先安静半秒');
  await act(async()=>root.unmount());host.remove();
 });

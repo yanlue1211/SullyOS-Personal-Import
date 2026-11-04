@@ -49,3 +49,13 @@ it('voice observations are stored separately when sending a recognized utterance
  vi.mocked(generate).mockResolvedValueOnce('盖好被子。');await moon.send('我盖好了。','声音轻柔。','audio');
  const user=moon.session!.turns.find(t=>t.role==='user');expect(user?.text).toBe('我盖好了。');expect(user?.voiceAnalysis).toBe('声音轻柔。');expect(user?.inputKind).toBe('audio');
 });
+
+it('finishing a hands-free moon turn keeps the feature enabled and forwards visible progress',async()=>{
+ const {handsFree}=await import('../features/yueqi/listen');const finish=vi.fn(),cancel=Object.assign(vi.fn(),{finish});
+ vi.mocked(handsFree).mockResolvedValueOnce(cancel);moon.session!.status='active';moon.session!.runningSince=Date.now();moon.voice=null;
+ moon.setHandsFree(true);await vi.advanceTimersByTimeAsync(801);
+ const options=vi.mocked(handsFree).mock.calls.at(-1)![2]!;
+ options.progress?.({state:'pausing',remainingMs:1200});expect(moon.captureProgress?.state).toBe('pausing');
+ await moon.record();expect(finish).toHaveBeenCalledOnce();expect(cancel).not.toHaveBeenCalled();expect(moon.handsFree).toBe(true);
+ moon.stopListening();expect(moon.captureProgress).toBeUndefined();
+});

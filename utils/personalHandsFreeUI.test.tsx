@@ -29,9 +29,22 @@ it('automatically starts the microphone after response completion, sends one cap
  const initial=vi.mocked(captureSpeechTurn).mock.calls.length;
  await act(async()=>render());await act(async()=>host.querySelector('button')!.click());await act(async()=>{await vi.advanceTimersByTimeAsync(1000);});expect(captureSpeechTurn).toHaveBeenCalledTimes(initial);
  await act(async()=>{ready=true;render();await vi.advanceTimersByTimeAsync(1);});await act(async()=>{await vi.advanceTimersByTimeAsync(601);});
- expect(host.textContent).toContain('正在收音');expect(signal?.aborted).toBe(false);
+ expect(host.textContent).toContain('正在听你说');expect(signal?.aborted).toBe(false);
  await act(async()=>resolveCapture({audio:new Blob(['wav']),duration:2}));expect(send).toHaveBeenCalledOnce();
  await act(async()=>{ready=false;render();});await act(async()=>finishReply());
- await act(async()=>{ready=true;render();});await act(async()=>{await vi.advanceTimersByTimeAsync(601);});expect(captureSpeechTurn).toHaveBeenCalledTimes(initial+2);expect(host.textContent).toContain('正在收音');
+ await act(async()=>{ready=true;render();});await act(async()=>{await vi.advanceTimersByTimeAsync(601);});expect(captureSpeechTurn).toHaveBeenCalledTimes(initial+2);expect(host.textContent).toContain('正在听你说');
+ await act(async()=>root.unmount());host.remove();
+});
+
+it('shows silence countdown and finishes the current turn without disabling hands-free',async()=>{
+ const host=document.createElement('div'),root=createRoot(host);document.body.append(host);
+ let enabled=true,progress:any,complete:(v:any)=>void=()=>{};const finish=vi.fn(()=>complete({audio:new Blob(['wav']),duration:1})),send=vi.fn(async()=>{}),onToggle=vi.fn();
+ vi.mocked(captureSpeechTurn).mockImplementation(async(_ctx,_signal,options)=>{options?.onStarted?.(finish);progress=options?.onProgress;return new Promise(resolve=>complete=resolve);});
+ await act(async()=>root.render(<HandsFreeCallControl enabled={enabled} onEnabledChange={onToggle} ready sessionId="finish" inputMode="real" apiConfig={{}} onStart={()=>{}} onUtterance={send}/>));
+ await act(async()=>{await vi.advanceTimersByTimeAsync(601);});
+ await act(async()=>progress({state:'pausing',remainingMs:1200}));expect(host.textContent).toContain('2 秒后发送');
+ await act(async()=>progress({state:'speaking'}));expect(host.textContent).toContain('听到你在说话');expect(host.textContent).not.toContain('2 秒后发送');
+ await act(async()=>{Array.from(host.querySelectorAll('button')).find(b=>b.textContent==='说完了')!.click();});
+ expect(finish).toHaveBeenCalledOnce();expect(send).toHaveBeenCalledOnce();expect(onToggle).not.toHaveBeenCalled();
  await act(async()=>root.unmount());host.remove();
 });

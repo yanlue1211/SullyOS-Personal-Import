@@ -1,22 +1,12 @@
 import {recordingToWav} from '../chatMedia/recording';
 import {startStt,type SttSession} from '../../../utils/speechToText';
 import type {APIConfig} from '../../../types';
-/** Pure silence gate: short pauses/noise never create API requests. */
-export class SpeechTurnGate {
- private lastVoice=0;private voicedMs=0;private previous=0;private started=0;
- get hasSpeech(){return this.voicedMs>=180;}
- update(rms:number,now:number):'waiting'|'speaking'|'complete'{
-  const delta=this.previous?Math.min(100,Math.max(0,now-this.previous)):0;this.previous=now;
-  if(rms>=.016){if(!this.started)this.started=now;this.lastVoice=now;this.voicedMs+=delta;}
-  if(!this.started)return 'waiting';
-  if(this.voicedMs>=180&&(now-this.lastVoice>=1400||now-this.started>=45_000))return 'complete';
-  if(now-this.lastVoice>1600&&this.voicedMs<180){this.started=0;this.voicedMs=0;return 'waiting';}
-  return 'speaking';
- }
-}
+import {SpeechTurnGate,TURN_PAUSE_MS,captureProgressReporter,type CaptureOptions} from '../audio/speechTurn';
+export {SpeechTurnGate} from '../audio/speechTurn';
 export function abortError(){return new DOMException('已停止免手持','AbortError');}
 /** Match Yueqi's fixed recorder: native encoded capture; the analyser only observes silence. */
-export async function captureSpeechTurn(context:AudioContext|undefined,signal:AbortSignal,options:{manual?:boolean;onStarted?:(stop:()=>void)=>void}={}):Promise<{audio?:Blob;duration:number}>{
+export async function captureSpeechTurn(context:AudioContext|undefined,signal:AbortSignal,options:CaptureOptions={}):Promise<{audio?:Blob;duration:number}>{
+ const report=captureProgressReporter(options.onProgress);
  signal.throwIfAborted();
  if(typeof MediaRecorder==='undefined')throw new Error('当前浏览器不支持稳定录音，请使用原生识别。');
  const stream=await navigator.mediaDevices.getUserMedia({audio:true});
@@ -29,7 +19,7 @@ export async function captureSpeechTurn(context:AudioContext|undefined,signal:Ab
   const done=(error?:unknown,result?:{audio?:Blob;duration:number})=>{if(closed)return;closed=true;signal.removeEventListener('abort',abort);release();parts=[];error?reject(error):resolve(result!);};
   const abort=()=>{done(abortError());if(recorder?.state==='recording')recorder.stop();};
   signal.addEventListener('abort',abort,{once:true});
-  const stop=()=>{if(!closed&&!stopping&&recorder?.state==='recording'){stopping=true;stoppedAt=performance.now();recorder.stop();}};
+  const stop=()=>{if(!closed&&!stopping&&recorder?.state==='recording'){if(options.manual)voiced=true;stopping=true;report({state:'complete'});stoppedAt=performance.now();recorder.stop();}};
   void (async()=>{
    try{
     const mimeType=['audio/webm;codecs=opus','audio/mp4','audio/ogg;codecs=opus'].find(type=>MediaRecorder.isTypeSupported(type));
@@ -49,26 +39,62 @@ export async function captureSpeechTurn(context:AudioContext|undefined,signal:Ab
      source=activeContext.createMediaStreamSource(stream);analyser=activeContext.createAnalyser();analyser.fftSize=2048;source.connect(analyser);samples=new Float32Array(analyser.fftSize);
     }
     if(closed)return;
-    const gate=new SpeechTurnGate();recorder.start();options.onStarted?.(stop);
+    const gate=new SpeechTurnGate();recorder.start();options.onStarted?.(()=>{voiced=true;stop();});if(stopping||closed)return;report({state:options.manual?'speaking':'calibrating'});
     timer=setInterval(()=>{
      if(closed||stopping)return;const now=performance.now();
-     if(analyser&&samples){analyser.getFloatTimeDomainData(samples);let sum=0;for(const sample of samples)sum+=sample*sample;const state=gate.update(Math.sqrt(sum/samples.length),now);if(state==='complete'){voiced=true;stoppedAt=now;stop();return;}}
-     if(now-started>=(options.manual?120_000:30_000)){voiced=gate.hasSpeech;stop();}
+     if(analyser&&samples){analyser.getFloatTimeDomainData(samples);let sum=0;for(const sample of samples)sum+=sample*sample;const state=gate.update(Math.sqrt(sum/samples.length),now);report({state,remainingMs:state==='pausing'?gate.remainingMs:undefined});if(state==='complete'){voiced=true;stoppedAt=now;stop();return;}}
+     if(now-started>=(options.manual||gate.hasSpeech?120_000:30_000)){voiced=gate.hasSpeech;stop();}
     },100);
    }catch(error){done(error);}
   })();
   if(signal.aborted)abort();
  });
 }
-export function captureBrowserSpeech(config:Partial<APIConfig>,language:string,signal:AbortSignal):Promise<string>{
+export function captureBrowserSpeech(config:Partial<APIConfig>,language:string,signal:AbortSignal,options:CaptureOptions={}):Promise<string>{
+ const report=captureProgressReporter(options.onProgress);
  return new Promise((resolve,reject)=>{
-  let text='',session:SttSession|undefined,closed=false,timer:ReturnType<typeof setTimeout>|undefined;
-  const finish=(error?:Error)=>{if(closed)return;closed=true;clearTimeout(timer);signal.removeEventListener('abort',abort);error?reject(error):resolve(text.trim());};
-  const abort=()=>{finish(abortError());session?.stop();};signal.addEventListener('abort',abort,{once:true});
+  let text='',base='',session:SttSession|undefined,closed=false,stopping=false,lastResult=0,generation=0;
+  let timer:ReturnType<typeof setInterval>|undefined,endTimer:ReturnType<typeof setTimeout>|undefined,restart:ReturnType<typeof setTimeout>|undefined;
+  const started=performance.now();
+  const finish=(error?:Error)=>{if(closed)return;closed=true;clearInterval(timer);clearTimeout(endTimer);clearTimeout(restart);signal.removeEventListener('abort',abort);error?reject(error):resolve(text.trim());};
+  const abort=()=>{finish(abortError());session?.stop();};
+  const stop=()=>{if(closed||stopping)return;stopping=true;clearInterval(timer);clearTimeout(restart);report({state:'complete'});endTimer=setTimeout(()=>finish(),1500);if(session)session.stop();else finish();};
+  signal.addEventListener('abort',abort,{once:true});
   if(signal.aborted){abort();return;}
-  void startStt(language,{
-   onPartial:value=>{text=value;clearTimeout(timer);timer=setTimeout(()=>session?.stop(),1400);},
-   onFinal:value=>{text=value;},onEnd:()=>finish(),onError:message=>{if(message==='没听清，再试一次？'){finish();session?.stop();}else if(message){finish(new Error(message));session?.stop();}},
-  },{...config,sttProvider:'browser'} as any).then(value=>{session=value;if(closed)value.stop();}).catch(error=>finish(error));
+  const open=()=>{
+   if(closed||stopping)return;
+   const token=++generation;
+   const combine=(value:string)=>(base+' '+value).trim();
+   void startStt(language,{
+    onPartial:value=>{
+     if(closed||stopping||token!==generation||!value.trim())return;
+     const combined=combine(value);if(combined===text)return;
+     text=combined;lastResult=performance.now();report({state:'speaking'});
+    },
+    onFinal:value=>{if(!closed&&token===generation&&value.trim())text=combine(value);},
+    onEnd:()=>{
+     if(closed||token!==generation)return;
+     session=undefined;
+     // Mobile browsers can end their own recognition session at a short pause.
+     // Keep the same turn and countdown alive so resuming speech can extend it.
+     if(!stopping&&text&&performance.now()-lastResult<TURN_PAUSE_MS){base=text;generation++;restart=setTimeout(open,100);}
+     else finish();
+    },
+    onError:message=>{if(closed||token!==generation)return;if(message==='没听清，再试一次？'){if(!text){finish();session?.stop();}}else if(message){finish(new Error(message));session?.stop();}},
+   },{...config,sttProvider:'browser'} as any).then(value=>{
+    if(closed||stopping||token!==generation){value.stop();return;}
+    session=value;
+    if(timer)return;
+    options.onStarted?.(stop);if(closed||stopping)return;report({state:'waiting'});
+    timer=setInterval(()=>{
+     if(closed||stopping)return;
+     const now=performance.now(),silence=text?now-lastResult:0;
+     if(text&&silence>=TURN_PAUSE_MS){stop();return;}
+     if(text&&silence>=300)report({state:'pausing',remainingMs:TURN_PAUSE_MS-silence});
+     if(now-started>=(text?120_000:30_000))stop();
+    },100);
+   }).catch(error=>{if(token===generation)finish(error);});
+  };
+  open();
  });
 }

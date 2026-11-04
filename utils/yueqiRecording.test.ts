@@ -39,8 +39,8 @@ it('manual capture uses the working chat recorder and conversion without a live 
  expect(recordingToWav).toHaveBeenCalledTimes(1);expect(c.text).toHaveBeenCalledWith('盖好被子了','声音轻柔');expect(stop).toHaveBeenCalledTimes(1);expect(c.end).toHaveBeenCalledTimes(1);
 });
 it('automatic mode observes silence without collecting PCM and finishes after speech',async()=>{
- const c=cb();await handsFree({} as any,c,{audioApi:api});
- await vi.advanceTimersByTimeAsync(500);level=0;await vi.advanceTimersByTimeAsync(1700);await settle();
+ level=0;const c=cb();await handsFree({} as any,c,{audioApi:api});
+ await vi.advanceTimersByTimeAsync(700);level=.1;await vi.advanceTimersByTimeAsync(700);level=0;await vi.advanceTimersByTimeAsync(2500);await settle();
  expect(c.text).toHaveBeenCalledWith('盖好被子了','声音轻柔');expect(stop).toHaveBeenCalledTimes(1);
 });
 it('cancellation before stop discards the recording',async()=>{
