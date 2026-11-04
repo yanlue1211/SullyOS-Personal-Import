@@ -1,5 +1,6 @@
 import { isAnthropicEndpoint, nativeRequestUrl } from './llmEndpoint';
 import { modelRejectsSamplingParams } from './samplingParamCompat';
+import { getAnthropicCacheTtl } from './anthropicCacheTtl';
 
 type Block = Record<string, any>;
 type FetchTransport = typeof fetch & { __sullyAnthropic?: boolean };
@@ -100,10 +101,13 @@ export function toAnthropicRequest(body: any): any {
     // prefix; a dedicated tool checkpoint is useful only when a slot remains.
     // Never move annotations or infer their stability from model-visible text.
     const checkpoints = new Set<Block>();
+    // All explicit checkpoints use the same TTL. Mixing TTLs would require the
+    // 1h breakpoint to precede every 5m breakpoint in actual prompt order.
+    const cacheControl = getAnthropicCacheTtl() === '1h' ? {...ephemeral, ttl: '1h'} : {...ephemeral};
     const checkpoint = (block: Block | undefined) => {
         if (block && checkpoints.size < 4 && !['thinking','redacted_thinking'].includes(block.type)) {
             checkpoints.add(block);
-            block.cache_control = {...ephemeral};
+            block.cache_control = {...cacheControl};
         }
     };
     checkpoint(system.at(-1));
