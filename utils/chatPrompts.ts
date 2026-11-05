@@ -707,6 +707,7 @@ ${humanStyle ? `**TOP 1｜ChatApp 格式（本节最高优先级）**：你是�
    - **主动留意情绪**: 结合谈话内容自然留意对方的感受，需要时试探，不必等ta主动说明；遵守【尊重表达】，不逐项分析标点、消息长短或频繁追问。
    - **当ta真的在害怕时（健康、安全、重大变故——不是玩闹逗你）：先稳，再问清楚，最后才安抚**。你的第一反应不是给解释，是了解具体情况（怎样的痛？什么时候开始？和以前比呢？）。想归因时先过筛子：这个解释和你对ta的了解矛盾吗？ta本来就天天走很多路，就别说"你最近走多了"——张口就来的归因等于告诉ta你根本没在听，比不安抚更伤。ta点名害怕某个具体的病/某件事时，直面它，别用"别乱想"绕开：讲清楚那个东西的特点和ta的情况哪里不一样，用具体的问题帮ta自己排除。ta用事实纠正你时（"我每天都走很多路啊"），立刻放下你的解释、接着了解，不要嘴硬加码——你要稳住的是情绪和分析，不是死守某句说错的话。结论式的安抚放在最后，并且必须基于ta刚刚告诉你的细节（"听你说下来……"），而不是万能的"不要怕，很正常啦"。这条对任何人都成立，不需要ta有什么"容易焦虑"的设定——你的性格只决定你用什么口吻稳住ta（毒舌可以毒舌地稳），不决定要不要稳。
 ` : '每行作为一个聊天气泡。按对话自然回应，无需扮演角色或模仿人类生活。\n'}
+收到用户图片时，自行决定是否值得留念；只有想保存时，在正常回复中附加 \`[[SAVE_PHOTO: 图片消息ID]]\`，可以多条；不保存则省略。只能使用图片旁标明的消息ID，不保存表情包，不声称保存未执行的图片。
 3. **格式要求**:
    - 每行渲染为一个气泡；空格和标点不会拆泡。
    - 【严禁】在输出中包含时间戳、名字前缀或"[角色名]:"。
@@ -1236,7 +1237,7 @@ ${voiceActingGuide()}`;
                          ? m.metadata.visionDescription.trim()
                          : '';
                      if (visionDescription) {
-                         let textPart = `${timeStr} [图片：${visionDescription}]`;
+                         let textPart = `${timeStr} [图片：${visionDescription}]${m.role === 'user' && m.id ? ` [图片消息ID: ${m.id}]` : ''}`;
                          if (index === historySlice.length - 1 && timeGapHint && m.role === 'user') textPart += `\n\n${timeGapHint}`;
                          return { role: m.role, content: textPart.trimStart() };
                      }
@@ -1248,7 +1249,7 @@ ${voiceActingGuide()}`;
                      const hasImageData = typeof m.content === 'string'
                          && (m.content.startsWith('data:') || m.content.startsWith('http') || isBlobRef(m.content));
                      let textPart = hasImageData
-                         ? `${timeStr} [User sent an image]`
+                         ? `${timeStr} [User sent an image]${m.role === 'user' && m.id ? ` [图片消息ID: ${m.id}]` : ''}`
                          : `${timeStr} [User sent an image, but the image data is no longer available]`;
                      if (index === historySlice.length - 1 && timeGapHint && m.role === 'user') textPart += `\n\n${timeGapHint}`;
                      if (!hasImageData) {

@@ -1,3 +1,4 @@
+import { recordProactiveUserActivity } from './proactiveActivity';
 import { reconcileWorldbookMounts } from './worldbookScope';
 import {createMomentsStore} from '../features/moments/schema';
 import {exportMoments,restoreMoments,validateMomentsBackup} from '../features/moments/backup';
@@ -986,6 +987,7 @@ export const DB = {
         // request 成功后事务仍可能回滚。主动消息通知和定时任务销账都必须等提交。
         transaction.oncomplete = () => {
             const newId = request.result as number;
+            recordProactiveUserActivity(msg, timestamp);
             if (msg.metadata?.source === 'story_theater_memory' && msg.metadata.theaterTimestampVersion !== 1) invalidateStoryTimelineRepair(db);
             // 水位线自愈：新消息的自增 id 必然大于既有一切消息 id，也就必然大于水位线
             // （水位线本身是某条旧消息的 id）。出现 newId ≤ 水位线，说明水位与消息
@@ -1034,6 +1036,7 @@ export const DB = {
       };
       tx.oncomplete = () => {
         if (inserted) {
+          recordProactiveUserActivity(msg, msg.timestamp ?? Date.now());
           try {
             for (const key of [`mp_lastMsgId_${msg.charId}`, ...(msg.groupId ? [`mp_lastMsgId_group_${msg.groupId}`] : [])]) {
               if (parseInt(localStorage.getItem(key) || '0', 10) >= savedId) localStorage.removeItem(key);

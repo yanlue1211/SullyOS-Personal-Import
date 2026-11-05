@@ -1,3 +1,5 @@
+import { consumePhotoChoices } from '../utils/photoChoice';
+import { getProactiveUserActivity, isProactiveUserReply } from '../utils/proactiveActivity';
 import { reconcileWorldbookMounts } from '../utils/worldbookScope';
 import { consumeIncomingCallInvites } from '../features/personal/calls/incoming';
 import {SONGWRITING_UPDATED} from '../features/songwriting/model';
@@ -2478,6 +2480,14 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           let friendFeedTask: Awaited<ReturnType<typeof prepareFriendFeedMainTask>>;
           let hintMsgId: number | null = null;
           try {
+              // Read committed interaction, independent of memory high-water marks.
+              const interactionHistory = await DB.getRecentMessagesByCharId(charId, 200, true);
+              const latestUser = [...interactionHistory].reverse().find(isProactiveUserReply);
+              const idleInterval = (char.proactiveConfig?.intervalMinutes || 60) * 60_000;
+              if (latestUser && Date.now() - latestUser.timestamp < idleInterval) {
+                  ProactiveChat.deferForInteraction(charId, latestUser.timestamp);
+                  return;
+              }
               // 1. Calculate time gap
               const recentMsgs = await DB.getRecentMessagesByCharId(charId, 200);
               const lastRealUserMsg = [...recentMsgs].reverse().find(
@@ -2607,6 +2617,11 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                   body: JSON.stringify(reqBody)
               }, 2, 0, { appName: '消息', charId, charName: char.name, purpose: '主动消息' });
 
+              // A reply received while the model was working supersedes this reminder.
+              if (getProactiveUserActivity(charId) > now.getTime()) {
+                  if (hintMsgId != null) await DB.deleteMessage(hintMsgId).catch(() => {});
+                  return;
+              }
               // 5. Process & save response
               let aiContent = stripResponseStatus(data.choices?.[0]?.message?.content || '');
               aiContent = await consumeFriendFeedMainReply(charId, aiContent, [], friendFeedTask?.id);
@@ -2635,6 +2650,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
               aiContent = aiContent.replace(/\s*\[(?:聊天|通话|约会)\]\s*/g, '\n').trim();
 
               aiContent = normalizeProactiveAiContent(aiContent);
+              aiContent = await consumePhotoChoices(aiContent, charId, allMsgs, message => addToast(message, 'info'));
               // Proactive 1.0 is an online chat reply: use the same heart parser
               // before chunking or HTML rendering, never expose raw <心声> tags.
               const proactiveHeart = extractInnerVoice(aiContent);
