@@ -91,17 +91,8 @@ describe('私聊（apps/Chat.tsx）的用户引用', () => {
         expect(source).not.toMatch(/replyTarget\.content\.slice\(0,\s*10\)/);
     });
 
-    it('存相册的聊天上下文对图片/表情消息用占位符', () => {
-        expect(source).not.toContain('${sender}: ${m.content.substring(0, 100)}');
-        expect(source).toMatch(/buildReplySnapshotContent\(m\)[\s\S]{0,120}m\.content\.substring\(0, 100\)/);
-    });
-
-    it('存相册失败不拖垮发消息：saveGalleryImage 被 try 包住', () => {
-        // 输入框在这一步之前已经清空，放任它抛出去就是「图片发着发着没了」
-        const calls = source.match(/DB\.saveGalleryImage\(/g) || [];
-        const guarded = source.match(/try\s*\{\s*await DB\.saveGalleryImage\(/g) || [];
-        expect(guarded.length).toBeGreaterThan(0);
-        expect(calls).toHaveLength(guarded.length);
+    it('用户发图不再自动存相册', () => {
+        expect(source).not.toContain('DB.saveGalleryImage(');
     });
 
     it('拼出来的相册上下文长成「小明: [图片]」', () => {

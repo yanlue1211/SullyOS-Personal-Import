@@ -1,3 +1,4 @@
+import { getProactiveUserActivity, PROACTIVE_ACTIVITY_EVENT } from './proactiveActivity';
 /**
  * Proactive Chat - schedule characters to send messages at regular intervals.
  *
@@ -210,7 +211,7 @@ function removeFailStreak(charId: string) {
 }
 
 function getLastFireTime(charId: string): number {
-  return loadLastFireTimes()[charId] || 0;
+  return Math.max(loadLastFireTimes()[charId] || 0, getProactiveUserActivity(charId));
 }
 
 function setLastFireTime(charId: string, ts: number) {
@@ -267,7 +268,7 @@ function handleSWMessage(e: MessageEvent) {
   // messages back-to-back.
   const now = Date.now();
   const lastFire = getLastFireTime(charId);
-  const minGap = Math.min(60_000, schedule.intervalMs * 0.1);
+  const minGap = schedule.intervalMs;
   if (lastFire > 0 && now - lastFire < minGap) {
     console.log(`[ProactiveChat] Ignoring duplicate trigger for ${charId} (fired ${Math.round((now - lastFire) / 1000)}s ago)`);
     return;
@@ -371,11 +372,13 @@ function attachListeners() {
   document.addEventListener('visibilitychange', visibilityListener);
   focusListener = handleFocus;
   window.addEventListener('focus', focusListener);
+  window.addEventListener(PROACTIVE_ACTIVITY_EVENT, schedulePreciseTimer);
   startMainThreadTimer();
   schedulePreciseTimer();
 }
 
 function detachListeners() {
+  window.removeEventListener(PROACTIVE_ACTIVITY_EVENT, schedulePreciseTimer);
   if (swListener) {
     navigator.serviceWorker?.removeEventListener('message', swListener);
     swListener = null;
@@ -476,6 +479,13 @@ export const ProactiveChat = {
     ProactiveChat.stop(charId);
     console.warn(`[ProactiveChat] 连续 ${streak} 次失败，已自动暂停主动消息: ${charId}`);
     return { tripped: true, streak };
+  },
+
+  /** Rebase a stale timer using persisted interaction, including pre-upgrade history. */
+  deferForInteraction(charId: string, timestamp: number) {
+    const userTime = Math.min(timestamp, Date.now());
+    setLastFireTime(charId, userTime);
+    schedulePreciseTimer();
   },
 
   getFailStreak(charId: string): number {

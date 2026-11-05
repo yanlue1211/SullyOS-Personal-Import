@@ -1,3 +1,4 @@
+import { consumePhotoChoices } from './photoChoice';
 import { resolveEmojiForSend } from './emojiNameResolver';
 import { consumeIncomingCallInvites } from '../features/personal/calls/incoming';
 import { consumeWorkroomActions } from '../features/workroom/bridge';
@@ -291,6 +292,7 @@ async function xhsReplyComment(conf: { mcpUrl: string }, feedId: string, xsecTok
  * discriminator, 其他字段是 flat 而不是 nested payload (减少 push body 嵌套).
  */
 export type PostProcessDirective =
+    | { type: 'save_photo'; messageId: number }
     | { type: 'friend_feed_reply'; action: unknown }
     | { type: 'home_visit_reply'; action: unknown }
     | { type: 'poke' }
@@ -332,6 +334,9 @@ function reconstructDirectiveTags(directives: PostProcessDirective[] | undefined
     const parts: string[] = [];
     for (const d of directives) {
         switch (d.type) {
+            case 'save_photo':
+                if (Number.isSafeInteger(d.messageId) && d.messageId > 0) parts.push(`[[SAVE_PHOTO: ${d.messageId}]]`);
+                break;
             case 'friend_feed_reply':
             case 'home_visit_reply':
                 // Consumed through the structured side-action path, never reconstructed into a bubble.
@@ -802,6 +807,7 @@ export async function applyAssistantPostProcessing(
     aiContent = await replyStep(() => consumeWorkroomActions(heart.text, char.id, message => addToast('造物间操作未完成：'+message,'info'), ctx.replyRun?.signal));
     aiContent = await replyStep(() => consumeIncomingCallInvites(aiContent, char.id, messageTimestamp));
     aiContent = normalizeAiContent(aiContent);
+    aiContent = await replyStep(() => consumePhotoChoices(aiContent, char.id, contextMsgs, message => addToast(message, 'info')));
     // 先于 lead-in / 二轮渲染消费：否则控制标签会作为普通气泡短暂闪给用户看。
     aiContent = await replyStep(async () => consumeScheduleChanges(aiContent, utteranceAt));
     // 在任何 lead-in/二轮渲染之前先剥掉仿卡片文本，防止它被 chunkText 拆成灰色普通气泡。
@@ -939,6 +945,7 @@ export async function applyAssistantPostProcessing(
         const firstQuoteMatch = rawContent.match(QUOTE_RE_DOUBLE) || rawContent.match(QUOTE_RE_SINGLE) || rawContent.match(REPLY_RE_CN) || rawContent.match(QUOTE_RE_NL);
         if (firstQuoteMatch) aiReplyTarget = resolveQuoteTarget(firstQuoteMatch[1]);
 
+        rawContent = await replyStep(() => consumePhotoChoices(rawContent, char.id, contextMsgs, message => addToast(message, 'info')));
         let content = ChatParser.sanitize(rawContent, { keepCitations: true });
         content = content.replace(/\[\[INNER_STATE:\s*[\s\S]*?\]\]/g, '').trim();
         if (!content) return;

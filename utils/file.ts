@@ -120,3 +120,37 @@ export const processImageToBlob = async (file: File, options?: { maxWidth?: numb
         ));
     } finally { URL.revokeObjectURL(url); }
 };
+
+export const CHAT_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+/** Keep small images byte-for-byte; reduce oversized still images only as far as needed. */
+export async function processChatImage(file: File): Promise<Blob> {
+    if (!file.type.startsWith('image/')) throw new Error('请上传图片文件');
+    if (file.size < CHAT_IMAGE_MAX_BYTES) return file;
+    if (file.type === 'image/gif') throw new Error('动图超过5MB，请手动压缩后发送，以保留动画');
+    const url = URL.createObjectURL(file);
+    try {
+        const image = new Image();
+        await new Promise<void>((resolve, reject) => {
+            image.onload = () => resolve();
+            image.onerror = () => reject(new Error('图片加载失败，请手动压缩后发送'));
+            image.src = url;
+        });
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        if (!context) throw new Error('图片处理不可用，请手动压缩后发送');
+        // Preserve resolution first. Never force long screenshots down to a fixed 600px edge.
+        for (const scale of [1, 0.9, 0.8, 0.7]) {
+            canvas.width = Math.max(1, Math.round(image.width * scale));
+            canvas.height = Math.max(1, Math.round(image.height * scale));
+            context.fillStyle = '#fff';
+            context.fillRect(0, 0, canvas.width, canvas.height);
+            context.drawImage(image, 0, 0, canvas.width, canvas.height);
+            for (const quality of [0.95, 0.9, 0.85]) {
+                const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/jpeg', quality));
+                if (!blob) throw new Error('图片压缩失败，请手动压缩后发送');
+                if (blob.size < CHAT_IMAGE_MAX_BYTES) return blob;
+            }
+        }
+        throw new Error('保留清晰度时无法压至5MB以下，请手动压缩后发送');
+    } finally { URL.revokeObjectURL(url); }
+}
