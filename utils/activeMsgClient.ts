@@ -2,7 +2,7 @@ import { usesHumanStyle, usesInnerVoice, INNER_VOICE_FORMAT_REMINDER, CHAT_EXPRE
 import { buildChatOutputStylePrompt, readChatTranslationConfig } from './chatOutputStylePrompt';
 import { buildReproductionTask, DIAGNOSTIC_NAMESPACE, diagnosticRunId, type DiagnosticEvent } from './amsgReproduction';
 import { resolveDialogueApi } from './characterApi';
-import { isAnthropicEndpoint } from './llmEndpoint';
+import { isAnthropicEndpoint, isGeminiEndpoint } from './llmEndpoint';
 import { ackStoppedReplyReceipts, stoppedReplyStateEntries } from './amsgStoppedReplyClient';
 import { loadCharacterContextMessages } from './chatContextRange';
 import { ReiClient, classifyClientStateWrite } from '@rei-standard/amsg-client';
@@ -635,15 +635,17 @@ export const isLlmCredentialsReady = async (): Promise<boolean> => {
 };
 
 export const requireAnthropicWorker = async (urls: string[]): Promise<void> => {
-  if (!urls.some(isAnthropicEndpoint)) return;
+  const needsGemini = urls.some(isGeminiEndpoint), needsAnthropic = urls.some(isAnthropicEndpoint);
+  if (!needsGemini && !needsAnthropic) return;
+  const ready = (c: ActiveMsg2GlobalConfig) => (!needsAnthropic || (c.anthropicMessagesSupported === true && c.anthropicMessagesWorkerUrl === c.workerUrl)) && (!needsGemini || (c.geminiNativeSupported === true && c.geminiNativeWorkerUrl === c.workerUrl));
   let config = await ActiveMsgStore.getGlobalConfig();
-  if (config.anthropicMessagesSupported === true && config.anthropicMessagesWorkerUrl === config.workerUrl) return;
+  if (ready(config)) return;
   // An automatic deployment can finish after the startup probe. Recheck the
   // current Worker instead of making users reconnect to clear a stale negative.
   await ActiveMsgClient.probeInstantChatSupportDetailed({ timeoutMs: 5000 });
   config = await ActiveMsgStore.getGlobalConfig();
-  if (config.anthropicMessagesSupported !== true || config.anthropicMessagesWorkerUrl !== config.workerUrl) {
-    throw new Error('主动消息 2.0 的 Anthropic 支持尚未就绪，已自动检查。请稍后重试；若持续失败，请检查网络或 Worker 自动更新设置。');
+  if (!ready(config)) {
+    throw new Error(`主动消息 2.0 的 ${needsGemini ? 'Gemini 原生' : 'Anthropic'} 支持尚未就绪，已自动检查。请稍后重试；若持续失败，请检查网络或 Worker 自动更新设置。`);
   }
 };
 
@@ -1859,7 +1861,7 @@ const rememberWorkerBundleVersion = async (body: any, checkedWorkerUrl?: string)
   try {
     const current = await ActiveMsgStore.getGlobalConfig();
     if (checkedWorkerUrl && current.workerUrl !== checkedWorkerUrl) return;
-    await ActiveMsgStore.saveGlobalConfig({ workerBundleVersion: deployed, anthropicMessagesSupported: body?.data?.anthropicMessages === true, anthropicMessagesWorkerUrl: checkedWorkerUrl || current.workerUrl });
+    await ActiveMsgStore.saveGlobalConfig({ workerBundleVersion: deployed, geminiNativeSupported: body?.data?.geminiNative === true, geminiNativeWorkerUrl: checkedWorkerUrl || current.workerUrl, anthropicMessagesSupported: body?.data?.anthropicMessages === true, anthropicMessagesWorkerUrl: checkedWorkerUrl || current.workerUrl });
   } catch (error) {
     console.warn('[AmsgInstantChat] Worker 的 bundle 版本没存下来（下次探测再补）', error);
   }
@@ -2446,6 +2448,7 @@ export const ActiveMsgClient = {
     const {
       instantChatSupported: _staleSupported,
       workerBundleVersion: _staleBundleVersion,
+      geminiNativeSupported: _staleGeminiSupported, geminiNativeWorkerUrl: _staleGeminiUrl,
       anthropicMessagesSupported: _staleAnthropicSupported,
       anthropicMessagesWorkerUrl: _staleAnthropicWorkerUrl,
       ...handshakeConfig

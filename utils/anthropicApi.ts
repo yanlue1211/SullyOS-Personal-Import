@@ -1,4 +1,5 @@
-import { isAnthropicEndpoint, nativeRequestUrl } from './llmEndpoint';
+import { isAnthropicEndpoint, isGeminiEndpoint, nativeRequestUrl } from './llmEndpoint';
+import { fetchGemini, geminiContinuation } from './geminiApi';
 import { modelRejectsSamplingParams } from './samplingParamCompat';
 import { getAnthropicCacheTtl } from './anthropicCacheTtl';
 
@@ -9,6 +10,7 @@ const finishReason = (reason: string | null) => reason === 'tool_use' ? 'tool_ca
 
 /** Preserve signed blocks and their original ordering throughout local tool loops. */
 export const anthropicContinuation = (message: any): Record<string, any> => ({
+    ...geminiContinuation(message),
     ...(Array.isArray(message?.anthropic_content) ? {anthropic_content:message.anthropic_content} : {}),
     ...(Array.isArray(message?.anthropic_thinking) ? {anthropic_thinking:message.anthropic_thinking} : {}),
 });
@@ -240,6 +242,7 @@ function convertAnthropicStream(response: Response): Response {
 export async function fetchLlm(resource: RequestInfo | URL, init?: RequestInit, transport: typeof fetch = globalThis.fetch, browser = typeof window !== 'undefined'): Promise<Response> {
     if ((transport as FetchTransport).__sullyAnthropic) return transport(resource,init);
     const inputUrl = typeof resource === 'string' ? resource : resource instanceof URL ? resource.href : resource.url;
+    if (isGeminiEndpoint(inputUrl)) return fetchGemini(resource, init, transport);
     if (!isAnthropicEndpoint(inputUrl)) return transport(resource,init);
     const request = resource instanceof Request ? resource : undefined;
     const method=(init?.method || request?.method || 'GET').toUpperCase();

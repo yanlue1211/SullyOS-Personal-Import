@@ -15,8 +15,8 @@ export default function DialogueApiFields({ value, onChange, fetchModels, isLoad
  const setLocalTemperature = (temperature: number) => onChange({ temperature });
  return <div className="space-y-4">
                 <label className="block text-xs text-slate-500">接口类型
-                    <select aria-label="接口类型" value={llmApiType(value)} onChange={e => onChange({apiType:e.target.value as 'openai'|'anthropic'})} className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-2.5 bg-white/50">
-                        <option value="openai">OpenAI 兼容</option><option value="anthropic">Anthropic 原生 Messages</option>
+                    <select aria-label="接口类型" value={llmApiType(value)} onChange={e => onChange({apiType:e.target.value as 'openai'|'anthropic'|'gemini'})} className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-2.5 bg-white/50">
+                        <option value="openai">OpenAI 兼容</option><option value="anthropic">Anthropic 原生 Messages</option><option value="gemini">Gemini 原生（自动缓存）</option>
                     </select>
                 </label>
                 {llmApiType(value) === 'anthropic' && <div className="rounded-xl border border-slate-200/60 bg-white/40 px-3 py-3 space-y-2">
@@ -31,6 +31,7 @@ export default function DialogueApiFields({ value, onChange, fetchModels, isLoad
                     </label>
                     <p className="text-[10px] text-slate-400 leading-relaxed">这是本设备所有 Anthropic 原生请求共用的时效设置；不影响 OpenAI 兼容接口。5 分钟写入约为正常输入费的 1.25 倍，1 小时写入约为 2 倍，缓存命中读取通常为 0.1 倍。时效从请求开始计算，生成时间也计入。中转站须支持 ttl=1h，否则请切回 5 分钟。修改后从下一次请求生效。</p>
                 </div>}
+                {llmApiType(value) === 'gemini' && <p className="text-[10px] text-slate-400 leading-relaxed">使用 Gemini 原生接口。填写服务商根地址或 /v1beta 地址，保存时自动处理。缓存由服务端自动决定，无需设置断点或时效；中转须支持原生端点和浏览器跨域。</p>}
                 <div className="group">
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block pl-1">URL</label>
                     <input type="text" value={localUrl} onChange={(e) => setLocalUrl(e.target.value)} placeholder="https://..." className="w-full bg-white/50 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono focus:bg-white transition-all" />

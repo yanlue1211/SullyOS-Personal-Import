@@ -300,7 +300,7 @@ export interface AudioApiConfig {
 }
 
 export interface APIConfig {
-  apiType?: 'openai' | 'anthropic';
+  apiType?: 'openai' | 'anthropic' | 'gemini';
   /** 私聊单次生成上限；未设置沿用 8000，不改变历史范围。 */
   maxTokens?: number;
   baseUrl: string;
@@ -365,6 +365,8 @@ export interface ActiveMsg2GlobalConfig {
   /** Confirmed by /config-check, scoped to the Worker URL that was checked. */
   anthropicMessagesSupported?: boolean;
   anthropicMessagesWorkerUrl?: string;
+  geminiNativeSupported?: boolean;
+  geminiNativeWorkerUrl?: string;
   userId: string;
   /** 单用户 Cloudflare Worker 地址，例如 https://amsg.your-worker.dev */
   workerUrl: string;

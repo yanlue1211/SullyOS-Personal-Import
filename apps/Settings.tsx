@@ -4189,7 +4189,7 @@ const Settings: React.FC = () => {
               </div>
               <div className="space-y-1.5">
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">URL</label>
-                  <select aria-label="预设接口类型" value={editPresetApiType} onChange={e => setEditPresetApiType(e.target.value as LlmApiType)} className="w-full bg-slate-100 rounded-xl px-4 py-2.5 text-sm"><option value="openai">OpenAI 兼容</option><option value="anthropic">Anthropic 原生 Messages</option></select>
+                  <select aria-label="预设接口类型" value={editPresetApiType} onChange={e => setEditPresetApiType(e.target.value as LlmApiType)} className="w-full bg-slate-100 rounded-xl px-4 py-2.5 text-sm"><option value="openai">OpenAI 兼容</option><option value="anthropic">Anthropic 原生 Messages</option><option value="gemini">Gemini 原生（自动缓存）</option></select>
                   <input value={editPresetUrl} onChange={e => setEditPresetUrl(e.target.value)} placeholder="https://..." className="w-full bg-slate-100 rounded-xl px-4 py-2.5 text-sm font-mono focus:outline-primary" />
               </div>
               <div className="space-y-1.5">
