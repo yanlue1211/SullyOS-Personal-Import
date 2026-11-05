@@ -1,7 +1,7 @@
 import {recordingToWav} from '../chatMedia/recording';
 import {startStt,type SttSession} from '../../../utils/speechToText';
 import type {APIConfig} from '../../../types';
-import {SpeechTurnGate,TURN_PAUSE_MS,captureProgressReporter,type CaptureOptions} from '../audio/speechTurn';
+import {SpeechTurnGate,SpeechAnalysisClock,waveformRms,TURN_PAUSE_MS,captureProgressReporter,type CaptureOptions} from '../audio/speechTurn';
 export {SpeechTurnGate} from '../audio/speechTurn';
 export function abortError(){return new DOMException('已停止免手持','AbortError');}
 /** Match Yueqi's fixed recorder: native encoded capture; the analyser only observes silence. */
@@ -14,8 +14,9 @@ export async function captureSpeechTurn(context:AudioContext|undefined,signal:Ab
  return new Promise((resolve,reject)=>{
   let recorder:MediaRecorder|undefined,source:MediaStreamAudioSourceNode|undefined,ownedContext:AudioContext|undefined;
   let timer:ReturnType<typeof setInterval>|undefined,closed=false,stopping=false,released=false,parts:Blob[]=[],voiced=false;
+  let analyser:AnalyserNode|undefined,muted:GainNode|undefined,activeContext:AudioContext|undefined;
   const started=performance.now();let stoppedAt=started;
-  const release=()=>{if(released)return;released=true;clearInterval(timer);source?.disconnect();stream.getTracks().forEach(track=>track.stop());void ownedContext?.close().catch(()=>{});};
+  const release=()=>{if(released)return;released=true;clearInterval(timer);source?.disconnect();analyser?.disconnect();muted?.disconnect();stream.getTracks().forEach(track=>track.stop());void ownedContext?.close().catch(()=>{});};
   const done=(error?:unknown,result?:{audio?:Blob;duration:number})=>{if(closed)return;closed=true;signal.removeEventListener('abort',abort);release();parts=[];error?reject(error):resolve(result!);};
   const abort=()=>{done(abortError());if(recorder?.state==='recording')recorder.stop();};
   signal.addEventListener('abort',abort,{once:true});
@@ -33,17 +34,33 @@ export async function captureSpeechTurn(context:AudioContext|undefined,signal:Ab
      if(!blob.size){done(new Error('录音太短，请再说一次。'));return;}
      try{const audio=await recordingToWav(blob);signal.throwIfAborted();done(undefined,{audio,duration:(stoppedAt-started)/1000});}catch(error){done(error);}
     };
-    let analyser:AnalyserNode|undefined,samples:Float32Array<ArrayBuffer>|undefined;
+    let samples:Float32Array<ArrayBuffer>|undefined;
     if(!options.manual){
-     const activeContext=context||(ownedContext=new AudioContext());await activeContext.resume();if(closed)return;
-     source=activeContext.createMediaStreamSource(stream);analyser=activeContext.createAnalyser();analyser.fftSize=2048;source.connect(analyser);samples=new Float32Array(analyser.fftSize);
+     activeContext=context||(ownedContext=new AudioContext());await activeContext.resume();if(closed)return;
+     source=activeContext.createMediaStreamSource(stream);analyser=activeContext.createAnalyser();analyser.fftSize=2048;source.connect(analyser);muted=activeContext.createGain();muted.gain.value=0;analyser.connect(muted);muted.connect(activeContext.destination);samples=new Float32Array(analyser.fftSize);
     }
     if(closed)return;
-    const gate=new SpeechTurnGate();recorder.start();options.onStarted?.(()=>{voiced=true;stop();});if(stopping||closed)return;report({state:options.manual?'speaking':'calibrating'});
+    const gate=new SpeechTurnGate(),clock=new SpeechAnalysisClock();
+    let recoveryAt=-Infinity,recoveries=0,resuming=false,analysisProblem=false;
+    recorder.start();options.onStarted?.(()=>{voiced=true;stop();});if(stopping||closed)return;report({state:options.manual?'speaking':'calibrating'});
     timer=setInterval(()=>{
      if(closed||stopping)return;const now=performance.now();
-     if(analyser&&samples){analyser.getFloatTimeDomainData(samples);let sum=0;for(const sample of samples)sum+=sample*sample;const state=gate.update(Math.sqrt(sum/samples.length),now);report({state,remainingMs:state==='pausing'?gate.remainingMs:undefined});if(state==='complete'){voiced=true;stoppedAt=now;stop();return;}}
-     if(now-started>=(options.manual||gate.hasSpeech?120_000:30_000)){voiced=gate.hasSpeech;stop();}
+     if(analyser&&samples&&activeContext){
+      if(!clock.healthy(activeContext.currentTime,activeContext.state,now)){
+       analysisProblem=true;gate.hold(now);report({state:'interrupted'});
+       if(!resuming&&recoveries<3&&now-recoveryAt>=1000){
+        recoveryAt=now;recoveries++;resuming=true;
+        void Promise.resolve().then(()=>{if(!closed)return activeContext!.resume();}).catch(()=>{}).finally(()=>{resuming=false;});
+       }
+      }else{
+       analysisProblem=false;
+       analyser.getFloatTimeDomainData(samples);const state=gate.update(waveformRms(samples),now);
+       report({state,remainingMs:state==='pausing'?gate.remainingMs:undefined});
+       if(state==='complete'){voiced=true;stop();return;}
+      }
+     }
+     if(now-started>=(options.manual||gate.hasSpeech||analysisProblem?120_000:30_000)){voiced=gate.hasSpeech||analysisProblem;stop();}
+
     },100);
    }catch(error){done(error);}
   })();
@@ -68,8 +85,9 @@ export function captureBrowserSpeech(config:Partial<APIConfig>,language:string,s
    void startStt(language,{
     onPartial:value=>{
      if(closed||stopping||token!==generation||!value.trim())return;
-     const combined=combine(value);if(combined===text)return;
-     text=combined;lastResult=performance.now();report({state:'speaking'});
+     const combined=combine(value),activity=(value:string)=>value.replace(/[\s\p{P}\p{S}]/gu,'');
+     const changed=activity(combined)!==activity(text);text=combined;if(!changed)return;
+     lastResult=performance.now();report({state:'speaking'});
     },
     onFinal:value=>{if(!closed&&token===generation&&value.trim())text=combine(value);},
     onEnd:()=>{

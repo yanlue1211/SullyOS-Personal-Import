@@ -43,6 +43,7 @@ it('shows silence countdown and finishes the current turn without disabling hand
  await act(async()=>root.render(<HandsFreeCallControl enabled={enabled} onEnabledChange={onToggle} ready sessionId="finish" inputMode="real" apiConfig={{}} onStart={()=>{}} onUtterance={send}/>));
  await act(async()=>{await vi.advanceTimersByTimeAsync(601);});
  await act(async()=>progress({state:'pausing',remainingMs:1200}));expect(host.textContent).toContain('2 秒后发送');
+ await act(async()=>progress({state:'interrupted'}));expect(host.textContent).toContain('停顿检测暂停');expect(host.textContent).toContain('说完了');
  await act(async()=>progress({state:'speaking'}));expect(host.textContent).toContain('听到你在说话');expect(host.textContent).not.toContain('2 秒后发送');
  await act(async()=>{Array.from(host.querySelectorAll('button')).find(b=>b.textContent==='说完了')!.click();});
  expect(finish).toHaveBeenCalledOnce();expect(send).toHaveBeenCalledOnce();expect(onToggle).not.toHaveBeenCalled();
