@@ -70,3 +70,10 @@ it('does not feed stale loud samples into the gate when resume fails; explicit f
  await vi.advanceTimersByTimeAsync(6000);expect(recordingToWav).not.toHaveBeenCalled();expect(progress).toHaveBeenLastCalledWith({state:'interrupted'});expect(context.resume).toHaveBeenCalledTimes(4);
  finish();expect((await result).audio).toBeDefined();expect(tracks).toHaveBeenCalledOnce();
 });
+
+it('a recovered context returns to silent idle handling without submitting empty audio',async()=>{
+ const context=new Context();let paused=false;Object.defineProperty(context,'state',{get:()=>paused?'suspended':'running'});Object.defineProperty(context,'currentTime',{get:()=>paused?0:Date.now()/1000});
+ context.resume=vi.fn(async()=>{paused=false;});level=0;
+ const result=captureSpeechTurn(context as any,new AbortController().signal);await flush();await vi.advanceTimersByTimeAsync(700);paused=true;await vi.advanceTimersByTimeAsync(100);await vi.advanceTimersByTimeAsync(30000);
+ expect(await result).toEqual({duration:0});expect(recordingToWav).not.toHaveBeenCalled();expect(tracks).toHaveBeenCalledOnce();
+});

@@ -53,6 +53,7 @@ export async function captureSpeechTurn(context:AudioContext|undefined,signal:Ab
         void Promise.resolve().then(()=>{if(!closed)return activeContext!.resume();}).catch(()=>{}).finally(()=>{resuming=false;});
        }
       }else{
+       analysisProblem=false;
        analyser.getFloatTimeDomainData(samples);const state=gate.update(waveformRms(samples),now);
        report({state,remainingMs:state==='pausing'?gate.remainingMs:undefined});
        if(state==='complete'){voiced=true;stop();return;}
