@@ -70,7 +70,7 @@ vi.mock('./activeMsgStore', () => ({
   },
 }));
 
-import { ActiveMsgClient } from './activeMsgClient';
+import { ActiveMsgClient, requireAnthropicWorker } from './activeMsgClient';
 import {
   AMSG_INSTANT_CHAT_PENDING_LS_KEY,
   AMSG_INSTANT_CHAT_STAGED_NOTICES_LS_KEY,
@@ -1332,16 +1332,35 @@ describe('探测顺手记下 bundle 版本（workerBundleVersion）', () => {
 
   beforeEach(() => { (ActiveMsgStore.saveGlobalConfig as any).mockClear(); });
 
+  it('records Gemini native support only for the checked Worker URL', async () => {
+    configCheck(200, { instantTick: true, workerVersion: '2099-01-01', geminiNative: true });
+    await ActiveMsgClient.probeInstantChatSupportDetailed();
+    expect(versionWrites()).toContainEqual(expect.objectContaining({ geminiNativeSupported: true, geminiNativeWorkerUrl: (await ActiveMsgStore.getGlobalConfig()).workerUrl }));
+  });
+
+  it('blocks an old Worker and reuses Gemini capability only for the current Worker URL', async () => {
+    const probe = vi.spyOn(ActiveMsgClient, 'probeInstantChatSupportDetailed').mockResolvedValue({} as any);
+    await expect(requireAnthropicWorker(['https://relay.test/v1beta/models'])).rejects.toThrow('Gemini 原生');
+    expect(probe).toHaveBeenCalledTimes(1);
+    storeState.config.geminiNativeSupported = true;
+    storeState.config.geminiNativeWorkerUrl = storeState.config.workerUrl;
+    await expect(requireAnthropicWorker(['https://relay.test/v1beta/models'])).resolves.toBeUndefined();
+    expect(probe).toHaveBeenCalledTimes(1);
+    storeState.config.geminiNativeWorkerUrl = 'https://different-worker.test';
+    await expect(requireAnthropicWorker(['https://relay.test/v1beta/models'])).rejects.toThrow('Gemini 原生');
+    delete storeState.config.geminiNativeSupported; delete storeState.config.geminiNativeWorkerUrl;
+  });
+
   it('probeInstantChatSupportDetailed：问到答案就记版本', async () => {
     configCheck(200, { instantTick: true, workerVersion: '2099-01-01', anthropicMessages: true });
     await ActiveMsgClient.probeInstantChatSupportDetailed();
-    expect(versionWrites()).toContainEqual({ workerBundleVersion: '2099-01-01', anthropicMessagesSupported: true, anthropicMessagesWorkerUrl: (await ActiveMsgStore.getGlobalConfig()).workerUrl });
+    expect(versionWrites()).toContainEqual({ workerBundleVersion: '2099-01-01', anthropicMessagesSupported: true, anthropicMessagesWorkerUrl: (await ActiveMsgStore.getGlobalConfig()).workerUrl, geminiNativeSupported: false, geminiNativeWorkerUrl: (await ActiveMsgStore.getGlobalConfig()).workerUrl });
   });
 
   it('probeWorkerVersion：老 bundle 不报版本 → 记 null（问到了，确实旧）', async () => {
     configCheck(200, { instantTick: true });
     await ActiveMsgClient.probeWorkerVersion();
-    expect(versionWrites()).toContainEqual({ workerBundleVersion: null, anthropicMessagesSupported: false, anthropicMessagesWorkerUrl: (await ActiveMsgStore.getGlobalConfig()).workerUrl });
+    expect(versionWrites()).toContainEqual({ workerBundleVersion: null, anthropicMessagesSupported: false, anthropicMessagesWorkerUrl: (await ActiveMsgStore.getGlobalConfig()).workerUrl, geminiNativeSupported: false, geminiNativeWorkerUrl: (await ActiveMsgStore.getGlobalConfig()).workerUrl });
   });
 
   it('没问到答案（5xx）→ 一个字都不写，存量保持原样', async () => {

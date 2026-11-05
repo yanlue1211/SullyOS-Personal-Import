@@ -56,6 +56,9 @@ jobs:
       - name: Verify photo choices and proactive inactivity
         run: pnpm vitest run utils/photoChoice.test.ts utils/chatImageSize.test.ts utils/proactiveIdle.test.ts utils/proactiveChat.test.ts worker/amsg/src/classifier.test.ts worker/amsg/src/agentic.test.ts
 
+      - name: Verify Gemini native transport and API configuration
+        run: pnpm vitest run utils/geminiApi.test.ts utils/characterApiPanel.test.ts utils/characterApi.test.ts utils/apiPresetSwitch.test.ts utils/amsgLlmCredentials.test.ts utils/amsgInstantChat.test.ts
+
       - name: Build
         run: pnpm run build
 

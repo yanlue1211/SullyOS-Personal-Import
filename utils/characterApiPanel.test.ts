@@ -34,6 +34,21 @@ beforeEach(async () => {
 afterEach(() => { act(() => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
 
 describe('character API draft transaction', () => {
+  it('selects Gemini, tests the native endpoint and saves only the role draft', async () => {
+    const network = vi.fn(async () => Response.json({ modelVersion: 'global-model', candidates: [{ content: { parts: [{ text: '你好' }] }, finishReason: 'STOP' }], usageMetadata: { promptTokenCount: 3, candidatesTokenCount: 2, totalTokenCount: 5 } }));
+    vi.stubGlobal('fetch', network);
+    await click('为角色使用独立 API');
+    const select = host.querySelector('select[aria-label="接口类型"]') as HTMLSelectElement;
+    await act(async () => { select.value = 'gemini'; select.dispatchEvent(new Event('change', { bubbles: true })); });
+    await click('测试连接');
+    expect(host.textContent).toContain('连接成功');
+    const [url, options] = network.mock.calls[0] as any;
+    expect(url).toBe('https://global.test/v1beta/models/global-model:generateContent');
+    expect(new Headers(options.headers).get('x-goog-api-key')).toBe('global');
+    await click('确定');
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ baseUrl: 'https://global.test/v1beta/models', apiType: 'gemini' }));
+    expect(os.apiConfig.baseUrl).toBe('https://global.test/v1');
+  });
   it('native protocol draft tests and saves a Messages endpoint without changing global settings', async () => {
     const network=vi.fn(async()=>new Response(JSON.stringify({type:'message',id:'m',model:'global-model',content:[{type:'text',text:'你好'}],stop_reason:'end_turn',usage:{input_tokens:1,output_tokens:2}}),{headers:{'content-type':'application/json'}}));
     vi.stubGlobal('fetch',network);
