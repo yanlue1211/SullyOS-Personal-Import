@@ -4,7 +4,8 @@ import HandsFreeCallControl from '../../features/personal/calls/HandsFreeCallCon
 const ctx=new AudioContext(),source=ctx.createOscillator(),gain=ctx.createGain(),mix=ctx.createGain(),offset=ctx.createConstantSource();gain.gain.value=0;source.connect(gain);gain.connect(mix);offset.offset.value=.035;offset.connect(mix);offset.start();source.start();
 const analyses:AudioContext[]=[],NativeAudioContext=AudioContext,health={blocked:false};
 (window as any).AudioContext=class extends NativeAudioContext{constructor(options?:AudioContextOptions){super(options);analyses.push(this);}resume(){return health.blocked?Promise.reject(Error('QA interrupted')):super.resume();}};
-const q={sent:0,interrupt:async(blocked=false)=>{health.blocked=blocked;await analyses.at(-1)!.suspend();},analysisState:()=>analyses.at(-1)?.state,unblock:()=>{health.blocked=false;},level:async(value:number)=>{await ctx.resume();gain.gain.value=value;}};
+const liveAnalysis=()=>[...analyses].reverse().find(context=>context.state!=='closed');
+const q={sent:0,interrupt:async(blocked=false)=>{health.blocked=blocked;await liveAnalysis()!.suspend();},analysisState:()=>liveAnalysis()?.state,unblock:()=>{health.blocked=false;},level:async(value:number)=>{await ctx.resume();gain.gain.value=value;}};
 Object.defineProperty(navigator,'mediaDevices',{configurable:true,value:{getUserMedia:async()=>{const stream=ctx.createMediaStreamDestination();mix.connect(stream);return stream.stream;}}});
 (window as any).__hfQA=q;
 function Preview(){
