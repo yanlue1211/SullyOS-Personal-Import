@@ -7,6 +7,7 @@ import { drainWorkroomOutbox, WORKROOM_HISTORY_UPDATED } from '../features/workr
 import { reconcileCommerce } from '../utils/personalCommerce';
 import { isEmotionFeatureOn } from '../utils/scheduleFeature';
 import { handleLocalBack } from '../utils/localBackHandlers';
+import { updateVirtualTimeIfChanged } from '../utils/blurPolicy';
 import {isHomeAssetDisposal} from '../utils/homeAssetCancellation';
 import { processHomeMemoryAfterSave } from '../utils/homeMemoryPostHook';
 import { homeSharedRecipients } from '../utils/homeSharedEvents';
@@ -945,7 +946,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   // Real-time Clock Sync
   useEffect(() => {
       const timer = setInterval(() => {
-          setVirtualTime(getRealTime());
+          setVirtualTime(prev => updateVirtualTimeIfChanged(prev, getRealTime()));
       }, 1000);
       return () => clearInterval(timer);
   }, []);

@@ -1,5 +1,6 @@
 import { usesHumanStyle, usesInnerVoice, INNER_VOICE_FORMAT_REMINDER, CHAT_EXPRESSION_TAIL_REMINDER } from './chatPromptPreferences';
 import { buildChatOutputStylePrompt, readChatTranslationConfig } from './chatOutputStylePrompt';
+import { buildReproductionTask, DIAGNOSTIC_NAMESPACE, diagnosticRunId, type DiagnosticEvent } from './amsgReproduction';
 import { resolveDialogueApi } from './characterApi';
 import { isAnthropicEndpoint } from './llmEndpoint';
 import { ackStoppedReplyReceipts, stoppedReplyStateEntries } from './amsgStoppedReplyClient';
@@ -135,6 +136,13 @@ import {
   type SubscribeFailureKind,
 } from './pushSubscribeShared';
 import { isUnifiedPushPlatform } from './unifiedPushPlugin';
+import {
+  buildThirdPartyClickUrl,
+  buildThirdPartyPushEndpoint,
+  getThirdPartyPushProviderMeta,
+  validateThirdPartyPushConfig,
+  type ThirdPartyPushProvider,
+} from './amsgThirdPartyPush';
 
 export const NATIVE_PUSH_TOKEN_STORAGE_KEY = 'amsg2_fcm_token_v1';
 const nativePushBuildEnabled = () => import.meta.env.VITE_AMSG_NATIVE_PUSH === 'true';
@@ -149,9 +157,11 @@ export interface ActiveMsg2PushStatus {
   hasSubscription: boolean;
   vapidConfigured: boolean;
   detail?: string;
-  transport?: 'web-push' | 'unified-push';
+  transport?: 'web-push' | 'unified-push' | 'third-party';
   distributor?: string | null;
   needsDistributor?: boolean;
+  thirdPartyProvider?: ThirdPartyPushProvider;
+  localEndpoint?: string | null;
 }
 
 /** worker 上登记的那份订阅（一个用户一行）。读不到时调用方拿 null。 */
@@ -1938,11 +1948,51 @@ const OUTBOX_MAX_PAGES = 20;
 const OUTBOX_ACK_BATCH_SIZE = 200;
 
 export const ActiveMsgClient = {
+  /** 独立测试配置只存在加密任务里；不重建订阅、不覆盖任何角色凭据。 */
+  async scheduleReproduction(runId: string, api: { baseUrl: string; apiKey: string; model: string; temperature?: number }, delaySeconds: number): Promise<{ uuid: string; dueAt: number }> {
+    const config = await ensureWorkerReady();
+    const probe = await fetchWithAuth('config-check', config, { method: 'GET', signal: AbortSignal.timeout(8000) }, '复现能力检查');
+    if (probe?.data?.diagnosticReproduction !== 1) throw new Error('请先在设置中更新主动消息 Worker，再开始复现。');
+    const client = await initializeClient(config);
+    const dueAt = Date.now() + Math.max(60, Math.min(300, delaySeconds)) * 1000;
+    const payload = buildReproductionTask(runId, { ...api, baseUrl: normalizeChatApiUrl(api.baseUrl.trim()) }, dueAt);
+    const encrypted = await encryptPayload(client, payload);
+    let response;
+    try {
+      response = await fetchWithAuth('schedule-message', config, {
+        method: 'POST', signal: AbortSignal.timeout(15000),
+        headers: { 'Content-Type': 'application/json', 'X-Payload-Encrypted': 'true', 'X-Encryption-Version': '1' },
+        body: JSON.stringify(encrypted),
+      }, '创建复现任务');
+    } catch (error) {
+      // 保留同一 UUID 供用户查询／取消，绝不自动另建一次付费调用。
+      if (error && typeof error === 'object') Object.assign(error, { diagnosticMayBeCreated: true, dueAt });
+      throw error;
+    }
+    if (!response?.success) throw new Error(formatAmsgServerError(response, '复现任务创建失败'));
+    return { uuid: response.data?.uuid || runId, dueAt };
+  },
+
+  async readReproductionEvents(runId: string): Promise<DiagnosticEvent[]> {
+    const client = await initializeClient(await ensureWorkerReady());
+    const response = await client.getClientState(DIAGNOSTIC_NAMESPACE);
+    if (!response?.success) throw new Error(formatAmsgServerError(response, '云端诊断记录未取得'));
+    const events: DiagnosticEvent[] = [];
+    for (const row of response.data?.entries ?? []) {
+      if (!row.key?.startsWith(`${runId}:`)) continue;
+      try {
+        const event = JSON.parse(row.value);
+        if (diagnosticRunId({ amsgDiagnosticRunId: event.runId }) === runId) events.push(event);
+      } catch { /* 单条损坏不丢整份报告 */ }
+    }
+    return events;
+  },
   async registerNativePushToken(token: string): Promise<void> {
     if (!nativePushBuildEnabled()) throw new Error('当前构建未开启 Capacitor 原生推送');
     const value = token.trim();
     if (!value) throw new Error('FCM registration token 为空');
     const config = await ensureWorkerReady();
+    if (config.pushMode === 'third-party') return;
     const client = await initializeClient(config);
     await client.putPushSubscription({ endpoint: `fcm:${value}` });
   },
@@ -1974,6 +2024,31 @@ export const ActiveMsgClient = {
   async getPushStatus(): Promise<ActiveMsg2PushStatus> {
     const config = await ensureGlobalReady();
     const workerConfigured = Boolean(config.workerUrl.trim());
+    if (config.pushMode === 'third-party') {
+      const validation = validateThirdPartyPushConfig(config.thirdPartyPush);
+      const providerMeta = getThirdPartyPushProviderMeta(config.thirdPartyPush?.provider);
+      const localEndpoint = validation.ok && validation.normalized
+        ? buildThirdPartyPushEndpoint({
+          provider: validation.normalized.provider,
+          token: validation.normalized.token,
+          serverUrl: validation.normalized.serverOrigin,
+        })
+        : null;
+      return {
+        supported: true,
+        permission: validation.ok ? 'granted' : 'default',
+        hasSubscription: validation.ok,
+        vapidConfigured: workerConfigured,
+        transport: 'third-party',
+        thirdPartyProvider: providerMeta.id,
+        localEndpoint,
+        detail: !validation.ok
+          ? validation.error
+          : !workerConfigured
+            ? '请先填写 Worker 地址。'
+            : `第三方推送：${providerMeta.shortLabel}`,
+      };
+    }
     if (isUnifiedPushPlatform()) {
       try {
         const { getUnifiedPushStatus } = await import('./unifiedPushPlugin');
@@ -1987,6 +2062,7 @@ export const ActiveMsgClient = {
           transport: 'unified-push',
           distributor: status.distributor,
           needsDistributor,
+          localEndpoint: status.subscription?.endpoint || null,
           detail: needsDistributor
             ? '尚未检测到 UnifiedPush 服务。请先安装并打开 ntfy 的无 Firebase 版本。'
             : status.lastError
@@ -2032,10 +2108,31 @@ export const ActiveMsgClient = {
       vapidConfigured: workerConfigured,
       detail: !workerConfigured ? '请先填写 Worker 地址。' : undefined,
       transport: 'web-push',
+      localEndpoint: subscription?.endpoint || null,
     };
   },
 
   async ensurePushSubscription() {
+    const globalConfig = await ensureGlobalReady();
+    if (globalConfig.pushMode === 'third-party') {
+      const validation = validateThirdPartyPushConfig(globalConfig.thirdPartyPush);
+      if (!validation.ok || !validation.normalized) {
+        throw withFailKind(new Error(validation.error || '请先配置第三方推送 App 的 Token。'), '配置缺失');
+      }
+      const endpoint = buildThirdPartyPushEndpoint({
+        provider: validation.normalized.provider,
+        token: validation.normalized.token,
+        serverUrl: validation.normalized.serverOrigin,
+      });
+      const clickUrl = typeof window !== 'undefined' && window.location
+        ? buildThirdPartyClickUrl(`${window.location.origin}${window.location.pathname}`)
+        : undefined;
+      return {
+        endpoint,
+        ...(clickUrl ? { clickUrl } : {}),
+      };
+    }
+
     if (isUnifiedPushPlatform()) {
       const config = await ensureWorkerReady();
       const client = createClient(config);
@@ -2099,6 +2196,24 @@ export const ActiveMsgClient = {
     }
   },
 
+  async sendTestPush(): Promise<{ sent: boolean }> {
+    const config = await ensureWorkerReady();
+    const signal = typeof AbortSignal?.timeout === 'function' ? AbortSignal.timeout(15000) : undefined;
+    const { status, body } = await fetchWithAuthRaw(
+      'test-push',
+      config,
+      { method: 'POST', signal },
+      '发送测试通知',
+    );
+    if (status === 404 && body?.error?.code !== 'SUBSCRIPTION_NOT_FOUND') {
+      throw new Error('当前 Worker 版本还不支持一键测试推送，请先在上方点击「更新 Worker」或复制最新 Worker 代码部署。');
+    }
+    if (!body?.success) {
+      throw new Error(formatAmsgServerError(body, `测试通知发送失败 (HTTP ${status})`));
+    }
+    return { sent: true };
+  },
+
   /**
    * worker 上登记的那份订阅现状（不含密钥，只有 endpoint 和登记时间）。
    *
@@ -2150,13 +2265,14 @@ export const ActiveMsgClient = {
    * 按钮要治的病，不能自己再犯一遍。
    */
   async resetPushSubscription(): Promise<void> {
-    if (isUnifiedPushPlatform()) {
+    const globalConfig = await ensureGlobalReady();
+    if (globalConfig.pushMode === 'third-party' || isUnifiedPushPlatform()) {
       const config = await ensureWorkerReady();
       const client = await initializeClient(config);
       try {
         await client.deletePushSubscription();
       } catch (error) {
-        console.warn('[ActiveMsg] UnifiedPush 重置：删除 Worker 旧订阅失败，继续覆盖', error);
+        console.warn('[ActiveMsg] 重置推送订阅：删除 Worker 旧订阅失败，继续覆盖', error);
       }
       const subscription = await this.ensurePushSubscription();
       await client.putPushSubscription(subscription);
@@ -2191,7 +2307,8 @@ export const ActiveMsgClient = {
    * 的 D1 里、跟 SW 无关，不用像 proactive-push 那样重新推排程回去。
    */
   async deepResetPushSubscription(): Promise<void> {
-    if (isUnifiedPushPlatform()) {
+    const globalConfig = await ensureGlobalReady();
+    if (globalConfig.pushMode === 'third-party' || isUnifiedPushPlatform()) {
       await this.resetPushSubscription();
       return;
     }
@@ -2242,6 +2359,18 @@ export const ActiveMsgClient = {
    * 返回值只为单测断言：'registered' 补了 / 'skipped' 条件不满足 / 'failed' 补失败了。
    */
   async reconcilePushSubscription(): Promise<'registered' | 'skipped' | 'failed'> {
+    const globalConfig = await ensureGlobalReady();
+    if (globalConfig.pushMode === 'third-party') {
+      if (!validateThirdPartyPushConfig(globalConfig.thirdPartyPush).ok) return 'skipped';
+      try {
+        await this.registerPushSubscription();
+        return 'registered';
+      } catch (error) {
+        console.warn('[ActiveMsg] 连接后补登记第三方推送订阅失败', error);
+        return 'failed';
+      }
+    }
+
     if (isUnifiedPushPlatform()) {
       try {
         const { readUnifiedPushSubscription } = await import('./unifiedPushPlugin');
@@ -2326,7 +2455,7 @@ export const ActiveMsgClient = {
     // 排在保存之后：上面那句写的是握手前的配置快照，探测结论放它前面会被原样盖回去。
     await this.probeWorkerFeatures();
     await this.reconcilePushSubscription();
-    const nativeToken = readNativePushToken();
+    const nativeToken = config.pushMode === 'third-party' ? '' : readNativePushToken();
     if (nativeToken) await this.registerNativePushToken(nativeToken);
     // warnings 是「连上了，但有一块功能是哑的」——比如 VAPID 没配齐，任务能建、到点
     // 却一条都推不出去。连接本身算成功，交给调用方提示，别拦住流程。
@@ -2618,7 +2747,7 @@ export const ActiveMsgClient = {
     const client = await initializeClient(globalConfig);
     assertWriteCurrent();
     // 任务体不带订阅，worker 到点读用户级那一份——所以建任务前先把它登记上去。
-    const nativeToken = readNativePushToken();
+    const nativeToken = globalConfig.pushMode === 'third-party' ? '' : readNativePushToken();
     if (nativeToken) await this.registerNativePushToken(nativeToken);
     else await this.registerPushSubscription();
 
