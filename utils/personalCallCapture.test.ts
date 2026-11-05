@@ -11,8 +11,9 @@ class Recorder{
 }
 class Context{
  constructor(){contextCount++;}resume=async()=>{};close=async()=>{};
+ createGain(){return{gain:{value:1},connect(){},disconnect(){}};} destination={};
  createMediaStreamSource=()=>({connect(){},disconnect(){}});
- createAnalyser=()=>({fftSize:2048,getFloatTimeDomainData:(samples:Float32Array)=>samples.fill(level)});
+ createAnalyser=()=>({fftSize:2048,connect(){},disconnect(){},getFloatTimeDomainData:(samples:Float32Array)=>samples.forEach((_,i)=>{samples[i]=(i%2?1:-1)*level;})});
  createScriptProcessor(){throw Error('Main-thread PCM capture must never be used');}
 }
 const flush=async()=>{for(let i=0;i<15;i++)await Promise.resolve();};
@@ -27,7 +28,7 @@ it('click-to-stop records natively, converts only after stop, and needs no live 
  const result=await promise;expect(result.audio?.type).toBe('audio/wav');expect(result.duration).toBeCloseTo(2.1);expect(tracks).toHaveBeenCalledOnce();expect(recordingToWav).toHaveBeenCalledOnce();
 });
 it('automatic capture only observes silence and preserves actual speech through the native recorder',async()=>{
- level=0;const promise=captureSpeechTurn(undefined,new AbortController().signal);await flush();await vi.advanceTimersByTimeAsync(700);level=.1;await vi.advanceTimersByTimeAsync(700);level=0;await vi.advanceTimersByTimeAsync(2500);
+ level=0;const promise=captureSpeechTurn(undefined,new AbortController().signal);await flush();await vi.advanceTimersByTimeAsync(700);level=.1;await vi.advanceTimersByTimeAsync(700);level=0;await vi.advanceTimersByTimeAsync(4100);
  expect((await promise).audio?.type).toBe('audio/wav');expect(tracks).toHaveBeenCalledOnce();
 });
 it('an all-silent automatic turn ends without sending an audio API request',async()=>{
@@ -48,4 +49,24 @@ it('the explicit finish button submits one automatic turn without waiting for th
  level=0;let stop:(()=>void)|undefined;
  const promise=captureSpeechTurn(undefined,new AbortController().signal,{onStarted:fn=>stop=fn});await flush();await vi.advanceTimersByTimeAsync(800);stop!();
  expect((await promise).audio?.type).toBe('audio/wav');expect(tracks).toHaveBeenCalledOnce();
+});
+
+it('removes a constant input bias and still ends a real captured turn on silence',async()=>{
+ const context=new Context();context.createAnalyser=()=>({fftSize:2048,connect(){},disconnect(){},getFloatTimeDomainData:(samples:Float32Array)=>samples.forEach((_,i)=>{samples[i]=.04+(i%2?1:-1)*level;})});
+ level=0;const result=captureSpeechTurn(context as any,new AbortController().signal);await flush();await vi.advanceTimersByTimeAsync(700);level=.1;await vi.advanceTimersByTimeAsync(700);level=0;await vi.advanceTimersByTimeAsync(4100);
+ expect((await result).audio).toBeDefined();expect(tracks).toHaveBeenCalledOnce();
+});
+it('reports and resumes an interrupted analysis context independently of recording',async()=>{
+ const context=new Context();let paused=false;Object.defineProperty(context,'state',{get:()=>paused?'suspended':'running'});Object.defineProperty(context,'currentTime',{get:()=>paused?0:Date.now()/1000});
+ context.resume=vi.fn(async()=>{paused=false;});const progress=vi.fn();
+ level=0;const result=captureSpeechTurn(context as any,new AbortController().signal,{onProgress:progress});await flush();await vi.advanceTimersByTimeAsync(700);level=.1;await vi.advanceTimersByTimeAsync(700);
+ paused=true;await vi.advanceTimersByTimeAsync(100);expect(progress).toHaveBeenCalledWith({state:'interrupted'});expect(context.resume).toHaveBeenCalledTimes(2);
+ level=0;await vi.advanceTimersByTimeAsync(4200);expect((await result).audio).toBeDefined();expect(tracks).toHaveBeenCalledOnce();
+});
+it('does not feed stale loud samples into the gate when resume fails; explicit finish remains available',async()=>{
+ const context=new Context();let paused=false;Object.defineProperty(context,'state',{get:()=>paused?'suspended':'running'});Object.defineProperty(context,'currentTime',{get:()=>paused?0:Date.now()/1000});
+ context.resume=vi.fn(async()=>{if(paused)throw Error('interrupted');});let finish:()=>void=()=>{};const progress=vi.fn();
+ level=0;const result=captureSpeechTurn(context as any,new AbortController().signal,{onProgress:progress,onStarted:stop=>finish=stop});await flush();await vi.advanceTimersByTimeAsync(700);level=.1;await vi.advanceTimersByTimeAsync(700);paused=true;
+ await vi.advanceTimersByTimeAsync(6000);expect(recordingToWav).not.toHaveBeenCalled();expect(progress).toHaveBeenLastCalledWith({state:'interrupted'});expect(context.resume).toHaveBeenCalledTimes(4);
+ finish();expect((await result).audio).toBeDefined();expect(tracks).toHaveBeenCalledOnce();
 });

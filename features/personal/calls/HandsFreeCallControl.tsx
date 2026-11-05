@@ -43,7 +43,7 @@ export default function HandsFreeCallControl({enabled,onEnabledChange,ready,wait
   </div>
   {(enabled||error)&&<div className="max-w-full text-right">
    <span role="status" className={`block text-[10px] leading-relaxed ${error?'text-rose-200':'text-emerald-100/80'}`}>{status}</span>
-   {recording&&<span className="block text-[9px] text-white/40">停顿约 2.4 秒自动发送 · 继续说会重计时</span>}
+   {recording&&<span className="block text-[9px] text-white/40">停顿约 4 秒自动发送 · 继续说会重计时</span>}
   </div>}
  </div>;
 }

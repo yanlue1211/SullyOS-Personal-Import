@@ -17,8 +17,9 @@ class Recorder {
 class Context {
  constructor(){contextCount++;}
  async resume(){} async close(){}
+ createGain(){return{gain:{value:1},connect(){},disconnect(){}};} destination={};
  createMediaStreamSource(){return{connect(){},disconnect(){}};}
- createAnalyser(){return{fftSize:2048,getFloatTimeDomainData(samples:Float32Array){samples.fill(level);}};}
+ createAnalyser(){return{fftSize:2048,connect(){},disconnect(){},getFloatTimeDomainData(samples:Float32Array){samples.forEach((_,i)=>{samples[i]=(i%2?1:-1)*level;});}};}
  createScriptProcessor(){throw Error('Must not capture audio on the main thread');}
 }
 const cb=()=>({text:vi.fn(),speech:vi.fn(),error:vi.fn(),end:vi.fn()});
@@ -40,7 +41,7 @@ it('manual capture uses the working chat recorder and conversion without a live 
 });
 it('automatic mode observes silence without collecting PCM and finishes after speech',async()=>{
  level=0;const c=cb();await handsFree({} as any,c,{audioApi:api});
- await vi.advanceTimersByTimeAsync(700);level=.1;await vi.advanceTimersByTimeAsync(700);level=0;await vi.advanceTimersByTimeAsync(2500);await settle();
+ await vi.advanceTimersByTimeAsync(700);level=.1;await vi.advanceTimersByTimeAsync(700);level=0;await vi.advanceTimersByTimeAsync(4100);await settle();
  expect(c.text).toHaveBeenCalledWith('盖好被子了','声音轻柔');expect(stop).toHaveBeenCalledTimes(1);
 });
 it('cancellation before stop discards the recording',async()=>{
