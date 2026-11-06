@@ -68,7 +68,7 @@ export default function TapNestLocalBridge({open,onClose,charId,charName,isTypin
 
     const connect = useCallback(async () => {
         if (state === 'connecting') return;
-        const pin=window.prompt('🐶 将桌宠绑定到「'+charName+'」\n运行 AutoJs6 V0.13 后，输入日志中的六位配对码：');
+        const pin=window.prompt('🐶 将桌宠绑定到「'+charName+'」\n运行 AutoJs6 V0.14 后，输入日志中的六位配对码：');
         if (!pin) return;
         if (!/^\d{6}$/.test(pin.trim())) {setInfo('配对码需要六位数字');setState('error');return;}
         setState('connecting');setInfo('正在连接本机 127.0.0.1…');
