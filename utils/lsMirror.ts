@@ -84,6 +84,7 @@ export const MIRRORED_KEYS: readonly string[] = [
     'proactive_schedules',
     'proactive_last_fire_map',
     'vr_schedules',
+    'vr_last_fire',
     'vr_last_fire_map',
     'world_home_schedules',
     'world_home_last_fire_map',

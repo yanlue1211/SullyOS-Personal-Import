@@ -263,9 +263,11 @@ export const VRScheduler = {
             const clamped = Math.max(30, Math.round(a.intervalMinutes / 30) * 30);
             const intervalMs = clamped * 60 * 1000;
             const existing = schedules[a.charId];
+            // 调度可能被镜像恢复，但触发时间已丢失；旧计划也要补齐首火基准。
+            // 只补缺失值，不推迟已有计划，也不在恢复瞬间集中调用模型。
+            if (getLastFire(a.charId) === 0) setLastFire(a.charId, Date.now());
             if (!existing) {
                 schedules[a.charId] = { charId: a.charId, intervalMs };
-                if (getLastFire(a.charId) === 0) setLastFire(a.charId, Date.now());
                 changed = true;
             } else if (existing.intervalMs !== intervalMs) {
                 existing.intervalMs = intervalMs;

@@ -66,3 +66,20 @@ it('finishing an in-flight activity cannot undo a switch to manual or disabled',
     expect(withLatestVRParticipation(current,patch).vrState).toMatchObject({enabled:true,activityMode:'manual',intervalMinutes:240,currentRoom:'sar',lastActiveAt:123});
     expect(withLatestVRParticipation({...current,vrState:{...current.vrState,enabled:false}},patch).vrState?.enabled).toBe(false);
 });
+
+it('repairs a restored automatic schedule whose last-fire timestamp was lost without firing immediately', () => {
+    browser(); vi.useFakeTimers(); localStorage.clear();
+    const trigger = vi.fn();
+    localStorage.setItem('vr_schedules', JSON.stringify({legacy: {charId:'legacy', intervalMs:30*60*1000}}));
+    VRScheduler.onTrigger(trigger);
+    VRScheduler.reconcile([{charId:'legacy', intervalMinutes:30}]);
+    expect(trigger).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(29*60*1000);
+    expect(trigger).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(60*1000);
+    expect(trigger).toHaveBeenCalledTimes(1);
+    expect(trigger).toHaveBeenCalledWith('legacy');
+    VRScheduler.reconcile([{charId:'legacy', intervalMinutes:30}]);
+    vi.advanceTimersByTime(30*60*1000);
+    expect(trigger).toHaveBeenCalledTimes(2);
+});
