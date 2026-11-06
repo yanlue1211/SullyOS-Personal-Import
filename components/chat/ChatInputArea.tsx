@@ -516,6 +516,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
         mediaTile('video','视频',<Images className="w-6 h-6"/>),
         mediaTile('oracle','我谕',<Sparkle className="w-6 h-6"/>),
         mediaTile('archived-cleanup','清理旧缓存',<Trash className="w-6 h-6"/>),
+        ...(personalMediaEnabled ? [mediaTile('pet-bridge','桌宠连接',<span className="text-2xl" aria-hidden="true">🐶</span>)] : []),
         ...(personalMediaEnabled ? [mediaTile('voice-input', '语音', <Microphone className="w-6 h-6" />), mediaTile('virtual-media', '图片／视频', <Images className="w-6 h-6" />), mediaTile('emotion', '情绪', <Sparkle className="w-6 h-6" />)] : []),
         <button key="collaboration" onClick={() => onPanelAction('collaboration')} className={`flex flex-col items-center gap-2 active:scale-95 transition-transform ${acnh ? 'text-[#725d42]' : isDiscordStyle ? 'text-slate-200' : 'text-slate-600'}`}>
             <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm border ${acnh ? 'bg-white/70 border-[#e6dab4] text-[#7c6ee6]' : isDiscordStyle ? 'bg-slate-800 text-indigo-300 border-indigo-400/20' : 'bg-indigo-50 text-indigo-500 border-indigo-100'}`}>
