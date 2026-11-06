@@ -4536,6 +4536,9 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
                       if (!char || isTyping || instantChatPending) return false;
                       // Explicit deskpet send should reply immediately, regardless
                       // of chat's normal manual/automatic send preferences.
+                      // A lost ack can retry an already-persisted user turn.
+                      const prior = await DB.getRecentMessagesByCharId(char.id, 100);
+                      if (prior.some(m => m.role === 'user' && m.metadata?.tapnestEventId === eventId)) return true;
                       autoReply.cancel();
                       const sent = await sendText(message, 'text', {
                         source: 'tapnest', tapnestEventId: eventId,
