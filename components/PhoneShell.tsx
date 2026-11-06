@@ -504,6 +504,19 @@ const PhoneShell: React.FC = () => {
   const reducedBlur = useReducedBlur();
   const deploymentNotice = useDeploymentNotice();
   const [settledApp, setSettledApp] = useState<AppID>(activeApp);
+  // While the pet is paired, keep the original Chat runtime mounted even
+  // when navigating to other SullyOS apps. Unmounting Chat previously
+  // destroyed its local bridge, timers, sendText and useChatAI callbacks.
+  // Unpaired users retain the original per-route mount/unmount behavior.
+  const [petBridgePaired, setPetBridgePaired] = useState(false);
+  useEffect(() => {
+    const onPairing = (event: Event) => {
+      const paired = (event as CustomEvent<{ connected?: boolean }>).detail?.connected === true;
+      setPetBridgePaired(paired);
+    };
+    window.addEventListener('tapnest-bridge-pairing', onPairing);
+    return () => window.removeEventListener('tapnest-bridge-pairing', onPairing);
+  }, []);
 
   useEffect(() => {
     if (activeApp === AppID.Launcher) {
@@ -1128,10 +1141,26 @@ const PhoneShell: React.FC = () => {
                     App 子树栅格化进 transform 图层，角色列表类 App 首帧会卡顿一下（停顿一秒）。
                     时长也压短，进重 App 时不至于多等。 */}
                 <AppEnterStage key={activeApp} appId={activeApp} onSettled={setSettledApp}>
-                  {renderApp()}
+                  {activeApp === AppID.Chat ? null : renderApp()}
                 </AppEnterStage>
               </Suspense>
             </AppErrorBoundary>
+            {/* Stable Chat owner. Paired deskpet remains the same Char when
+                visiting Launcher, Moments or other internal apps. Do not
+                remount it on activeApp changes or the local socket drops. */}
+            {(activeApp === AppID.Chat || petBridgePaired) && (
+              <div
+                className="absolute inset-0 z-[1] h-full w-full"
+                style={{ display: activeApp === AppID.Chat ? 'block' : 'none' }}
+                aria-hidden={activeApp !== AppID.Chat}
+              >
+                <AppErrorBoundary onCloseApp={closeApp} resetKey={`chat:${activeCharacterId || 'none'}`}>
+                  <Suspense fallback={<AppLoadingFallback onReturn={closeApp} animationEnabled={theme.appLoadingAnimationEnabled !== false} />}>
+                    <Chat />
+                  </Suspense>
+                </AppErrorBoundary>
+              </div>
+            )}
           </div>
 
           {/* Overlays: Status Bar (Top) —— 常驻渲染：时钟/电量条由开关+平台默认决定显隐（StatusBar 内部 isStatusBarHidden），
