@@ -1,5 +1,6 @@
 import {avatarFrameLayer} from '../utils/avatarFrameTarget';
 import ChatRuntimeStyle from '../components/chat/ChatRuntimeStyle';
+import TapNestLocalBridge from '../features/tapnest/TapNestLocalBridge';
 import {homePhoneAppearance,HOME_PHONE_BUBBLES} from './room3d/homePhoneAppearance';
 
 import { publishReplyDisplay, stopReplyRuns } from '../utils/chatReplyCancellation';
@@ -4455,6 +4456,28 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
                 {/* 开关写着「已开启」、这一轮却在本地生成时，把原因说给用户听 */}
                 <InstantChatRouteNotice charId={activeCharacterId} />
 
+                {/* Experimental opt-in same-device pet bridge.
+                    All messages still travel through existing Chat's sendText
+                    and triggerAI: native characters, context and memory remain authoritative. */}
+                {!homePhone && char && (
+                    <TapNestLocalBridge
+                        key={char.id}
+                        charId={char.id}
+                        charName={char.name}
+                        isTyping={isTyping || instantChatPending}
+                        onPetMessage={async (text, eventId) => {
+                            if (!char || isTyping || instantChatPending) return false;
+                            autoReply.cancel();
+                            const accepted = await sendText(text, 'text', {
+                                source: 'tapnest', tapnestEventId: eventId,
+                            });
+                            if (accepted !== true) return false;
+                            const recent = await DB.getRecentMessagesByCharId(char.id, 200);
+                            void triggerAI(recent);
+                            return true;
+                        }}
+                    />
+                )}
                 <ChatInputArea
                     compactHome={!!homePhone}
                     input={input} setInput={handleInputChange}
