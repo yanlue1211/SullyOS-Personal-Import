@@ -190,6 +190,7 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
     useEffect(() => {setPersonalMediaPanel(null);setExperienceOpen(false);}, [activeCharacterId]);
     const [isInputFocused, setIsInputFocused] = useState(false);
     const [showPanel, setShowPanel] = useState<'none' | 'actions' | 'emojis' | 'chars'>('none');
+    const [petBridgeOpen, setPetBridgeOpen] = useState(false);
     const [collaborationOpen, setCollaborationOpen] = useState(false);
     const [collaborationPreviewAssetId, setCollaborationPreviewAssetId] = useState<string | null>(null);
     const [memoryRepairOpen, setMemoryRepairOpen] = useState(false);
@@ -1823,6 +1824,7 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
             case 'video': case 'oracle': case 'archived-cleanup': setShowPanel('none');setExperienceOpen(type==='archived-cleanup'?'cleanup':type);break;
             case 'voice-input': setShowPanel('none'); setPersonalMediaPanel('voice'); break;
             case 'virtual-media': setShowPanel('none'); setPersonalMediaPanel('visual'); break;
+            case 'pet-bridge': setShowPanel('none'); setPetBridgeOpen(true); break;
             case 'export-chat': void handleExportChat(); break;
             case 'collaboration': setShowPanel('none'); setCollaborationOpen(true); break;
             case 'memory-link': setShowPanel('none'); setMemoryRepairOpen(true); break;
@@ -4529,6 +4531,8 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
                 {!homePhone && char && (
                   <TapNestLocalBridge
                     key={char.id}
+                    open={petBridgeOpen}
+                    onClose={() => setPetBridgeOpen(false)}
                     charId={char.id}
                     charName={char.name}
                     isTyping={isTyping || instantChatPending}
