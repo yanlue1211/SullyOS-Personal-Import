@@ -37,11 +37,16 @@ const Appearance = lazyApp(() => import('../apps/Appearance'));
 const Gallery = lazyApp(() => import('../apps/Gallery'));
 const DateApp = lazyApp(() => import('../apps/DateApp'));
 const UserApp = lazyApp(() => import('../apps/UserApp'));
+const TaobaoApp = lazyApp(() => import('../apps/CommerceApp'));
+const MeituanApp = lazyApp(() => import('../apps/MeituanApp'));
 const JournalApp = lazyApp(() => import('../apps/JournalApp'));
 const ScheduleApp = lazyApp(() => import('../apps/ScheduleApp'));
 const RoomApp = lazyApp(() => import('../apps/RoomApp'));
 const CheckPhone = lazyApp(() => import('../apps/CheckPhone'));
+const MomentsApp = lazyApp(() => import('../apps/MomentsApp'));
+const MomentsRuntime = React.lazy(() => import('./os/MomentsRuntime'));
 const FriendFeedApp = lazyApp(() => import('../apps/FriendFeedApp'));
+const WorkroomNotification = React.lazy(() => import('./os/WorkroomNotification'));
 const FriendFeedNotification = React.lazy(() => import('./os/FriendFeedNotification'));
 const SocialApp = lazyApp(() => import('../apps/SocialApp'));
 const StudyApp = lazyApp(() => import('../apps/StudyApp'));
@@ -55,6 +60,9 @@ const XhsFreeRoamApp = lazyApp(() => import('../apps/XhsFreeRoamApp'));
 const BrowserApp = lazyApp(() => import('../apps/BrowserApp'));
 const SongwritingApp = lazyApp(() => import('../apps/SongwritingApp'));
 const MusicApp = lazyApp(() => import('../apps/MusicApp'));
+const SongArchiveApp = lazyApp(() => import('../apps/SongArchiveApp'));
+const YueqiApp = lazyApp(() => import('../apps/YueqiApp'));
+const WorkroomApp = lazyApp(() => import('../apps/WorkroomApp'));
 const CallApp = lazyApp(() => import('../apps/CallApp'));
 const VoiceDesignerApp = lazyApp(() => import('../apps/VoiceDesignerApp'));
 const GuidebookApp = lazyApp(() => import('../apps/GuidebookApp'));
@@ -89,13 +97,13 @@ const APP_BY_ID: Partial<Record<AppID, PreloadableLazy>> = {
   [AppID.Settings]: Settings, [AppID.Character]: Character, [AppID.Chat]: Chat,
   [AppID.GroupChat]: GroupChat, [AppID.ThemeMaker]: ThemeMaker, [AppID.Appearance]: Appearance,
   [AppID.Gallery]: Gallery, [AppID.Date]: DateApp, [AppID.User]: UserApp,
-  [AppID.Journal]: JournalApp, [AppID.Schedule]: ScheduleApp, [AppID.Room]: RoomApp,
+  [AppID.Taobao]: TaobaoApp, [AppID.Meituan]: MeituanApp, [AppID.Journal]: JournalApp, [AppID.Schedule]: ScheduleApp, [AppID.Room]: RoomApp,
   [AppID.CheckPhone]: CheckPhone, [AppID.Social]: SocialApp, [AppID.Study]: StudyApp,
-  [AppID.FriendFeed]: FriendFeedApp,
+  [AppID.FriendFeed]: FriendFeedApp, [AppID.Moments]: MomentsApp,
   [AppID.FAQ]: FAQApp, [AppID.Game]: GameApp, [AppID.Worldbook]: WorldbookApp,
   [AppID.Novel]: NovelApp, [AppID.Bank]: BankApp, [AppID.XhsStock]: XhsStockApp,
   [AppID.XhsFreeRoam]: XhsFreeRoamApp, [AppID.Browser]: BrowserApp, [AppID.Songwriting]: SongwritingApp,
-  [AppID.Music]: MusicApp, [AppID.Call]: CallApp, [AppID.VoiceDesigner]: VoiceDesignerApp,
+  [AppID.Music]: MusicApp, [AppID.SongArchive]: SongArchiveApp, [AppID.Workroom]: WorkroomApp, [AppID.Yueqi]: YueqiApp, [AppID.Call]: CallApp, [AppID.VoiceDesigner]: VoiceDesignerApp,
   [AppID.Guidebook]: GuidebookApp, [AppID.LifeSim]: LifeSimApp, [AppID.MemoryPalace]: MemoryPalaceApp,
   [AppID.Handbook]: HandbookApp, [AppID.QQBridge]: QQBridge, [AppID.HotNews]: HotNewsApp,
   [AppID.VRWorld]: VRWorldApp, [AppID.CharCreatorDev]: CharCreatorDevApp, [AppID.SpecialMoments]: SpecialMomentsApp,
@@ -119,6 +127,7 @@ import { StatusBar as CapStatusBar, Style as StatusBarStyle } from '@capacitor/s
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { Capacitor } from '@capacitor/core';
 import { isIOSStandaloneWebApp, resolveStatusBarMode } from '../utils/iosStandalone';
+import { canHideShellBackdropWhenSettled, useReducedBlur } from '../utils/blurPolicy';
 import AppErrorBoundary from './os/AppErrorBoundary';
 import GlobalMiniPlayer from './os/GlobalMiniPlayer';
 import NavigationBall from './os/NavigationBall';
@@ -461,10 +470,46 @@ const AppLoadingFallback: React.FC<{ onReturn?: () => void; animationEnabled?: b
   );
 };
 
+const AppEnterStage: React.FC<{
+  appId: AppID;
+  onSettled: (appId: AppID) => void;
+  children: React.ReactNode;
+}> = ({ appId, onSettled, children }) => {
+  useEffect(() => {
+    if (appId === AppID.Launcher) {
+      onSettled(AppID.Launcher);
+      return;
+    }
+    const timer = window.setTimeout(() => onSettled(appId), 260);
+    return () => window.clearTimeout(timer);
+  }, [appId, onSettled]);
+
+  return (
+    <div
+      className="w-full h-full"
+      style={{ animation: 'appEnterFade 200ms ease-out both' }}
+      onAnimationEnd={(e) => {
+        if (e.target === e.currentTarget) onSettled(appId);
+      }}
+    >
+      <style>{`@keyframes appEnterFade{from{opacity:0}to{opacity:1}}`}</style>
+      {children}
+    </div>
+  );
+};
+
 const PhoneShell: React.FC = () => {
-  const { theme, isLocked, unlock, activeApp, closeApp, openApp, virtualTime, isDataLoaded, toasts, unreadMessages, characters, handleBack, suspendedCall, resumeCall, activeCharacterId, errorDialog, dismissError, sysOperation } = useOS();
+  const { theme, isLocked, unlock, activeApp, closeApp, openApp, virtualTime, isDataLoaded, toasts, unreadMessages, characters, groups, handleBack, suspendedCall, resumeCall, activeCharacterId, errorDialog, dismissError, sysOperation } = useOS();
   const useIOSStandaloneLayout = isIOSStandaloneWebApp();
+  const reducedBlur = useReducedBlur();
   const deploymentNotice = useDeploymentNotice();
+  const [settledApp, setSettledApp] = useState<AppID>(activeApp);
+
+  useEffect(() => {
+    if (activeApp === AppID.Launcher) {
+      setSettledApp(AppID.Launcher);
+    }
+  }, [activeApp]);
 
   // 三档顶部状态栏：安全显示 / 紧凑显示 / 隐藏。旧存档仍由 hideStatusBar 兼容解析。
   // compact 把时间放进 safe-area，本体顶栏只让出 max(safe-area, 1.5rem)，避免顶部再多一整行。
@@ -935,7 +980,7 @@ const PhoneShell: React.FC = () => {
 
         {!companionLockFrame && unreadCount > 0 && (
             <div className="absolute top-[40%] left-4 right-4 animate-slide-up">
-                <div className="bg-white/20 backdrop-blur-md rounded-2xl p-4 shadow-lg border border-white/10 flex items-center gap-4">
+                <div className={`rounded-2xl p-4 shadow-lg border flex items-center gap-4 ${reducedBlur ? 'bg-slate-900/70 border-white/20' : 'bg-white/20 backdrop-blur-md border-white/10'}`}>
                     <div className="w-10 h-10 rounded-xl bg-green-500 flex items-center justify-center text-white shrink-0 shadow-sm">
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6"><path fillRule="evenodd" d="M4.804 21.644A6.707 6.707 0 0 0 6 21.75a6.721 6.721 0 0 0 3.583-1.029c.774.182 1.584.279 2.417.279 5.322 0 9.75-3.97 9.75-9 0-5.03-4.428-9-9.75-9s-9.75 3.97-9.75 9c0 2.409 1.025 4.587 2.674 6.192.232.226.277.428.254.543a3.73 3.73 0 0 1-.814 1.686.75.75 0 0 0 .44 1.223ZM8.25 10.875a1.125 1.125 0 1 0 0 2.25 1.125 1.125 0 0 0 0-2.25ZM10.875 12a1.125 1.125 0 1 1 2.25 0 1.125 1.125 0 0 1-2.25 0Zm4.875-1.125a1.125 1.125 0 1 0 0 2.25 1.125 1.125 0 0 0 0-2.25Z" clipRule="evenodd" /></svg>
                     </div>
@@ -971,10 +1016,13 @@ const PhoneShell: React.FC = () => {
       case AppID.Gallery: return <Gallery />;
       case AppID.Date: return <DateApp />; 
       case AppID.User: return <UserApp />;
+      case AppID.Taobao: return <TaobaoApp />;
+      case AppID.Meituan: return <MeituanApp />;
       case AppID.Journal: return <JournalApp />; 
       case AppID.Schedule: return <ScheduleApp />;
       case AppID.Room: return <RoomApp />; 
       case AppID.CheckPhone: return <CheckPhone />;
+      case AppID.Moments: return <MomentsApp />;
       case AppID.FriendFeed: return <FriendFeedApp />;
       case AppID.Social: return <SocialApp />;
       case AppID.Study: return <StudyApp />; 
@@ -988,6 +1036,9 @@ const PhoneShell: React.FC = () => {
       case AppID.Browser: return <BrowserApp />;
       case AppID.Songwriting: return <SongwritingApp />;
       case AppID.Music: return <MusicApp />;
+      case AppID.SongArchive: return <SongArchiveApp />;
+      case AppID.Yueqi: return <YueqiApp />;
+      case AppID.Workroom: return <WorkroomApp />;
       case AppID.Call: return <CallApp />;
       case AppID.VoiceDesigner: return <VoiceDesignerApp />;
       case AppID.Guidebook: return <GuidebookApp />;
@@ -1010,24 +1061,48 @@ const PhoneShell: React.FC = () => {
   // 自理名单见 utils/safeAreaApps.ts（迁移一个 App = 把它加进名单 + 顶栏用 --chrome-top 自己让位）。
   // TODO(safe-area-A): 把剩余「未迁移」App 逐个改为自理安全区后，移除外壳这层兜底，实现全屏无色条。
   const shellPadsSafeArea = shellHandlesSafeArea(activeApp);
+  const activeCharacter = characters.find(c => c.id === activeCharacterId);
+  const hasCustomChatChromeCss = Boolean(
+    theme.chatChromeCustomCss ||
+      (activeApp === AppID.Chat && activeCharacter?.chromeCustomCss) ||
+      (activeApp === AppID.GroupChat && groups.some(g => Boolean(g.chromeCustomCss))),
+  );
+  const shellBackdropHidden =
+    activeApp !== AppID.Launcher &&
+    settledApp === activeApp &&
+    canHideShellBackdropWhenSettled(activeApp, {
+      hasCustomChatChromeCss,
+      iosStandalone: useIOSStandaloneLayout,
+    });
 
   return (
     <div className="sully-phone-shell relative w-full h-full overflow-hidden bg-gradient-to-br from-pink-200 via-purple-200 to-indigo-200 text-slate-900 font-sans select-none overscroll-none">
        {/* Optimized Background Layer */}
        {/* 壁纸底层：进 App 时只柔和虚化/压暗作背景，不再做缩放「过场」——
-          进 App 的过渡感统一交给 App 容器的淡入（见下方 animate-fade-in 包裹层）。 */}
+          进 App 的过渡感统一交给 App 容器的淡入（见下方 animate-fade-in 包裹层）。
+          虚化直接落在静态壁纸层上，上层叠纯色柔光遮罩；不透明全屏 App 淡入稳定后隐藏底层纹理。 */}
        <div
-         className="absolute inset-0 bg-cover bg-center transition-all duration-500 ease-[cubic-bezier(0.25,0.1,0.25,1)]"
+         className="sully-shell-wallpaper absolute inset-0 bg-cover bg-center transition-opacity duration-500 ease-[cubic-bezier(0.25,0.1,0.25,1)]"
          style={{
              backgroundImage: bgImageValue,
-             filter: activeApp !== AppID.Launcher ? 'blur(10px)' : 'none',
-             opacity: activeApp !== AppID.Launcher ? 0.6 : 1,
+             filter: activeApp === AppID.Launcher || reducedBlur || shellBackdropHidden ? 'none' : 'blur(24px)',
+             opacity: activeApp === AppID.Launcher ? 1 : reducedBlur ? 0.25 : 0.6,
+             visibility: shellBackdropHidden ? 'hidden' : undefined,
              backfaceVisibility: 'hidden',
              contain: useIOSStandaloneLayout ? undefined : 'strict'
          }}
        />
        
-       <div className={`absolute inset-0 transition-all duration-500 ${activeApp === AppID.Launcher ? 'bg-transparent' : 'bg-white/50 backdrop-blur-3xl'}`} />
+       <div
+         className={`sully-shell-wash absolute inset-0 transition-colors duration-500 ${
+           activeApp === AppID.Launcher
+             ? 'bg-transparent'
+             : reducedBlur
+               ? 'bg-slate-50/95'
+               : 'bg-white/55'
+         }`}
+         style={shellBackdropHidden ? { visibility: 'hidden' } : undefined}
+       />
        
        {/* 外壳安全区两种策略：
           - 未迁移 App：外壳铺满 body（含 --app-height 多出的 +safe-bottom 溢出区），用 padding 让位安全区，
@@ -1052,10 +1127,9 @@ const PhoneShell: React.FC = () => {
                     关键：只动 opacity、不做 scale/translate —— 否则会把整棵（常含大量头像图片的）
                     App 子树栅格化进 transform 图层，角色列表类 App 首帧会卡顿一下（停顿一秒）。
                     时长也压短，进重 App 时不至于多等。 */}
-                <div key={activeApp} className="w-full h-full" style={{ animation: 'appEnterFade 200ms ease-out both' }}>
-                  <style>{`@keyframes appEnterFade{from{opacity:0}to{opacity:1}}`}</style>
+                <AppEnterStage key={activeApp} appId={activeApp} onSettled={setSettledApp}>
                   {renderApp()}
-                </div>
+                </AppEnterStage>
               </Suspense>
             </AppErrorBoundary>
           </div>
@@ -1080,7 +1154,7 @@ const PhoneShell: React.FC = () => {
           {/* Overlays: Global Mini Player (when music is playing in background) */}
           <GlobalMiniPlayer />
           <NavigationBall />
-          {isDataLoaded&&!isLocked&&<Suspense fallback={null}><FriendFeedNotification/></Suspense>}
+          {isDataLoaded&&!isLocked&&<Suspense fallback={null}><FriendFeedNotification/><MomentsRuntime/>{activeApp===AppID.Launcher&&<WorkroomNotification/>}</Suspense>}
           {!isLocked && <SARModuleMonitor />}
 
           {/* Overlays: 人格模拟生成全局指示条 */}

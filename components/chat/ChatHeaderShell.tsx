@@ -4,6 +4,7 @@ import { CaretLeft, Lightning, Stop } from '@phosphor-icons/react';
 import { CharacterBuff, CharacterProfile } from '../../types';
 import TokenImg from '../os/TokenImg';
 import { chatCharacterDisplayName } from '../../utils/characterRemark';
+import { useReducedBlur } from '../../utils/blurPolicy';
 
 /** header 实际只用到这些字段——放宽类型让群聊传合成对象（群名/群头像）复用本组件 */
 type HeaderCharacter = Pick<CharacterProfile, 'id' | 'name' | 'avatar'> & Partial<Pick<CharacterProfile, 'description' | 'chatShowRemark'>> & { activeBuffs?: CharacterBuff[] };
@@ -12,6 +13,8 @@ interface TokenBreakdown {
     prompt: number;
     completion: number;
     total: number;
+    cacheRead?: number | null;
+    cacheWrite?: number | null;
     msgCount: number;
     pass: string;
 }
@@ -95,6 +98,17 @@ const ChatHeaderShell: React.FC<ChatHeaderShellProps> = ({
     chromeStyle = 'soft',
     acnh = false,
 }) => {
+    // Compact enough for narrow chat headers, with exact counts available on long-press / hover.
+    const shortTokens = (value: number | null | undefined): string => {
+        if (value == null || !Number.isFinite(value)) return '—';
+        if (value >= 10_000) return `${(value / 1000).toFixed(1)}k`;
+        return value.toLocaleString('en-US');
+    };
+    const tokenPillText = lastTokenUsage == null ? '' :
+        `总${shortTokens(lastTokenUsage)} · 读${shortTokens(tokenBreakdown?.cacheRead)} · 写${shortTokens(tokenBreakdown?.cacheWrite)}`;
+    const tokenPillTitle = tokenBreakdown
+        ? `总 Token: ${tokenBreakdown.total.toLocaleString()} | 输入: ${tokenBreakdown.prompt.toLocaleString()} | 输出: ${tokenBreakdown.completion.toLocaleString()} | 缓存读取: ${tokenBreakdown.cacheRead?.toLocaleString() ?? '未返回'} | 缓存创建: ${tokenBreakdown.cacheWrite?.toLocaleString() ?? '未返回'} | 消息: ${tokenBreakdown.msgCount} | 请求阶段: ${tokenBreakdown.pass}`
+        : '';
     const buffs: CharacterBuff[] = hideBuffs ? [] : (activeCharacter.activeBuffs || []);
     const [openBuff, setOpenBuff] = useState<CharacterBuff | null>(null);
     const [isBuffListExpanded, setIsBuffListExpanded] = useState(false);
@@ -201,6 +215,7 @@ const ChatHeaderShell: React.FC<ChatHeaderShellProps> = ({
 
     const isDarkHeader = headerStyle === 'discord';
     const isPixelHeader = headerStyle === 'pixel';
+    const reducedBlur = useReducedBlur();
     const useCenteredLayout = headerAlign === 'center';
     const avatarRadiusClass = avatarShape === 'square' ? 'rounded-sm' : avatarShape === 'rounded' ? 'rounded-xl' : 'rounded-full';
     // 动森：情绪 buff 胶囊统一奶油底 + 棕字，和谐进绿顶栏（否则各 buff 自带的彩色底铺在绿上很糊）
@@ -213,22 +228,22 @@ const ChatHeaderShell: React.FC<ChatHeaderShellProps> = ({
           ? 'bg-[#a8d6bb] border-b-[3px] border-[#86c29a] shadow-[0_3px_0_rgba(110,160,130,0.22)]'
           :
         headerStyle === 'gradient'
-            ? 'bg-gradient-to-r from-primary/20 via-primary/10 to-white/80 backdrop-blur-xl border-b border-slate-200/60 shadow-sm'
+            ? `${reducedBlur ? 'bg-white/90 ' : 'backdrop-blur-xl '}bg-gradient-to-r from-primary/20 via-primary/10 to-white/80 border-b border-slate-200/60 shadow-sm`
             : headerStyle === 'minimal'
-              ? 'bg-white/95 backdrop-blur-md border-b border-slate-200/50 shadow-sm'
+              ? `bg-white/95 ${reducedBlur ? '' : 'backdrop-blur-md '}border-b border-slate-200/50 shadow-sm`
               : headerStyle === 'wechat'
-                ? 'bg-[#f7f7f7]/95 backdrop-blur-md border-b border-black/5 shadow-none'
+                ? `bg-[#f7f7f7]/95 ${reducedBlur ? '' : 'backdrop-blur-md '}border-b border-black/5 shadow-none`
                 : headerStyle === 'telegram'
-                  ? 'bg-white/85 backdrop-blur-xl border-b border-sky-100 shadow-sm'
+                  ? `${reducedBlur ? 'bg-white/95' : 'bg-white/85 backdrop-blur-xl'} border-b border-sky-100 shadow-sm`
                   : headerStyle === 'discord'
-                    ? 'bg-slate-900/95 backdrop-blur-xl border-b border-white/10 shadow-[0_10px_30px_rgba(15,23,42,0.35)]'
+                    ? `bg-slate-900/95 ${reducedBlur ? '' : 'backdrop-blur-xl '}border-b border-white/10 shadow-[0_10px_30px_rgba(15,23,42,0.35)]`
                     : headerStyle === 'pixel'
                       ? 'bg-[#c99872] border-b-[3px] border-[#7b5a40] shadow-[0_4px_0_rgba(123,90,64,0.25)]'
                       : chromeStyle === 'flat'
                         ? 'bg-white border-b border-slate-200 shadow-none'
                         : chromeStyle === 'floating'
-                          ? 'bg-white/85 backdrop-blur-xl border-b border-white/70 shadow-sm'
-                          : 'bg-white/80 backdrop-blur-xl border-b border-slate-200/60 shadow-sm';
+                          ? `${reducedBlur ? 'bg-white/95' : 'bg-white/85 backdrop-blur-xl'} border-b border-white/70 shadow-sm`
+                          : `${reducedBlur ? 'bg-white/95' : 'bg-white/80 backdrop-blur-xl'} border-b border-slate-200/60 shadow-sm`;
     const headerBaseHeight = headerDensity === 'compact' ? '5rem' : headerDensity === 'airy' ? '7rem' : '6rem';
     // 两种对齐都用对称 py，让内容垂直居中（原标准布局只给 pb → 底贴、上方留白、整体不居中）。
     const headerDensityClass = headerDensity === 'compact' ? 'px-4 py-2' : headerDensity === 'airy' ? 'px-6 py-4' : 'px-5 py-3';
@@ -331,8 +346,8 @@ const ChatHeaderShell: React.FC<ChatHeaderShellProps> = ({
     const floatingStatusNodes = (lastTokenUsage || isEmotionEvaluating || isMemoryPalaceProcessing) ? (
         <div className={`absolute ${extraAction ? 'right-20' : 'right-12'} top-1/2 -translate-y-1/2 flex items-center gap-1.5 pointer-events-none`}>
             {lastTokenUsage && (
-                <div className={`sully-chat-token text-[9px] px-1.5 py-0.5 rounded-md font-mono border ${isDarkHeader ? 'bg-slate-800 text-slate-300 border-white/10' : isPixelHeader ? 'bg-[#fff7ed] text-[#8f674a] border-[#8f674a]/20' : 'bg-slate-100/95 text-slate-400 border-slate-200'}`}>
-                    {lastTokenUsage}
+                <div className={`sully-chat-token text-[9px] px-1.5 py-0.5 rounded-md font-mono border whitespace-nowrap ${isDarkHeader ? 'bg-slate-800 text-slate-300 border-white/10' : isPixelHeader ? 'bg-[#fff7ed] text-[#8f674a] border-[#8f674a]/20' : 'bg-slate-100/95 text-slate-400 border-slate-200'}`} title={tokenPillTitle}>
+                    {tokenPillText}
                 </div>
             )}
             {isEmotionEvaluating && (
@@ -371,8 +386,8 @@ const ChatHeaderShell: React.FC<ChatHeaderShellProps> = ({
                 <div className="sully-chat-status flex items-center gap-2 flex-wrap">
                     {onlineStatusNode}
                     {lastTokenUsage && (
-                        <div className={`sully-chat-token text-[9px] px-1.5 py-0.5 rounded-md font-mono border ${isDarkHeader ? 'bg-slate-800 text-slate-300 border-white/10' : isPixelHeader ? 'bg-[#fff7ed] text-[#8f674a] border-[#8f674a]/20' : 'bg-slate-100 text-slate-400 border-slate-200'}`} title={tokenBreakdown ? `prompt: ${tokenBreakdown.prompt} | completion: ${tokenBreakdown.completion} | msgs: ${tokenBreakdown.msgCount} | pass: ${tokenBreakdown.pass}` : ''}>
-                            {lastTokenUsage}
+                        <div className={`sully-chat-token text-[9px] px-1.5 py-0.5 rounded-md font-mono border whitespace-nowrap ${isDarkHeader ? 'bg-slate-800 text-slate-300 border-white/10' : isPixelHeader ? 'bg-[#fff7ed] text-[#8f674a] border-[#8f674a]/20' : 'bg-slate-100 text-slate-400 border-slate-200'}`} title={tokenPillTitle}>
+                            {tokenPillText}
                         </div>
                     )}
                     {isEmotionEvaluating && (

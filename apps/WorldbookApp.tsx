@@ -1,3 +1,4 @@
+import { newGlobalWorldbook, worldbookScope } from '../utils/worldbookScope';
 import React, { useState, useMemo, useRef } from 'react';
 import { useOS } from '../context/OSContext';
 import { Worldbook, WorldbookDepthRole, WorldbookPosition, WorldbookSelectiveLogic } from '../types';
@@ -63,12 +64,19 @@ const WorldbookApp: React.FC = () => {
     const [tempCaseSensitive, setTempCaseSensitive] = useState(false);
     const [tempWholeWords, setTempWholeWords] = useState(false);
 
+    const [scope, setScope] = useState<'global' | 'personal'>('personal');
+    const scopedBooks = useMemo(() => worldbooks.filter(book => worldbookScope(book) === scope), [worldbooks, scope]);
+    const applyScopeUpdates = async (ids:string[], patch:Partial<Worldbook>) => {
+        try { await updateWorldbooks(ids, patch); return true; }
+        catch(error:any) { addToast(error?.message || '世界书设置未保存，请重试', 'error'); return false; }
+    };
+
     // Grouping Logic
     const groupedBooks = useMemo(() => {
         const groups: Record<string, Worldbook[]> = {};
         const defaultCat = '未分类设定 (General)';
 
-        worldbooks.forEach(wb => {
+        scopedBooks.forEach(wb => {
             const cat = wb.category || defaultCat;
             if (!groups[cat]) groups[cat] = [];
             groups[cat].push(wb);
@@ -80,7 +88,7 @@ const WorldbookApp: React.FC = () => {
         }
 
         return groups;
-    }, [worldbooks]);
+    }, [scopedBooks]);
 
     const categoryNames = useMemo(() => Object.keys(groupedBooks), [groupedBooks]);
 
@@ -189,7 +197,7 @@ const WorldbookApp: React.FC = () => {
                 createdAt: Date.now(),
                 updatedAt: Date.now()
             };
-            addWorldbook(newBook);
+            await addWorldbook({...newBook, scope, globalEnabled:false});
             addToast('新书已创建', 'success');
         }
         setIsEditing(false);
@@ -203,7 +211,8 @@ const WorldbookApp: React.FC = () => {
             const text = await source.text();
             const category = source.name.replace(/\.json$/i, '').trim() || '导入世界书';
             const imported = parseStandardWorldbook(text, category);
-            for (const book of imported) await addWorldbook(book);
+            for (const book of imported) await addWorldbook(newGlobalWorldbook(book));
+            setScope('global');
             addToast(`已导入 ${imported.length} 条世界书条目`, 'success');
             setExpandedCategory(category);
         } catch (error: any) {
@@ -269,9 +278,9 @@ const WorldbookApp: React.FC = () => {
     };
 
     const toggleSelectAll = () => {
-        setSelectedBookIds(current => current.size === worldbooks.length
+        setSelectedBookIds(current => current.size === scopedBooks.length
             ? new Set()
-            : new Set(worldbooks.map(book => book.id)));
+            : new Set(scopedBooks.map(book => book.id)));
     };
 
     const closeBulkDelete = () => {
@@ -656,18 +665,27 @@ const WorldbookApp: React.FC = () => {
                 </div>
             </div>
 
+            <div className="relative z-10 px-5 py-3 bg-white/80 border-b border-emerald-100">
+                <div className="flex gap-2" role="tablist" aria-label="世界书使用范围">
+                    {(['global','personal'] as const).map(value => <button key={value} role="tab" aria-selected={scope===value} onClick={()=>{setScope(value);leaveSelectionMode();setExpandedCategory(null);}} className={`flex-1 rounded-xl px-3 py-2 text-sm font-bold ${scope===value?'bg-emerald-100 text-emerald-800':'bg-slate-50 text-slate-500'}`}>{value==='global'?'全局世界书':'个人世界书'} <span className="text-xs opacity-60">{worldbooks.filter(book=>worldbookScope(book)===value).length}</span></button>)}
+                </div>
+                <p className="text-[11px] leading-relaxed text-slate-500 mt-2">{scope==='global'?'开启后默认供所有角色使用，可在人设中单独禁用。常驻条目进入人设前的共享区；条件与指定深度条目保留原规则。外部导入与协同作品首次不自动开启。':'仅供已挂载的角色使用。旧备份和原有挂载保持原效果。'}</p>
+            </div>
+
             {isSelecting && (
-                <div className="relative z-10 shrink-0 bg-white/90 backdrop-blur-xl border-b border-indigo-100 px-5 py-2.5 flex items-center gap-3 shadow-sm">
+                <div className="relative z-10 shrink-0 bg-white/90 backdrop-blur-xl border-b border-indigo-100 px-5 py-2.5 flex flex-wrap items-center gap-3 shadow-sm">
                     <button
                         onClick={toggleSelectAll}
                         className="flex items-center gap-2 text-xs font-bold text-indigo-600 active:scale-95 transition-transform"
                     >
-                        <span className={`w-5 h-5 rounded-md border flex items-center justify-center ${selectedBookIds.size === worldbooks.length ? 'bg-indigo-500 border-indigo-500 text-white' : 'bg-white border-slate-300 text-transparent'}`}>
+                        <span className={`w-5 h-5 rounded-md border flex items-center justify-center ${selectedBookIds.size === scopedBooks.length ? 'bg-indigo-500 border-indigo-500 text-white' : 'bg-white border-slate-300 text-transparent'}`}>
                             <Check size={13} weight="bold" />
                         </span>
-                        {selectedBookIds.size === worldbooks.length ? '取消全选' : '全选'}
+                        {selectedBookIds.size === scopedBooks.length ? '取消全选' : '全选'}
                     </button>
-                    <span className="text-[11px] text-slate-400">已选 {selectedBookIds.size} / {worldbooks.length}</span>
+                    <span className="text-[11px] text-slate-400">已选 {selectedBookIds.size} / {scopedBooks.length}</span>
+                    <button type="button" disabled={!selectedBookIds.size} onClick={async()=>{if(await applyScopeUpdates([...selectedBookIds],{scope:scope==='global'?'personal':'global',globalEnabled:false}))leaveSelectionMode();}} className="ml-auto text-[11px] font-bold text-emerald-700 disabled:opacity-40">移至{scope==='global'?'个人':'全局'}</button>
+                    {scope==='global' && <button type="button" disabled={!selectedBookIds.size} onClick={async()=>{if(await applyScopeUpdates([...selectedBookIds],{globalEnabled:true}))leaveSelectionMode();}} className="text-[11px] font-bold text-emerald-700 disabled:opacity-40">开启全局</button>}
                     <button
                         onClick={() => setShowBulkDeleteConfirm(true)}
                         disabled={selectedBookIds.size === 0}
@@ -688,7 +706,7 @@ const WorldbookApp: React.FC = () => {
                         世界书是一组按条件提供给 AI 的补充设定，可用于世界观、人物关系、地点和规则等内容。它不会自己发消息，也不等同于角色记忆。
                     </p>
                     <p className="mt-1.5 text-[11px] leading-relaxed text-slate-500">
-                        创建或导入后，还要在角色编辑页的“扩展设定”中挂载；聊天生成回复时，已启用并满足常驻或关键词条件（以及可选的概率判定）的条目才会注入提示词。
+                        全局板块开启后默认供全部角色使用，人设中可单独禁用；个人板块仍需在人设中挂载。旧书保持原挂载，导入与协同制作默认存入全局且不自动开启。条目的关键词、概率与指定深度继续生效。
                     </p>
                     <p className="mt-2 rounded-xl bg-indigo-50 px-3 py-2 text-[10px] leading-relaxed text-indigo-700">
                         注意：“启用随机概率”未点亮 = 不使用随机抽取，条件满足时按 100% 通过；并不是“未激活”。
@@ -736,6 +754,10 @@ const WorldbookApp: React.FC = () => {
                         <div className={`space-y-3 pl-2 transition-all duration-300 ${expandedCategory === category ? 'opacity-100 mt-2' : 'max-h-0 opacity-0 overflow-hidden'}`}>
                             {pagedBooks.map(book => (
                                 <div key={book.id} className="bg-white/60 backdrop-blur-md rounded-2xl border border-white/60 shadow-sm hover:shadow-md transition-all group relative overflow-hidden">
+                                    {!isSelecting && <div className="flex flex-wrap items-center justify-end gap-2 px-4 pt-3">
+                                        {worldbookScope(book)==='global' && <button type="button" aria-label={`${book.globalEnabled?'关闭':'开启'}全局世界书 ${book.title}`} onClick={()=>void applyScopeUpdates([book.id],{globalEnabled:!book.globalEnabled})} className={`rounded-lg px-3 py-1.5 text-[11px] font-bold ${book.globalEnabled?'bg-emerald-100 text-emerald-800':'bg-slate-100 text-slate-500'}`}>{book.globalEnabled?'全局已开启':'开启全局'}</button>}
+                                        <button type="button" onClick={()=>void applyScopeUpdates([book.id],{scope:scope==='global'?'personal':'global',globalEnabled:false})} className="rounded-lg border border-emerald-100 px-3 py-1.5 text-[11px] text-emerald-700">移至{scope==='global'?'个人':'全局'}</button>
+                                    </div>}
                                     {/* Item Header */}
                                     <div 
                                         onClick={() => isSelecting ? toggleBookSelection(book.id) : togglePreview(book.id)}

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { CharacterProfile, Message } from '../types';
 import { DB } from './db';
-import { loadStoryActorContext, replaceStoryTheaterReply } from './storyTheaterReply';
+import { buildStoryActorRecallMessages, loadStoryActorContext, replaceStoryTheaterReply } from './storyTheaterReply';
 
 describe('剧情重写上下文和保存', () => {
     it('本剧情的用户/助手镜像都不回流，仍保留其他来源和剧情的可见原文', async () => {
@@ -36,4 +36,25 @@ describe('剧情重写上下文和保存', () => {
         expect((await DB.getMessagesByCharId(old.charId, true))[0].content).toBe('旧回复');
         expect((await DB.getMessagesByCharId(old.charId + '-actor', true))[0].content).toBe('手动编辑');
     });
+});
+
+describe('剧情共享上下文与召回线索', () => {
+ it('真实时间携带完整共享窗口；虚构模式仍尊重独立条数和用户断点', async () => {
+  const char={id:'story-full-window',contextRangeMode:'manual',contextLimit:150,contextRangePolicyVersion:1} as CharacterProfile;
+  for(let i=0;i<130;i++) await DB.saveMessage({charId:char.id,role:'user',type:'text',content:`消息${i}`});
+  const all=await loadStoryActorContext(char,'scene');
+  expect(all).toHaveLength(130);
+  expect(await loadStoryActorContext(char,'scene',100)).toHaveLength(100);
+  expect(await loadStoryActorContext({...char,contextUserStartMessageId:all[120].id},'scene')).toHaveLength(10);
+  expect(await loadStoryActorContext(char,'scene',0)).toEqual([]);
+ });
+ it('当前剧情用户输入成为最新召回线索，保留私聊且不重复或改写原数组', () => {
+  const old={id:1,role:'user',content:'旧私聊'} as Message;
+  const fresh={id:2,role:'user',content:'现在剧情里找钥匙'} as Message;
+  const carried=[old,fresh];
+  const result=buildStoryActorRecallMessages(carried,[fresh]);
+  expect(result).toEqual([old,fresh]);
+  expect(carried).toEqual([old,fresh]);
+  expect(buildStoryActorRecallMessages([old],[fresh]).at(-1)).toBe(fresh);
+ });
 });

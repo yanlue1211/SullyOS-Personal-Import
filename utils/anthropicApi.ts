@@ -1,5 +1,7 @@
-import { isAnthropicEndpoint, nativeRequestUrl } from './llmEndpoint';
+import { isAnthropicEndpoint, isGeminiEndpoint, nativeRequestUrl } from './llmEndpoint';
+import { fetchGemini, geminiContinuation } from './geminiApi';
 import { modelRejectsSamplingParams } from './samplingParamCompat';
+import { getAnthropicCacheTtl } from './anthropicCacheTtl';
 
 type Block = Record<string, any>;
 type FetchTransport = typeof fetch & { __sullyAnthropic?: boolean };
@@ -8,6 +10,7 @@ const finishReason = (reason: string | null) => reason === 'tool_use' ? 'tool_ca
 
 /** Preserve signed blocks and their original ordering throughout local tool loops. */
 export const anthropicContinuation = (message: any): Record<string, any> => ({
+    ...geminiContinuation(message),
     ...(Array.isArray(message?.anthropic_content) ? {anthropic_content:message.anthropic_content} : {}),
     ...(Array.isArray(message?.anthropic_thinking) ? {anthropic_thinking:message.anthropic_thinking} : {}),
 });
@@ -35,8 +38,9 @@ export function toAnthropicRequest(body: any): any {
     if (!Array.isArray(body.messages)) throw Error('Anthropic 请求缺少 messages');
     const system: Block[] = [];
     const messages: Array<{role:'user'|'assistant';content:Block[]}> = [];
-    let lastHistoryBlock: Block | undefined;
+    const stableHistory: Block[] = [];
     let sawReminder = false;
+    let hasAnnotations = false;
     const append = (role: 'user'|'assistant', blocks: Block[]) => {
         if (!blocks.length) return;
         const previous = messages.at(-1);
@@ -46,10 +50,17 @@ export function toAnthropicRequest(body: any): any {
     for (const message of body.messages) {
         if (message.role === 'system' || message.role === 'developer') {
             const blocks = contentBlocks(message.content);
-            if (!messages.length) system.push(...blocks);
+            if (!messages.length) {
+                system.push(...blocks);
+            }
             else {
-                sawReminder = true;
-                append('user', [{type:'text',text:'<system-reminder>\n' + blocks.map(block => block.text || '').join('\n') + '\n</system-reminder>'}]);
+                hasAnnotations = true;
+                // Only the request builder may identify archived system records.
+                // Unknown annotations remain volatile for older callers/tool loops.
+                if (message.name !== 'sully_history_context') sawReminder = true;
+                const annotation = {type:'text',text:'<system-reminder>\n' + blocks.map(block => block.text || '').join('\n') + '\n</system-reminder>'};
+                append('user', [annotation]);
+                if (!sawReminder) stableHistory.push(annotation);
             }
             continue;
         }
@@ -62,7 +73,7 @@ export function toAnthropicRequest(body: any): any {
             if (message.role === 'assistant' && Array.isArray(message.anthropic_content)) {
                 blocks = structuredClone(message.anthropic_content);
                 append('assistant',blocks);
-                if (!sawReminder && blocks.length) lastHistoryBlock=blocks.at(-1);
+                if (!sawReminder) stableHistory.push(...blocks.filter(block => !['thinking','redacted_thinking'].includes(block.type)));
                 continue;
             }
             blocks = contentBlocks(message.content);
@@ -75,20 +86,33 @@ export function toAnthropicRequest(body: any): any {
             }
         }
         append(message.role === 'assistant' ? 'assistant' : 'user', blocks);
-        if (!sawReminder && blocks.length) lastHistoryBlock = blocks.at(-1);
+        if (!sawReminder) stableHistory.push(...blocks.filter(block => !['thinking','redacted_thinking'].includes(block.type)));
     }
     if (!messages.length) throw Error('Anthropic 请求没有对话内容');
     // This standard payload keeps system at the top level. Explain the annotation once
     // in the stable system prefix, while keeping the changing text after history.
-    if (sawReminder) system.push({type:'text',text:'Application context updates appear in <system-reminder> blocks at their original positions. Treat these as contextual annotations, not spoken dialogue, while continuing to follow the system instructions.'});
+    if (hasAnnotations) system.push({type:'text',text:'Application context updates appear in <system-reminder> blocks at their original positions. Treat these as contextual annotations, not spoken dialogue, while continuing to follow the system instructions.'});
     const tools = (body.tools || []).map((tool: any) => {
         if (tool.type !== 'function' || !tool.function?.name) throw Error('Anthropic 暂仅支持 function 工具');
         return {name:tool.function.name,description:tool.function.description || '',input_schema:tool.function.parameters || {type:'object',properties:{}}};
     });
-    // Three explicit 5-minute breakpoints: tools, stable system, history before volatile reminders.
-    if (tools.length) tools.at(-1).cache_control = {...ephemeral};
-    if (system.length) system.at(-1)!.cache_control = {...ephemeral};
-    if (lastHistoryBlock && !['thinking','redacted_thinking'].includes(lastHistoryBlock.type)) lastHistoryBlock.cache_control = {...ephemeral};
+    // Prioritize this character: full system, latest history, then an earlier
+    // history checkpoint for a growing/sliding window. Tools use the remaining slot.
+    // Never move annotations or infer their stability from model-visible text.
+    const checkpoints = new Set<Block>();
+    // All explicit checkpoints use the same TTL. Mixing TTLs would require the
+    // 1h breakpoint to precede every 5m breakpoint in actual prompt order.
+    const cacheControl = getAnthropicCacheTtl() === '1h' ? {...ephemeral, ttl: '1h'} : {...ephemeral};
+    const checkpoint = (block: Block | undefined) => {
+        if (block && checkpoints.size < 4 && !['thinking','redacted_thinking'].includes(block.type)) {
+            checkpoints.add(block);
+            block.cache_control = {...cacheControl};
+        }
+    };
+    checkpoint(system.at(-1));
+    checkpoint(stableHistory.at(-1));
+    if (stableHistory.length >= 8) checkpoint(stableHistory[Math.floor((stableHistory.length - 1) * 0.7)]);
+    checkpoint(tools.at(-1));
     const thinking = body.thinking || body.extra_body?.thinking;
     const request: any = {
         model: body.model,
@@ -124,8 +148,15 @@ export function toAnthropicRequest(body: any): any {
 }
 
 export function anthropicUsage(usage: any = {}): any {
-    const input = usage.input_tokens || 0, read = usage.cache_read_input_tokens || 0, write = usage.cache_creation_input_tokens || 0;
-    return {...usage,prompt_tokens:input+read+write,completion_tokens:usage.output_tokens || 0,total_tokens:input+read+write+(usage.output_tokens || 0),prompt_tokens_details:{cached_tokens:read},cache_creation_input_tokens:write};
+    const input = usage.input_tokens || 0, read = usage.cache_read_input_tokens || 0;
+    // This relay's converted responses explicitly expose claude_cache_creation_*
+    // fields and report inclusive input_tokens. Native responses are exclusive.
+    // Never guess from the relative sizes: a large native uncached tail is valid.
+    const relayInclusive = Object.hasOwn(usage, 'claude_cache_creation_5_m_tokens')
+        || Object.hasOwn(usage, 'claude_cache_creation_1_h_tokens');
+    const write = usage.cache_creation_input_tokens ?? ((usage.claude_cache_creation_5_m_tokens || 0) + (usage.claude_cache_creation_1_h_tokens || 0));
+    const prompt = relayInclusive ? input : input + read + write;
+    return {...usage,prompt_tokens:prompt,completion_tokens:usage.output_tokens || 0,total_tokens:prompt+(usage.output_tokens || 0),prompt_tokens_details:{cached_tokens:read},cache_creation_input_tokens:write};
 }
 
 export function fromAnthropicMessage(message: any): any {
@@ -211,6 +242,7 @@ function convertAnthropicStream(response: Response): Response {
 export async function fetchLlm(resource: RequestInfo | URL, init?: RequestInit, transport: typeof fetch = globalThis.fetch, browser = typeof window !== 'undefined'): Promise<Response> {
     if ((transport as FetchTransport).__sullyAnthropic) return transport(resource,init);
     const inputUrl = typeof resource === 'string' ? resource : resource instanceof URL ? resource.href : resource.url;
+    if (isGeminiEndpoint(inputUrl)) return fetchGemini(resource, init, transport);
     if (!isAnthropicEndpoint(inputUrl)) return transport(resource,init);
     const request = resource instanceof Request ? resource : undefined;
     const method=(init?.method || request?.method || 'GET').toUpperCase();

@@ -1,3 +1,4 @@
+import MusicCover from '../../components/os/MusicCover';
 /**
  * 网易云「我的」主页
  * - 未登录: 扫码登录 / 手机验证码登录
@@ -13,6 +14,9 @@ import { MagnifyingGlass, Gear, User as UserIcon } from '@phosphor-icons/react';
 import NeteaseLoginPanel from './NeteaseLoginPanel';
 import TokenImg from '../../components/os/TokenImg';
 import { isBlobRef } from '../../utils/blobRef';
+import PersonalPlaylistsPanel from './PersonalPlaylistsPanel';
+import {DB} from '../../utils/db';
+import {loadNeteasePlaylistSongs,importNeteasePlaylist} from '../../utils/personalMusicLibrary';
 import { trackEvent } from '../../utils/analytics';
 
 interface Playlist {
@@ -36,6 +40,7 @@ interface Props {
   onOpenSearch?: () => void;
   onOpenSettings?: () => void;
   onVisitChar?: (charId: string) => void;
+  onManage?: (playlistId?:string) => void;
 }
 
 // ─── 「一起写的歌」本地专辑卡 — 写歌 App 同步过来的 ACE-Step / MiniMax 出歌 ───
@@ -82,7 +87,7 @@ const LocalAlbumCard: React.FC<LocalAlbumCardProps> = ({ songs, expanded, setExp
         <div className="flex items-center gap-1.5">
           <span className="text-sm font-medium tracking-wider"
             style={{ color: C.primary, fontFamily: `'Georgia', 'Noto Serif SC', serif` }}>
-            一起写的歌
+            我的歌曲
           </span>
           <span className="text-[8px] px-1.5 py-[1px] rounded-full font-bold"
             style={{
@@ -94,7 +99,7 @@ const LocalAlbumCard: React.FC<LocalAlbumCardProps> = ({ songs, expanded, setExp
           </span>
         </div>
         <div className="text-[10px] truncate mt-0.5" style={{ color: C.muted }}>
-          {songs.length} 首 · 你和 char 共同创作
+          {songs.length} 首 · 创作与导入
         </div>
       </div>
       <div className="text-[10px] shrink-0" style={{ color: C.sakura }}>
@@ -155,7 +160,7 @@ const LocalAlbumCard: React.FC<LocalAlbumCardProps> = ({ songs, expanded, setExp
   </div>
 );
 
-const NeteaseProfilePage: React.FC<Props> = ({ onBack, onOpenPlayer, onOpenSearch, onOpenSettings, onVisitChar }) => {
+const NeteaseProfilePage: React.FC<Props> = ({ onBack, onOpenPlayer, onOpenSearch, onOpenSettings, onVisitChar, onManage }) => {
   const { addToast, characters, userProfile } = useOS();
   const {
     cfg, setCfg, profile, refreshProfile, playSong,
@@ -180,8 +185,6 @@ const NeteaseProfilePage: React.FC<Props> = ({ onBack, onOpenPlayer, onOpenSearc
   const [records, setRecords] = useState<RecordItem[]>([]);
   const [cloud, setCloud] = useState<Song[]>([]);
   const [loading, setLoading] = useState(false);
-  const [expandedPl, setExpandedPl] = useState<number | null>(null);
-  const [plTracks, setPlTracks] = useState<Record<number, Song[]>>({});
   const [signedIn, setSignedIn] = useState(false);
 
   const uid = profile?.userId;
@@ -204,13 +207,32 @@ const NeteaseProfilePage: React.FC<Props> = ({ onBack, onOpenPlayer, onOpenSearc
 
   // 加载歌单 / 播放记录 / 云盘
   // 重点：deps 只含 uid —— 其他依赖通过 ref 读取，避免 OSContext 每秒 tick 触发循环刷新
-  const reload = useCallback(async () => {
+  const reload = useCallback(async (force=false) => {
     const curCfg = cfgRef.current;
     if (!uid || !curCfg.cookie) return;
     setLoading(true);
     try {
       const [plRes, recRes, clRes] = await Promise.allSettled([
-        musicApi.userPlaylist(curCfg, uid),
+        (async()=>{
+          const key='music-netease-index:'+uid;
+          if(!force){const saved=await DB.getAsset(key);if(saved){const cached=JSON.parse(saved);if(Array.isArray(cached))return {playlist:cached};}}
+          let result=force?await musicApi._raw(curCfg,'/user/playlist',{uid,limit:60,offset:0}):await musicApi.userPlaylist(curCfg,uid);
+          if(force&&Array.isArray(result?.playlist)){
+            const all=[...result.playlist];let offset=all.length;
+            while(result.more===true || result.playlist.length===60){
+              const page=await musicApi._raw(curCfg,'/user/playlist',{uid,limit:60,offset});
+              if(!Array.isArray(page?.playlist))throw Error('歌单分页读取失败');
+              const fresh=page.playlist.filter((p:any)=>!all.some((x:any)=>x.id===p.id));
+              if(!fresh.length){if(page.more)throw Error('网易云歌单分页未完成');break;}
+              all.push(...fresh);offset+=page.playlist.length;result=page;
+              if(offset>10000)throw Error('歌单数量过多，请稍后重试');
+            }
+            result={...result,playlist:all};
+          }
+          if(!Array.isArray(result?.playlist))throw Error(result?.message||'歌单读取失败');
+          await DB.saveAsset(key,JSON.stringify(result.playlist));
+          return result;
+        })(),
         musicApi.userRecord(curCfg, uid, 1),
         musicApi.userCloud(curCfg),
       ]);
@@ -225,7 +247,7 @@ const NeteaseProfilePage: React.FC<Props> = ({ onBack, onOpenPlayer, onOpenSearc
           creatorNickname: p.creator?.nickname,
         }));
         setPlaylists(arr);
-      }
+      } else if(force)throw plRes.reason;
 
       if (recRes.status === 'fulfilled') {
         const weekly = recRes.value?.weekData || recRes.value?.allData || [];
@@ -260,6 +282,7 @@ const NeteaseProfilePage: React.FC<Props> = ({ onBack, onOpenPlayer, onOpenSearc
       }
     } catch (e: any) {
       toastRef.current(`加载失败：${e.message}`, 'error');
+      if(force)throw e;
     } finally {
       setLoading(false);
     }
@@ -267,27 +290,23 @@ const NeteaseProfilePage: React.FC<Props> = ({ onBack, onOpenPlayer, onOpenSearc
 
   useEffect(() => { reload(); }, [reload]);
 
-  // 展开歌单 — 同样用 ref 去稳定化 cfg / addToast
-  const expandPlaylist = useCallback(async (pl: Playlist) => {
-    if (expandedPl === pl.id) { setExpandedPl(null); return; }
-    setExpandedPl(pl.id);
-    if (plTracks[pl.id]) return;
+  const [syncing,setSyncing]=useState(false);
+  const syncLock=useRef(false);
+  const loadImportTracks = async (source:{id:number;trackCount:number},force=false) => {
+    return loadNeteasePlaylistSongs(source,(limit,offset)=>force?musicApi._raw(cfgRef.current,'/playlist/track/all',{id:source.id,limit,offset}):musicApi.playlistTrackAll(cfgRef.current,source.id,limit,offset));
+  };
+
+  const syncAll = async () => {
+    if(syncLock.current)return;syncLock.current=true;setSyncing(true);
     try {
-      const r = await musicApi.playlistTrackAll(cfgRef.current, pl.id, 100, 0);
-      const songs: Song[] = (r?.songs || []).map((s: any) => ({
-        id: s.id,
-        name: s.name,
-        artists: (s.ar || []).map((a: any) => a.name).join(' / '),
-        album: s.al?.name || '',
-        albumPic: toHttps(s.al?.picUrl || ''),
-        duration: (s.dt || 0) / 1000,
-        fee: s.fee ?? 0,
-      }));
-      setPlTracks(prev => ({ ...prev, [pl.id]: songs }));
-    } catch (e: any) {
-      toastRef.current(`加载歌单失败：${e.message}`, 'error');
-    }
-  }, [expandedPl, plTracks]);
+      await reload(true);
+      const raw=await DB.getAsset('music-netease-index:'+uid);
+      if(!raw)throw Error('没有读取到网易云歌单');
+      const sources=JSON.parse(raw);let failed=0;
+      for(const source of sources){try{await importNeteasePlaylist({...source,coverImgUrl:toHttps(source.coverImgUrl||'')},await loadImportTracks(source,true));}catch{failed++;}}
+      toastRef.current(failed?`已完成同步，${failed} 个歌单未完成，可再次同步重试`:`已同步并保存 ${sources.length} 个歌单`,failed?'info':'success');
+    }catch(e){toastRef.current('同步失败：'+String(e),'error');}finally{syncLock.current=false;setSyncing(false);}
+  };
 
   // 签到
   const doSignIn = useCallback(async () => {
@@ -316,14 +335,13 @@ const NeteaseProfilePage: React.FC<Props> = ({ onBack, onOpenPlayer, onOpenSearc
     await refreshProfile();
   }, [setCfg, refreshProfile]);
 
-  // 未登录 → 默认展示「一起写的歌」本地专辑 + 网易云登录入口；
-  // 没本地专辑 → 直接进登录面板（保持原来体验）。
+  // 未登录也保留本地歌单与音乐管理入口，登录面板由用户主动打开。
   // ⚠️ 所有 hooks 必须在这个 early-return **之前** 声明完。
   if (!cfg.cookie || !profile) {
-    if (localAlbumSongs.length === 0 || showNeteaseLogin) {
+    if (showNeteaseLogin) {
       return (
         <NeteaseLoginPanel
-          onBack={localAlbumSongs.length > 0 ? () => setShowNeteaseLogin(false) : onBack}
+          onBack={() => setShowNeteaseLogin(false)}
           onLoggedIn={async (cookie) => {
             setCfg({ ...cfgRef.current, cookie });
             await new Promise(r => setTimeout(r, 300));
@@ -339,10 +357,11 @@ const NeteaseProfilePage: React.FC<Props> = ({ onBack, onOpenPlayer, onOpenSearc
       <div className="flex flex-col h-full relative"
         style={{ background: `linear-gradient(180deg, #ffffff 0%, ${C.bg} 50%, ${C.bgDeep} 100%)` }}>
         <BokehBg />
-        <MizuHeader title="My Cloud" onBack={onBack} />
+        <MizuHeader title="My Cloud" onBack={onBack} right={<button type="button" className="text-[11px] px-2 py-1" onClick={()=>onManage?.()}>音乐管理</button>}/>
         <div className="relative z-10 flex-1 overflow-y-auto pb-24 px-3 pt-3 shizuku-scrollbar">
           {/* 本地专辑卡 */}
-          <LocalAlbumCard
+          <PersonalPlaylistsPanel onManage={onManage} onOpenPlayer={onOpenPlayer}/>
+          {localAlbumSongs.length>0&&<LocalAlbumCard
             songs={localAlbumSongs}
             expanded={localAlbumExpanded}
             setExpanded={setLocalAlbumExpanded}
@@ -353,7 +372,7 @@ const NeteaseProfilePage: React.FC<Props> = ({ onBack, onOpenPlayer, onOpenSearc
               trackEvent('播放「我的」页列表里的一首歌', { source: 'local' });
             }}
             onRemove={removeLocalSong}
-          />
+          />}
           {/* 登录入口卡 */}
           <button
             onClick={() => setShowNeteaseLogin(true)}
@@ -477,7 +496,7 @@ const NeteaseProfilePage: React.FC<Props> = ({ onBack, onOpenPlayer, onOpenSearc
           </div>
 
           {/* 快捷按钮 */}
-          <div className="flex items-center gap-2 mt-3">
+          <div className="grid grid-cols-4 gap-2 mt-3" aria-label="音乐快捷操作">
             <button
               onClick={doSignIn}
               className="flex-1 py-2 rounded-xl text-[11px] transition-all shizuku-glass"
@@ -531,6 +550,7 @@ const NeteaseProfilePage: React.FC<Props> = ({ onBack, onOpenPlayer, onOpenSearc
             >
               私人 FM
             </button>
+            <button type="button" onClick={()=>onManage?.()} className="py-2 rounded-xl text-[11px] transition-all shizuku-glass whitespace-nowrap" style={{color:C.primary,border:`1px solid ${C.primary}30`}}>音乐管理</button>
           </div>
 
           <button
@@ -629,6 +649,7 @@ const NeteaseProfilePage: React.FC<Props> = ({ onBack, onOpenPlayer, onOpenSearc
               {t.label}
             </button>
           ))}
+          <button type="button" aria-label="同步网易云歌单" disabled={syncing||loading} onClick={()=>void syncAll()} className="flex-1 py-1.5 rounded-full text-[11px] tracking-wider disabled:opacity-40" style={{color:C.muted}}>{syncing?'同步中…':'同步'}</button>
         </div>
 
         {loading && (
@@ -639,71 +660,10 @@ const NeteaseProfilePage: React.FC<Props> = ({ onBack, onOpenPlayer, onOpenSearc
           </div>
         )}
 
-        {tab === 'playlist' && (
-          <div className="px-3 mt-3 space-y-2">
-            {localAlbumSongs.length > 0 && (
-              <LocalAlbumCard
-                songs={localAlbumSongs}
-                expanded={localAlbumExpanded}
-                setExpanded={setLocalAlbumExpanded}
-                currentId={current?.id ?? null}
-                playing={playing}
-                onPlay={(s, idx) => {
-                  playSong(s, { alsoSetQueue: true, replaceQueue: localAlbumSongs, startIdx: idx });
-                  trackEvent('播放「我的」页列表里的一首歌', { source: 'local' });
-                }}
-                onRemove={removeLocalSong}
-              />
-            )}
-            {playlists.length === 0 && !loading && localAlbumSongs.length === 0 && (
-              <div className="text-center text-[11px] py-10" style={{ color: C.faint }}>还没有歌单</div>
-            )}
-            {playlists.map(pl => (
-              <div key={pl.id} className="rounded-2xl shizuku-glass overflow-hidden">
-                <button
-                  onClick={() => expandPlaylist(pl)}
-                  className="w-full flex items-center gap-3 p-2.5 text-left"
-                >
-                  <img src={pl.coverImgUrl} alt=""
-                    className="w-12 h-12 rounded-xl object-cover"
-                    style={{ border: `1px solid ${C.faint}30` }} />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm truncate" style={{ color: C.text }}>{pl.name}</div>
-                    <div className="text-[10px] truncate" style={{ color: C.muted }}>
-                      {pl.trackCount} 首 · {pl.subscribed ? '收藏' : '创建'}
-                      {pl.creatorNickname && ` · ${pl.creatorNickname}`}
-                    </div>
-                  </div>
-                  <div className="text-[10px] shrink-0" style={{ color: C.accent }}>
-                    {expandedPl === pl.id ? '收起' : '展开'}
-                  </div>
-                </button>
-                {expandedPl === pl.id && (
-                  <div className="border-t px-2 py-1" style={{ borderColor: `${C.faint}20` }}>
-                    {(plTracks[pl.id] || []).slice(0, 30).map(s => (
-                      <button key={s.id}
-                        onClick={() => {
-                          playSong(s, { replaceQueue: plTracks[pl.id], startIdx: plTracks[pl.id].findIndex(x => x.id === s.id) });
-                          onOpenPlayer();
-                          trackEvent('播放「我的」页列表里的一首歌', { source: 'playlist' });
-                        }}
-                        className="w-full text-left flex items-center gap-2 py-1.5 px-1">
-                        <TokenImg value={s.albumPic} alt="" className="w-7 h-7 rounded-md object-cover" />
-                        <div className="flex-1 min-w-0">
-                          <div className="text-[11px] truncate" style={{ color: C.text }}>{s.name}</div>
-                          <div className="text-[9px] truncate" style={{ color: C.muted }}>{s.artists}</div>
-                        </div>
-                      </button>
-                    ))}
-                    {(plTracks[pl.id] || []).length === 0 && (
-                      <div className="text-[10px] text-center py-2" style={{ color: C.faint }}>加载中...</div>
-                    )}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
+        {tab==='playlist'&&<>
+          <PersonalPlaylistsPanel sources={playlists} loadTracks={loadImportTracks} onManage={onManage} onOpenPlayer={onOpenPlayer}/>
+          {localAlbumSongs.length>0&&<div className="px-3 mt-3"><LocalAlbumCard songs={localAlbumSongs} expanded={localAlbumExpanded} setExpanded={setLocalAlbumExpanded} currentId={current?.id??null} playing={playing} onPlay={(song,index)=>{playSong(song,{replaceQueue:localAlbumSongs,startIdx:index});onOpenPlayer();}} onRemove={removeLocalSong}/></div>}
+        </>}
 
         {tab === 'record' && (
           <div className="px-3 mt-3 space-y-1">
@@ -722,7 +682,7 @@ const NeteaseProfilePage: React.FC<Props> = ({ onBack, onOpenPlayer, onOpenSearc
                 style={{ background: 'rgba(255,255,255,0.06)' }}
               >
                 <div className="text-[10px] w-5 text-center shrink-0" style={{ color: C.faint }}>{i + 1}</div>
-                <TokenImg value={r.song.albumPic} alt="" className="w-10 h-10 rounded-lg object-cover" />
+                <MusicCover value={r.song.albumPic} alt="" className="w-10 h-10 rounded-lg object-cover" />
                 <div className="flex-1 min-w-0">
                   <div className="text-sm truncate" style={{ color: C.text }}>{r.song.name}</div>
                   <div className="text-[10px] truncate" style={{ color: C.muted }}>{r.song.artists}</div>
@@ -751,7 +711,7 @@ const NeteaseProfilePage: React.FC<Props> = ({ onBack, onOpenPlayer, onOpenSearc
                 className="w-full flex items-center gap-3 p-2 rounded-2xl text-left transition-all"
                 style={{ background: 'rgba(255,255,255,0.06)' }}
               >
-                <TokenImg value={s.albumPic || 'https://p1.music.126.net/y19E5SadGUmSR8SZxkrNtw==/109951163965029180.jpg'}
+                <MusicCover value={s.albumPic}
                   alt="" className="w-10 h-10 rounded-lg object-cover" />
                 <div className="flex-1 min-w-0">
                   <div className="text-sm truncate" style={{ color: C.text }}>{s.name}</div>

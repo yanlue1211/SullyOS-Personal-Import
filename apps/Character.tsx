@@ -1,3 +1,5 @@
+import { GlobalWorldbookSettings } from '../components/character/GlobalWorldbookSettings';
+import { worldbookScope } from '../utils/worldbookScope';
 import CharacterApiPanel from '../components/character/CharacterApiPanel';
 import CharacterSettingsSection from '../components/character/CharacterSettingsSection';
 import CharacterStatsPanel from '../components/character/CharacterStatsPanel';
@@ -432,7 +434,7 @@ const Character: React.FC = () => {
   // New: Mount entire category
   const mountCategory = (category: string) => {
       if (!formData) return;
-      const booksToMount = worldbooks.filter(b => (b.category || '未分类设定 (General)') === category);
+      const booksToMount = worldbooks.filter(b => worldbookScope(b)==='personal' && (b.category || '未分类设定 (General)') === category);
       if (booksToMount.length === 0) return;
 
       const currentBooks = formData.mountedWorldbooks || [];
@@ -465,7 +467,7 @@ const Character: React.FC = () => {
   // 弹窗没打开时整个编辑表单每敲一个字都会重新分组一遍全部世界书。
   const wbModalGroups = useMemo(() => {
       const groups: Record<string, typeof worldbooks> = {};
-      worldbooks.forEach(wb => {
+      worldbooks.filter(wb=>worldbookScope(wb)==='personal').forEach(wb => {
           const cat = wb.category || '未分类设定 (General)';
           if (!groups[cat]) groups[cat] = [];
           groups[cat].push(wb);
@@ -478,7 +480,7 @@ const Character: React.FC = () => {
   const wbModalSearchResults = useMemo(() => {
       const query = wbModalSearch.trim().toLowerCase();
       if (!query) return null;
-      const matched = worldbooks.filter(wb =>
+      const matched = worldbooks.filter(wb => worldbookScope(wb)==='personal').filter(wb =>
           wb.title.toLowerCase().includes(query) ||
           (wb.category || '未分类设定 (General)').toLowerCase().includes(query)
       );
@@ -646,7 +648,7 @@ const Character: React.FC = () => {
 
           const timeFmt = (ts: number) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
           const rawLog = dayMsgs
-              .map(m => formatMessageWithTime(m, formData.name, userProfile.name, timeFmt))
+              .map(m => formatMessageWithTime(m, formData.name, userProfile.name, timeFmt, formData.innerVoiceMemoryEnabled !== false))
               .join('\n');
 
           // 模板优先级：override（弹窗现场选）→ 当前 state → 默认 preset
@@ -831,7 +833,7 @@ const Character: React.FC = () => {
                 const dayMsgs = msgsByDate[date];
                 const timeFmt = (ts: number) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
                 const rawLog = dayMsgs
-                    .map(m => formatMessageWithTime(m, formData.name, userProfile.name, timeFmt))
+                    .map(m => formatMessageWithTime(m, formData.name, userProfile.name, timeFmt, formData.innerVoiceMemoryEnabled !== false))
                     .join('\n');
 
                 // Use selected template (same as ChatApp) with variable substitution
@@ -942,7 +944,7 @@ const Character: React.FC = () => {
           // 重置模式下大幅减少近期聊天的数量，避免近因偏差
           const recentMsgs = await loadCharacterContextMessages(formData).then(messages => messages.slice(-(type === 'initial' ? 15 : 50)));
           const msgText = recentMsgs
-              .map(m => formatMessageForPrompt(m, charName, boundUser.name))
+              .map(m => formatMessageForPrompt(m, charName, boundUser.name, formData.innerVoiceMemoryEnabled !== false))
               .join('\n');
 
           if (msgText) messagesToAnalyze += `\n【最近的聊天记录 (Recent Chats - 仅用于检测近期变化)】:\n${msgText}\n`;
@@ -1782,15 +1784,17 @@ ${isInitialGeneration ? `
 
                            <CharacterApiPanel key={formData.id} character={formData} onChange={api => handleChange('dialogueApi', api)} />
 
+                           <GlobalWorldbookSettings character={formData} books={worldbooks} onChange={ids => handleChange('disabledGlobalWorldbookIds', ids)} />
+
                            {/* Worldbook Section */}
                            <div>
                                <div className="flex justify-between items-center mb-2 px-1">
-                                   <label className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest block flex items-center gap-1"><Books size={12} /> 扩展设定 (Worldbooks)</label>
+                                   <label className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest block flex items-center gap-1"><Books size={12} /> 个人世界书 · 扩展设定</label>
                                    <button onClick={openWorldbookModal} className="text-[10px] bg-indigo-50 text-indigo-600 px-2 py-1 rounded font-bold hover:bg-indigo-100">+ 挂载</button>
                                 </div>
                                 <div className="space-y-2">
-                                   {formData.mountedWorldbooks && formData.mountedWorldbooks.length > 0 ? (
-                                       [...formData.mountedWorldbooks.reduce((groups, book) => {
+                                   {formData.mountedWorldbooks && formData.mountedWorldbooks.some(book=>!book.globalMount) ? (
+                                       [...formData.mountedWorldbooks.filter(book=>!book.globalMount).reduce((groups, book) => {
                                            const category = book.category || '未分类设定 (General)';
                                            groups.set(category, [...(groups.get(category) || []), book]);
                                            return groups;
@@ -2019,9 +2023,9 @@ ${isInitialGeneration ? `
             onClose={() => setShowWorldbookModal(false)} 
         >
             <div className="max-h-[50vh] overflow-y-auto no-scrollbar space-y-3 p-1">
-                {worldbooks.length === 0 ? (
+                {worldbooks.filter(book=>worldbookScope(book)==='personal').length === 0 ? (
                     <div className="text-center text-slate-400 text-xs py-8">
-                        还没有世界书，请去桌面【世界书】App 创建。
+                        个人板块还没有世界书，可在【世界书】App 创建或从全局板块移动。
                     </div>
                 ) : (
                     <>

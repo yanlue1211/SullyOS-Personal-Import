@@ -14,6 +14,51 @@ import {
     resolveCollaborationFileByTitle,
 } from '../features/collaboration/chatLibrary';
 
+/** Shared local scheduler: status cards may invoke this without executing unrelated actions. */
+export async function executeLocalScheduledMessages(content:string,charId:string,charName:string,addToast:(message:string,type:'info'|'success'|'error')=>void,charTz?:string,replyRun?:ReplyRun){
+ const replyStep=<T>(operation:()=>Promise<T>)=>withReplyCancellation(replyRun,operation);
+ replyRun?.check();
+        const scheduleRegex = /\[schedule_message \| (.*?) \| fixed \| (.*?)\]/g;
+        let match;
+        while ((match = scheduleRegex.exec(content)) !== null) {
+            const timeStr = match[1].trim();
+            const msgContent = match[2].trim();
+            // 角色照着自己那边的钟写时间，按设备时区解释会整体偏一个时差：
+            // 纽约角色在自己上午说「今晚 21:00 找你」，设备在中国就会算成已经过期。
+            const dueTime = wallClockToTimestamp(timeStr, charTz);
+            // 时间写歪 / 已经过去的一律不排。这两种情况下角色在正文里往往已经把话说出去了
+            // （「我到点叫你」），排不上就是一句空头承诺，所以留一行日志说清是哪条、为什么，
+            // 别让它悄无声息地消失。离线补收时尤其常见：消息是凌晨发的，人第二天早上才打开。
+            if (isNaN(dueTime)) {
+                console.warn('[ScheduledMessage] 时间解析不了，这条不排:', timeStr, '内容:', msgContent);
+                addToast('本地定时消息未安排：时间格式无法识别。','error');
+                continue;
+            }
+            if (dueTime <= Date.now()) {
+                addToast('本地定时消息未安排：指定时间已经过去。','info');
+                console.warn(
+                    '[ScheduledMessage] 时间已经过去，这条不排:', timeStr,
+                    `(角色时区 ${charTz ?? '设备默认'}，晚了 ${Math.round((Date.now() - dueTime) / 60000)} 分钟)`,
+                    '内容:', msgContent,
+                );
+                continue;
+            }
+            const notificationId = Math.floor(Math.random() * 2147483646) + 1;
+            const inserted = await replyStep(async () => DB.saveScheduledMessage({ notificationId, id: `sched-${Date.now()}-${Math.random()}`, charId, content: msgContent, dueAt: dueTime, createdAt: Date.now() }));
+            if (inserted === false) continue;
+            try {
+                const hasPerm = await replyStep(async () => LocalNotifications.checkPermissions());
+                if (hasPerm.display === 'granted') {
+                    await replyStep(async () => LocalNotifications.schedule({ notifications: [{ title: charName, body: msgContent, id: notificationId, schedule: { at: new Date(dueTime) }, smallIcon: 'ic_stat_icon_config_sample' }] }));
+                }
+            } catch (e) { replyRun?.check(); console.log("Notification schedule skipped (web mode)"); }
+
+            addToast(`${charName} 已保存本地定时消息（需保持糯米机运行）`, 'info');
+        }
+        return content.replace(scheduleRegex, '').trim();
+
+}
+
 export interface MusicActionSnapshot {
     songId: number;
     name: string;
@@ -392,6 +437,33 @@ export const ChatParser = {
             content = content.replace(MUSIC_TAG_GLOBAL_RE, '').trim();
         }
 
+        // Character-selected music: control actual player and analyze song audio.
+        const listenMatch = /\[\[LISTEN_SONG:\s*([^\]]+?)\s*\]\]/.exec(content);
+        if (listenMatch) {
+            content = content.replace(/\[\[LISTEN_SONG:\s*[^\]]+?\s*\]\]/g, '').trim();
+            const query = listenMatch[1];
+            void (async () => {
+                const listening = await import('./songListening');
+                const target = await DB.getCharacter(charId);
+                if (!target || !listening.isListenSongEnabled(target)) return;
+                const { searchNeteaseSong } = await import('./songSearch');
+                const picked = await searchNeteaseSong(query);
+                if (!picked) { addToast('没有找到匹配的网易云歌曲，本次未播放', 'info'); return; }
+                const liveTarget = await DB.getCharacter(charId);
+                if (!liveTarget || !listening.isListenSongEnabled(liveTarget)) return;
+                const { loadMusicControl } = await import('../context/MusicContext');
+                const control = loadMusicControl();
+                if (!control) { addToast('播放器尚未初始化，本次未播放', 'info'); return; }
+                await control.playSong(picked, {requestedByCharId: charId});
+                // 角色自主点歌只负责播放；不要自动写个人听歌日记。
+                // 音频分析只由用户开启的真实听歌功能控制。
+                if (listening.isRealSongListeningEnabled(liveTarget)) {
+                  try { await listening.getOrAnalyzeSongSound(picked); }
+                  catch (error) { console.warn('[audio-listening] 自主点歌分析失败', error); }
+                }
+            })().catch(error => { console.warn('[audio-listening] 执行失败', error); addToast('网易云点歌失败，请稍后再试', 'error'); });
+        }
+
         // NEWS_CARD — char 主动把某条热点当作新闻卡片分享（来源 + 标题）
         //   [[NEWS_CARD: 来源|标题]]    （来源可省略 → [[NEWS_CARD: 标题]]）
         const NEWS_CARD_RE = /\[\[NEWS_CARD:\s*([^\]]*?)\s*\]\]/;
@@ -463,41 +535,8 @@ export const ChatParser = {
             content = content.replace(eventMatch[0], '').trim();
         }
 
-        // SCHEDULE
-        const scheduleRegex = /\[schedule_message \| (.*?) \| fixed \| (.*?)\]/g;
-        let match;
-        while ((match = scheduleRegex.exec(content)) !== null) {
-            const timeStr = match[1].trim();
-            const msgContent = match[2].trim();
-            // 角色照着自己那边的钟写时间，按设备时区解释会整体偏一个时差：
-            // 纽约角色在自己上午说「今晚 21:00 找你」，设备在中国就会算成已经过期。
-            const dueTime = wallClockToTimestamp(timeStr, charTz);
-            // 时间写歪 / 已经过去的一律不排。这两种情况下角色在正文里往往已经把话说出去了
-            // （「我到点叫你」），排不上就是一句空头承诺，所以留一行日志说清是哪条、为什么，
-            // 别让它悄无声息地消失。离线补收时尤其常见：消息是凌晨发的，人第二天早上才打开。
-            if (isNaN(dueTime)) {
-                console.warn('[ScheduledMessage] 时间解析不了，这条不排:', timeStr, '内容:', msgContent);
-                continue;
-            }
-            if (dueTime <= Date.now()) {
-                console.warn(
-                    '[ScheduledMessage] 时间已经过去，这条不排:', timeStr,
-                    `(角色时区 ${charTz ?? '设备默认'}，晚了 ${Math.round((Date.now() - dueTime) / 60000)} 分钟)`,
-                    '内容:', msgContent,
-                );
-                continue;
-            }
-            await replyStep(async () => DB.saveScheduledMessage({ id: `sched-${Date.now()}-${Math.random()}`, charId, content: msgContent, dueAt: dueTime, createdAt: Date.now() }));
-            try {
-                const hasPerm = await replyStep(async () => LocalNotifications.checkPermissions());
-                if (hasPerm.display === 'granted') {
-                    await replyStep(async () => LocalNotifications.schedule({ notifications: [{ title: charName, body: msgContent, id: Math.floor(Math.random() * 100000), schedule: { at: new Date(dueTime) }, smallIcon: 'ic_stat_icon_config_sample' }] }));
-                }
-            } catch (e) { replyRun?.check(); console.log("Notification schedule skipped (web mode)"); }
-
-            addToast(`${charName} 似乎打算一会儿找你...`, 'info');
-        }
-        content = content.replace(scheduleRegex, '').trim();
+        // SCHEDULE — shared with exclusive response-status cards.
+        content = await executeLocalScheduledMessages(content,charId,charName,addToast,charTz,replyRun);
 
         // LIFE — 生活记录代记（生理期/药盒/记账/锻炼）。开关校验、去重、写库、落 life_card
         // 都在 lifeRecords.ts 里；这里只负责取角色档案。取不到就只剥 tag（静默丢弃）。
@@ -535,6 +574,8 @@ export const ChatParser = {
      * Used to decide whether a chunk is worth saving as a message.
      */
     hasDisplayContent: (text: string): boolean => {
+        // Virtual media markers are complete visible cards, not disposable control tags.
+        if (/\[\[虚拟(?:图片|视频|语音)[:：][\s\S]+?\]\]/.test(text)) return true;
         const stripped = text
             .replace(/%%BILINGUAL%%/gi, '')
             .replace(/%%TRANS%%[\s\S]*/gi, '')
@@ -593,7 +634,12 @@ export const ChatParser = {
         const voiceBlocks: string[] = [];
         // 语音块 + 紧邻 <字幕> 块是一个原子单元 (字幕是该语音的中文对照, 拆开就配不上)。
         // 闭合标签容许空格 / 简繁互换 (normalizeVoiceTags 在 sanitize 阶段已修, 这里是保险)
-        const guardedText = text.replace(/(?:<字幕>[\s\S]*?<\/字幕>\s*)?<[语語]音[^>]*>[\s\S]*?<\/\s*[语語]音\s*>(?:\s*<字幕>[\s\S]*?<\/字幕>)?/g, m => {
+        const virtualGuarded = text.replace(/\[\[虚拟(?:图片|视频|语音)[:：][\s\S]*?\]\]/g, m => {
+            const idx = voiceBlocks.length;
+            voiceBlocks.push(m);
+            return `\n${ATOM}${idx}${ATOM}\n`;
+        });
+        const guardedText = virtualGuarded.replace(/(?:<字幕>[\s\S]*?<\/字幕>\s*)?<[语語]音[^>]*>[\s\S]*?<\/\s*[语語]音\s*>(?:\s*<字幕>[\s\S]*?<\/字幕>)?/g, m => {
             const idx = voiceBlocks.length;
             voiceBlocks.push(m);
             return `\n${ATOM}${idx}${ATOM}\n`;

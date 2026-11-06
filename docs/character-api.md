@@ -49,3 +49,12 @@ URL / Key / Model 整套选择，禁止逐字段从不同配置补齐。空 Key 
 `pnpm vitest run utils/characterApi.test.ts utils/characterApiPanel.test.ts utils/amsgLlmCredentials.test.ts utils/amsgStateSync.test.ts utils/apiPresetSwitch.test.ts utils/apiPresetSwitch.wiring.test.ts utils/characterCard.test.ts`
 
 本地可视验收页：`/test/fixtures/character-api.html`。点击「加载演示配置」只写入该预览站点的虚构配置，不调用真实模型。可验证预设分组、保存 / 取消、跟随全局、跨页名单和窄屏布局。
+
+
+## 主动消息 / 朋友圈独立 API 编辑器
+
+系统设置的「主动消息 API」与朋友圈设置的「朋友圈独立 API」共用 `BackgroundApiEditor`。入口默认折叠，展开后可从全局 API 预设库按分组载入副本，拉取/搜索模型或手动填写名称。载入和选择只修改草稿；保存才写入对应独立 API，不会切换主聊天 API 或修改预设库。切换预设整份替换，不带入上一家服务商的温度、流式或输出额度。
+
+模型拉取沿用 `fetchLlm` 和 `extractModelIds`，支持 OpenAI 兼容、Anthropic 原生及 [Gemini 原生](./gemini-native.md)模型列表地址和鉴权。切换接口、预设、关闭或卸载会使旧请求失效；列表失败允许手填，不自动换模型。主动消息保存继续走已有凭据同步，朋友圈保存继续使用原独立配置字段，调用范围与回退规则未变。
+
+验证：`pnpm vitest run utils/backgroundApiEditor.test.tsx`，覆盖两个入口、保存/取消、参数隔离、原生鉴权、搜索、迟到响应和失败手填。

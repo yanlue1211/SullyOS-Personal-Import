@@ -1,3 +1,4 @@
+import MusicCover from './MusicCover';
 /**
  * 方形「正在播放」组件 — 用于桌面第二页的风车布局
  * — 全局 Music Context 驱动，点击跳到 Music App。
@@ -57,7 +58,7 @@ const NowPlayingSquareWidget: React.FC<{ contentColor: string }> = ({ contentCol
             <div className="absolute inset-[34%] rounded-full overflow-hidden flex items-center justify-center"
               style={{ background: '#F7CD67', boxShadow: '0 0 0 2px #e0b84a' }}>
               {albumPic
-                ? <img src={albumPic} alt="" className="w-full h-full object-cover" />
+                ? <MusicCover value={albumPic} alt="" className="w-full h-full object-cover" />
                 : <span className="text-[11px] font-black text-[#7a5c1e]">♪</span>}
             </div>
             <div className="absolute left-1/2 top-1/2 w-1.5 h-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full" style={{ background: '#1f1813' }} />
@@ -185,7 +186,7 @@ const NowPlayingSquareWidget: React.FC<{ contentColor: string }> = ({ contentCol
           }}
         >
           {albumPic ? (
-            <img src={albumPic} alt="" className="w-full h-full object-cover"
+            <MusicCover value={albumPic} alt="" className="w-full h-full object-cover"
               style={{ animation: playing ? 'spin 14s linear infinite' : 'none' }} />
           ) : (
             <div className="w-full h-full flex items-center justify-center">

@@ -25,6 +25,16 @@ export function validFriendGraph(value:unknown):value is FriendAccountGraph {
 export function friendAccountRef(feed:FriendFeedState, row:Pick<FriendComment,'authorId'|'accountId'>) {
     return feed.accountGraph?.accounts.find(a=>a.ownerId===row.authorId&&a.accountId===(row.accountId||'main'));
 }
+/** Material exposes opaque public IDs, while old actions use local alias IDs.
+ * Resolve either spelling only inside the current actor's active accounts. */
+export function resolveFriendActingAccount(feed:FriendFeedState,char:Pick<CharacterProfile,'id'|'name'>,id:unknown){
+    if(id!==undefined&&typeof id!=='string')return;
+    const accounts=friendAccounts(resolveFriendFeedSettings(feed.settings),char),key=(id as string|undefined)?.trim()||'main';
+    const local=accounts.find(a=>a.id===key);
+    if(local)return local;
+    const ref=feed.accountGraph?.accounts.find(a=>a.id===key&&a.ownerId===char.id);
+    return ref&&accounts.find(a=>a.id===ref.accountId);
+}
 export function activeFriendAccounts(feed:FriendFeedState, characters:Pick<CharacterProfile,'id'>[]) {
     const settings=resolveFriendFeedSettings(feed.settings), owners=new Set(['user',...characters.map(c=>c.id)]);
     return (feed.accountGraph?.accounts||[]).filter(a=>owners.has(a.ownerId)
@@ -119,5 +129,5 @@ export function friendPublicName(feed:FriendFeedState,viewerId:string,row:Pick<F
 }
 export function friendGraphStamp(feed:FriendFeedState) {
     const graph=feed.accountGraph,owners=new Set(['user',...feed.circles.flatMap(c=>c.memberIds)]);
-    return JSON.stringify([graph&&{...graph,accounts:graph.accounts.filter(a=>owners.has(a.ownerId))},resolveFriendFeedSettings(feed.settings).identities,resolveFriendFeedSettings(feed.settings).userNickname]);
+    return JSON.stringify([graph&&{...graph,accounts:graph.accounts.filter(a=>owners.has(a.ownerId))},resolveFriendFeedSettings(feed.settings).identities,resolveFriendFeedSettings(feed.settings).userNickname,resolveFriendFeedSettings(feed.settings).publicFigures,resolveFriendFeedSettings(feed.settings).publicPeers]);
 }

@@ -2,6 +2,7 @@ import type { Message } from '../types';
 
 /** Media references are storage identifiers, not user-visible message summaries. */
 export const chatPreviewText = (message: Pick<Message, 'type' | 'content'>): string => {
+    if (message.type === 'audio') return '[语音]';
     if (message.type === 'image') return '[图片]';
     if (message.type === 'emoji') return '[表情]';
     if (message.type === 'friend_feed_share_card') return '[分享好友圈帖子]';
@@ -18,7 +19,7 @@ export const isVisibleChatMessage = (message: Message, hideSystemLogs = false): 
     && message.metadata?.source !== 'home'
     && message.metadata?.source !== 'story_theater_memory'
     && !message.metadata?.proactiveHint
-    && !(hideSystemLogs && message.role === 'system' && message.type !== 'score_card' && message.type !== 'friend_feed_card')
+    && !(hideSystemLogs && message.role === 'system' && message.type !== 'score_card' && message.type !== 'friend_feed_card' && message.type !== 'workroom_card')
 );
 
 /** 点击后进入私聊的桌面消息卡，与聊天页共用来源过滤，不展示系统日志。 */

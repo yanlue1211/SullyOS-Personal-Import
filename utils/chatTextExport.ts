@@ -9,7 +9,8 @@ export function formatChatTextExport(messages: Message[]): string {
         .map(message => {
             const date = new Date(message.timestamp);
             const time = Number.isFinite(date.getTime()) ? date.toLocaleString('sv-SE', { hour12: false }) : '时间未知';
-            const content = message.type === 'image' ? '[图片]'
+            const content = message.type === 'audio' ? `[真实语音] ${message.metadata?.audioDescription || '尚未识别'}`
+                : message.type === 'image' ? '[图片]'
                 : message.type === 'emoji' ? '[表情]'
                 : /^(?:blobref:|blob:|data:)/i.test(message.content || '') ? '[附件]'
                 : message.type === 'voice' ? `[语音] ${message.content || ''}` : message.content || '';

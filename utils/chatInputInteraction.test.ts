@@ -254,3 +254,33 @@ describe('private chat input controls', () => {
         expect(box.checked).toBe(true);
     });
 });
+
+
+it.each(['actions','emojis','chars'] as const)('closes %s when typing starts without changing the draft',showPanel=>{
+ renderInput({showPanel,input:'保留草稿'});
+ act(()=>textarea().focus());
+ expect(props.setShowPanel).toHaveBeenCalledWith('none');
+ expect(textarea().value).toBe('保留草稿');
+ expect(props.onSend).not.toHaveBeenCalled();
+ vi.mocked(props.setShowPanel).mockClear();
+ // Mobile keyboards may keep the textarea focused while another panel opens.
+ renderInput({showPanel});pointerdown(textarea());
+ expect(props.setShowPanel).toHaveBeenCalledWith('none');
+ expect(document.activeElement).toBe(textarea());
+});
+
+it.each(['聊天功能','表情包'])('switches keyboard and %s on pointerdown before the target can move',label=>{
+ renderInput({showPanel:'none'});act(()=>textarea().focus());
+ const toggle=container.querySelector(`[aria-label="${label}"]`)!;
+ const event=pointerdown(toggle);expect(event.defaultPrevented).toBe(true);
+ expect(document.activeElement).not.toBe(textarea());
+ expect(props.setShowPanel).toHaveBeenLastCalledWith(label==='聊天功能'?'actions':'emojis');
+ renderInput({showPanel:label==='聊天功能'?'actions':'emojis'});
+ const press=pointerdown(textarea());expect(press.defaultPrevented).toBe(true);
+ expect(document.activeElement).toBe(textarea());expect(props.setShowPanel).toHaveBeenLastCalledWith('none');
+});
+it('consumes the opening touch click instead of activating a tile that moved under the finger',()=>{
+ renderInput({showPanel:'none'});pointerdown(container.querySelector('[aria-label="聊天功能"]')!);renderInput({showPanel:'actions'});const tile=[...container.querySelectorAll('button')].find(b=>b.textContent?.trim()==='我谕')!;
+ act(()=>tile.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,detail:1})));expect(props.onPanelAction).not.toHaveBeenCalled();pointerdown(tile);act(()=>tile.click());expect(props.onPanelAction).toHaveBeenLastCalledWith('oracle');
+});
+it('has separate video and oracle entries and puts cleanup on the final page',()=>{renderInput({showPanel:'actions'});const groups=[...container.querySelectorAll('[aria-label^="聊天功能第"]')];const last=groups.at(-1)!;expect(last.textContent).toContain('清理旧缓存');expect(container.textContent).toContain('视频');expect(container.textContent).toContain('我谕');expect(container.textContent).not.toContain('真实视频／我谕');});

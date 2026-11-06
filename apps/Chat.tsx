@@ -1,3 +1,10 @@
+import ExperienceTools from '../features/experience/Tools';
+import {isOracleControl,saveOracleControl} from '../features/experience/oracle';
+import { consumeWorkroomCollection } from '../features/workroom/launch';
+import { isAudioApiReady, audioBlobToPayload, recognizeUserRecording, registerRecordingRecognition, recordingMetadata, materializeAudioDescriptions } from '../utils/audioApi';
+import { isEmotionFeatureOn } from '../utils/scheduleFeature';
+import { recordingToWav } from '../features/personal/chatMedia/recording';
+import PersonalMediaComposer from '../features/personal/chatMedia/Composer';
 import {avatarFrameLayer} from '../utils/avatarFrameTarget';
 import ChatRuntimeStyle from '../components/chat/ChatRuntimeStyle';
 import {homePhoneAppearance,HOME_PHONE_BUBBLES} from './room3d/homePhoneAppearance';
@@ -15,7 +22,7 @@ import { DB } from '../utils/db';
 import { isVisibleChatMessage } from '../utils/chatMessageVisibility';
 import { chatCharacterDisplayName } from '../utils/characterRemark';
 import { AppID, Message, MessageType, MemoryFragment, Emoji, EmojiCategory, DailySchedule, ScheduleSlot } from '../types';
-import { processImageToBlob } from '../utils/file';
+import { processChatImage, processImageToBlob } from '../utils/file';
 import { safeResponseJson, extractContent } from '../utils/safeApi';
 import { buildChatFineTuneCss, mergeChatFineTune } from '../utils/chatFineTuneCss';
 import TokenImg from '../components/os/TokenImg';
@@ -30,6 +37,7 @@ import { getRoomLabel } from '../utils/memoryPalace/types';
 import { XhsMcpClient, extractNotesFromMcpData, normalizeXhsLiteDetail } from '../utils/xhsMcpClient';
 import { extractWebpageContent, detectFirstUrl, detectXhsShortUrl, extractXhsShareTitle, isXhsUrl, extractXhsNoteLink, expandShortUrl, type ExtractedWebpage } from '../utils/webpageExtractor';
 import { isVideoShareUrl, parseVideoShareUrl } from '../utils/videoParser';
+import { extractVideoFrames } from '../utils/shareVideoFrames';
 import { isDevDebugAvailable } from '../utils/devDebug';
 import { isImageValue, migrateDataUrlToRef, putImageBlob, putImageBlobDeduped, useBlobRefUrl } from '../utils/blobRef';
 import { buildReplySnapshotContent } from '../utils/applyAssistantPostProcessing';
@@ -51,6 +59,7 @@ import {resolveDecorationTheme} from '../utils/chatDecoration';
 import {DecorationTab} from '../components/chat/ChatDecorationPanel';
 import ChatAppearanceWardrobe from '../components/chat/ChatAppearanceWardrobe';
 import ChatInputArea from '../components/chat/ChatInputArea';
+import InnerVoiceSettings from '../features/personal/innerVoice/InnerVoiceSettings';
 import ConfirmDialog from '../components/os/ConfirmDialog';
 import { loadChatInputPreferences, saveChatInputPreferences } from '../utils/chatInputPreferences';
 import InstantChatRouteNotice from '../components/chat/InstantChatRouteNotice';
@@ -144,6 +153,9 @@ const HISTORY_WINDOW_BATCH_SIZE = 30;
 const INSTANT_VOICE_SCAN_WINDOW_MS = 30_000;
 
 export interface HomePhoneChatProps {characterId:string;getContext:()=>string;onBack:()=>void}
+const preparedRecordings = new WeakMap<Blob, Promise<Blob>>();
+function prepareRecording(blob: Blob) { let pending = preparedRecordings.get(blob); if (!pending) { pending = recordingToWav(blob); preparedRecordings.set(blob, pending); } return pending; }
+
 const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
     const { activeApp, characters, activeCharacterId: osActiveCharacterId, setActiveCharacterId, addCharacter, updateCharacter, updateUserProfile, apiConfig, apiPresets, availableModels, addApiPreset, closeApp, openApp, customThemes, addCustomTheme, removeCustomTheme, addWorldbook, updateTheme, saveAppearancePreset, addToast, showError, userProfile, lastMsgTimestamp, groups, characterGroups, clearUnread, unreadMessages, realtimeConfig, memoryPalaceConfig, updateMemoryPalaceConfig, remoteVectorConfig, syncEmotionApiToAllCharacters, theme: baseOsTheme, proactiveComposingChars, openDateWithChar } = useOS();
     const activeCharacterId=homePhone?.characterId??osActiveCharacterId;
@@ -172,6 +184,9 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
     // 角色切换「登场」过场是否显示。切换/进入角色时由 useLayoutEffect 在绘制前置真，覆盖住加载、避免闪到新聊天。
     const [showEntry, setShowEntry] = useState(false);
     const [input, setInput] = useState('');
+    const [experienceOpen,setExperienceOpen]=useState<false|'video'|'oracle'|'cleanup'>(false);
+    const [personalMediaPanel, setPersonalMediaPanel] = useState<'voice' | 'visual' | null>(null);
+    useEffect(() => {setPersonalMediaPanel(null);setExperienceOpen(false);}, [activeCharacterId]);
     const [isInputFocused, setIsInputFocused] = useState(false);
     const [showPanel, setShowPanel] = useState<'none' | 'actions' | 'emojis' | 'chars'>('none');
     const [collaborationOpen, setCollaborationOpen] = useState(false);
@@ -219,7 +234,7 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
     // Reply Logic
     const [replyTarget, setReplyTarget] = useState<Message | null>(null);
 
-    const [modalType, setModalType] = useState<'none' | 'transfer' | 'emoji-import' | 'chat-settings' | 'message-options' | 'edit-message' | 'delete-emoji' | 'delete-category' | 'add-category' | 'history-manager' | 'archive-settings' | 'archive-legacy-warning' | 'prompt-editor' | 'category-options' | 'category-visibility' | 'emoji-options' | 'rename-emoji' | 'rename-category' | 'schedule' | 'chrome-css' | 'chrome-sound' | 'memory-vectorize-confirm' | 'memory-vectorize-result'>('none');
+    const [modalType, setModalType] = useState<'none' | 'transfer' | 'emoji-import' | 'chat-settings' | 'message-options' | 'edit-message' | 'delete-emoji' | 'delete-category' | 'add-category' | 'history-manager' | 'archive-settings' | 'archive-legacy-warning' | 'prompt-editor' | 'category-options' | 'category-visibility' | 'emoji-options' | 'rename-emoji' | 'rename-category' | 'schedule' | 'emotion' | 'chrome-css' | 'chrome-sound' | 'memory-vectorize-confirm' | 'memory-vectorize-result'>('none');
     // 「聊天装扮」悬浮态：不走全屏 modal——圆气泡挂在聊天上，点开小面板边看真聊天边调。
     const [decorationTab, setDecorationTab] = useState<DecorationTab>('layout');
     // 切换角色时收掉装扮气泡：定制是 per-character 的，避免误改到下一个角色
@@ -290,6 +305,7 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
     const [showProactiveModal, setShowProactiveModal] = useState(false);
     const [showActiveMsg2Modal, setShowActiveMsg2Modal] = useState(false);
     const [showThinkingChainModal, setShowThinkingChainModal] = useState(false);
+    const [showInnerVoiceSettings, setShowInnerVoiceSettings] = useState(false);
 
     // Archive Prompts State
     const [archivePrompts, setArchivePrompts] = useState<{id: string, name: string, content: string}[]>(DEFAULT_ARCHIVE_PROMPTS);
@@ -1037,6 +1053,7 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
         return () => window.removeEventListener(VOICE_FAVORITES_CHANGED_EVENT, syncFavoriteFlags);
     }, [messages]);
 
+    useEffect(()=>{const refresh=(event:Event)=>{const ids=new Set<number>((event as CustomEvent).detail?.ids||[]),owner=charRef.current?.id,visible=messages.filter(m=>ids.has(m.id));if(!visible.length)return;void Promise.all(visible.map(m=>DB.getMessageById(m.id))).then(rows=>{if(charRef.current?.id!==owner)return;const updates=new Map(rows.filter((m):m is Message=>!!m).map(m=>[m.id,m]));setMessages(previous=>previous.map(m=>updates.get(m.id)||m));});};window.addEventListener('archived-media-cleaned',refresh);return()=>window.removeEventListener('archived-media-cleaned',refresh);},[activeCharacterId,messages]);
     // Revoke blob URLs when switching characters / unmounting to avoid leaks.
     useEffect(() => {
         voiceMountedRef.current = true;
@@ -1253,6 +1270,12 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- clearUnread is stable (useCallback with []), omit to prevent stale-dep lint noise
     }, [lastMsgTimestamp, activeCharacterId, char?.hideSystemLogs, reloadMessages, clearUnread]);
 
+    useEffect(() => {
+        const refresh = () => { if (activeCharIdRef.current) void reloadMessages(visibleCountRef.current); };
+        window.addEventListener('commerce-updated', refresh);
+        return () => window.removeEventListener('commerce-updated', refresh);
+    }, [reloadMessages]);
+
     // 即时对话待收记录的跨标签页补听。同一聊天开两个标签页时，回复推送到达后 SW 把
     // 广播发给所有 client，后台标签页的 flush 可能先抢到并落库——销账的 CustomEvent
     // 只在它自己那边派发，这边收不到，「正在输入…」就会无限常亮、回复也不上屏。
@@ -1467,23 +1490,12 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
         // 图片 / 表情消息存的是短令牌，图片二进制单独躺在 blob_assets 里，省掉 base64 那 ~33%
         // 的膨胀。同一张图之前存过就直接复用它的令牌；转不动时原样还回这条 data URL，图不会丢。
         // http 外链（网络表情）和已经是令牌的值都原样通过。
-        // 注意：这条消息和下面存进相册的那条共用同一个令牌（按内容哈希认人，只存一份 Blob），
+        // 角色选择保存时，相册共用同一个令牌（按内容哈希认人，只存一份 Blob），
         // 所以删消息时绝不能顺手删 Blob——那会把相册里的同一张图一起删破。失去引用的 Blob
         // 交给孤儿 GC 收（见 utils/blobGc.ts）。
         const storedContent = (type === 'image' || type === 'emoji') && text.startsWith('data:')
             ? await migrateDataUrlToRef(text)
             : text;
-
-        const imageChatContext = type === 'image'
-            ? messages.slice(-10).map(m => {
-                const sender = m.role === 'user' ? userProfile.name : char.name;
-                const isMedia = m.type === 'image' || m.type === 'emoji' || isImageValue(m.content);
-                const preview = isMedia
-                    ? buildReplySnapshotContent(m)
-                    : m.content.substring(0, 100);
-                return `${sender}: ${preview}`;
-            })
-            : null;
 
         const msgPayload: any = { charId: char.id, role: 'user', type, content: storedContent, metadata };
         
@@ -1499,25 +1511,10 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
         }
 
         const savedUserMsgId = await DB.saveMessage(msgPayload);
-
-        if (type === 'image') {
-            // 相册是消息的附带记录：保留来源消息引用供收藏/去重使用，但相册写入失败
-            // 不能阻断已经落库的聊天消息。
-            try {
-                await DB.saveGalleryImage({
-                    id: `img-${Date.now()}-${Math.random()}`,
-                    charId: char.id,
-                    url: storedContent,
-                    timestamp: Date.now(),
-                    sourceMessageId: savedUserMsgId,
-                    savedDate: localDateKey,
-                    chatContext: imageChatContext || undefined,
-                });
-                addToast('图片已保存至相册', 'info');
-            } catch (err) {
-                console.warn('[Chat] 图片存相册失败，消息照常发送', err);
-                addToast('图片没能存进相册，消息照常发送', 'error');
-            }
+        // Recognition belongs to the saved recording, independent of a later AI reply.
+        if (type === 'audio' && !metadata?.audioDescription) {
+            void materializeAudioDescriptions([{ ...msgPayload, id: savedUserMsgId, timestamp: Date.now() }], apiConfig.audioApi)
+                .catch(error => console.warn('[recording] 无法更新语音字幕', error));
         }
 
         // 小红书链接 → xhs_card。主路径不依赖任何后端：小红书分享文案自带标题（【标题】）
@@ -1584,6 +1581,20 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
                         }
                     }
 
+                    // Only use an actual video URL supplied by the configured XHS detail provider.
+                    // A playable note page or a cover image is not itself a readable video source.
+                    if (typeof note.videoUrl === 'string' && /^https?:\/\//i.test(note.videoUrl)) {
+                        const frames = await extractVideoFrames(note.videoUrl, { count: 4, width: 400, timeoutMs: 8000 });
+                        if (frames.length) {
+                            note = { ...note, videoFrames: frames };
+                            addToast(`小红书已提取 ${frames.length} 张视频画面用于识图`, 'info');
+                        } else {
+                            addToast('小红书已取得视频地址，但未能读取画面（可能是跨域限制、地址失效或读取超时）；本次仅发送封面。', 'info');
+                        }
+                    } else if (/video|视频/i.test(String(note.type || ''))) {
+                        addToast('小红书详情未返回视频直链，本次只能识别封面。', 'info');
+                    }
+
                     await DB.saveMessage({
                         charId: char.id,
                         role: 'user',
@@ -1629,6 +1640,13 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
                         addToast(`网页抓取失败：${e?.message || '可能被这个站点拦截了，换个链接或稍后再试。'}`, 'error');
                     }
                 }
+                if (webpage?.video?.contentType === 'video' && webpage.video.videoUrl) {
+                    // Best-effort: sample a few frames before saving the card, so both
+                    // the default multimodal model and optional vision API can see them.
+                    // Cross-origin or expired media simply keeps the existing cover.
+                    const frames = await extractVideoFrames(webpage.video.videoUrl, { count: 4, width: 400, timeoutMs: 3500 });
+                    if (frames.length) webpage = { ...webpage, video: { ...webpage.video, frames } };
+                }
                 if (webpage) {
                     await DB.saveMessage({
                         charId: char.id,
@@ -1666,7 +1684,7 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
         const finish = autoReply.beginSend(char?.id || null);
         try {
             const sent = await sendText(customContent, customType, metadata);
-            finish(sent === true && (!customType || ['text', 'image', 'emoji'].includes(customType)));
+            finish(sent === true && (!customType || ['text', 'image', 'emoji', 'audio'].includes(customType)));
         } catch (error) {
             finish(false);
             throw error;
@@ -1757,7 +1775,7 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
     const handleImageSelect = async (file: File) => {
         const finishImage = autoReply.beginSend(char?.id || null);
         try {
-            const blob = await processImageToBlob(file, { maxWidth: 600, quality: 0.6, forceJpeg: true });
+            const blob = await processChatImage(file);
             const { token } = await putImageBlobDeduped(blob);
             if (!inputPreferences.autoReply) setShowPanel('none');
             await handleSendText(token, 'image');
@@ -1793,7 +1811,7 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
         if ([
             'transfer', 'archive', 'settings', 'chrome-css', 'chrome-sound', 'fine-tune',
             'meetup', 'proactive', 'active-msg-2', 'schedule', 'mcd-request', 'luckin-request',
-            'html-mode-toggle', 'html-mode-settings', 'thinking-settings', 'favorites', 'collaboration',
+            'real-song-listening-toggle', 'html-mode-toggle', 'html-mode-settings', 'thinking-settings', 'favorites', 'collaboration',
             // 独立小功能：点一下就是用了一次，跟「打开某个面板」同一性质。
             // send-emoji / select-category 这些是「挑哪一个」，不进名单。
             'poke', 'emoji-import', 'add-category', 'mcd-end', 'luckin-end',
@@ -1801,6 +1819,9 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
             trackEvent('打开聊天功能面板项', { action: type });
         }
         switch (type) {
+            case 'video': case 'oracle': case 'archived-cleanup': setShowPanel('none');setExperienceOpen(type==='archived-cleanup'?'cleanup':type);break;
+            case 'voice-input': setShowPanel('none'); setPersonalMediaPanel('voice'); break;
+            case 'virtual-media': setShowPanel('none'); setPersonalMediaPanel('visual'); break;
             case 'export-chat': void handleExportChat(); break;
             case 'collaboration': setShowPanel('none'); setCollaborationOpen(true); break;
             case 'memory-link': setShowPanel('none'); setMemoryRepairOpen(true); break;
@@ -1823,7 +1844,7 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
             case 'meetup': if (char) { setShowPanel('none'); openDateWithChar(char.id); } break;
             case 'proactive': setShowProactiveModal(true); break;
             case 'active-msg-2': setShowActiveMsg2Modal(true); break;
-            case 'emotion': setModalType('schedule'); break; // 情绪已并入日程，打开同一 modal
+            case 'emotion': setModalType('emotion'); break; // 情绪已并入日程，打开同一 modal
             case 'schedule': setModalType('schedule'); break;
             case 'mcd-not-configured':
                 addToast('请先到设置 → 麦当劳 启用并填入 MCP Token', 'info');
@@ -1844,6 +1865,35 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
             case 'luckin-end':
                 deactivateLuckin();
                 break;
+            case 'workroom-toggle': { if(char) updateCharacter(char.id,{workroomLinkEnabled:char.workroomLinkEnabled!==true}); break; }
+            case 'incoming-voice-toggle':
+            case 'incoming-video-toggle': {
+                if (!char) break;
+                const key = type === 'incoming-voice-toggle' ? 'allowIncomingVoiceCalls' : 'allowIncomingVideoCalls';
+                const next = char[key] !== true;
+                updateCharacter(char.id, { [key]: next });
+                addToast(`${key === 'allowIncomingVoiceCalls' ? '主动语音来电' : '主动视频来电'}${next ? '已允许' : '已关闭'}`, 'info');
+                break;
+            }
+            case 'inner-voice-toggle': {
+                setShowInnerVoiceSettings(true);
+                break;
+            }
+            case 'human-style-toggle': {
+                if (!char) break;
+                const key = 'humanStyleEnabled';
+                const next = char[key] === false;
+                updateCharacter(char.id, { [key]: next });
+                addToast(next ? '拟人提示词已开启' : '拟人提示词已关闭：从下一轮使用模型自然表达，已有对话保留', 'info');
+                break;
+            }
+            case 'real-song-listening-toggle': {
+                if (!char) break;
+                const next = !((char as any).realSongListeningEnabled);
+                updateCharacter(char.id, { realSongListeningEnabled: next } as any);
+                addToast(next ? '真实听歌已开启：一起听时会调用或复用音频分析' : '真实听歌已关闭：继续使用原版一起听', next ? 'success' : 'info');
+                break;
+            }
             case 'html-mode-toggle': {
                 if (!char) break;
                 const next = !((char as any).htmlModeEnabled);
@@ -2215,12 +2265,8 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
 
     const handleScheduleStyleChange = async (style: 'lifestyle' | 'mindful') => {
         if (!char) return;
-        // 与情绪/意识流强制同步：启用日程时自动启用情绪感知
-        const prevEmotion = char.emotionConfig;
-        const nextEmotion = { ...(prevEmotion || {}), enabled: true };
-        updateCharacter(char.id, { scheduleStyle: style, emotionConfig: nextEmotion });
-        // Force regenerate with new style — use updated char object
-        const updatedChar = { ...char, scheduleStyle: style, emotionConfig: nextEmotion };
+        updateCharacter(char.id, { scheduleStyle: style, emotionIndependent: true, emotionConfig: { ...char.emotionConfig, enabled: isEmotionFeatureOn(char) } });
+        const updatedChar = { ...char, scheduleStyle: style };
         if (!isScheduleFeatureOn(updatedChar)) return;
         setIsScheduleGenerating(true);
         try {
@@ -2239,25 +2285,14 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
     const handleToggleScheduleFeature = async () => {
         if (!char) return;
         const nextEnabled = !isScheduleFeatureOn(char);
-        const patch: any = { scheduleFeatureEnabled: nextEnabled };
-        if (nextEnabled) {
-            // 与 handleScheduleStyleChange 对齐：开日程 = 同步开情绪/意识流。
-            // 旧逻辑下，新角色的 emotionConfig 从未初始化（undefined），
-            // 仅切总开关而不点风格时，emotionConfig?.enabled 始终落 false，
-            // 副 API 闸门 (isScheduleFeatureOn && emotionConfig?.enabled) 永远过不去。
-            patch.emotionConfig = { ...(char.emotionConfig || {}), enabled: true };
-        } else {
-            // 关闭时顺手把 buff 注入清空，避免上一轮残留继续注入
-            patch.buffInjection = '';
-            patch.activeBuffs = [];
-        }
+        const patch: any = { scheduleFeatureEnabled: nextEnabled, emotionIndependent: true, emotionConfig: { ...char.emotionConfig, enabled: isEmotionFeatureOn(char) } };
         updateCharacter(char.id, patch);
         if (!nextEnabled) {
             setScheduleData(null);
-            addToast('日程与情绪已关闭', 'info');
+            addToast('日程已关闭', 'info');
             return;
         }
-        addToast('日程与情绪已开启', 'success');
+        addToast('日程已开启', 'success');
         // 打开后立刻尝试生成（若今日未生成且已选风格）
         const updatedChar = { ...char, ...patch };
         if (updatedChar.scheduleStyle) {
@@ -2857,7 +2892,7 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
                 setArchiveProgress(`归档中 ${dateStr} (${idx + 1}/${datesToProcess.length})`);
                 const dayMsgs = msgsByDate[dateStr];
                 const rawLog = dayMsgs
-                    .map(m => formatMessageWithTime(m, char.name, userProfile.name, formatTime))
+                    .map(m => formatMessageWithTime(m, char.name, userProfile.name, formatTime, char.innerVoiceMemoryEnabled !== false))
                     .join('\n');
                 
                 let prompt = template;
@@ -2951,6 +2986,11 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
     };
 
     useEffect(() => {
+        const ask=()=>{if(!char)return;const request=consumeWorkroomCollection(char.id);if(request)void handleSendText('我分享给你的这个小组件，你感兴趣吗？想不想收藏一个独立副本？分享编号：'+request.shareId,'text');};
+        ask();window.addEventListener('workroom-chat-requested',ask);return()=>window.removeEventListener('workroom-chat-requested',ask);
+    },[char?.id]);
+
+    useEffect(() => {
         const refresh=(event:Event)=>{
             const owner=(event as CustomEvent).detail?.charId;
             if(!char || owner && owner!==char.id)return;
@@ -2958,12 +2998,25 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
         };
         window.addEventListener('home-secrets-updated',refresh);
         window.addEventListener('friend-feed-history-updated',refresh);
+        window.addEventListener('workroom-history-updated',refresh);
+        window.addEventListener('moments-history-updated',refresh);
+        window.addEventListener('yueqi-history-updated',refresh);
+        window.addEventListener('songwriting-history-updated',refresh);
         return()=>{
             window.removeEventListener('home-secrets-updated',refresh);
             window.removeEventListener('friend-feed-history-updated',refresh);
+            window.removeEventListener('workroom-history-updated',refresh);
+            window.removeEventListener('moments-history-updated',refresh);
+            window.removeEventListener('yueqi-history-updated',refresh);
+            window.removeEventListener('songwriting-history-updated',refresh);
         };
     },[char?.id,visibleCount,reloadMessages]);
 
+    useEffect(() => {
+        const changed = (event: Event) => { const row = (event as CustomEvent<Message>).detail; if (row.charId !== char?.id) return; setMessages(previous => previous.map(message => message.id === row.id ? row : message)); markAmsgStateDirty({ char, userProfile, groups, realtimeConfig }); };
+        window.addEventListener('personal-recording-edited', changed);window.addEventListener('personal-message-edited', changed);
+        return () => {window.removeEventListener('personal-recording-edited', changed);window.removeEventListener('personal-message-edited', changed);};
+    }, [char, userProfile, groups, realtimeConfig]);
     // --- Message Management ---
     const handleDeleteMessage = async () => {
         if (!selectedMessage) return;
@@ -3452,8 +3505,8 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
         }
         const target = characters.find(item => item.id === targetCharacterId);
         return target
-            ? `世界书「${String(artifact.payload.category || artifact.title)}」的 ${books.length} 条内容已保存并挂载给 ${target.name}`
-            : `世界书已保存到世界书库，共 ${books.length} 条`;
+            ? `世界书「${String(artifact.payload.category || artifact.title)}」的 ${books.length} 条内容已存入全局板块（未开启），并保留本次给 ${target.name} 的个人挂载`
+            : `世界书已保存到全局板块（未开启），共 ${books.length} 条`;
     }, [addCharacter, addCustomTheme, addWorldbook, characters, osTheme, saveAppearancePreset, updateCharacter, updateTheme]);
 
     // hideBeforeMessageId 不在视觉层过滤：用户依旧能往上翻到旧消息，只是 LLM 拉不到。
@@ -3559,11 +3612,12 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
     const handleCharSelectCallback = useCallback((id: string) => { setActiveCharacterId(id); setShowPanel('none'); }, []);
     const autoReply = useChatAutoReply({
         enabled: inputPreferences.autoReply,
+        mediaComposerOpen: !!personalMediaPanel || !!experienceOpen,
         conversationId: activeCharacterId || null,
         active: (activeApp === AppID.Chat || !!homePhone) && !!char,
         blocked: isInputFocused || !!input.trim() || showPanel !== 'none' || modalType !== 'none'
             || selectionMode || isSummarizing || collaborationOpen || memoryRepairOpen || favoritesOpen
-            || showProactiveModal || showActiveMsg2Modal || showThinkingChainModal
+            || showProactiveModal || showActiveMsg2Modal || showThinkingChainModal || showInnerVoiceSettings
             || mcdAppOpen || luckinAppOpen || showForwardModal,
         generating: isTyping || instantChatPending || isProactiveComposing,
         onGenerate: handleManualTrigger,
@@ -3911,7 +3965,7 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
                 onOpenHistoryCleanup={() => { setModalType('none'); setShowHistoryCleanup(true); }} onArchive={handleFullArchive}
                 onCreatePrompt={createNewPrompt} onEditPrompt={editSelectedPrompt} onSavePrompt={handleSavePrompt} onDeletePrompt={handleDeletePrompt}
                 onSetHistoryStart={handleSetHistoryStart} onRestoreAdaptiveContext={restoreAdaptiveContext} onJumpToMessageInChat={handleJumpToMessageInChat} onEnterSelectionMode={handleEnterSelectionMode}
-                onReplyMessage={handleReplyMessage} onEditMessageStart={() => { if (selectedMessage) { setEditContent(selectedMessage.content); setModalType('edit-message'); } }}
+                onReplyMessage={handleReplyMessage} onEditMessageStart={() => { if (selectedMessage?.type === 'audio') { setModalType('none'); addToast('长按语音卡片或声音细节可修改原文和语气', 'info'); return; } if (selectedMessage) { setEditContent(selectedMessage.content); setModalType('edit-message'); } }}
                 onConfirmEditMessage={confirmEditMessage} onDeleteMessage={handleDeleteMessage} onCopyMessage={handleCopyMessage}
                 messageFavorited={!!(selectedMessage && contentFavoriteIds.has(contentFavoriteIdForMessage(selectedMessage)))}
                 onToggleMessageFavorite={selectedMessage ? () => handleToggleContentFavorite(selectedMessage) : undefined}
@@ -3955,6 +4009,8 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
                 xhsEnabled={!!char.xhsEnabled}
                 onToggleXhs={() => updateCharacter(char.id, { xhsEnabled: !char.xhsEnabled })}
                 htmlModeEnabled={!!(char as any).htmlModeEnabled}
+                stickerVisionEnabled={!!char.stickerVisionEnabled}
+                onToggleStickerVision={() => updateCharacter(char.id, { stickerVisionEnabled: !char.stickerVisionEnabled })}
                 onToggleHtmlMode={() => updateCharacter(char.id, { htmlModeEnabled: !((char as any).htmlModeEnabled) } as any)}
                 htmlModeCustomPrompt={settingsHtmlModeCustomPrompt}
                 setHtmlModeCustomPrompt={setSettingsHtmlModeCustomPrompt}
@@ -3998,6 +4054,7 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
                     // API 同步到所有角色，enabled 仅写到当前角色
                     syncEmotionApiToAllCharacters(config.api);
                     updateCharacter(char.id, {
+                        emotionIndependent: true,
                         emotionConfig: {
                             enabled: config.enabled,
                             ...(config.api && config.api.baseUrl ? { api: config.api } : {}),
@@ -4195,7 +4252,7 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
                             visibleCountRef.current = nextVisibleCount;
                             setVisibleCount(nextVisibleCount);
                             await reloadMessages(nextVisibleCount);
-                        }} className="px-4 py-2 bg-white/50 backdrop-blur-sm rounded-full text-xs text-slate-500 shadow-sm border border-white hover:bg-white transition-colors">加载历史消息 ({collapsedCount})</button>
+                        }} className="px-4 py-2 bg-white/60 rounded-full text-xs text-slate-500 shadow-sm border border-white hover:bg-white transition-colors">加载历史消息 ({collapsedCount})</button>
                     </div>
                 )}
                 {windowedFocusMsgId !== null && (
@@ -4203,7 +4260,7 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
                         {hasOlderHistoryWindow ? (
                             <button
                                 onClick={() => extendHistoryWindow('older')}
-                                className="px-3 py-1.5 bg-white/60 backdrop-blur-sm rounded-full text-[11px] text-slate-500 shadow-sm border border-white hover:bg-white transition-colors"
+                                className="px-3 py-1.5 bg-white/60 rounded-full text-[11px] text-slate-500 shadow-sm border border-white hover:bg-white transition-colors"
                             >
                                 向上滑继续看更早消息
                             </button>
@@ -4298,7 +4355,7 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
                         {hasNewerHistoryWindow ? (
                             <button
                                 onClick={() => extendHistoryWindow('newer')}
-                                className="px-3 py-1.5 bg-white/60 backdrop-blur-sm rounded-full text-[11px] text-slate-500 shadow-sm border border-white hover:bg-white transition-colors"
+                                className="px-3 py-1.5 bg-white/60 rounded-full text-[11px] text-slate-500 shadow-sm border border-white hover:bg-white transition-colors"
                             >
                                 向下滑继续看较新消息
                             </button>
@@ -4455,7 +4512,18 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
                 {/* 开关写着「已开启」、这一轮却在本地生成时，把原因说给用户听 */}
                 <InstantChatRouteNotice charId={activeCharacterId} />
 
+                {experienceOpen&&<ExperienceTools key={char.id} scopeId={char.id} disabled={isTyping} initialTool={experienceOpen||'menu'} initialOpen onClose={()=>setExperienceOpen(false)} onSend={async message=>{if(isOracleControl(message)){autoReply.cancel();await saveOracleControl(char.id,message);await reloadMessages(visibleCountRef.current);setExperienceOpen(false);return;}await handleSendText(message.content,'text',message.metadata);}}/>}
+                {!selectionMode && personalMediaPanel && <PersonalMediaComposer key={`${char.id}:${personalMediaPanel}`} sheet visualOnly={personalMediaPanel === 'visual'} onClose={() => setPersonalMediaPanel(null)} conversationId={char.id} onRecognize={isAudioApiReady(apiConfig.audioApi) ? async blob => recognizeUserRecording(await audioBlobToPayload(await prepareRecording(blob), 'voice.wav'), apiConfig.audioApi!) : undefined} onSend={async (content, blob, duration, signal, recognition, completedRecognition) => {
+                    if (blob) {
+                        const wav = await prepareRecording(blob);
+                        signal?.throwIfAborted();
+                        const ref = await putImageBlob(wav);
+                        if (recognition && !completedRecognition) registerRecordingRecognition(ref, recognition);
+                        await handleSendText(ref, 'audio', { duration, fileName: 'voice.wav', ...(completedRecognition ? recordingMetadata(completedRecognition, true) : {}) });
+                    } else await handleSendText(content, 'text');
+                }} />}
                 <ChatInputArea
+                    personalMediaEnabled
                     compactHome={!!homePhone}
                     input={input} setInput={handleInputChange}
                     isTyping={isTyping || instantChatPending} selectionMode={selectionMode}
@@ -4494,6 +4562,12 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
                     luckinConfigured={luckinConfiguredFlag}
                     luckinActivated={luckinActivated}
                     htmlModeEnabled={!!(char as any).htmlModeEnabled}
+                    allowIncomingVoiceCalls={char.allowIncomingVoiceCalls === true}
+                    allowIncomingVideoCalls={char.allowIncomingVideoCalls === true}
+                    humanStyleEnabled={char.humanStyleEnabled !== false}
+                    innerVoiceEnabled={char.innerVoiceEnabled !== false}
+                    realSongListeningEnabled={!!(char as any).realSongListeningEnabled}
+                    workroomLinkEnabled={char.workroomLinkEnabled === true}
                     showThinkingChain={!!(char as any).showThinkingChain}
                     inputStyle={osTheme.chatInputStyle}
                     sendButtonStyle={osTheme.chatSendButtonStyle}
@@ -4502,6 +4576,10 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
                 />
             </div>
 
+
+            {char && showInnerVoiceSettings && <InnerVoiceSettings key={char.id} character={char}
+                onClose={() => setShowInnerVoiceSettings(false)}
+                onSave={patch => updateCharacter(char.id, patch)} />}
 
             {/* Proactive Settings Modal */}
             {char && (

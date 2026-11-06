@@ -1,3 +1,16 @@
+import SongwritingCard from '../song/SongwritingCard';
+import MessageDetailEditor from '../../features/personal/messageEditing/MessageDetailEditor';
+import RealMediaView from '../../features/experience/RealMediaView';
+import WorkroomCard from './WorkroomCard';
+import YueqiCard from './YueqiCard';
+import ResponseStatusCard from '../../features/personal/responseStatus/ResponseStatusCard';
+import { readResponseStatus } from '../../features/personal/responseStatus/protocol';
+import OrderCard from '../commerce/OrderCard';
+import InnerVoiceChip from '../../features/personal/innerVoice/InnerVoiceChip';
+import ShareGalleryButton from './ShareGalleryButton';
+import { getShareCardImageUrls } from '../../utils/shareCardImages';
+import PersonalMediaMessage from '../../features/personal/chatMedia/MediaMessage';
+import { parseVirtualMedia } from '../../features/personal/chatMedia/format';
 import { avatarDecorationImageStyle, isAnniversaryFrame } from '../../utils/anniversaryGifts';
 
 
@@ -12,6 +25,7 @@ import { stripFishCuesForDisplay } from '../../utils/fishAudioTts';
 import { formatStatCount } from '../../utils/videoParser';
 import { trackEvent } from '../../utils/analytics';
 import { resolveBubbleCornerRadii, shouldHideBubbleTail } from '../../utils/bubbleAppearance';
+import { isReducedBlurActive } from '../../utils/blurPolicy';
 import { isImageValue, useBlobRefUrl } from '../../utils/blobRef';
 import { buildReplySnapshotContent } from '../../utils/applyAssistantPostProcessing';
 import { stripLeakedSourceTags } from '../../utils/sanitize';
@@ -1200,6 +1214,8 @@ const MessageItem = React.memo(({
     // 于是气泡列底恒等于气泡尖角——头像贴 bottom-0 就始终对齐：
     // 组末/组中、时间戳开或关都一样，发新消息也不会因参考高度变化而位移。
     const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const longPressFired = useRef(false);
+    useEffect(()=>()=>{if(longPressTimer.current)clearTimeout(longPressTimer.current);},[]);
     const startPos = useRef({ x: 0, y: 0 });
     const activePointerId = useRef<number | null>(null);
     const activePointerType = useRef<string>('');
@@ -1233,6 +1249,7 @@ const MessageItem = React.memo(({
 
     const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
         if (selectionMode || e.button !== 0) return;
+        longPressFired.current=false;
         activePointerId.current = e.pointerId;
         activePointerType.current = e.pointerType;
         startPos.current = { x: e.clientX, y: e.clientY };
@@ -1244,6 +1261,7 @@ const MessageItem = React.memo(({
             activePointerId.current = null;
             activePointerType.current = '';
             resetReplyGesture();
+            longPressFired.current=true;
             onLongPress(m);
         }, 600);
     };
@@ -1310,6 +1328,7 @@ const MessageItem = React.memo(({
     };
 
     const interactionProps = {
+        onClickCapture:(e:React.MouseEvent)=>{if(longPressFired.current){longPressFired.current=false;e.preventDefault();e.stopPropagation();}},
         onPointerDown: handlePointerDown,
         onPointerUp: handlePointerEnd,
         onPointerMove: handlePointerMove,
@@ -1321,6 +1340,7 @@ const MessageItem = React.memo(({
             activePointerId.current = null;
             activePointerType.current = '';
             resetReplyGesture();
+            longPressFired.current=true;
             onLongPress(m);
         },
         onDragStart: (e: React.DragEvent) => e.preventDefault(),
@@ -1373,6 +1393,26 @@ const MessageItem = React.memo(({
         </div>;
     }
 
+    const responseStatus = m.type === 'score_card' ? readResponseStatus(m.content, m.metadata) : undefined;
+    if (responseStatus) return <div className={`w-full px-4 my-3 relative ${selectionMode ? 'pl-12' : ''}`} {...interactionProps}>
+        {selectionMode && <button type="button" className="absolute left-2 top-1/2" aria-label="选择状态卡片" aria-pressed={isSelected} onClick={event => { event.stopPropagation(); onToggleSelect(m.id); }}>{isSelected ? '●' : '○'}</button>}
+        <div className="flex justify-center"><MessageDetailEditor message={m} kind="status" disabled={selectionMode}><ResponseStatusCard value={responseStatus} /></MessageDetailEditor></div>
+    </div>;
+
+    if (m.metadata?.source === 'yueqi' && m.metadata?.yueqiSessionId) return <div className={`w-full px-4 py-2 flex justify-center relative ${selectionMode?'pl-12':''}`} {...interactionProps}>
+        {selectionMode&&<button type="button" aria-label="选择月栖卡片" aria-pressed={isSelected} className="absolute left-2 top-4" onClick={e=>{e.stopPropagation();onToggleSelect(m.id);}}>{isSelected?'☑':'□'}</button>}
+        <YueqiCard message={m} disabled={selectionMode}/>
+    </div>;
+
+    if (m.type === 'workroom_card') return <div className={`w-full px-4 py-2 flex justify-center relative ${selectionMode ? 'pl-12' : ''}`} {...interactionProps}>
+        {selectionMode && <button type="button" className="absolute left-2 top-4" aria-label="选择造物间卡片" aria-pressed={isSelected} onClick={event => {event.stopPropagation(); onToggleSelect(m.id);}}>{isSelected ? '☑' : '□'}</button>}
+        <div className={selectionMode ? 'pointer-events-none' : ''}><ChatCardSurface message={m}><WorkroomCard message={m}/></ChatCardSurface></div>
+    </div>;
+
+    if (m.type === 'moments_card') return <div className="w-full px-4 py-2 relative" {...interactionProps}>
+        {selectionMode && <button type="button" aria-label="选择朋友圈记录" aria-pressed={isSelected} onClick={()=>onToggleSelect(m.id)}>{isSelected?'☑':'□'}</button>}
+        <ChatCardSurface message={m}><details className="p-3 text-sm"><summary className="cursor-pointer text-slate-600">朋友圈 · 一段新见闻</summary><p className="whitespace-pre-wrap mt-3">{m.content}</p></details></ChatCardSurface>
+    </div>;
     // --- SYSTEM MESSAGE RENDERING ---
     if (isSystem) {
         const isCallSummary = m.metadata?.source === 'call-end-popup';
@@ -1399,6 +1439,12 @@ const MessageItem = React.memo(({
                     </div>
                 );
             }
+            if (scoreData?.type === 'commerce_order' && scoreData.order) return (
+                <div className={`w-full px-4 my-3 relative ${selectionMode ? 'pl-12' : ''}`} {...interactionProps}>
+                    {selectionMode && <button className="absolute left-2 top-1/2" aria-label="选择订单卡片" onClick={e=>{e.stopPropagation();onToggleSelect(m.id);}}>{isSelected ? '●' : '○'}</button>}
+                    <div className="mx-auto w-72"><OrderCard order={scoreData.order} delivered={scoreData.delivered} /></div>
+                </div>
+            );
             if (scoreData?.type === 'diary_card') {
                 const dateParts = (scoreData.date || '').split('-');
                 const monthDay = dateParts.length === 3 ? `${dateParts[1]}/${dateParts[2]}` : (scoreData.date || '');
@@ -1425,7 +1471,7 @@ const MessageItem = React.memo(({
                                         <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white text-sm font-bold shrink-0" style={{ background: 'linear-gradient(135deg, #d4a55a, #b8843a)' }}>{scoreData.charName?.[0] || '?'}</div>
                                     )}
                                     <div className="flex-1 min-w-0">
-                                        <div className="text-[9px] font-bold tracking-widest uppercase" style={{ color: '#a07840' }}>Exchange Diary · 交换日记</div>
+                                        <div className="text-[9px] font-bold tracking-widest uppercase" style={{ color: '#a07840' }}>{scoreData.diaryKind === 'character' ? 'Personal Diary · TA 的日记' : 'Exchange Diary · 交换日记'}</div>
                                         <div className="text-xs font-bold truncate" style={{ color: '#5c3e1a' }}>与 {scoreData.charName} · {scoreData.date}</div>
                                     </div>
                                     <div className="shrink-0 text-right leading-none">
@@ -1435,7 +1481,7 @@ const MessageItem = React.memo(({
                                 </div>
 
                                 {/* User page */}
-                                <div className="px-4 pt-3 pb-2">
+                                {scoreData.diaryKind !== 'character' && <div className="px-4 pt-3 pb-2">
                                     <div className="flex items-center justify-between mb-1.5">
                                         <span className="text-[9px] font-bold tracking-widest uppercase" style={{ color: '#a07840' }}>● {scoreData.userName || '我'} 写道</span>
                                         {scoreData.userPaperName && <span className="text-[8px] font-mono opacity-50" style={{ color: '#a07840' }}>{scoreData.userPaperName}</span>}
@@ -1445,10 +1491,11 @@ const MessageItem = React.memo(({
                                     </div>
                                 </div>
 
+                                }
                                 {/* Char page */}
                                 <div className="px-4 pb-3 pt-1.5">
                                     <div className="flex items-center justify-between mb-1.5">
-                                        <span className="text-[9px] font-bold tracking-widest uppercase" style={{ color: '#a07840' }}>● {scoreData.charName} 回道</span>
+                                        <span className="text-[9px] font-bold tracking-widest uppercase" style={{ color: '#a07840' }}>● {scoreData.charName} {scoreData.diaryKind === 'character' ? '写道' : '回道'}</span>
                                         {scoreData.charPaperName && <span className="text-[8px] font-mono opacity-50" style={{ color: '#a07840' }}>{scoreData.charPaperName}</span>}
                                     </div>
                                     <div className="rounded-xl px-3 py-2.5 text-[11px] leading-relaxed whitespace-pre-wrap" style={{ background: 'linear-gradient(135deg, rgba(255,245,220,0.85), rgba(255,238,200,0.7))', border: '1px solid rgba(217,180,120,0.3)', color: '#4a3520', fontFamily: 'ui-serif, Georgia, serif' }}>
@@ -1463,7 +1510,7 @@ const MessageItem = React.memo(({
                                             ? `贴了 ${(scoreData.userStickerCount || 0) + (scoreData.charStickerCount || 0)} 张贴纸`
                                             : '今天的纸面很干净'}
                                     </span>
-                                    <span className="text-[9px] font-bold" style={{ color: '#a07840' }}>交换日记 ✿</span>
+                                    <span className="text-[9px] font-bold" style={{ color: '#a07840' }}>{scoreData.diaryKind === 'character' ? '个人日记 ✎' : '交换日记 ✿'}</span>
                                 </div>
                             </div>
                         </div>
@@ -1578,7 +1625,7 @@ const MessageItem = React.memo(({
                     </div>
                 )}
                 <div className="flex justify-center my-6 px-10 w-full" {...interactionProps}>
-                    <div className="flex items-center gap-1.5 bg-slate-200/40 backdrop-blur-md text-slate-500 px-3 py-1 rounded-full shadow-sm border border-white/20 select-none cursor-pointer active:scale-95 transition-transform">
+                    <div className="flex items-center gap-1.5 bg-white/60 text-slate-500 px-3 py-1 rounded-full shadow-sm border border-slate-200/70 select-none cursor-pointer active:scale-95 transition-transform">
                         {/* Optional Icon based on content */}
                         <img src={displayText.includes('任务') ? 'https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/72x72/2728.png' :
                         displayText.includes('纪念日') || displayText.includes('Event') ? 'https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/72x72/1f4c5.png' :
@@ -1602,7 +1649,7 @@ const MessageItem = React.memo(({
                 )}
                 <div className="text-[10px] text-slate-400 mb-1 opacity-70">{formatTime(m.timestamp)}</div>
                 <div className="group relative cursor-pointer active:scale-95 transition-transform" {...interactionProps}>
-                        <div className="text-[11px] text-slate-500 bg-slate-200/50 backdrop-blur-sm px-4 py-1.5 rounded-full flex items-center gap-1.5 border border-white/40 shadow-sm select-none">
+                        <div className="text-[11px] text-slate-500 bg-white/60 px-4 py-1.5 rounded-full flex items-center gap-1.5 border border-slate-200/70 shadow-sm select-none">
                         <img src="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/72x72/1f449.png" alt="poke" className="w-4 h-4 group-hover:animate-bounce" />
                         <span className="font-medium opacity-80">{isUser ? '你' : charName}</span>
                         <span className="opacity-60">戳了戳</span>
@@ -1702,7 +1749,7 @@ const MessageItem = React.memo(({
                         className={`absolute -right-10 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full flex items-center justify-center pointer-events-none transition-all duration-150 ${isReplyReady ? 'bg-indigo-500 text-white shadow-md shadow-indigo-200' : 'bg-white/90 text-slate-400 shadow-sm'}`}
                         style={{
                             opacity: Math.min(1, Math.abs(replyOffset) / 36),
-                            transform: `translateY(-50%) scale(${isReplyReady ? 1 : 0.86})`,
+                            transform: replyOffset !== 0 ? `translateY(-50%) scale(${isReplyReady ? 1 : 0.86})` : undefined,
                         }}
                     >
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
@@ -1713,7 +1760,7 @@ const MessageItem = React.memo(({
                     <div
                         className={`relative flex flex-col ${isModuleCard && centerModules ? 'items-center' : (isUser ? 'items-end' : 'items-start')} min-w-0`}
                         style={{
-                            transform: `translateX(${replyOffset}px)`,
+                            transform: replyOffset !== 0 ? `translateX(${replyOffset}px)` : undefined,
                             transition: isReplyGestureActive ? 'none' : 'transform 220ms cubic-bezier(0.22, 1, 0.36, 1)',
                             touchAction: 'pan-y',
                             userSelect: 'none',
@@ -1726,8 +1773,13 @@ const MessageItem = React.memo(({
                     <div className={selectionMode ? 'pointer-events-none' : ''}>
                         {<ChatCardSurface message={m}>{content}</ChatCardSurface>}
                     </div>
-                    {isLastInGroup && showTimestamp !== 'never' && (
-                        <div className={`absolute top-full ${isUser ? 'right-0' : 'left-0'} mt-0.5 px-1 text-[9px] text-slate-400/80 font-medium whitespace-nowrap pointer-events-none ${showTimestamp === 'hover' ? 'opacity-0 group-hover:opacity-100 transition-opacity' : ''}`}>{formatTime(m.timestamp)}</div>
+                    {isLastInGroup && (showTimestamp !== 'never' || (!isUser && m.metadata?.innerVoice)) && (
+                        <div className={`sully-chat-message-meta absolute top-full ${isUser ? 'right-0' : 'left-0'} mt-0.5 px-1 inline-flex items-center gap-1.5 whitespace-nowrap`}>
+                            {showTimestamp !== 'never' && (
+                                <span className={`text-[9px] text-slate-400/80 font-medium pointer-events-none ${showTimestamp === 'hover' ? 'opacity-0 group-hover:opacity-100 transition-opacity' : ''}`}>{formatTime(m.timestamp)}</span>
+                            )}
+                            {!isUser && m.metadata?.innerVoice && <MessageDetailEditor message={m} kind="heart" disabled={selectionMode}><InnerVoiceChip value={m.metadata.innerVoice} /></MessageDetailEditor>}
+                        </div>
                     )}
                     </div>
                 </div>
@@ -1900,6 +1952,7 @@ const MessageItem = React.memo(({
     // --- XHS Card Rendering (小红书笔记卡片) ---
     if (m.type === 'xhs_card' && m.metadata?.xhsNote) {
         const note = m.metadata.xhsNote;
+        const shareImages = getShareCardImageUrls(m);
         const openXhsNote = () => {
             const nid = note.noteId || note.note_id || note.id;
             if (!nid) return;
@@ -1935,6 +1988,7 @@ const MessageItem = React.memo(({
                                 container.appendChild(fallback);
                             }}
                         />
+                        {shareImages.length > 1 && <div className="absolute bottom-2 right-2"><ShareGalleryButton images={shareImages} title={note.title || '小红书笔记'} /></div>}
                         {note.type === 'video' && (
                             <div className="absolute top-2 right-2 bg-black/50 rounded-full px-1.5 py-0.5 flex items-center gap-0.5">
                                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3 text-white"><path d="M6.3 2.841A1.5 1.5 0 004 4.11V15.89a1.5 1.5 0 002.3 1.269l9.344-5.89a1.5 1.5 0 000-2.538L6.3 2.84z" /></svg>
@@ -1976,6 +2030,7 @@ const MessageItem = React.memo(({
     if (m.type === 'webpage_card' && m.metadata?.webpage) {
         const wp = m.metadata.webpage;
         const vd = wp.video; // videoParser 解析路径才有：平台/作者/热度
+        const shareImages = getShareCardImageUrls(m);
         let host = (wp.siteName || '').trim();
         try { host = new URL(wp.finalUrl || wp.url).hostname.replace(/^www\./, ''); } catch { /* 用 siteName 兜底 */ }
         const openPage = () => {
@@ -2003,6 +2058,7 @@ const MessageItem = React.memo(({
                             referrerPolicy="no-referrer"
                             onError={(e: any) => { const c = e.target?.parentElement; if (c) c.style.display = 'none'; }}
                         />
+                        {vd?.contentType === 'image' && shareImages.length > 1 && <div className="absolute bottom-2 right-2 z-10"><ShareGalleryButton images={shareImages} title={wp.title || '分享图集'} /></div>}
                         {/* 视频分享：封面加播放角标；图集显示张数 */}
                         {vd && vd.contentType !== 'image' && (
                             <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
@@ -2011,7 +2067,7 @@ const MessageItem = React.memo(({
                                 </span>
                             </span>
                         )}
-                        {vd && vd.contentType === 'image' && !!vd.imageCount && (
+                        {vd && vd.contentType === 'image' && !!vd.imageCount && shareImages.length < 2 && (
                             <span className="absolute bottom-1.5 right-1.5 px-1.5 py-0.5 rounded-md bg-black/45 text-white text-[9px] font-medium pointer-events-none">
                                 图集 · {vd.imageCount}张
                             </span>
@@ -2819,6 +2875,8 @@ const MessageItem = React.memo(({
         );
     }
 
+    if (m.metadata?.source === 'songwriting' && m.metadata?.songwritingCard) return commonLayout(<SongwritingCard card={m.metadata.songwritingCard}/>);
+
     // --- Score Card Rendering (Songwriting & Quiz) ---
     if (m.type === 'score_card') {
         let scoreData: any = null;
@@ -3113,6 +3171,9 @@ const MessageItem = React.memo(({
         );
     }
 
+    if(m.metadata?.realMedia)return commonLayout(<RealMediaView text={m.content} value={m.metadata.realMedia}/>);
+    if (m.type === 'audio' || parseVirtualMedia(m.content)) return commonLayout(<PersonalMediaMessage key={m.id} message={m} />);
+
     if (m.type === 'image') {
         return commonLayout(
             <div className="relative group">
@@ -3154,7 +3215,13 @@ const MessageItem = React.memo(({
         ...(bubbleVariant === 'shadow' ? { boxShadow: '0 4px 12px rgba(0,0,0,0.12)' } : {}),
         ...(bubbleVariant === 'flat' ? { boxShadow: 'none' } : {}),
         ...(bubbleVariant === 'wechat' ? { boxShadow: 'none', border: '1px solid rgba(15,23,42,0.05)' } : {}),
-        ...(bubbleVariant === 'ios' ? { boxShadow: '0 10px 24px rgba(148,163,184,0.16)', border: '1px solid rgba(255,255,255,0.75)', backdropFilter: 'blur(12px)' } : {}),
+        ...(bubbleVariant === 'ios'
+            ? {
+                  boxShadow: '0 10px 24px rgba(148,163,184,0.16)',
+                  border: '1px solid rgba(255,255,255,0.75)',
+                  ...(isReducedBlurActive() ? {} : { backdropFilter: 'blur(12px)' }),
+              }
+            : {}),
     };
 
     // --- Inline formatting parser: code → bold → italic → plain ---
@@ -3625,6 +3692,11 @@ const MessageItem = React.memo(({
            // 否则用户点了「确认」，DB 已更新、消息已重载，卡片却因 memo 判等而纹丝不动。
            prev.msg.metadata?.reviewStatus === next.msg.metadata?.reviewStatus &&
            prev.msg.metadata?.status === next.msg.metadata?.status &&
+           prev.msg.metadata?.innerVoice === next.msg.metadata?.innerVoice && prev.msg.metadata?.responseStatus===next.msg.metadata?.responseStatus &&
+           prev.msg.metadata?.audioTranscript === next.msg.metadata?.audioTranscript &&
+           prev.msg.metadata?.audioAnalysis === next.msg.metadata?.audioAnalysis &&
+           prev.msg.metadata?.audioDescription === next.msg.metadata?.audioDescription &&
+           prev.msg.metadata?.audioCleared === next.msg.metadata?.audioCleared &&
            prev.msg.metadata?.receipt === next.msg.metadata?.receipt &&
            prev.msg.metadata?.sarModuleSurface?.surface === next.msg.metadata?.sarModuleSurface?.surface &&
            prev.isFirstInGroup === next.isFirstInGroup &&
@@ -3658,7 +3730,7 @@ const MessageItem = React.memo(({
 // System-authored diary/settlement/call cards bypass the normal bubble layout.
 // They still participate in the same whitebox styling contract.
 export default function ChatMessage(props:MessageItemProps){
- return props.msg.role==='system'
+ return ['workroom_card','moments_card'].includes(props.msg.type) ? <MessageItem {...props}/> : props.msg.role==='system'
   ? <ChatCardSurface message={props.msg}><div className="sully-chat-system"> <MessageItem {...props}/> </div></ChatCardSurface>
   : props.msg.type==='interaction' ? <div className="sully-chat-interaction"><MessageItem {...props}/></div> : <MessageItem {...props}/>;
 }

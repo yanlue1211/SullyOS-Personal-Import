@@ -1,0 +1,51 @@
+name: Yueqi verification
+on:
+  push:
+    branches: [personal/yueqi, personal/yueqi-music, personal/yueqi-audio-input]
+  pull_request:
+    branches: [personal/audio-listening]
+    paths: ['features/yueqi/**', 'features/personal/audio/**', 'features/personal/calls/**', 'utils/personalHandsFree*', 'utils/personalCallCapture*', 'utils/personalCallAutoRecording*', 'test/fixtures/handsfree-browser*', 'scripts/handsfree-browser-check.mjs', 'apps/YueqiApp*', 'components/chat/YueqiCard.tsx', 'utils/yueqi*', 'scripts/yueqi-browser-check.mjs', 'test/fixtures/yueqi-browser*', '.github/workflows/yueqi-verify.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      NODE_OPTIONS: '--max-old-space-size=6144'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm vitest run utils/personalHandsFree.test.ts utils/personalHandsFreeUI.test.tsx utils/personalCallCapture.test.ts utils/personalCallAutoRecording.test.tsx utils/personalCallReadiness.test.ts utils/yueqiRecording.test.ts utils/yueqiAudioInput.test.ts utils/yueqi.test.ts utils/yueqiRuntime.test.ts utils/yueqiContext.test.ts utils/yueqiUI.test.tsx utils/contextPipeline.test.ts utils/contextWorldbook.test.ts utils/experience.test.ts utils/chatInputInteraction.test.ts --maxWorkers=2 --minWorkers=1
+      - run: pnpm build
+      - name: Install isolated browser test runtime
+        run: |
+          mkdir -p /tmp/yueqi-browser-tools
+          pnpm --dir /tmp/yueqi-browser-tools add playwright@1.56.1
+          node /tmp/yueqi-browser-tools/node_modules/playwright/cli.js install --with-deps chromium
+      - name: Verify mobile pages and summary editing
+        env:
+          YUEQI_PLAYWRIGHT_MODULE: /tmp/yueqi-browser-tools/node_modules/playwright/index.mjs
+        run: |
+          pnpm exec vite --host 127.0.0.1 --port 4183 > /tmp/yueqi-vite.log 2>&1 &
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:4183/test/fixtures/yueqi-browser.html > /dev/null; then break; fi
+            sleep 1
+          done
+          node scripts/yueqi-browser-check.mjs
+          node scripts/yueqi-recording-browser-check.mjs
+          node scripts/handsfree-browser-check.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: yueqi-mobile-screenshots
+          path: test-results/yueqi
+          if-no-files-found: ignore

@@ -31,6 +31,7 @@ interface Props {
   charId: string;
   onBack: () => void;
   onOpenPlayer: () => void;
+  onManage?: () => void;
 }
 
 const gradientMap: Record<string, string> = {
@@ -58,7 +59,7 @@ const toPlaylistSong = (s: Song): CharPlaylistSong => ({
   albumPic: s.albumPic, duration: s.duration, fee: s.fee,
 });
 
-const CharVisitPage: React.FC<Props> = ({ charId, onBack, onOpenPlayer }) => {
+const CharVisitPage: React.FC<Props> = ({ charId, onBack, onOpenPlayer, onManage }) => {
   const { characters, updateCharacter, userProfile, apiConfig, addToast } = useOS();
   const {
     cfg, playSong,
@@ -161,7 +162,9 @@ const CharVisitPage: React.FC<Props> = ({ charId, onBack, onOpenPlayer }) => {
     setInitializing(true);
     try {
       const newProfile = await CharMusicPersona.initialize(char, userProfile, apiConfig);
-      updateCharacter(char.id, { musicProfile: newProfile });
+      const existing=(await DB.getCharacter(char.id))?.musicProfile;
+      const ids=new Set((existing?.playlists||[]).map(p=>p.id));
+      updateCharacter(char.id, { musicProfile: {...newProfile,playlists:[...(existing?.playlists||[]),...newProfile.playlists.filter(p=>!ids.has(p.id))]} });
       addToast(`${char.name} 的音乐角落已开启`, 'success');
       trackEvent('生成角色的音乐人格');
     } catch (e: any) {
@@ -334,6 +337,7 @@ const CharVisitPage: React.FC<Props> = ({ charId, onBack, onOpenPlayer }) => {
       <BokehBg />
       <MizuHeader
         title={`拜访 · ${char.name}`}
+        right={<button type="button" className="text-[11px] px-2 py-1" onClick={onManage}>音乐管理</button>}
         onBack={onBack}
       />
 
@@ -470,7 +474,7 @@ const CharVisitPage: React.FC<Props> = ({ charId, onBack, onOpenPlayer }) => {
         )}
 
         {/* 歌单 */}
-        {initialized && (profile?.playlists?.length || 0) > 0 && (
+        {(profile?.playlists?.length || 0) > 0 && (
           <div className="mx-4 mt-4">
             <SectionTitle>歌单 · {profile!.playlists.length}</SectionTitle>
             <div className="space-y-2">

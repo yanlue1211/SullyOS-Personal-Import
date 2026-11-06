@@ -1,7 +1,9 @@
+import {createPortal} from 'react-dom';
 
 import React from 'react';
 
 interface ModalProps {
+    portal?: boolean;
     isOpen: boolean;
     title: string;
     onClose: () => void;
@@ -9,10 +11,10 @@ interface ModalProps {
     footer?: React.ReactNode;
 }
 
-const Modal: React.FC<ModalProps> = ({ isOpen, title, onClose, children, footer }) => {
+const Modal: React.FC<ModalProps> = ({ isOpen, title, onClose, children, footer,portal=false }) => {
     if (!isOpen) return null;
 
-    return (
+    const content=(
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 animate-fade-in" style={{ paddingTop: 'calc(var(--safe-top, 0px) + 1rem)', paddingBottom: 'calc(var(--safe-bottom, 0px) + 1rem)', maxHeight: 'var(--visual-viewport-height, 100dvh)' }}>
             <div className="absolute inset-0 bg-black/40" onClick={onClose} />
             <div className="relative w-full max-w-sm max-h-full flex flex-col min-h-0 bg-white text-slate-800 rounded-[2.5rem] shadow-2xl border border-white/20 overflow-hidden animate-slide-up">
@@ -39,6 +41,7 @@ const Modal: React.FC<ModalProps> = ({ isOpen, title, onClose, children, footer 
             </div>
         </div>
     );
+    return portal?createPortal(content,document.body):content;
 };
 
 export default Modal;

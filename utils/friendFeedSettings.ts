@@ -1,3 +1,4 @@
+import {PUBLIC_FIGURE_RULES} from './friendFeedPublicFigure';
 export const DEFAULT_FRIEND_FEED_PROMPT = '有想分享的日常就发动态，确实想回应时再写短评。可以接梗、吐槽、关心、表达不同意见，不必赞美或对每条互动。这是开放广场，不同世界的人都能刷到。认识的人按已有关系互动，不认识的就是陌生网友，不凭刷到帖子虚构交情。保留各自的性格与关系分寸。';
 export const DEFAULT_FRIEND_NPC_PROMPT = `你写的是各自刷手机的网友，不是来服务帖主的捧场团。每个人只注意到自己感兴趣的一小点，不必理解全文，也不必给建议、提供情绪价值或把话说圆。
 网友不是承载角色的分身，不把角色的口头禅、长比喻、职业术语传染给所有人。昵称像普通账号，不要人人都起一个精准贴合本帖话题的职业名或拟人梗名。
@@ -11,6 +12,8 @@ export interface FriendIdentity {nickname?:string; tags: string[]; accounts: Fri
 export type FriendRefreshKind = 'self' | 'related' | 'stranger';
 export type WeiboHomeMode = 'default' | 'latest';
 export interface FriendFeedSettings {
+    publicFigures:Record<string,boolean>;
+    publicPeers:Record<string,boolean>;
     userNickname?:string;
     weiboHomeMode: WeiboHomeMode;
     weiboProfile?:{uid:string;name:string;avatar?:string};
@@ -31,6 +34,7 @@ export interface FriendFeedSettings {
     identities: Record<string, FriendIdentity>;
 }
 export const defaultFriendFeedSettings = (): FriendFeedSettings => ({
+    publicFigures:{}, publicPeers:{},
     userNickname: '',
     weiboHomeMode: 'default',
     coverImages: {},
@@ -59,13 +63,15 @@ export function friendAccounts(settings: FriendFeedSettings, char: {id: string; 
     return [{id: 'main', name: identity?.nickname||char.name, purpose: '主号', tags: identity?.tags || []}, ...(identity?.accounts || [])];
 }
 export function friendAccountPrompt(settings: FriendFeedSettings, char: {id: string; name: string}) {
-    return '这是公共广场，不同世界的人也能刷到。只按已有关系认人，未认识的作者按陌生网友理解，不因此共享世界观或私聊。\n你的账号（只属于你，不代表额外角色）：' + JSON.stringify(friendAccounts(settings, char))
-        + '\n发帖、转发或评论时选择符合用途的账号，动作加 accountId；省略表示 main。小号仍是你的行为。不得冒用别人的账号，不自动向网友公开小号与主号的关联；正文不可泄露未公开私聊。';
+    return (settings.publicFigures[char.id]?PUBLIC_FIGURE_RULES+'\n':'')+'这是公共广场，不同世界的人也能刷到。只按已有关系认人，未认识的作者按陌生网友理解，不因此共享世界观或私聊。\n你的账号（只属于你，不代表额外角色）：' + JSON.stringify(friendAccounts(settings, char))
+        + '\n发帖、转发或评论时，accountId 必须填写上面本人账号列表中的 id（主号固定为 "main"），不要填网名、人名、角色 ID 或照抄其他作者的 accountId；省略表示 main。小号仍是你的行为。不得冒用别人的账号，不自动向网友公开小号与主号的关联；正文不可泄露未公开私聊。';
 }
 /** Older backups and unknown appearance values keep their content and use stable defaults. */
 export function resolveFriendFeedSettings(value?: Partial<FriendFeedSettings> | null): FriendFeedSettings {
     const defaults = defaultFriendFeedSettings();
     return {
+        publicFigures:record(value?.publicFigures)?Object.fromEntries(Object.entries(value.publicFigures).filter(([,v])=>typeof v==='boolean')) as Record<string,boolean>:{},
+        publicPeers:record(value?.publicPeers)?Object.fromEntries(Object.entries(value.publicPeers).filter(([,v])=>typeof v==='boolean')) as Record<string,boolean>:{},
         userNickname:typeof value?.userNickname==='string'?value.userNickname.trim().slice(0,40):'',
         weiboHomeMode:value?.weiboHomeMode==='latest'?'latest':'default',
         weiboProfile:value?.weiboProfile && /^\d{4,25}$/.test(value.weiboProfile.uid) && typeof value.weiboProfile.name==='string' && value.weiboProfile.name.trim()

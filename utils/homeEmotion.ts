@@ -1,3 +1,4 @@
+import { isEmotionFeatureOn } from './scheduleFeature';
 import type {CharacterBuff,CharacterProfile} from '../types';
 import type {CompanionPolicy} from './homeCompanion';
 import {isScheduleFeatureOn} from './scheduleFeature';
@@ -10,7 +11,7 @@ export function parseHomeEmotion(value:unknown):HomeEmotion|undefined {
  for(const key of Object.keys(out) as (keyof HomeEmotion)[]){const n=data[key];if(typeof n!=='number'||!Number.isFinite(n))return;out[key]=Math.max(-1,Math.min(1,n));}
  return out;
 }
-export function homeEmotionEnabled(char:CharacterProfile){return isScheduleFeatureOn(char)&&char.emotionConfig?.enabled===true;}
+export function homeEmotionEnabled(char:CharacterProfile){return isEmotionFeatureOn(char);}
 export function emotionMaterial(char:CharacterProfile){return JSON.stringify({buffs:(char.activeBuffs||[]).map(b=>({name:b.name,label:b.label,description:b.description,intensity:b.intensity})),text:char.buffInjection||''});}
 export function structuredHomeEmotion(buffs:CharacterBuff[]):TimedHomeEmotion|undefined {
  if(!buffs.length)return;

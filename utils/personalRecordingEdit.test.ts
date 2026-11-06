@@ -1,0 +1,5 @@
+import { expect, it } from 'vitest';
+import { DB } from './db';
+import { editRecordingText } from '../features/personal/chatMedia/editRecording';
+it('edits both caption and sound analysis without overwriting audio or other metadata', async () => { const charId=`edit-${Date.now()}`; const id=await DB.saveMessage({charId,role:'user',type:'audio',content:'blobref:b_original',metadata:{source:'call',duration:4,audioCleared:true,audioTranscript:'错误文字',audioAnalysis:'错误语气'}}); const edited=await editRecordingText(id,'正确原话','很平静，没有笑声'); expect(edited.content).toBe('blobref:b_original'); expect(edited.metadata).toMatchObject({source:'call',duration:4,audioCleared:true,audioTranscript:'正确原话',audioAnalysis:'很平静，没有笑声',audioTextEdited:true}); expect(edited.metadata.audioDescription).not.toContain('错误'); });
+it('refuses editing another message type', async () => { const id=await DB.saveMessage({charId:'edit-text',role:'user',type:'text',content:'保留正文'}); await expect(editRecordingText(id,'改','')).rejects.toThrow('用户录音'); });

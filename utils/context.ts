@@ -1,3 +1,4 @@
+import { isEmotionFeatureOn } from './scheduleFeature';
 import {getDailyScheduleForChar} from './dailySchedule';
 import {getLastInnerState} from './emotionState';
 import { readableContextMemories } from './contextMemories';
@@ -30,11 +31,26 @@ import { buildSARModulePrompt } from './vrWorld/sarModuleRuntime';
  * 负责统一构建所有 App 共用的基础角色上下文 (System Prompt)。
  * 包含：身份设定、用户画像、世界观、核心记忆、详细记忆、以及角色内心看法。
  */
+/** 跳过时间感知时，抹掉已持久化或刚拼好的记忆宫殿注入文本里的现实日期与相对天数标注。 */
+const stripMemoryPalaceDateStamps = (text: string): string => text
+    .replace(/\(\d{4}年\d{1,2}月\d{1,2}日[^,\n)]*,\s*(重要性(?:\s+|[:：]))/g, '($1')
+    .replace(/^(\s*-\s*)\[\d{4}年\d{1,2}月\d{1,2}日[^\]]*\]\s*/gm, '$1')
+    .replace(/（对应日期：[^）]+）/g, '')
+    .replace(/（剩余 \d+ 天）/g, '');
+
 export interface EmotionContextOptions { surface?: 'chat' | 'home'; innerState?: string }
 export const ContextBuilder = {
+    /** Only account-level facts; private impressions remain in character context. */
+    buildUserProfileContext: (user: UserProfile): string =>
+        `### 互动对象 (User)\n- 名字: ${user.name}\n- 设定/备注: ${user.bio || '无'}\n\n`,
     /** 所有入口共用：只读取现有日程，不触发生成；按角色当地日期读取。 */
-    buildCurrentScheduleContext: async (char: CharacterProfile, allowScheduleChange = false, snapshot?: Promise<DailySchedule | null>): Promise<string> => {
-        if (!isScheduleFeatureOn(char)) return '';
+    buildCurrentScheduleContext: async (
+        char: CharacterProfile,
+        allowScheduleChange = false,
+        snapshot?: Promise<DailySchedule | null>,
+        options?: { skipTimeAwareness?: boolean },
+    ): Promise<string> => {
+        if (options?.skipTimeAwareness || !isScheduleFeatureOn(char)) return '';
         const schedule = await (snapshot ?? getDailyScheduleForChar(char));
         if (!schedule) return '';
         return buildScheduleInjectionText(schedule, undefined, nowInTimeZone(resolveCharTimeZone(char)), {
@@ -43,7 +59,7 @@ export const ContextBuilder = {
         });
     },
     buildEmotionContext: (char: CharacterProfile, options?: EmotionContextOptions): string => {
-        if ((options?.surface !== 'chat' && options?.surface !== 'home') || !isScheduleFeatureOn(char) || !char.emotionConfig?.enabled) return '';
+        if ((options?.surface !== 'chat' && options?.surface !== 'home') || !isEmotionFeatureOn(char)) return '';
         const inner = options.innerState ?? getLastInnerState(char.id);
         return (char.buffInjection ? char.buffInjection + '\n\n' : '')
             + (inner.trim() ? '### 当前内心想法\n' + inner.trim() + '\n（这是你的内心状态，不是台词，不必说出口；让它自然影响你的回应。）\n\n' : '');
@@ -290,7 +306,7 @@ export const ContextBuilder = {
         const wbMounts = new Map<string, { memberNames: string[]; entry: MountedWorldbook }>();
         for (const m of members) {
             for (const wb of (m.mountedWorldbooks || [])) {
-                if (!wb.id) continue;
+                if (!wb.id || (wb.globalMount && wb.disable)) continue;
                 const existing = wbMounts.get(wb.id);
                 if (existing) existing.memberNames.push(m.name);
                 else wbMounts.set(wb.id, { memberNames: [m.name], entry: wb });
@@ -360,6 +376,7 @@ export const ContextBuilder = {
         userListening: {
             songName: string;
             artists: string;
+            fullLyrics?: string;
             lyricWindow: string[];      // 前2当前后2（共 ≤5 行）；可为空（没歌词）
             activeIdx: number;          // 在 lyricWindow 里的高亮位置，-1 表示没歌词
         } | null,
@@ -402,6 +419,8 @@ export const ContextBuilder = {
                     else lines.push(`  … ${l}`);
                 });
             }
+
+            if(userListening.fullLyrics) lines.push('以下为全曲歌词参考（未对轴，不能据此判断当前唱到哪句）：\n'+userListening.fullLyrics);
 
             // 歌单命中提示（按 songName 粗匹，避免在 context.ts 里引 MusicContext）
             const profile = char.musicProfile;
@@ -554,6 +573,8 @@ const renderCoreContext = async (
              * 只有聊天主路径（chatPrompts.buildSystemPromptParts）用；其他 App 不传，行为不变。
              */
             deferVolatile?: boolean;
+            /** ChatApp emits these account-level fields once in its shared prefix. */
+            deferUserProfile?: boolean;
             emotion?: EmotionContextOptions;
         },
     ): Promise<string> => {
@@ -599,11 +620,9 @@ const renderCoreContext = async (
         // 3. 用户画像 (User Profile)
         // 群聊场景下：用户画像已在共享场景块顶部，这里跳过避免重复
         if (!groupOptions?.skipUserProfile) {
-            context += `### 互动对象 (User)\n`;
-            context += `- 名字: ${user.name}\n`;
-            context += `- 设定/备注: ${user.bio || '无'}\n\n`;
+            if (!layout?.deferUserProfile) context += ContextBuilder.buildUserProfileContext(user);
             if (timeOptions?.includeUserLocation && !timeOptions.skipTimeAwareness) {
-                context += await getUserLocationContext(user.name);
+                context += await getUserLocationContext(user.name, char.id);
             }
             if (char.timeAwarenessEnabled !== false && !timeOptions?.skipTimeAwareness && !timeOptions?.skipUserHoliday) {
                 const holiday = getCachedUserHolidayReminder(user.name, timeOptions?.userHolidays);
@@ -649,14 +668,18 @@ const renderCoreContext = async (
         if (readableMemories.monthly.length) {
             memoryContent += '**长期核心记忆 (Key Memories)**:\n';
             readableMemories.monthly.forEach(({ date, summary }) => {
-                memoryContent += `- [${date}]: ${summary}\n`;
+                memoryContent += timeOptions?.skipTimeAwareness ? `- ${summary}\n` : `- [${date}]: ${summary}\n`;
             });
         }
         let details = '';
         readableMemories.daily.forEach(({ month, entries }) => {
             if (entries.length) {
-                details += `\n> 详细回忆 [${month}]:\n`;
-                entries.forEach(m => { details += `  - ${m.date} (${m.mood || 'rec'}): ${m.summary}\n`; });
+                details += timeOptions?.skipTimeAwareness ? `\n> 详细回忆:\n` : `\n> 详细回忆 [${month}]:\n`;
+                entries.forEach(m => {
+                    details += timeOptions?.skipTimeAwareness
+                        ? `  - (${m.mood || 'rec'}): ${m.summary}\n`
+                        : `  - ${m.date} (${m.mood || 'rec'}): ${m.summary}\n`;
+                });
             }
         });
         if (details) memoryContent += `\n**当前激活的详细回忆 (Active Recall)**:${details}`;
@@ -674,7 +697,10 @@ const renderCoreContext = async (
         // 表现为"宫殿已关、后台无召回，角色却还在精准复述记忆"。与下方 Buff 注入同理。
         // deferVolatile：召回结果每轮都变 → 移交 buildVolatileCoreState。
         if (!layout?.deferVolatile && char.memoryPalaceEnabled) {
-            const mpContext = char.memoryPalaceInjection || memoryPalaceContext;
+            const rawMpContext = char.memoryPalaceInjection || memoryPalaceContext;
+            const mpContext = rawMpContext && timeOptions?.skipTimeAwareness
+                ? stripMemoryPalaceDateStamps(rawMpContext)
+                : rawMpContext;
             if (mpContext && mpContext.trim()) {
                 context += `${mpContext}\n\n`;
             }
@@ -713,7 +739,7 @@ const renderCoreContext = async (
             console.log(`✅ [Context] All fields present | context_chars=${context.length}`);
         }
 
-        if (!layout?.deferVolatile) context += await ContextBuilder.buildCurrentScheduleContext(char);
+        if (!layout?.deferVolatile) context += await ContextBuilder.buildCurrentScheduleContext(char, false, undefined, timeOptions);
         return context;
     };
 
@@ -739,6 +765,7 @@ async function resolveCharacterContext(input: CharacterContextInput) {
         (char.mountedWorldbooks || []).filter(book => !groupOptions?.skipWorldbookIds?.has(book.id)),
         history ?? timeOptions?.worldbookMessages ?? [], char.name, user.name,
     );
+    // Global mounting selects books; placement still follows each book's authored slot.
     const sections = splitWorldbookSections(entries);
     const rawCoreContext = await renderCoreContext(
         history === undefined ? sections : { ...sections, atDepth: [] },
@@ -748,14 +775,17 @@ async function resolveCharacterContext(input: CharacterContextInput) {
     const coreContext = typeof input.instructions === 'function'
         ? input.instructions(rawCoreContext)
         : [rawCoreContext, input.instructions].filter(Boolean).join('\n\n');
-    return { coreContext, sections };
+    const globalWorldbookRemainder = formatWorldbookSection(entries.filter(entry=>'globalMount' in entry.book && entry.book.globalMount && entry.position!==4), '全局世界书 · 条件条目');
+    return { coreContext, sections, sharedWorldbookPrefix: '', globalWorldbookRemainder };
 }
 
 async function buildCharacterContext(input: CharacterContextInput) {
-    const { coreContext, sections } = await resolveCharacterContext(input);
+    const { coreContext, sections, sharedWorldbookPrefix, globalWorldbookRemainder } = await resolveCharacterContext(input);
     const preparedHistory = input.history === undefined ? [] : injectWorldbookDepthEntries(input.history, sections.atDepth);
     return {
         coreContext,
+        sharedWorldbookPrefix,
+        globalWorldbookRemainder,
         history: preparedHistory,
         messages: [{ role: 'system', content: coreContext }, ...preparedHistory],
     };

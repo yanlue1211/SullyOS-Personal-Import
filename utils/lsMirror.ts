@@ -84,6 +84,7 @@ export const MIRRORED_KEYS: readonly string[] = [
     'proactive_schedules',
     'proactive_last_fire_map',
     'vr_schedules',
+    'vr_last_fire',
     'vr_last_fire_map',
     'world_home_schedules',
     'world_home_last_fire_map',
@@ -127,6 +128,7 @@ export const MIRRORED_KEYS: readonly string[] = [
     'sullyos_anniversary_gift_v1',
     'sullyos_real_location_intro_v1_seen',
     'sullyos_navigation_ball_intro_v1_seen',
+    'sullyos_update_2026_10_halloween_seen',
     'sullyos_update_2026_10_home3d_beta_seen',
     'sullyos_update_2026_09_small_updates_seen',
     'sullyos_user_holidays_intro_v1',
@@ -146,6 +148,8 @@ const WRITE_DEBOUNCE_MS = 250;
 type MirrorPayload = { savedAt: number; data: Record<string, string> };
 
 let mirrorReadFailed = false;
+// A failed quota/security write must not disappear from the next partial snapshot.
+const unrestoredMirrorValues = new Map<string, string>();
 let pendingDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
 /**
@@ -174,7 +178,9 @@ export async function healLocalStorageMirror(): Promise<string[]> {
                 localStorage.setItem(key, v);
                 restored.push(key);
             }
+            unrestoredMirrorValues.delete(key);
         } catch {
+            unrestoredMirrorValues.set(key, v);
             // quota 满 / 私有模式写不进：兜底失败就算了，不能让启动流程挂掉
         }
     }
@@ -197,7 +203,10 @@ export async function snapshotLocalStorageMirror(): Promise<void> {
         try {
             const v = localStorage.getItem(key);
             if (v !== null) data[key] = v;
-        } catch { /* ignore */ }
+            else if (unrestoredMirrorValues.has(key)) data[key] = unrestoredMirrorValues.get(key)!;
+        } catch {
+            if (unrestoredMirrorValues.has(key)) data[key] = unrestoredMirrorValues.get(key)!;
+        }
     }
     if (Object.keys(data).length === 0) return;
     try {

@@ -1,3 +1,4 @@
+import { MINIMAL_THINKING_PROMPT } from './chatPromptPreferences';
 import { buildHtmlPrompt } from './htmlPrompt';
 import { buildThinkingChainPrompt } from './thinkingChainPrompt';
 import { normalizeTranslationLangLabel } from './translationLang';
@@ -10,6 +11,7 @@ export function buildChatOutputStylePrompt(input: {
     htmlMode?: { enabled: boolean; customPrompt?: string };
     thinkingChain?: { enabled: boolean; customPrompt?: string };
     sarEnvelopeActive?: boolean;
+    humanStyleEnabled?: boolean;
 }) {
     const { translationConfig, htmlMode, thinkingChain, sarEnvelopeActive } = input;
     const char = { name: input.charName };
@@ -57,8 +59,8 @@ export function buildChatOutputStylePrompt(input: {
     const thinkingActive = !!thinkingChain?.enabled;
     if (thinkingActive) {
         const userName = (userProfile?.name && userProfile.name.trim()) || '用户';
-        prompt += `\n\n${buildThinkingChainPrompt(char.name, userName)}`;
-        const extra = (thinkingChain?.customPrompt || '').trim();
+        prompt += `\n\n${input.humanStyleEnabled === false ? MINIMAL_THINKING_PROMPT : buildThinkingChainPrompt(char.name, userName)}`;
+        const extra = input.humanStyleEnabled === false ? '' : (thinkingChain?.customPrompt || '').trim();
         if (extra) {
             prompt += `\n\n## 用户对内心独白的额外要求\n${extra}`;
         }

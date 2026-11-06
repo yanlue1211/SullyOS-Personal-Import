@@ -42,6 +42,12 @@ export interface VideoShareInfo {
   publishTime?: string;
   /** 图集张数（contentType === 'image' 时）。 */
   imageCount?: number;
+  /** Complete image gallery returned by the video parser. */
+  images?: string[];
+  /** Direct media URL when supplied by the parser; may be cross-origin or expire. */
+  videoUrl?: string;
+  /** Sampled video frames, only when browser CORS permits canvas reads. */
+  frames?: { timeSeconds: number; image: string }[];
 }
 
 /** 抓取并解析后的网页结构。卡片 metadata 存这一份。 */

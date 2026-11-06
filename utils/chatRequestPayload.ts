@@ -1,3 +1,9 @@
+import {momentsEnabled} from '../features/moments/gate';
+import {oracleContext} from '../features/experience/oracle';
+import { materializeAudioDescriptions } from './audioApi';
+import { loadAudioApiConfig } from './songListening';
+import { buildSongSearchGuide } from './songSearch';
+import { isListenSongEnabled, isSongListeningAvailable, isRealSongListeningEnabled, getOrAnalyzeSongSound, buildCurrentSongSoundBlock } from './songListening';
 import { getMemoryPalaceHighWaterMarkForContext, selectCharacterContextMessages } from './chatContextRange';
 import { expandHomeContextHistory } from './homeContextSegments';
 import { protectPendingChatTurn } from './storyTheaterTimeline';
@@ -25,6 +31,7 @@ import { renderDeepEngagementGuidance } from './memoryPalace/deepEngagement';
 import { renderConversationEngagementGuidance } from './memoryPalace/conversationEngagement';
 import type { ConversationEngagementAnalysis } from './memoryPalace/conversationEngagement';
 import type { DeepEngagementAnalysis } from './memoryPalace/deepEngagement';
+import { usesHumanStyle, usesInnerVoice, INNER_VOICE_FORMAT_REMINDER } from './chatPromptPreferences';
 import { buildChatOutputStylePrompt } from './chatOutputStylePrompt';
 import { buildMcdMiniAppContextBlock } from './mcdToolBridge';
 import type { McdMiniAppSnapshot } from './mcdToolBridge';
@@ -32,6 +39,7 @@ import { buildLuckinMiniAppContextBlock, buildLuckinChatSystemBlock } from './lu
 import type { LuckinMiniAppSnapshot, LuckinChatState } from './luckinToolBridge';
 import { isMcpChatAvailable } from './mcpClient';
 import { buildMcpSystemBlock, MCP_TAIL_REMINDER } from './mcpToolBridge';
+import { loadMusicPlaybackSnapshot } from '../context/MusicContext';
 import type { MusicCfg, Song, LyricLine, MusicPlaybackSnapshot, RecentTrackChange } from '../context/MusicContext';
 import { isPromptBuildSkipped, isSystemMessageMergeEnabled } from './devDebug';
 import { mergeSystemMessages } from './systemMessageMerge';
@@ -46,6 +54,7 @@ import { getSARModuleRuntimePlan } from './vrWorld/sarModuleRuntime';
 export { cleanApiMessages, flattenImageContentParts } from './promptMessageCleanup';
 
 export interface UserListeningContext {
+    fullLyrics?: string;
     songName: string;
     artists: string;
     lyricWindow: string[];
@@ -134,7 +143,7 @@ export interface BuildChatPayloadResult {
     /** 已剥离双语标签的历史消息（emotion eval 也吃这份） */
     cleanedApiMessages: Array<{ role: string; content: any }>;
     /** [system, ...cleanedApiMessages, 末尾 bilingual reminder?] —— 主 API 直接发这个 */
-    fullMessages: Array<{ role: string; content: any }>;
+    fullMessages: Array<{ role: string; content: any; name?:string }>;
     /**
      * fullMessages 里易变尾段那条 system 的下标；想插在钢印**之前**的块按它定位。
      *
@@ -190,6 +199,7 @@ function deriveListeningFromSnapshot(
             songName: current.name,
             artists: current.artists,
             lyricWindow: [],
+            fullLyrics: current.lyricTimingMode==='plain'&&!current.lyricLineTimings?.length ? current.localLyrics?.slice(0,12000) : undefined,
             activeIdx: -1,
         };
     }
@@ -241,6 +251,7 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
         try{return await work();}finally{input.onPreparationStage?.({stage,status:'end',ms:Math.round(performance.now()-started)});}
     };
     const char = { ...input.char, memoryPalaceInjection: '', roomPlatesInjection: '' };
+    const humanStyle = usesHumanStyle(char) || !!input.appPrompt;
     const {
         userProfile, groups, historyMsgs, contextLimit,
         realtimeConfig, innerState,
@@ -275,11 +286,17 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
         const prepared = await prepare('vision',()=>materializeVisionDescriptions(
             [...uniqueMessages.values()],
             input.visionApiConfig,
+            {includeEmojis: char.stickerVisionEnabled===true},
         ));
         const preparedById = new Map(prepared.map(message => [message.id, message]));
         historyMsgsForPrompt = selectedHistory.map(message => preparedById.get(message.id) || message);
         recentMsgsHint = rawRecentMsgsHint.map(message => preparedById.get(message.id) || message);
     }
+
+    historyMsgsForPrompt = await materializeAudioDescriptions(historyMsgsForPrompt, loadAudioApiConfig());
+    const audioById = new Map(historyMsgsForPrompt.map(message => [message.id, message]));
+    recentMsgsHint = recentMsgsHint.map(message => audioById.get(message.id) || message);
+    input.signal?.throwIfAborted();
 
     // Range/vision processing must retain database IDs. Only after those steps may
     // legacy home rows expand into their actual speakers and chronological events.
@@ -382,27 +399,83 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
             includeUserLocation: isChatConversationEntry(input.recallEntryPoint),
             returningFromMode: returningFromMode || undefined,
             appRules: input.appPrompt?.rules,
+            suppressMusicAtmosphere: !isRealSongListeningEnabled(char) || !!input.musicSnapshot?.requestedByCharId,
+            responseStatusEnabled: input.recallEntryPoint!=='proactive_chat',
         },
     ));
     input.signal?.throwIfAborted();
     let systemPrompt = parts.stable;
     let volatileTail = parts.volatileState;
-    const sarModulePlan = input.recallEntryPoint === 'chat_app' && !input.appPrompt
+    if(humanStyle && momentsEnabled() && !input.appPrompt && (!input.recallEntryPoint || ['chat_app','proactive_chat','chat_payload'].includes(input.recallEntryPoint))){
+        const {chatMomentsContext}=await import('../features/moments/bridge');
+        const moments=await chatMomentsContext(char.id,[...historyMsgsForPrompt].reverse().find(m=>m.role==='user')?.id);
+        systemPrompt+=moments.stable;volatileTail+=moments.dynamic;
+    }
+    if (humanStyle && !input.appPrompt && char.workroomLinkEnabled === true && (!input.recallEntryPoint || ['chat_app','proactive_chat','chat_payload'].includes(input.recallEntryPoint))) {
+        const { buildWorkroomGuide } = await import('../features/workroom/bridge');
+        volatileTail += await buildWorkroomGuide(char.id);
+    }
+    const sarModulePlan = humanStyle && input.recallEntryPoint === 'chat_app' && !input.appPrompt
         ? getSARModuleRuntimePlan(char, userProfile)
         : undefined;
-    const sarModuleBlock = isChatConversationEntry(input.recallEntryPoint)
+    const sarModuleBlock = humanStyle && isChatConversationEntry(input.recallEntryPoint)
         ? ContextBuilder.buildSARModuleContext(char, userProfile, input.appPrompt ? 'home' : 'chat')
         : '';
     const sarEnvelopeActive = sarModulePlan?.requiresEnvelope === true;
 
     const { prompt: outputStylePrompt, bilingualActive, htmlActive, thinkingActive } = buildChatOutputStylePrompt({
-        charName: char.name,
+        humanStyleEnabled: char.humanStyleEnabled,
+    charName: char.name,
         userName: userProfile?.name,
         ...(!input.appPrompt ? { translationConfig, htmlMode, thinkingChain, sarEnvelopeActive } : {}),
     });
-    systemPrompt += outputStylePrompt;
+    const formatReminder = !input.appPrompt && usesInnerVoice(char) ? INNER_VOICE_FORMAT_REMINDER + '\n' : '';
+    systemPrompt += formatReminder + outputStylePrompt;
+    if (isRealSongListeningEnabled(char)) {
+      systemPrompt += `\n### 【真实听歌说明】
+当你与用户一起听音乐时，系统可能在本轮动态上下文提供歌曲的客观声音分析。它是歌曲本身的声音资料，不是你写的日记，也不是你已经发表的评价。你可以基于真实声音信息和当下情境形成自己的感受，但绝不必每轮都谈论音乐；优先自然回应用户。不要照搬分析报告，不要编造没有分析到的乐器或旋律。没有分析结果时，不要假装听清了曲调。听歌日记不是自动任务，只有用户明确要求时才写。\n`;
+    }
 
-    const messagesWithWorldbookDepth = parts.history;
+    // The history pipeline includes immutable system records (Moments, etc.).
+    // Mark their provenance explicitly; the native adapter must not confuse them
+    // with this request's changing recall/state or later tool reminders.
+    const messagesWithWorldbookDepth = parts.history.map(message =>
+        message.role === 'system' || message.role === 'developer'
+            ? {...message, name:'sully_history_context'} : message);
+
+
+    // 用户在聊天功能菜单独立启用；不依赖模型是否生成音乐卡片。
+    // 未分析过时等待客观音频分析完成，命中缓存则直接提供给主模型。
+    if (isRealSongListeningEnabled(char) && isSongListeningAvailable() && (input.musicSnapshot?.playing ?? !!userListeningContext)) {
+      const currentSong = input.musicSnapshot?.current;
+      if (currentSong) {
+        try {
+          const record = await getOrAnalyzeSongSound(currentSong);
+          const { DB } = await import('./db');
+          const liveChar = await DB.getCharacter(char.id);
+          const livePlayback = loadMusicPlaybackSnapshot();
+          if (isRealSongListeningEnabled(liveChar) && livePlayback?.playing
+              && livePlayback.current?.id === currentSong.id) {
+            volatileTail += buildCurrentSongSoundBlock(currentSong, record);
+          }
+        } catch (error) {
+          console.warn('[audio-listening] 获取歌曲声音分析失败，保持原版回复', error);
+        }
+      }
+    }
+    if (input.recallEntryPoint === 'chat_app' && !input.appPrompt && isListenSongEnabled(char)) {
+      volatileTail += buildSongSearchGuide();
+    }
+
+
+    // Explicit current state overrides earlier listening messages after pause/stop.
+    const livePlayback = loadMusicPlaybackSnapshot() ?? input.musicSnapshot;
+    if (input.musicSnapshot !== undefined && livePlayback) {
+      const state = !livePlayback.playing ? '播放器当前未在播放音乐。'
+        : livePlayback.requestedByCharId ? '当前由角色主动点播，正在共享播放器播放《' + livePlayback.current?.name + '》。这是角色点歌，不是用户主动听歌的证据。'
+        : '用户的播放器当前正在播放《' + livePlayback.current?.name + '》。';
+      volatileTail += '\n### 【当前播放器状态】\n' + state + '先前听歌记录、收藏和搜索意图均不代表当前播放状态，也不能证明用户正在专心听。\n';
+    }
 
     // ── 9. 麦当劳小程序上下文（购物车/菜单实时快照 → 易变尾段） ──
     const mcdActive = !!mcdMiniSnap?.open;
@@ -449,6 +522,7 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
     // 私聊与 3D 家园共用本地语境分析：它告诉主模型“这句话此刻在做什么”，
     // 不指定具体记忆答案、不改变角色人格，也不进入其他 App 的专属写作提示。
     if (isChatConversationEntry(input.recallEntryPoint)) {
+        if (humanStyle) {
         volatileTail += renderLocalContextGuidance(recallTrace.contextAnalyzer);
         volatileTail += renderInteractionAdaptationGuidance(recallTrace.interactionAdaptation?.analysis);
         const engagementTrace = recallTrace.deepEngagement;
@@ -459,6 +533,7 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
             volatileTail += renderConversationEngagementGuidance(
                 engagementTrace.analysis as ConversationEngagementAnalysis | undefined,
             );
+        }
         }
         if (char.chatCollaborationEnabled) {
             volatileTail += await prepare('collaboration',()=>loadCollaborationFileCabinetBlock(
@@ -471,8 +546,10 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
 
     // 「关于对方的表达」+「回到你自己」必须是易变尾段的最后内容：修复旧版把双语/HTML/
     // 思考链/点单块拼在钢印之后、模型开口前最后读到的是格式说明书的问题。
+    if(humanStyle&&!input.appPrompt&&(!input.recallEntryPoint||['chat_app','chat_payload','proactive_chat'].includes(input.recallEntryPoint)))volatileTail+=await oracleContext(char.id);
     if (input.appPrompt) volatileTail += input.appPrompt.scene;
     volatileTail += parts.recencyTail;
+
     if (sarModuleBlock) volatileTail += sarModuleBlock;
 
     // 结构：[稳定 system] + [历史消息] + [易变状态 system] (+ 末尾 reminder)。
@@ -481,8 +558,11 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
     // 注意：即时对话的 worker 端情绪评估把 messages[0] 当 system、messages[1..]
     // 展平为对话历史 —— 易变尾段会以「[系统]: …」行出现在历史末尾，信息不丢。
     if(input.homePhoneContext) volatileTail += `\n\n${input.homePhoneContext}`;
-    let fullMessages: Array<{ role: string; content: any }> = [
+    const stableMessages: Array<{role:string;content:any;name?:string}> = [
         { role: 'system', content: systemPrompt },
+    ];
+    let fullMessages: Array<{ role: string; content: any; name?:string }> = [
+        ...stableMessages,
         ...messagesWithWorldbookDepth,
         { role: 'system', content: volatileTail },
     ];
@@ -513,7 +593,7 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
     // ChatApp refreshes this same block inside its tool loop. Home has one request,
     // so take the same task/receipt snapshot here, before the live-state tail.
     let amsg2ExpiredNoticeIds: string[] | undefined;
-    let volatileTailIndex = 1 + messagesWithWorldbookDepth.length;
+    let volatileTailIndex = stableMessages.length + messagesWithWorldbookDepth.length;
     if (input.recallEntryPoint === 'home_3d' && char.activeMsg2Config?.enabled) {
         await prepare('tasks',async()=>{
         const { isAmsg2GlobalReady } = await import('./amsg2ToolBridge');
@@ -538,7 +618,7 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
     }
     input.signal?.throwIfAborted();
 
-    if (!input.appPrompt || input.recallEntryPoint === 'home_3d') {
+    if ((humanStyle && !input.appPrompt) || input.recallEntryPoint === 'home_3d') {
         const {homeVisitPrompt}=await import('./homeVisits');
         const visits=await homeVisitPrompt(char);
         if(visits)fullMessages.push({role:'system',content:visits});

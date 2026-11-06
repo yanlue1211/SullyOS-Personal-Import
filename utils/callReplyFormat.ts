@@ -1,13 +1,17 @@
+import { extractInnerVoice, type InnerVoice } from '../features/personal/innerVoice/protocol';
 import { extractAvatarPerformanceTimeline, type AvatarPerformanceCue, type AvatarPerformanceDirection } from './avatarPerformance';
 
 export interface ParsedCallReply {
   text: string;
+  innerVoice?: InnerVoice;
   thinkingChain?: string;
   /** 第一条演出指令（立即生效）。 */
   performance?: AvatarPerformanceDirection;
   /** 完整演出时间轴：正文中穿插的所有指令，按位置比例调度。 */
   performanceCues?: AvatarPerformanceCue[];
 }
+
+export const stripCallSourceLabels = (raw:string):string => raw.replace(/[\[［【]{1,2}\s*(?:通话|聊天|约会)\s*[\]］】]{1,2}[ \t]*/g,'');
 
 export const stripCallTextFormatting = (raw: string): string => (raw || '')
   .replace(/```(?:[a-z0-9_-]+)?\s*/gi, '')
@@ -17,6 +21,7 @@ export const stripCallTextFormatting = (raw: string): string => (raw || '')
   .replace(/^(?:\s{0,3}#{1,6}\s+|\s{0,3}>\s?|\s*[-+*]\s+)/gm, '')
   .replace(/(\*\*|__)([\s\S]*?)\1/g, '$2')
   .replace(/([*_~`])([^\n]*?)\1/g, '$2')
+  .replace(/[\[［【]{1,2}\s*(?:通话|聊天|约会)\s*[\]］】]{1,2}[ \t]*/g,'')
   .replace(/[\t ]+\n/g, '\n')
   .replace(/\n{3,}/g, '\n\n')
   .trim();
@@ -53,10 +58,12 @@ export const parseCallAssistantMessage = (message: any, keepThinking = false): P
   });
   cleaned = cleaned.replace(/<\/?(?:think|thinking|thought)\b[^>]*>/gi, '');
 
-  const { text, cues } = extractAvatarPerformanceTimeline(cleaned);
+  const heart = extractInnerVoice(cleaned);
+  const { text, cues } = extractAvatarPerformanceTimeline(heart.text);
   const uniqueChains = [...new Set([nativeChain, ...inlineChains].map(item => item.trim()).filter(Boolean))];
   return {
-    text,
+    text:stripCallSourceLabels(text),
+    ...(heart.innerVoice ? { innerVoice: heart.innerVoice } : {}),
     ...(keepThinking && uniqueChains.length ? { thinkingChain: uniqueChains.join('\n\n') } : {}),
     ...(cues.length ? { performance: cues[0].direction, performanceCues: cues } : {}),
   };

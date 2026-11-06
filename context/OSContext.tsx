@@ -1,4 +1,15 @@
+import { consumePhotoChoices } from '../utils/photoChoice';
+import { getProactiveUserActivity, isProactiveUserReply } from '../utils/proactiveActivity';
+import { reconcileWorldbookMounts } from '../utils/worldbookScope';
+import { consumeIncomingCallInvites } from '../features/personal/calls/incoming';
+import {SONGWRITING_UPDATED} from '../features/songwriting/model';
+import {streamMoments} from '../features/moments/backup';
+import {stripResponseStatus} from '../features/personal/responseStatus/protocol';
+import { drainWorkroomOutbox, WORKROOM_HISTORY_UPDATED } from '../features/workroom/delivery';
+import { reconcileCommerce } from '../utils/personalCommerce';
+import { isEmotionFeatureOn } from '../utils/scheduleFeature';
 import { handleLocalBack } from '../utils/localBackHandlers';
+import { updateVirtualTimeIfChanged } from '../utils/blurPolicy';
 import {isHomeAssetDisposal} from '../utils/homeAssetCancellation';
 import { processHomeMemoryAfterSave } from '../utils/homeMemoryPostHook';
 import { homeSharedRecipients } from '../utils/homeSharedEvents';
@@ -23,7 +34,8 @@ import { FEEDBACK_INVITATION_KEY, hasPriorFeedbackInstallEvidence, initializeFee
 import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react';
 import type { VRSARActivity } from '../types';
 import { APIConfig, AppID, OSTheme, VirtualTime, CharacterProfile, CharacterGroup, ChatTheme, Toast, FullBackupData, UserProfile, ApiPreset, GroupProfile, SystemLog, Worldbook, NovelBook, SongSheet, Message, RealtimeConfig, AppearancePreset, CloudBackupConfig, CloudBackupFile, MemoryPalaceFeatureFlags } from '../types';
-import { DB } from '../utils/db';
+import { DB, openDB } from '../utils/db';
+import { streamWorkroomBackup } from '../features/workroom/backup';
 import { reportDatabaseFailure } from '../utils/databaseHealth';
 import type { AvatarTouchRecord } from '../utils/avatarTouch';
 import { clampClaudeTemperature, modelRejectsSamplingParams, stripSamplingParams } from '../utils/samplingParamCompat';
@@ -45,6 +57,7 @@ import { encodeVectorsForBackupChunked } from '../utils/memoryPalace/db';
 import { createBackupArchive } from '../utils/backupArchive';
 import { streamBackupArrayStore } from '../utils/backupStoreStreaming';
 import { ProactiveChat } from '../utils/proactiveChat';
+import { extractInnerVoice } from '../features/personal/innerVoice/protocol';
 import { VRScheduler, type VRSessionOutcome } from '../utils/vrWorld/scheduler';
 import { runVRSession } from '../utils/vrWorld/runSession';
 import { allowsAutomaticVR } from '../utils/vrWorld/participation';
@@ -924,10 +937,18 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
   const [virtualTime, setVirtualTime] = useState<VirtualTime>(getRealTime());
   
+  useEffect(() => {
+    const scan = () => { void reconcileCommerce().catch(e => console.warn('[commerce] Pending delivery retained for retry', e)); };
+    scan(); const timer = setInterval(scan, 30000);
+    const onVisible = () => { if (document.visibilityState === 'visible') scan(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { clearInterval(timer); document.removeEventListener('visibilitychange', onVisible); };
+  }, []);
+
   // Real-time Clock Sync
   useEffect(() => {
       const timer = setInterval(() => {
-          setVirtualTime(getRealTime());
+          setVirtualTime(prev => updateVirtualTimeIfChanged(prev, getRealTime()));
       }, 1000);
       return () => clearInterval(timer);
   }, []);
@@ -1863,6 +1884,11 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
               markAmsgStateDirty({ char, userProfile: dbUser ?? defaultUserProfile, groups: dbGroups, realtimeConfig: restoredRealtime });
             }
           }
+          // Refresh existing scheduled packs once so old read/busy instructions do not linger in cloud state.
+          if(localStorage.getItem('os_proactive_status_policy_v1')!=='done'){
+            markAmsgStateDirtyForAll({characters:finalChars,userProfile:dbUser??defaultUserProfile,groups:dbGroups,realtimeConfig:restoredRealtime});
+            localStorage.setItem('os_proactive_status_policy_v1','done');
+          }
           resumePendingAmsgStateSync({
             characters: finalChars,
             userProfile: dbUser ?? defaultUserProfile,
@@ -1945,76 +1971,71 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   useEffect(() => {
       if (!isDataLoaded || characters.length === 0) return;
       let cancelled = false;
+      let scanning = false;
       const checkAllSchedules = async () => {
-          if (cancelled) return;
-          let hasNewMessage = false;
-          const unreadUpdates: Record<string, number> = {};
+          if (cancelled || scanning) return;
+          scanning = true;
+          try {
+              let hasNewMessage = false;
+              const unreadUpdates: Record<string, number> = {};
 
-          for (const char of characters) {
-              try {
-                  // 用户正在 DateApp 里和这个角色见面 —— 角色之前排好的定时消息
-                  // ([schedule_message] 指令) 这轮先压着不投递（不删不读），
-                  // 等用户离开见面界面后，下一轮 5s 检查会自然送达。
-                  if (activeAppRef.current === AppID.Date && activeCharIdScheduleRef.current === char.id) continue;
-                  // 通话中（含挂起）同理：定时消息这轮先压着，离开通话后下一轮再送达。
-                  if ((activeAppRef.current === AppID.Call && activeCharIdScheduleRef.current === char.id)
-                      || suspendedCallRef.current?.charId === char.id) continue;
-                  const dueMessages = await DB.getDueScheduledMessages(char.id);
-                  if (cancelled) return;
-                  if (dueMessages.length > 0) {
-                      for (const msg of dueMessages) {
-                          await DB.saveMessage({
-                               charId: msg.charId,
-                               role: 'assistant',
-                               type: 'text',
-                               content: msg.content
-                          });
-                          await DB.deleteScheduledMessage(msg.id);
-                      }
+              for (const char of characters) {
+                  try {
+                      // 用户正在 DateApp 里和这个角色见面 —— 角色之前排好的定时消息
+                      // ([schedule_message] 指令) 这轮先压着不投递（不删不读），
+                      // 等用户离开见面界面后，下一轮 5s 检查会自然送达。
+                      if (activeAppRef.current === AppID.Date && activeCharIdScheduleRef.current === char.id) continue;
+                      // 通话中（含挂起）同理：定时消息这轮先压着，离开通话后下一轮再送达。
+                      if ((activeAppRef.current === AppID.Call && activeCharIdScheduleRef.current === char.id)
+                          || suspendedCallRef.current?.charId === char.id) continue;
+                      const dueMessages = await DB.deliverDueScheduledMessages(char.id);
                       if (cancelled) return;
-                      hasNewMessage = true;
-                      // Use refs for latest state (avoids stale closure & unnecessary deps)
-                      const isChattingWithThisChar = activeAppRef.current === AppID.Chat && activeCharIdScheduleRef.current === char.id;
+                      if (dueMessages.length > 0) {
+                          if (cancelled) return;
+                          hasNewMessage = true;
+                          // Use refs for latest state (avoids stale closure & unnecessary deps)
+                          const isChattingWithThisChar = activeAppRef.current === AppID.Chat && activeCharIdScheduleRef.current === char.id;
 
-                      // If not chatting specifically with this char right now, mark as unread
-                      if (!isChattingWithThisChar) {
-                          addToast(`${char.name} 发来了一条消息`, 'success');
-                          unreadUpdates[char.id] = dueMessages.length;
+                          // If not chatting specifically with this char right now, mark as unread
+                          if (!isChattingWithThisChar) {
+                              addToast(`${char.name} 发来了一条消息`, 'success');
+                              unreadUpdates[char.id] = dueMessages.length;
 
-                          // Web Notification
-                          if (!Capacitor.isNativePlatform() && window.Notification && Notification.permission === 'granted') {
-                              try {
-                                  // 通知不是 DOM，icon 只认能直接加载的地址：头像字段可能是 blobref
-                                  // 令牌，原样塞进去就是没图标。先解析（非令牌原样返回），解析不出
-                                  // 来（图已丢）时退回应用默认图标。
-                                  const icon = (await resolveRefToDataUrl(char.avatar || '')) || './icons/icon-192.png';
-                                  const notif = new Notification(char.name, {
-                                      body: dueMessages[0].content,
-                                      icon,
-                                      silent: false
-                                  });
-                                  notif.onclick = () => {
-                                      window.focus();
-                                      setActiveApp(AppID.Chat);
-                                      setActiveCharacterId(char.id);
-                                  };
-                              } catch (e) { /* notification failed */ }
+                              // Web Notification
+                              if (!Capacitor.isNativePlatform() && window.Notification && Notification.permission === 'granted') {
+                                  try {
+                                      // 通知不是 DOM，icon 只认能直接加载的地址：头像字段可能是 blobref
+                                      // 令牌，原样塞进去就是没图标。先解析（非令牌原样返回），解析不出
+                                      // 来（图已丢）时退回应用默认图标。
+                                      const icon = (await resolveRefToDataUrl(char.avatar || '')) || './icons/icon-192.png';
+                                      const notif = new Notification(char.name, {
+                                          body: dueMessages[0].content,
+                                          icon,
+                                          silent: false
+                                      });
+                                      notif.onclick = () => {
+                                          window.focus();
+                                          setActiveApp(AppID.Chat);
+                                          setActiveCharacterId(char.id);
+                                      };
+                                  } catch (e) { /* notification failed */ }
+                              }
                           }
                       }
-                  }
-              } catch (e) { /* schedule check failed */ }
-          }
-          if (hasNewMessage && !cancelled) {
-              setLastMsgTimestamp(Date.now());
-              // Use functional updater to avoid depending on unreadMessages in the effect deps
-              setUnreadMessages(prev => {
-                  const next = { ...prev };
-                  for (const [charId, count] of Object.entries(unreadUpdates)) {
-                      next[charId] = (next[charId] || 0) + count;
-                  }
-                  return next;
-              });
-          }
+                  } catch (e) { /* schedule check failed */ }
+              }
+              if (hasNewMessage && !cancelled) {
+                  setLastMsgTimestamp(Date.now());
+                  // Use functional updater to avoid depending on unreadMessages in the effect deps
+                  setUnreadMessages(prev => {
+                      const next = { ...prev };
+                      for (const [charId, count] of Object.entries(unreadUpdates)) {
+                          next[charId] = (next[charId] || 0) + count;
+                      }
+                      return next;
+                  });
+              }
+          } finally { scanning = false; }
       };
       schedulerRef.current = setInterval(checkAllSchedules, 5000);
       checkAllSchedules();
@@ -2353,6 +2374,43 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
   useEffect(() => {
       if (!isDataLoaded) return;
+      const memoryChains = new Map<string, Promise<void>>();
+      const historyChanged = (event: Event) => {
+          const charId = (event as CustomEvent).detail?.charId;
+          if (typeof charId !== 'string') return;
+          setLastMsgTimestamp(Date.now());
+          const task = (memoryChains.get(charId) || Promise.resolve()).catch(() => {}).then(async () => {
+              const char = await DB.getCharacter(charId), config = memoryPalaceConfigRef.current;
+              const llm = config.lightLLM?.baseUrl ? config.lightLLM : apiConfigRef.current;
+              if (!char?.memoryPalaceEnabled || !config.embedding?.baseUrl || !config.embedding.apiKey || !llm.baseUrl) return;
+              const { processNewMessagesWithAutoArchive } = await import('../utils/memoryPalace/autoArchive');
+              await processNewMessagesWithAutoArchive([], char.id, char.name, config.embedding, llm, userProfileRef.current.name, false);
+          });
+          memoryChains.set(charId, task);
+          void task.catch(error => console.warn('[Workroom] Memory buffer retained for retry', error)).finally(() => {
+              if (memoryChains.get(charId) === task) memoryChains.delete(charId);
+          });
+      };
+      const drain = () => { if (document.hidden) return; void DB.getAllCharacters().then(async rows => {
+          for (const char of rows) await drainWorkroomOutbox(char.id);
+      }).catch(error => console.warn('[Workroom] Chat outbox retained for retry', error)); };
+      const openWorkroom = () => setActiveApp(AppID.Workroom);
+      const askWorkroom = (event:Event) => { const id=(event as CustomEvent).detail?.charId; if(typeof id==='string'){setActiveCharacterId(id);setActiveApp(AppID.Chat);} };
+      window.addEventListener('workroom-chat-requested', askWorkroom);
+      window.addEventListener('workroom-open-requested', openWorkroom);
+      window.addEventListener(WORKROOM_HISTORY_UPDATED, historyChanged);
+      window.addEventListener('moments-history-updated', historyChanged);
+      window.addEventListener(SONGWRITING_UPDATED, historyChanged);
+      const reloadSongs = () => { void DB.getAllSongs().then(setSongs).catch(()=>{}); };
+      window.addEventListener(SONGWRITING_UPDATED, reloadSongs);
+      document.addEventListener('visibilitychange', drain);
+      drain();
+      return () => { window.removeEventListener('workroom-chat-requested', askWorkroom); window.removeEventListener('workroom-open-requested', openWorkroom); window.removeEventListener(WORKROOM_HISTORY_UPDATED, historyChanged); window.removeEventListener('moments-history-updated', historyChanged); window.removeEventListener(SONGWRITING_UPDATED, historyChanged); window.removeEventListener(SONGWRITING_UPDATED, reloadSongs); document.removeEventListener('visibilitychange', drain); };
+  }, [isDataLoaded]);
+
+
+  useEffect(() => {
+      if (!isDataLoaded) return;
 
       const drainQueuedProactive = () => {
           const next = proactiveQueueRef.current.shift();
@@ -2409,7 +2467,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           }
 
           // 页面内主动消息与私聊使用同一角色默认；旧主动消息副 API 不再参与取值。
-          const api = resolveDialogueApi(currentApiConfig, char);
+          const api = resolveDialogueApi(currentApiConfig, char, currentApiConfig.proactiveApi?.baseUrl ? currentApiConfig.proactiveApi : undefined);
           if (!api.baseUrl) {
               drainQueuedProactive();
               return;
@@ -2422,6 +2480,14 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           let friendFeedTask: Awaited<ReturnType<typeof prepareFriendFeedMainTask>>;
           let hintMsgId: number | null = null;
           try {
+              // Read committed interaction, independent of memory high-water marks.
+              const interactionHistory = await DB.getRecentMessagesByCharId(charId, 200, true);
+              const latestUser = [...interactionHistory].reverse().find(isProactiveUserReply);
+              const idleInterval = (char.proactiveConfig?.intervalMinutes || 60) * 60_000;
+              if (latestUser && Date.now() - latestUser.timestamp < idleInterval) {
+                  ProactiveChat.deferForInteraction(charId, latestUser.timestamp);
+                  return;
+              }
               // 1. Calculate time gap
               const recentMsgs = await DB.getRecentMessagesByCharId(charId, 200);
               const lastRealUserMsg = [...recentMsgs].reverse().find(
@@ -2504,7 +2570,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
               const systemPrompt = payload.systemPrompt;
               const apiMessages = payload.cleanedApiMessages;
               const fullMessages = payload.fullMessages;
-              if (!payload.flags.promptBuildSkipped) {
+              if (!payload.flags.promptBuildSkipped && char.humanStyleEnabled !== false) {
                   try {
                       friendFeedTask = await prepareFriendFeedMainTask(charId);
                       if (friendFeedTask) fullMessages.splice(Math.max(1, payload.volatileTailIndex), 0,
@@ -2514,7 +2580,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
               // 3c. 情绪评估 fire-and-forget — 与主 API 并行，沿用 useChatAI 的 API 选择逻辑：
               //     角色专属情绪 API > 主 apiConfig（与记忆宫殿副 API 完全独立）
-              if (!payload.flags.promptBuildSkipped && !isEmotionEvalSkipped() && isScheduleFeatureOn(char) && char.emotionConfig?.enabled) {
+              if (char.humanStyleEnabled !== false && !payload.flags.promptBuildSkipped && !isEmotionEvalSkipped() && isEmotionFeatureOn(char)) {
                   const emotionApi = (char.emotionConfig.api?.baseUrl)
                       ? char.emotionConfig.api
                       : { baseUrl: apiConfigRef.current.baseUrl, apiKey: apiConfigRef.current.apiKey, model: apiConfigRef.current.model };
@@ -2551,8 +2617,13 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                   body: JSON.stringify(reqBody)
               }, 2, 0, { appName: '消息', charId, charName: char.name, purpose: '主动消息' });
 
+              // A reply received while the model was working supersedes this reminder.
+              if (getProactiveUserActivity(charId) > now.getTime()) {
+                  if (hintMsgId != null) await DB.deleteMessage(hintMsgId).catch(() => {});
+                  return;
+              }
               // 5. Process & save response
-              let aiContent = data.choices?.[0]?.message?.content || '';
+              let aiContent = stripResponseStatus(data.choices?.[0]?.message?.content || '');
               aiContent = await consumeFriendFeedMainReply(charId, aiContent, [], friendFeedTask?.id);
               // 思考链抽取 — 与 useChatAI 保持一致:reasoning_content 字段 + 主 content 里的 <think>/<thinking>/<thought> 块,
               // 拼接后挂到本回合首条 assistant 消息的 metadata.thinkingChain
@@ -2579,7 +2650,18 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
               aiContent = aiContent.replace(/\s*\[(?:聊天|通话|约会)\]\s*/g, '\n').trim();
 
               aiContent = normalizeProactiveAiContent(aiContent);
+              aiContent = await consumePhotoChoices(aiContent, charId, allMsgs, message => addToast(message, 'info'));
+              // Proactive 1.0 is an online chat reply: use the same heart parser
+              // before chunking or HTML rendering, never expose raw <心声> tags.
+              const proactiveHeart = extractInnerVoice(aiContent);
+              aiContent = await consumeIncomingCallInvites(proactiveHeart.text, charId);
 
+              let lastProactiveAssistantId: number | undefined;
+              const saveProactiveMessage: typeof DB.saveMessage = async msg => {
+                  const id = await DB.saveMessage(msg);
+                  if (msg.role === 'assistant') lastProactiveAssistantId = id;
+                  return id;
+              };
               const savedPreviewChunks: string[] = [];
               const baseTimestamp = Date.now();
               let offset = 0;
@@ -2598,7 +2680,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                   for (const blk of blocks) {
                       try {
                           const meta = consumeThinkingMeta();
-                          await DB.saveMessage({
+                          await saveProactiveMessage({
                               charId,
                               role: 'assistant',
                               type: 'html_card',
@@ -2634,7 +2716,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                           const foundEmoji = emojis.find(e => e.name === name);
                           if (!foundEmoji?.url) return;
                           const meta = consumeThinkingMeta();
-                          await DB.saveMessage({
+                          await saveProactiveMessage({
                               charId,
                               role: 'assistant',
                               type: 'emoji',
@@ -2656,7 +2738,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                               for (const chunk of ChatParser.chunkText(cleaned)) {
                                   if (!chunk) continue;
                                   const meta = consumeThinkingMeta();
-                                  await DB.saveMessage({
+                                  await saveProactiveMessage({
                                       charId,
                                       role: 'assistant',
                                       type: 'text',
@@ -2688,7 +2770,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                                   ? `${originalText}\n%%BILINGUAL%%\n${translatedText}`
                                   : (originalText || translatedText);
                               const meta = consumeThinkingMeta();
-                              await DB.saveMessage({
+                              await saveProactiveMessage({
                                   charId,
                                   role: 'assistant',
                                   type: 'text',
@@ -2714,7 +2796,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                               const foundEmoji = emojis.find(e => e.name === part.content);
                               if (foundEmoji?.url) {
                                   const meta = consumeThinkingMeta();
-                                  await DB.saveMessage({
+                                  await saveProactiveMessage({
                                       charId,
                                       role: 'assistant',
                                       type: 'emoji',
@@ -2725,7 +2807,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                               } else {
                                   const fallbackText = `发送了表情包：${part.content}`;
                                   const meta = consumeThinkingMeta();
-                                  await DB.saveMessage({
+                                  await saveProactiveMessage({
                                       charId,
                                       role: 'assistant',
                                       type: 'text',
@@ -2745,7 +2827,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
                           for (const chunk of textChunks) {
                               const meta = consumeThinkingMeta();
-                              await DB.saveMessage({
+                              await saveProactiveMessage({
                                   charId,
                                   role: 'assistant',
                                   type: 'text',
@@ -2758,6 +2840,10 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                           }
                       }
                   }
+              }
+
+              if (char.innerVoiceEnabled !== false && proactiveHeart.innerVoice && lastProactiveAssistantId != null) {
+                  await DB.updateMessageMetadata(lastProactiveAssistantId, previous => ({ ...(previous || {}), innerVoice: proactiveHeart.innerVoice }));
               }
 
               if (offset > 0) {
@@ -3385,12 +3471,10 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   const savePresets = (presets: ApiPreset[]) => { const normalized = presets.map(normalizeApiPreset); setApiPresets(normalized); localStorage.setItem('os_api_presets', JSON.stringify(normalized)); };
   const addCharacter = async () => {
     const name = 'New Character';
-    // 默认开启 emotionConfig.enabled，让"开日程 = 开情绪"这条隐含约定对新角色也成立。
-    // 真正的闸门是 (isScheduleFeatureOn && emotionConfig.enabled)，schedule 没开
-    // 时副 API 不会触发，所以这里默认 true 安全。
+    // 新角色的情绪独立配置，默认关闭，由用户明确开启。
     // 注意：memoryPalaceEnabled 不在这里默认开 —— 那是用户在记忆宫殿 App 显式 opt-in
     // 的功能，自动开会替用户决策。
-    const newChar: CharacterProfile = {
+    const newCharBase: CharacterProfile = {
       id: `char-${Date.now()}`,
       name,
       avatar: generateAvatar(name),
@@ -3400,8 +3484,10 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       contextLimit: DEFAULT_MANUAL_CONTEXT_LIMIT,
       contextRangeMode: 'manual',
       contextRangePolicyVersion: CONTEXT_RANGE_POLICY_VERSION,
-      emotionConfig: { enabled: true },
+      emotionIndependent: true,
+      emotionConfig: { enabled: false },
     };
+    const newChar = reconcileWorldbookMounts(newCharBase, worldbooks);
     setCharacters(prev => [...prev, newChar]);
     setActiveCharacterId(newChar.id);
     await DB.saveCharacter(newChar);
@@ -3410,7 +3496,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   const updateCharacter = async (id: string, updates: Partial<CharacterProfile> | ((prev: CharacterProfile) => Partial<CharacterProfile>)) => {
     if (typeof updates !== 'function' && Object.keys(updates).some(key => ['chatAppearance','chatFineTune','bubbleStyle','chatBackground','chromeCustomCss','chatSound','chatSoundBound','chatDecorationCssIsolated'].includes(key))) stopBeautyUsage('chat:' + id);
     setCharacters(prev => {
-      const updated = prev.map(c => c.id === id ? normalizeCharacterImpression({ ...c, ...(typeof updates === 'function' ? updates(c) : updates) }) : c);
+      const updated = prev.map(c => c.id === id ? reconcileWorldbookMounts(normalizeCharacterImpression({ ...c, ...(typeof updates === 'function' ? updates(c) : updates) }), worldbooks) : c);
       const target = updated.find(c => c.id === id);
       if (target) {
         const before = prev.find(c => c.id === id);
@@ -4221,9 +4307,16 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           // 可能多达数 MB（壁纸 base64）的克隆。
           const cloneForInPlace = <T,>(v: T): T => (mode === 'text_only' ? v : deepCloneForExport(v));
 
+          if (mode === 'full' || mode === 'text_only') {
+              const { listSongSoundRecords } = await import('../features/personal/songArchive/storage');
+              await listSongSoundRecords();
+          }
           const backupData: Partial<FullBackupData> = {
               friendFeed: mode === 'text_only' ? stripBackupImages(await readFriendFeed()) : undefined,
               friendFeedMedia: mode === 'media_only' ? collectFriendFeedMedia(await readFriendFeed()) : undefined,
+              songSoundArchive: (mode === 'text_only' || mode === 'full')
+                  ? (await DB.getAllAssets()).filter(a => a.id.startsWith('personal_song_sound_v1_'))
+                  : undefined,
               contentFavoritesIndex: mode === 'text_only'
                   ? stripBackupImages(await DB.getAssetRaw('content_favorites_index_v1')) : undefined,
               timestamp: Date.now(),
@@ -4574,7 +4667,11 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
               med_plans: 'medPlans',
               life_record_settings: 'lifeRecordSettings',
           };
-          const prewrittenStores: BackupManifest['stores'] = {};
+          const workroomOwnerIds = new Set<string>();
+          const exportedCharacterIds = new Set<string>();
+          const prewrittenStores: BackupManifest['stores'] = mode === 'full' || mode === 'text_only'
+              ? await streamWorkroomBackup(await openDB(), zip as unknown as ZipFileWriter, collectSerialized, id => workroomOwnerIds.add(id)) : {};
+          if(mode === 'full' || mode === 'text_only') Object.assign(prewrittenStores,await streamMoments(await openDB(),zip as unknown as ZipFileWriter,collectSerialized));
           // Vectors retain the existing binary format, read one record at a time.
           let vectorPayload: Awaited<ReturnType<typeof encodeVectorsForBackupChunked>> | undefined;
           // Only voice Blobs reachable from the exported Live2D settings are portable.
@@ -4605,6 +4702,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                       onSerialized: collectSerialized,
                       transform: (item, index) => {
                           if (storeName === 'characters') {
+                              exportedCharacterIds.add(item.id);
                               normalizeCharacterRoomAssetsInPlace(item);
                               if (mode !== 'text_only') {
                                   collectCharacterCompanionVoiceAssetIds([item])
@@ -4696,6 +4794,10 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                   default: throw new Error(`未配置备份字段：${storeName}`);
               }
               await new Promise(resolve => setTimeout(resolve, 10));
+          }
+
+          if ([...workroomOwnerIds].some(id => !exportedCharacterIds.has(id))) {
+              throw new Error('备份期间角色资料发生变化，请重新导出，以保持造物间归属完整');
           }
 
           // 进度条停在 70% 让用户看到接下来的"压缩中 X%"实际推进，而不是卡在 95% 干等。

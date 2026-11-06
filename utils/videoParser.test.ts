@@ -108,6 +108,7 @@ describe('parseVideoShareUrl', () => {
         expect(wp.image).toBe('http://i1.hdslb.com/bfs/archive/cover.jpg');
         expect(wp.content).toBe('');
         expect(wp.provider).toBe('apizero-video');
+        expect(wp.video?.videoUrl).toBe('https://upos-sz.bilivideo.com/xxx.mp4');
         expect(wp.video).toMatchObject({
             platform: 'bilibili',
             platformLabel: '哔哩哔哩',
@@ -132,6 +133,7 @@ describe('parseVideoShareUrl', () => {
         const wp = await parseVideoShareUrl('https://v.douyin.com/xyz/');
         expect(wp.video?.contentType).toBe('image');
         expect(wp.video?.imageCount).toBe(2);
+        expect(wp.video?.images).toEqual(['https://p1.example.com/1.jpg', 'https://p1.example.com/2.jpg']);
         expect(wp.image).toBe('https://p1.example.com/1.jpg');
     });
 

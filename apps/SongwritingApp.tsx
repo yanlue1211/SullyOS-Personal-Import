@@ -1,3 +1,6 @@
+import SongwritingStudio from '../components/song/SongwritingStudio';
+import {ThemeSwitch, StudioMascot} from '../components/song/StudioTheme';
+import type {StudioTheme} from '../features/songwriting/model';
 import { ContextBuilder } from '../utils/context';
 import { loadCharacterContextMessages } from '../utils/chatContextRange';
 
@@ -40,7 +43,7 @@ import {
     loadMinimaxMusicBlob,
     type MinimaxMusicInput,
 } from '../utils/minimaxMusic';
-import { C as MusicC, Sparkle, CrossStar, GlassProgress, MetaChip } from './music/MusicUI';
+import { C as OriginalMusicC, Sparkle, CrossStar, GlassProgress, MetaChip } from './music/MusicUI';
 import Modal from '../components/os/Modal';
 import ConfirmDialog from '../components/os/ConfirmDialog';
 import TokenImg from '../components/os/TokenImg';
@@ -181,6 +184,11 @@ const buildLyricSlots = (song: SongSheet): LyricSlot[] => {
 const SongwritingApp: React.FC = () => {
     const { closeApp, openApp, songs, addSong, updateSong, deleteSong, characters, apiConfig, addToast, userProfile, characterGroups } = useOS();
     const { addLocalSong, removeLocalSong, localAlbumSongs, playSong, current: currentMusicSong, markRegenerating } = useMusic();
+
+    const [studioTheme,setStudioTheme] = useState<StudioTheme>('moon-sheep');
+    useEffect(()=>{let active=true;void DB.getAssetRaw('songwriting:theme').then(t=>{if(active&&(t==='moon-sheep'||t==='ocean-dog'))setStudioTheme(t);}).catch(()=>{});return()=>{active=false;};},[]);
+    const changeStudioTheme=(t:StudioTheme)=>{setStudioTheme(t);void DB.saveAssetRaw('songwriting:theme',t).catch(()=>addToast('主题保存失败，请重试','error'));};
+    const MusicC = {...OriginalMusicC,...(studioTheme==='moon-sheep' ? {bg:'#f5faf3',bgDeep:'#edf5ed',bgTint:'#e3f0eb',primary:'#709886',accent:'#a1c3a8',soft:'#dfecdf',glow:'#bfdbbc',sakura:'#bfdbe9',lavender:'#c9e0ec',text:'#34574e',muted:'#78968b',faint:'#9cb5a8'} : {bg:'#f4f9fc',bgDeep:'#edf5fa',bgTint:'#e4f1f5',primary:'#739bad',accent:'#a3c7d9',soft:'#dfedf3',glow:'#c2deea',sakura:'#c7dfc9',lavender:'#cee4d0',text:'#365b70',muted:'#7a99a7',faint:'#a0bac8'})};
 
     // Navigation
     const [view, setView] = useState<'shelf' | 'create' | 'partner' | 'write' | 'preview'>('shelf');
@@ -1243,6 +1251,7 @@ const SongwritingApp: React.FC = () => {
             currentAudioOwnerRef.current = activeSong.id;
 
             const audioMeta: SongAudio = {
+                lyricRevisionId: activeSong.lyricRevisions?.at(-1)?.id,
                 assetKey,
                 mimeType: resultMime,
                 generatedAt: Date.now(),
@@ -1251,9 +1260,10 @@ const SongwritingApp: React.FC = () => {
                 tagsUsed: styleStr,
                 lyricsLineCount: finalLines.length,
             };
-            const updated = { ...activeSong, audio: audioMeta, musicProvider: providerArg };
+            const audioVersions = [...(activeSong.audioVersions || (activeSong.audio ? [activeSong.audio] : [])), audioMeta];
+            const updated = { ...activeSong, audio: audioMeta, audioVersions, musicProvider: providerArg };
             setActiveSong(updated);
-            await updateSong(activeSong.id, { audio: audioMeta, musicProvider: providerArg });
+            await updateSong(activeSong.id, { audio: audioMeta, audioVersions, musicProvider: providerArg });
             addToast(cached ? '已命中之前生成的版本' : '出歌完成！', 'success');
 
             // ── 默认 like 点亮 ── 一生成出来就自动加入「一起写的歌」相册，
@@ -1629,6 +1639,7 @@ const SongwritingApp: React.FC = () => {
                 className="h-full w-full flex flex-col font-sans relative overflow-hidden"
                 style={{ background: `linear-gradient(180deg, ${MusicC.bg} 0%, ${MusicC.bgDeep} 60%, ${MusicC.bgTint} 100%)` }}
             >
+
                 {/* 装饰星星 */}
                 <Sparkle size={9} color={MusicC.glow}    delay={0}   className="absolute top-20 left-6"   />
                 <Sparkle size={7} color={MusicC.sakura}  delay={1.0} className="absolute top-44 right-8"  />
@@ -1645,7 +1656,7 @@ const SongwritingApp: React.FC = () => {
                         <div className="text-center flex flex-col items-center">
                             <div className="flex items-center gap-2">
                                 <Sparkle size={7} color={MusicC.glow} delay={0} />
-                                <h1 className="text-[10px] tracking-[0.4em] uppercase" style={{ color: MusicC.faint, fontFamily: 'Georgia, serif' }}>Lyric</h1>
+                                <h1 title="把没说出口的话，慢慢唱给你听" className="text-[10px] tracking-[0.4em] uppercase" style={{ color: MusicC.faint, fontFamily: 'Georgia, serif' }}>Lyric</h1>
                                 <Sparkle size={7} color={MusicC.sakura} delay={0.7} />
                             </div>
                             <p className="text-lg font-bold mt-0.5" style={{ color: MusicC.primary, fontFamily: 'Georgia, "Noto Serif SC", serif' }}>歌词手帖</p>
@@ -1667,6 +1678,10 @@ const SongwritingApp: React.FC = () => {
                 </div>
 
                 <div className="flex-1 overflow-y-auto px-5 pt-5 pb-8 space-y-7 no-scrollbar z-10">
+                    <div className="flex items-center justify-between rounded-[24px] border border-white bg-white/50 px-5 py-3" style={{boxShadow:'0 12px 36px rgba(80,125,110,.06)'}}>
+                        <div><div className="text-[8px] tracking-[.2em]" style={{color:MusicC.muted}}>{studioTheme==='moon-sheep'?'MOONWOOL / 月光织词':'TIDELINES / 潮汐来信'}</div><p className="text-[15px] leading-7 my-2" style={{color:MusicC.text,fontFamily:'Georgia, "Noto Serif SC", serif'}}>{studioTheme==='moon-sheep'?'月光替你收好，未唱完的心事':'把心事写成歌，寄往蓝色海岸'}</p><ThemeSwitch theme={studioTheme} onChange={changeStudioTheme}/></div>
+                        <StudioMascot theme={studioTheme}/>
+                    </div>
                     {songs.length === 0 && (
                         <div className="flex flex-col items-center justify-center py-20 text-center px-8">
                             <div className="w-20 h-[2px] bg-stone-300/60 mb-8" />
@@ -2529,6 +2544,7 @@ const SongwritingApp: React.FC = () => {
                                                     ? 'MiniMax'
                                                     : 'MiniMax · 免费'}
                                         </MetaChip>
+                                        {!!activeSong.audioVersions?.length && <select aria-label="歌曲音频版本" value={activeSong.audio?.assetKey||''} disabled={isGeneratingAudio} className="text-[10px] rounded-full p-1 max-w-[110px] bg-white/50" onChange={event=>{const audio=activeSong.audioVersions?.find(a=>a.assetKey===event.target.value);if(audio){setActiveSong({...activeSong,audio});void updateSong(activeSong.id,{audio});}}}>{activeSong.audioVersions.map((audio,index)=><option value={audio.assetKey} key={`${audio.assetKey}-${index}`}>音频 {index+1} · {audio.provider}</option>)}</select>}
                                         {activeSong.audio?.generatedAt && (
                                             <span className="text-[9px]" style={{ color: MusicC.faint, fontFamily: 'monospace' }}>
                                                 {new Date(activeSong.audio.generatedAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
@@ -3183,474 +3199,8 @@ const SongwritingApp: React.FC = () => {
         );
     }
 
-    // --- Lyric notebook workspace ---
     if (view === 'write' && activeSong) {
-        const genreInfo = SONG_GENRES.find(g => g.id === activeSong.genre);
-        const coWritingStyle = getLyricCoWritingStyle(activeSong.lyricCoWritingStyle);
-        const paper = getPaperTheme(activeSong.coverStyle);
-        const fixedSlots = buildLyricSlots(activeSong);
-        const activeLines = activeSong.lines
-            .filter(line => !line.isDraft)
-            .map((line, fallbackIndex) => ({ line, index: line.slotIndex ?? fallbackIndex }))
-            .sort((a, b) => a.index - b.index);
-        const isFreeNotebook = fixedSlots.length === 0;
-        const nextFreeIndex = activeLines.length
-            ? Math.max(...activeLines.map(item => item.index)) + 1
-            : 0;
-        const notebookSlots: LyricSlot[] = isFreeNotebook
-            ? [
-                ...activeLines.map(({ line, index }) => ({
-                    index,
-                    section: line.section,
-                    chars: '不限',
-                    sectionOccurrence: 0,
-                    lineInSection: index,
-                })),
-                {
-                    index: nextFreeIndex,
-                    section: currentSection,
-                    chars: '不限',
-                    sectionOccurrence: 0,
-                    lineInSection: nextFreeIndex,
-                },
-            ]
-            : fixedSlots;
-        const filledCount = notebookSlots.filter(slot => !!lineAtSlot(activeSong, slot.index)?.content.trim()).length;
-        const discussionSuggestions = filledCount === 0
-            ? [
-                '先聊聊这首歌最想留下的一个画面',
-                '一起定下叙述者是谁、在对谁说话',
-                '这首歌的情绪应该从哪里走到哪里',
-            ]
-            : [
-                '目前哪一句最像整首歌的核心',
-                '副歌的 Hook 够不够集中、好记',
-                '主歌有没有真的推进人物或事件',
-                '相邻几句的字数和呼吸是否顺口',
-                '现在的意象有没有跑出同一个世界',
-                `当前${SECTION_LABELS[currentSection]?.label || '段落'}应该承担什么作用`,
-                coWritingStyle.id === 'adaptive'
-                    ? '这首歌更适合往哪一种写法继续'
-                    : `这几句是否真的符合「${coWritingStyle.shortLabel}」的写法`,
-            ];
-        const discussionPlaceholder = `可以和 ${collaborator?.name || 'C'} 聊：${
-            discussionSuggestions[(filledCount + activeSong.comments.length) % discussionSuggestions.length]
-        }……`;
-        const paperBackground = `radial-gradient(circle at 14% 10%, rgba(255,255,255,.24) 0 1px, transparent 1.5px), radial-gradient(circle at 80% 35%, rgba(70,55,45,.05) 0 1px, transparent 1.5px), ${paper.background}`;
-
-        return (
-            <div
-                className="h-full w-full flex flex-col font-sans relative overflow-hidden transition-colors duration-500"
-                style={{ background: paperBackground, color: paper.ink }}
-            >
-                <ConfirmDialog
-                    isOpen={!!confirmDialog}
-                    title={confirmDialog?.title || ''}
-                    message={confirmDialog?.message || ''}
-                    variant={confirmDialog?.variant}
-                    confirmText={confirmDialog?.confirmText}
-                    onConfirm={confirmDialog?.onConfirm || (() => {})}
-                    onCancel={() => setConfirmDialog(null)}
-                />
-
-                <div
-                    className="shrink-0 z-30"
-                    style={{
-                        paddingTop: 'var(--safe-top)',
-                        background: paper.sheet,
-                        borderBottom: `1px solid ${paper.rule}`,
-                        backdropFilter: 'blur(18px)',
-                        WebkitBackdropFilter: 'blur(18px)',
-                    }}
-                >
-                    <div className="h-14 flex items-center justify-between px-4">
-                        <button
-                            onClick={handlePause}
-                            className="p-2 -ml-2 rounded-full active:scale-90 transition-transform"
-                            style={{ color: paper.muted }}
-                            aria-label="返回歌词本书架"
-                        >
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
-                        </button>
-                        <div className="text-center min-w-0 px-3">
-                            <div className="font-semibold text-[15px] truncate max-w-[190px]" style={{ fontFamily: 'Georgia, "Noto Serif SC", serif' }}>
-                                {activeSong.title}
-                            </div>
-                            <div className="text-[9px] tracking-[.24em] uppercase mt-0.5" style={{ color: paper.muted }}>
-                                {genreInfo?.label} · {filledCount}/{isFreeNotebook ? Math.max(filledCount, 1) : notebookSlots.length} lines
-                            </div>
-                        </div>
-                        <button
-                            onClick={handleComplete}
-                            className="px-3 py-1.5 rounded-full text-[11px] font-semibold active:scale-95 transition-transform"
-                            style={{ color: paper.ink, border: `1px solid ${paper.rule}`, background: paper.sheet }}
-                        >
-                            收录
-                        </button>
-                    </div>
-
-                    <div className="px-4 pb-3 flex items-center gap-3">
-                        {collaborator && (
-                            <div className="flex items-center gap-2 min-w-0 flex-1">
-                                <TokenImg value={collaborator.avatar} className="w-7 h-7 rounded-full object-cover" alt="" />
-                                <div className="min-w-0">
-                                    <div className="text-[10px] truncate" style={{ color: paper.muted }}>{collaborator.name} 正在看这本歌词</div>
-                                    <div className="text-[9px] truncate opacity-70">{activeSong.subtitle || '每次只改你点到的那一句'}</div>
-                                </div>
-                            </div>
-                        )}
-                        <button
-                            onClick={() => {
-                                if (coWritingStyle.category !== 'adaptive') {
-                                    setLyricStyleCategory(coWritingStyle.category);
-                                }
-                                setShowLyricStylePicker(prev => !prev);
-                                setShowStructureGuide(false);
-                            }}
-                            className="text-[10px] px-2.5 py-1.5 rounded-full shrink-0"
-                            style={{ color: paper.muted, border: `1px solid ${paper.rule}` }}
-                            title="切换 C 写歌词时采用的风格规则"
-                        >
-                            C · {coWritingStyle.shortLabel}
-                        </button>
-                        <button
-                            onClick={() => {
-                                setShowStructureGuide(prev => !prev);
-                                setShowLyricStylePicker(false);
-                            }}
-                            className="text-[10px] px-2.5 py-1.5 rounded-full shrink-0"
-                            style={{ color: paper.muted, border: `1px solid ${paper.rule}` }}
-                        >
-                            模板
-                        </button>
-                    </div>
-
-                    <div className="px-4 pb-3">
-                        <div
-                            className="grid grid-cols-2 p-1 rounded-2xl"
-                            style={{ background: 'rgba(0,0,0,.055)' }}
-                        >
-                            <button
-                                onClick={() => setWorkMode('notebook')}
-                                className="flex items-center justify-center gap-2 py-2 rounded-xl text-[11px] font-semibold transition-all duration-300"
-                                style={workMode === 'notebook'
-                                    ? { background: paper.sheet, color: paper.ink, boxShadow: '0 2px 10px rgba(0,0,0,.08)' }
-                                    : { color: paper.muted }}
-                            >
-                                <BookOpenText size={14} weight={workMode === 'notebook' ? 'fill' : 'regular'} />
-                                写歌词
-                            </button>
-                            <button
-                                onClick={() => setWorkMode('chat')}
-                                className="flex items-center justify-center gap-2 py-2 rounded-xl text-[11px] font-semibold transition-all duration-300"
-                                style={workMode === 'chat'
-                                    ? { background: paper.sheet, color: paper.ink, boxShadow: '0 2px 10px rgba(0,0,0,.08)' }
-                                    : { color: paper.muted }}
-                            >
-                                <ChatCircleDots size={14} weight={workMode === 'chat' ? 'fill' : 'regular'} />
-                                讨论
-                                {feedbackGroups.length > 0 && <span className="opacity-55">{feedbackGroups.length}</span>}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-
-                {showLyricStylePicker && (
-                    <div
-                        className="shrink-0 z-20 px-4 py-3"
-                        style={{ background: paper.sheet, borderBottom: `1px solid ${paper.rule}` }}
-                    >
-                        <div className="flex gap-1.5 overflow-x-auto no-scrollbar pb-2">
-                            {LYRIC_STYLE_CATEGORIES.map(category => {
-                                const active = category.id === lyricStyleCategory;
-                                return (
-                                    <button
-                                        key={category.id}
-                                        onClick={() => setLyricStyleCategory(category.id)}
-                                        className="shrink-0 px-2.5 py-1 rounded-full text-[9px] font-semibold transition-all"
-                                        style={active
-                                            ? { color: '#fff', background: paper.ink }
-                                            : { color: paper.muted }}
-                                    >
-                                        {category.shortLabel}
-                                    </button>
-                                );
-                            })}
-                        </div>
-                        <div className="flex gap-2 overflow-x-auto no-scrollbar pb-2">
-                            {LYRIC_CO_WRITING_STYLES
-                                .filter(style => style.category === 'adaptive' || style.category === lyricStyleCategory)
-                                .map(style => {
-                                const active = style.id === coWritingStyle.id;
-                                return (
-                                    <button
-                                        key={style.id}
-                                        onClick={() => updateActiveLyricStyle(style.id)}
-                                        className="shrink-0 px-3 py-1.5 rounded-full text-[9px] transition-all"
-                                        style={active
-                                            ? { color: '#fff', background: paper.accent, border: '1px solid transparent' }
-                                            : { color: paper.muted, border: `1px solid ${paper.rule}` }}
-                                    >
-                                        {style.shortLabel}
-                                    </button>
-                                );
-                            })}
-                        </div>
-                        <p className="text-[9px] leading-relaxed px-1" style={{ color: paper.muted }}>
-                            <span className="font-semibold" style={{ color: paper.ink }}>{coWritingStyle.label}</span>
-                            {' · '}
-                            {coWritingStyle.desc}
-                        </p>
-                    </div>
-                )}
-
-                {showStructureGuide && (
-                    <div
-                        className="shrink-0 z-20 px-5 py-3 flex gap-2 overflow-x-auto no-scrollbar"
-                        style={{ background: paper.sheet, borderBottom: `1px solid ${paper.rule}` }}
-                    >
-                        {isFreeNotebook ? (
-                            <span className="text-[10px]" style={{ color: paper.muted }}>自由模板 · 随时添加新句</span>
-                        ) : (
-                            (activeSong.lyricTemplate === 'custom'
-                                ? activeSong.customLyricTemplate || []
-                                : getLyricTemplate(activeSong.lyricTemplate).structure
-                            ).map((section, index) => (
-                                <span
-                                    key={`${section.section}-${index}`}
-                                    className="shrink-0 px-2.5 py-1 rounded-full text-[9px]"
-                                    style={{ color: paper.muted, border: `1px solid ${paper.rule}` }}
-                                >
-                                    {SECTION_LABELS[section.section]?.label} · {section.lines}句 × {section.chars}字
-                                </span>
-                            ))
-                        )}
-                    </div>
-                )}
-
-                {workMode === 'notebook' ? (
-                    <div className="flex-1 overflow-y-auto no-scrollbar px-3.5 py-4 pb-10">
-                        {isFreeNotebook && (
-                            <div className="flex gap-1.5 overflow-x-auto no-scrollbar pb-3 px-1">
-                                {Object.entries(SECTION_LABELS).map(([key, info]) => (
-                                    <button
-                                        key={key}
-                                        onClick={() => setCurrentSection(toSectionKind(key))}
-                                        className="shrink-0 px-2.5 py-1 rounded-full text-[9px] transition-all"
-                                        style={currentSection === key
-                                            ? { color: '#fff', background: paper.accent }
-                                            : { color: paper.muted, border: `1px solid ${paper.rule}` }}
-                                    >
-                                        下一句 · {info.label}
-                                    </button>
-                                ))}
-                            </div>
-                        )}
-
-                        <div
-                            className="relative max-w-2xl mx-auto rounded-[24px] overflow-hidden"
-                            style={{
-                                background: paper.sheet,
-                                boxShadow: '0 18px 50px rgba(54,43,37,.13), inset 0 1px 0 rgba(255,255,255,.45)',
-                                border: `1px solid ${paper.rule}`,
-                            }}
-                        >
-                            <div className="px-6 pt-7 pb-5 text-center">
-                                <div className="text-[9px] tracking-[.42em] uppercase" style={{ color: paper.muted }}>lyric notebook</div>
-                                <h2 className="text-[22px] mt-2 leading-tight" style={{ fontFamily: 'Georgia, "Noto Serif SC", serif' }}>{activeSong.title}</h2>
-                                {activeSong.subtitle && <p className="text-[11px] mt-2 italic" style={{ color: paper.muted }}>{activeSong.subtitle}</p>}
-                                <div className="w-10 h-px mx-auto mt-5" style={{ background: paper.rule }} />
-                            </div>
-
-                            <div className="px-4 pb-8">
-                                {notebookSlots.map(slot => {
-                                    const line = lineAtSlot(activeSong, slot.index);
-                                    const value = lineDrafts[slot.index] ?? line?.content ?? '';
-                                    const charCount = Array.from(value.trim()).length;
-                                    const sectionStart = slot.lineInSection === 0;
-                                    const isGenerating = generatingSlotIndex === slot.index;
-                                    return (
-                                        <div key={slot.index}>
-                                            {sectionStart && (
-                                                <div className="flex items-center gap-3 pt-5 pb-2 px-2">
-                                                    <span className="text-[9px] tracking-[.28em] uppercase font-semibold" style={{ color: paper.muted }}>
-                                                        {SECTION_LABELS[slot.section]?.label || slot.section}
-                                                        {slot.sectionOccurrence > 0 ? ` ${slot.sectionOccurrence + 1}` : ''}
-                                                    </span>
-                                                    <div className="h-px flex-1" style={{ background: paper.rule }} />
-                                                </div>
-                                            )}
-                                            <div
-                                                className="group grid grid-cols-[28px_1fr_42px] gap-2 items-center px-2 min-h-[54px]"
-                                                style={{ borderBottom: `1px solid ${paper.rule}` }}
-                                            >
-                                                <div className="text-[10px] tabular-nums text-center" style={{ color: paper.muted }}>
-                                                    {String(slot.index + 1).padStart(2, '0')}
-                                                </div>
-                                                <div className="relative min-w-0">
-                                                    <textarea
-                                                        value={value}
-                                                        onChange={event => setLineDrafts(prev => ({ ...prev, [slot.index]: event.target.value }))}
-                                                        onBlur={() => {
-                                                            if (value.trim() !== (line?.content || '').trim()) saveNotebookLine(slot, value, 'user');
-                                                        }}
-                                                        onKeyDown={event => {
-                                                            if (event.key === 'Enter' && !event.shiftKey) {
-                                                                event.preventDefault();
-                                                                event.currentTarget.blur();
-                                                            }
-                                                        }}
-                                                        rows={1}
-                                                        placeholder={`第 ${slot.index + 1} 句 · ${slot.chars === '不限' ? '随心写' : `建议 ${slot.chars} 字`}`}
-                                                        className="w-full bg-transparent resize-none outline-none py-4 pr-10 text-[15px] leading-6 placeholder:opacity-35"
-                                                        style={{ color: paper.ink, fontFamily: 'Georgia, "Noto Serif SC", serif' }}
-                                                        aria-label={`第 ${slot.index + 1} 句歌词`}
-                                                    />
-                                                    <span className="absolute right-0 bottom-1.5 text-[8px] tabular-nums" style={{ color: paper.muted }}>
-                                                        {charCount}{slot.chars !== '不限' ? `/${slot.chars}` : ''}
-                                                    </span>
-                                                    {line && (
-                                                        <span className="absolute right-0 top-1 text-[8px]" style={{ color: paper.muted }}>
-                                                            {line.authorId === 'user' ? '我' : collaborator?.name || 'C'}
-                                                        </span>
-                                                    )}
-                                                </div>
-                                                <button
-                                                    onClick={() => handleGenerateNotebookLine(slot)}
-                                                    disabled={generatingSlotIndex !== null}
-                                                    className="w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-all disabled:opacity-45"
-                                                    style={{ color: paper.ink, border: `1px solid ${paper.rule}`, background: 'rgba(255,255,255,.24)' }}
-                                                    title={line ? `让 ${collaborator?.name || 'C'} 重写第 ${slot.index + 1} 句` : `让 ${collaborator?.name || 'C'} 生成第 ${slot.index + 1} 句`}
-                                                    aria-label={line ? '刷新这一句' : '生成这一句'}
-                                                >
-                                                    {isGenerating
-                                                        ? <ArrowsClockwise size={14} className="animate-spin" />
-                                                        : line
-                                                            ? <ArrowsClockwise size={14} />
-                                                            : <SparkleP size={14} weight="fill" />}
-                                                </button>
-                                            </div>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-
-                            <div className="px-6 pb-7 flex items-center justify-between text-[9px]" style={{ color: paper.muted }}>
-                                <span>{collaborator?.name || 'C'} 会读到整本歌词，但只改你点到的句子</span>
-                                <span>{filledCount} 句已写</span>
-                            </div>
-                        </div>
-                    </div>
-                ) : (
-                    <>
-                        <div className="flex-1 overflow-y-auto no-scrollbar px-4 py-5 pb-28" ref={scrollRef}>
-                            {feedbackGroups.length === 0 && (
-                                <div className="h-full flex flex-col items-center justify-center text-center px-10 pb-16">
-                                    {collaborator && <TokenImg value={collaborator.avatar} className="w-14 h-14 rounded-full object-cover mb-5 opacity-90" alt="" />}
-                                    <p className="text-[14px]" style={{ fontFamily: 'Georgia, "Noto Serif SC", serif' }}>这里专心讨论，不会碰你的歌词</p>
-                                    <p className="text-[10px] mt-2 leading-5" style={{ color: paper.muted }}>可以问结构、请点评、讨论押韵，写词请回到「写歌词」。</p>
-                                </div>
-                            )}
-                            <div className="space-y-4 max-w-2xl mx-auto">
-                                {feedbackGroups.map(group => {
-                                    const lead = group.reaction || group.details[0];
-                                    if (!lead) return null;
-                                    const isUserMessage = lead.authorId === 'user';
-                                    const details = group.details.filter(detail => detail.id !== lead.id);
-                                    const expanded = !!expandedFeedbackIds[group.id];
-                                    return (
-                                        <div key={group.id} className={`flex gap-2.5 ${isUserMessage ? 'justify-end' : 'justify-start'}`}>
-                                            {!isUserMessage && collaborator && <TokenImg value={collaborator.avatar} className="w-7 h-7 rounded-full object-cover shrink-0 mt-1" alt="" />}
-                                            <div className={`max-w-[82%] ${isUserMessage ? 'items-end' : 'items-start'} flex flex-col`}>
-                                                <div
-                                                    className={`px-4 py-3 text-[13px] leading-6 ${isUserMessage ? 'rounded-[18px_18px_5px_18px]' : 'rounded-[18px_18px_18px_5px]'}`}
-                                                    style={isUserMessage
-                                                        ? { background: paper.accent, color: '#fff' }
-                                                        : { background: paper.sheet, color: paper.ink, border: `1px solid ${paper.rule}` }}
-                                                >
-                                                    <p className="whitespace-pre-wrap">{lead.content}</p>
-                                                    {!isUserMessage && details.length > 0 && expanded && (
-                                                        <div className="mt-3 pt-3 space-y-2" style={{ borderTop: `1px solid ${paper.rule}` }}>
-                                                            {details.map(detail => (
-                                                                <p key={detail.id} className="text-[11px] whitespace-pre-wrap" style={{ color: paper.muted }}>{detail.content}</p>
-                                                            ))}
-                                                        </div>
-                                                    )}
-                                                </div>
-                                                <div className="flex items-center gap-2 mt-1.5 px-1">
-                                                    {!isUserMessage && details.length > 0 && (
-                                                        <button onClick={() => toggleFeedback(group.id)} className="text-[9px]" style={{ color: paper.muted }}>
-                                                            {expanded ? '收起' : `展开 ${details.length} 条细节`}
-                                                        </button>
-                                                    )}
-                                                    <button onClick={() => handleDeleteFeedback(group.id)} className="text-[9px] opacity-0 group-hover:opacity-100" style={{ color: paper.muted }}>删除</button>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    );
-                                })}
-                                {isTyping && (
-                                    <div className="flex items-center gap-2.5">
-                                        {collaborator && <TokenImg value={collaborator.avatar} className="w-7 h-7 rounded-full object-cover" alt="" />}
-                                        <div className="px-4 py-3 rounded-[18px_18px_18px_5px] flex gap-1.5" style={{ background: paper.sheet, border: `1px solid ${paper.rule}` }}>
-                                            {[0, 1, 2].map(index => <span key={index} className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ background: paper.muted, animationDelay: `${index * 90}ms` }} />)}
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-
-                        <div
-                            className="absolute bottom-0 left-0 right-0 z-30 pb-safe"
-                            style={{ background: paper.sheet, borderTop: `1px solid ${paper.rule}`, backdropFilter: 'blur(18px)', WebkitBackdropFilter: 'blur(18px)' }}
-                        >
-                            <div className="p-3 flex gap-2 items-end">
-                                <textarea
-                                    value={inputText}
-                                    onChange={event => setInputText(event.target.value)}
-                                    placeholder={discussionPlaceholder}
-                                    rows={1}
-                                    className="flex-1 rounded-2xl px-4 py-3 text-[13px] outline-none resize-none max-h-28 placeholder:opacity-45"
-                                    style={{ minHeight: 44, background: paper.sheet, color: paper.ink, border: `1px solid ${paper.rule}` }}
-                                    onKeyDown={event => {
-                                        if (event.key === 'Enter' && !event.shiftKey) {
-                                            event.preventDefault();
-                                            handleDiscuss();
-                                        }
-                                    }}
-                                />
-                                <button
-                                    onClick={handleDiscuss}
-                                    disabled={isTyping || !inputText.trim()}
-                                    className="w-11 h-11 rounded-full flex items-center justify-center shrink-0 active:scale-90 transition-transform disabled:opacity-35"
-                                    style={{ background: paper.accent, color: '#fff' }}
-                                    aria-label="发送讨论"
-                                >
-                                    <ChatCircleDots size={17} weight="fill" />
-                                </button>
-                            </div>
-                        </div>
-                    </>
-                )}
-
-                <Modal isOpen={showPreviewModal} title="完成创作" onClose={() => setShowPreviewModal(false)}>
-                    <div className="space-y-4">
-                        <div className="bg-stone-50 border border-stone-200 p-4 rounded-lg">
-                            <h3 className="text-sm font-medium text-stone-600 mb-2">搭档评语</h3>
-                            <p className="text-sm text-stone-500 leading-relaxed whitespace-pre-wrap" style={{ fontFamily: 'Georgia, "Noto Serif SC", serif' }}>
-                                {isCompleting ? '正在思考……' : completionReview}
-                            </p>
-                        </div>
-                        <p className="text-[11px] text-stone-400 leading-5">完成后歌曲将存为乐谱，同时在聊天中发送通知。你也可以随时把乐谱分享给其他角色。</p>
-                        {!isCompleting && (
-                            <button onClick={confirmComplete} className="w-full py-3 bg-stone-700 text-stone-50 font-medium rounded-lg text-sm">
-                                完成并收录
-                            </button>
-                        )}
-                    </div>
-                </Modal>
-            </div>
-        );
+        return <SongwritingStudio key={activeSong.id} song={activeSong} theme={studioTheme} onTheme={changeStudioTheme} onBack={handlePause} onPreview={song=>{setActiveSong(song);setView('preview');}} />;
     }
 
     return null;

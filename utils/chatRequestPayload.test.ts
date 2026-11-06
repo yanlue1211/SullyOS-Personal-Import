@@ -6,6 +6,7 @@ import { RealtimeContextManager } from './realtimeContext';
 import { installSARModuleOnCharacter, installSARModuleOnUser } from './vrWorld/sarModuleRuntime';
 import { SAR_MODULE_CATALOG } from './vrWorld/sarModuleShop';
 import { ChatPrompts } from './chatPrompts';
+import { toAnthropicRequest } from './anthropicApi';
 
 // 即时对话（这一轮交给用户自己的 amsg worker 生成）那份 prompt 里，凡是 worker 到点
 // 会自己补一遍的时效段，前端就不再烤进去：当前时间块、【真实世界感知系统】（节日 /
@@ -49,8 +50,28 @@ it.each([false,true])('adds home phone background only to this request (worker=%
     expect(input.char).not.toHaveProperty('homePhoneContext');
 });
 
+it('marks archived system records by provenance and caches all later history before changing state', async () => {
+    const input=baseInput();
+    input.historyMsgs=[
+        {id:1,charId:input.char.id,role:'user',type:'text',content:'early',timestamp:1},
+        {id:2,charId:input.char.id,role:'system',type:'moments_card',content:'archived Moments event',timestamp:2},
+        {id:3,charId:input.char.id,role:'assistant',type:'text',content:'later stable answer',timestamp:3},
+        {id:4,charId:input.char.id,role:'user',type:'text',content:'latest input',timestamp:4},
+    ] as any;
+    const payload=await buildChatRequestPayload(input);
+    const archived=payload.fullMessages.find(m=>String(m.content).includes('archived Moments event'));
+    expect(archived).toMatchObject({role:'system',name:'sully_history_context',content:'archived Moments event'});
+    expect(input.historyMsgs[1]).not.toHaveProperty('name');
+    const native=toAnthropicRequest({model:'c',messages:payload.fullMessages});
+    const blocks=native.messages.flatMap((m:any)=>m.content);
+    const cached=blocks.filter((b:any)=>b.cache_control);
+    expect(cached.at(-1).text).toContain('latest input');
+    expect(blocks.find((b:any)=>b.text?.includes('[System: 实时状态'))).not.toHaveProperty('cache_control');
+});
+
 it('本地仅节假日感知可独立注入一句，云端生成不烤进本地提醒', async () => {
-    vi.useFakeTimers(); vi.setSystemTime(new Date(2026, 8, 27, 12));
+    // Only the wall clock is frozen; IndexedDB callbacks must keep real timers.
+    vi.useFakeTimers({toFake:['Date']}); vi.setSystemTime(new Date(2026, 8, 27, 12));
     const input = baseInput();
     input.realtimeConfig = { ...realtimeConfig, weatherEnabled: false, newsEnabled: false, userHolidays: { enabled: true, countryCode: 'CN' } };
     const reminder = '小明所在地中国 2026-09-27 为中秋节公共假期，实际休息与否以小明自己的日程和说明为准。';
@@ -113,7 +134,7 @@ describe('timelyByWorker —— 时效段交给 worker，前端这份不重复�
         const topRule = '**TOP 1｜ChatApp 格式（本节最高优先级）**';
         expect(systemPrompt).toContain(topRule);
         expect(systemPrompt.indexOf(topRule)).toBeLessThan(systemPrompt.indexOf('1. **沉浸感**'));
-        expect(systemPrompt).toContain('你是发消息的真实存在，以自然短句、短气泡为主；一个气泡一行，气泡间直接另起一行（实际换行，不要输出“\\n”字样）。');
+        expect(systemPrompt).toContain('你是发消息的真实存在，以自然短句、短气泡为主；一个气泡一行，气泡间直接另起一行（使用真实换行，不要用反斜杠和字母 n 代替换行）。');
         expect(systemPrompt).toContain('每行渲染为一个气泡；空格和标点不会拆泡');
     });
 
@@ -425,4 +446,51 @@ describe('ChatApp 按月 RECALL 提示偏好', () => {
         expect(result.stable).toContain(recallRule);
         expect(JSON.stringify(char)).toBe(before);
     });
+});
+
+it('real listening off keeps search tool but excludes lyrics and random library candidates', async () => {
+    const input = baseInput();
+    input.recallEntryPoint = 'chat_app';
+    input.char = {...input.char, realSongListeningEnabled: false} as any;
+    input.musicSnapshot = {current: {id: 123, name: '角色选歌', artists: '歌手'}, playing: true,
+      requestedByCharId: input.char.id, lyric: [{t:0,text:'不应注入的歌词'}], activeLyricIdx:0,
+      listeningTogetherWith:[],cfg:{}} as any;
+    const payload = await buildChatRequestPayload(input);
+    const text = joinMessages(payload.fullMessages);
+    expect(text).toContain('主动搜索点歌工具');
+    expect(text).toContain('当前由角色主动点播');
+    expect(text).not.toContain('不应注入的歌词');
+    expect(text).not.toContain('【戴上耳机】');
+    expect(text).not.toContain('当前播放歌曲的客观声音信息');
+    expect(text).not.toContain('用户的播放器当前正在播放');
+});
+
+it('paused player explicitly overrides old song history without injecting paused lyrics', async () => {
+    const input = baseInput();
+    input.recallEntryPoint = 'chat_app';
+    input.musicSnapshot = {current:{id:123,name:'旧歌'},playing:false,lyric:[{t:0,text:'旧歌词'}],
+      activeLyricIdx:0,listeningTogetherWith:[],cfg:{}} as any;
+    const text = joinMessages((await buildChatRequestPayload(input)).fullMessages);
+    expect(text).toContain('播放器当前未在播放音乐');
+    expect(text).not.toContain('旧歌词');
+    expect(text).not.toContain('旧歌');
+});
+
+it.each(['pause', 'switch', 'disable'])('discards sound analysis when playback changes during analysis: %s', async change => {
+    const listening = await import('./songListening');
+    const music = await import('../context/MusicContext');
+    const {DB} = await import('./db');
+    const input = baseInput();
+    input.char = {...input.char, realSongListeningEnabled:true} as any;
+    input.musicSnapshot = {current:{id:123,name:'分析中的歌'},playing:true,lyric:[],activeLyricIdx:-1,listeningTogetherWith:[],cfg:{}} as any;
+    const current = {...input.musicSnapshot, playing:change !== 'pause',current:{...input.musicSnapshot!.current,id:change==='switch'?456:123}} as any;
+    vi.spyOn(music,'loadMusicPlaybackSnapshot').mockReturnValue(current);
+    vi.spyOn(listening,'isSongListeningAvailable').mockReturnValue(true);
+    vi.spyOn(listening,'getOrAnalyzeSongSound').mockResolvedValue(JSON.stringify({description:'不应继续注入的音迹分析'}));
+    vi.spyOn(DB,'getCharacter').mockResolvedValue({...input.char,realSongListeningEnabled:change!=='disable'} as any);
+    try {
+      const text=joinMessages((await buildChatRequestPayload(input)).fullMessages);
+      expect(listening.getOrAnalyzeSongSound).toHaveBeenCalled();
+      expect(text).not.toContain('不应继续注入的音迹分析');
+    } finally {vi.restoreAllMocks();}
 });

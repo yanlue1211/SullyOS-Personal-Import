@@ -1,0 +1,34 @@
+/* Reserve real room for conversation and input on short mobile viewports. */
+.sully-call-session .sully-call-heading { padding-top: max(1rem, var(--safe-top)) !important; }
+.sully-call-session .sully-call-heading > .absolute { top: max(1rem, var(--safe-top)) !important; }
+.sully-call-session .sully-call-heading > .text-center { padding-top: 1.8rem; }
+.sully-call-session .sully-call-name { font-size: clamp(1.5rem, 4.5dvh, 2rem); }
+.sully-call-session .sully-call-voice-hero { flex: 0 1 auto; min-height: 0; padding-top: .6rem; }
+.sully-call-session .sully-call-voice-hero > button { width: clamp(5rem, 18dvh, 9rem); height: clamp(5rem, 18dvh, 9rem); flex-shrink: 0; }
+.sully-call-session .sully-call-voice-hero > div { margin-top: .6rem; gap: .25rem; }
+.sully-call-session .sully-call-transcript { flex: 1 1 8rem; min-height: 5.5rem; }
+.sully-call-session .sully-call-input-tools { min-height: 2.25rem; }
+.sully-call-session .sully-call-input-tools select { color-scheme: dark; }
+.sully-call-session .sully-call-controls { padding-bottom: max(.5rem, var(--safe-bottom)); }
+.sully-call-session .sully-call-controls button { min-width: 44px; }
+.sully-call-session[data-call-video-layout] .sully-call-name { font-size: 1.35rem; }
+.sully-call-session[data-call-video-layout] .sully-call-heading > .text-center { padding-top: 1.4rem; }
+.sully-call-session[data-call-video-layout] .sully-video-stage-shell { flex: 1 1 12rem; height: auto; min-height: 6rem; }
+.sully-call-session[data-call-video-layout='mini'] .sully-video-stage-shell { flex: 0 1 clamp(96px, 22dvh, 180px); max-height: 26dvh; }
+.sully-call-session[data-call-video-layout='stage'] .sully-video-stage-shell { flex-basis: 16rem; }
+.sully-call-light .sully-call-input-tools select { color-scheme: light; background: rgba(255,255,255,.6); color: #51476b; border-color: #d8d1e6; }
+.sully-call-light .sully-call-handsfree button { color: #526b61; border-color: #b8d0c4; background: #e4f1e9; }
+@media (max-height: 680px) {
+ .sully-call-session .sully-call-heading > .text-center { padding-top: 1.2rem; }
+ .sully-call-session .sully-call-heading > .text-center > .text-sm { display: none; }
+ .sully-call-session .sully-call-voice-hero > button { width: 5.5rem; height: 5.5rem; }
+ .sully-call-session .sully-call-voice-hero > div > div:last-child { height: 1rem; }
+ .sully-call-session .sully-call-controls button > span:first-child { width: 2.5rem; height: 2.5rem; }
+ .sully-call-session .sully-call-transcript { padding: .5rem .75rem; margin-bottom: .25rem; }
+}
+@media (max-height: 500px) {
+ .sully-call-session .sully-call-voice-hero, .sully-call-session[data-call-video-layout] .sully-video-stage-shell { display: none; }
+ .sully-call-session .sully-call-transcript { min-height: 3rem; }
+ .sully-call-session .sully-call-heading > .absolute { display: none; }
+ .sully-call-session .sully-call-heading > .text-center { padding-top: 0; }
+}

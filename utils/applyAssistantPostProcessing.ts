@@ -1,3 +1,10 @@
+import { consumePhotoChoices } from './photoChoice';
+import { resolveEmojiForSend } from './emojiNameResolver';
+import { consumeIncomingCallInvites } from '../features/personal/calls/incoming';
+import { consumeWorkroomActions } from '../features/workroom/bridge';
+import { hasMalformedResponseStatus,extractResponseStatus,proactiveResponseText,isProactiveStatusDelivery,statusScheduleActions,isScheduleOnlyResponse } from '../features/personal/responseStatus/protocol';
+import { consumeCommerceAction } from './personalCommerce';
+import { extractInnerVoice, type InnerVoice } from '../features/personal/innerVoice/protocol';
 import { withReplyCancellation, type ReplyRun } from './chatReplyCancellation';
 import { dialogueMaxTokens } from './characterApi';
 /**
@@ -28,7 +35,7 @@ import { dialogueMaxTokens } from './characterApi';
 
 import { CharacterProfile, UserProfile, Message, Emoji, EmojiCategory, RealtimeConfig, GroupProfile } from '../types';
 import { DB } from './db';
-import { ChatParser, type FrozenMusicSong } from './chatParser';
+import { executeLocalScheduledMessages, ChatParser, type FrozenMusicSong } from './chatParser';
 import { resolveCharTimeZone } from './timezone';
 import { NotionManager, FeishuManager, XhsNote } from './realtimeContext';
 import { enqueuePendingDiary, removePendingDiary } from './pendingDiary';
@@ -83,7 +90,9 @@ export function buildReplySnapshotContent(msg: { type?: string; content: string 
 
 /** 第一遍粗洗 — 剥 <think> / 时间戳 / 历史里漏出的 [聊天]/[通话]/[约会] / 表情包反向 tag */
 const normalizeAiContent = (raw: string): string => {
-    let cleaned = normalizeAssistantActionFormatting(raw || '');
+    const status = extractResponseStatus(raw || '');
+    if (status) return `<回应状态>${JSON.stringify(status)}</回应状态>`;
+    let cleaned = normalizeAssistantActionFormatting(extractInnerVoice(raw || '').text.replace(/<回应状态\s*>[\s\S]*?(?:<\/回应状态\s*>|$)/g, ''));
     // Strip hidden chain-of-thought blocks: <think> / <thinking> / <thought>
     cleaned = cleaned.replace(/<(think|thinking|thought)>[\s\S]*?<\/\1>/gi, '');
     cleaned = cleaned.replace(/<(?:think|thinking|thought)>[\s\S]*$/gi, '');
@@ -158,47 +167,6 @@ export const splitSARChatSurfaceBubbles = (raw: string): string[] => {
     return chunks;
 };
 
-/**
- * 模型偶尔会把按分类展示的清单 `呆猫: [亲亲额头]` 抄成
- * `[[SEND_EMOJI: 呆猫: 亲亲额头]]`。先保留既有的纯名称精确匹配；只有失败后，
- * 才把前缀当作“当前角色可见分类名”解析，并且仅在候选唯一时接受。
- * 这样不会误伤本来就含冒号的表情名，也不会在同名分类/同名表情间猜 URL。
- */
-const resolveEmojiForSend = (
-    rawName: string,
-    emojis: Emoji[],
-    categories: EmojiCategory[] = [],
-): Emoji | undefined => {
-    const name = rawName.trim();
-    const exact = emojis.find(emoji => emoji.name === name);
-    if (exact) return exact;
-
-    const separator = name.match(/^(.+?)\s*[:：]\s*(.+)$/u);
-    if (!separator) return undefined;
-    const categoryName = separator[1].trim();
-    const emojiName = separator[2].trim();
-    if (!categoryName || !emojiName) return undefined;
-
-    const categoryIds = new Set(categories.map(category => category.id));
-    const candidates: Emoji[] = [];
-    for (const category of categories) {
-        if (category.name !== categoryName) continue;
-        candidates.push(...emojis.filter(emoji => (
-            emoji.categoryId === category.id && emoji.name === emojiName
-        )));
-    }
-    // buildEmojiContext 给无分类表情使用“通用”，给找不到分类定义的残留使用“其他”。
-    if (categoryName === '通用') {
-        candidates.push(...emojis.filter(emoji => !emoji.categoryId && emoji.name === emojiName));
-    } else if (categoryName === '其他') {
-        candidates.push(...emojis.filter(emoji => (
-            !!emoji.categoryId && !categoryIds.has(emoji.categoryId) && emoji.name === emojiName
-        )));
-    }
-
-    const unique = candidates.filter((candidate, index) => candidates.indexOf(candidate) === index);
-    return unique.length === 1 ? unique[0] : undefined;
-};
 
 interface MimickedXhsShareBlock {
     title: string;
@@ -324,6 +292,7 @@ async function xhsReplyComment(conf: { mcpUrl: string }, feedId: string, xsecTok
  * discriminator, 其他字段是 flat 而不是 nested payload (减少 push body 嵌套).
  */
 export type PostProcessDirective =
+    | { type: 'save_photo'; messageId: number }
     | { type: 'friend_feed_reply'; action: unknown }
     | { type: 'home_visit_reply'; action: unknown }
     | { type: 'poke' }
@@ -365,6 +334,9 @@ function reconstructDirectiveTags(directives: PostProcessDirective[] | undefined
     const parts: string[] = [];
     for (const d of directives) {
         switch (d.type) {
+            case 'save_photo':
+                if (Number.isSafeInteger(d.messageId) && d.messageId > 0) parts.push(`[[SAVE_PHOTO: ${d.messageId}]]`);
+                break;
             case 'friend_feed_reply':
             case 'home_visit_reply':
                 // Consumed through the structured side-action path, never reconstructed into a bubble.
@@ -534,6 +506,8 @@ export interface PostProcessCtx {
     historyMsgCount: number;
     /** 当 MCD MiniApp 打开时附加到每条 assistant message 的 metadata patch */
     mcdInheritMeta?: any;
+    /** Scheduled proactive delivery excludes read/busy cards; instant chat is not proactive. */
+    isProactive?: boolean;
     /** XHS 跨消息缓存 (调用方持有的 ref) */
     xhsCaches: XhsCaches;
     /**
@@ -625,6 +599,8 @@ export async function applyAssistantPostProcessing(
         messageTimestamp,
         sarModuleSurface,
     } = ctx;
+    const responseStatusAllowed=ctx.isProactive!==true&&!(mcdInheritMeta?.source==='active_msg_2'&&isProactiveStatusDelivery(mcdInheritMeta.activeMsg2||{}));
+    if(!responseStatusAllowed)rawAiContent=proactiveResponseText(rawAiContent);
     const { baseUrl, headers, effectiveApi } = api;
     // 拟人打字延迟：流式预览已实时展示过气泡时（instantRender）跳过，避免二次慢放
     const typingPause = (ms: number): Promise<void> => {
@@ -643,8 +619,13 @@ export async function applyAssistantPostProcessing(
     // 统一落库入口：ctx.messageTimestamp（若有）盖到每条消息上，保证同一轮拆出的
     // 正文 / 表情 / 卡片 / 系统提示时间戳一致；没传则维持 DB.saveMessage 默认（写库当刻）。
     // 全函数落库一律走这里，别直接调 DB.saveMessage——漏一处就会出现气泡时间戳互相打架。
-    const persistMessage: typeof DB.saveMessage = (msg) =>
-        (ctx.replyRun?.saveMessage ?? DB.saveMessage)(messageTimestamp != null ? { ...msg, timestamp: messageTimestamp } : msg);
+    let pendingInnerVoice: InnerVoice | undefined;
+    let lastAssistantMessageId: number | undefined;
+    const persistMessage: typeof DB.saveMessage = async (msg) => {
+        const id = await (ctx.replyRun?.saveMessage ?? DB.saveMessage)(messageTimestamp != null ? { ...msg, timestamp: messageTimestamp } : msg);
+        if (msg.role === 'assistant') lastAssistantMessageId = id;
+        return id;
+    };
     const {
         setMessages,
         addToast,
@@ -770,13 +751,63 @@ export async function applyAssistantPostProcessing(
         return result.cleanedText;
     };
 
+    const completedStatusSchedules=new Set<string>();
+    const scheduleAlongsideStatus=async(raw:string)=>{
+        const actions=statusScheduleActions(raw).split('\n').filter(action=>action&&!completedStatusSchedules.has(action));
+        if(!actions.length)return;
+        actions.forEach(action=>completedStatusSchedules.add(action));
+        try {
+            await replyStep(()=>executeLocalScheduledMessages(actions.join('\n'),char.id,char.name,addToast,resolveCharTimeZone(char),ctx.replyRun));
+        } catch(error) {
+            ctx.replyRun?.check();
+            console.warn('[ResponseStatus] 定时消息未安排',error);
+            addToast('本轮状态已保留，但本地定时消息未能保存，请重试。','error');
+        }
+    };
+
+    // Status is the entire visible reply; scheduling is the sole independent exception.
+    if (responseStatusAllowed && hasMalformedResponseStatus(rawAiContent)) {
+        addToast('状态卡解析失败，请重试本轮回复。', 'error');
+        // An explicitly typed broken JSON payload contains private status, not spoken text.
+        if (!/<回应状态(?:\s*>|$)/.test(rawAiContent)) rawAiContent = '';
+    }
+    const combinedStatusActions=rawAiContent+'\n'+replayedTagPrefix;
+    const latestChatRole=contextMsgs.filter(message=>message.role==='user'||message.role==='assistant').at(-1)?.role;
+    const responseStatus = extractResponseStatus(rawAiContent) || (responseStatusAllowed&&latestChatRole==='user'&&isScheduleOnlyResponse(combinedStatusActions)
+        ? {type:'response_status' as const,kind:'read' as const,reason:'他打算稍后再联系，这一轮暂时没有发来文字回复。',footer:'稍后回复',eta:''}
+        : undefined);
+    if (responseStatus) {
+        await replyStep(() => persistMessage({ charId: char.id, role: 'assistant', type: 'score_card',
+            content: JSON.stringify(responseStatus), metadata: { ...(mcdInheritMeta || {}), responseStatus } }));
+        setMessages(await replyStep(() => DB.getRecentMessagesByCharId(char.id, 200)));
+        await scheduleAlongsideStatus(rawAiContent+'\n'+replayedTagPrefix);
+        return;
+    }
+
+    // Simulated purchases execute at most once per persisted reply/source round.
+    if (rawAiContent.includes('<购物>')) {
+        const original = rawAiContent;
+        try {
+            rawAiContent = await replyStep(() => consumeCommerceAction(char.id, char.name, userProfile.name, original,
+                ctx.replyRun?.uuid || `reply:${char.id}:${contextMsgs.filter(m=>m.role==='user').at(-1)?.id || spokenAt}`));
+        } catch (error: any) {
+            rawAiContent = original.replace(/<购物>[\s\S]*?<\/购物>/g, '');
+            hooks.addToast?.(`订单未创建：${error.message}`, 'info');
+            await persistMessage({charId:char.id,role:'system',type:'text',content:`购物未成功：${error.message}。未创建这次订单，不能视为已经购买。`,metadata:{source:'personal-commerce'}});
+        }
+    }
+
     // ─── Step 1: 初次粗洗 ───
     rawAiContent = await replyStep(() => consumeHomeVisitReply(char.id, rawAiContent,
         (directives || []).flatMap(d=>d.type==='home_visit_reply'?[d.action]:[])));
     rawAiContent = await replyStep(() => consumeFriendFeedMainReply(char.id, rawAiContent,
         (directives || []).flatMap(d => d.type === 'friend_feed_reply' ? [d.action] : [])));
     let aiContent = replayedTagPrefix ? `${replayedTagPrefix}${rawAiContent}` : rawAiContent;
+    const heart = extractInnerVoice(aiContent); pendingInnerVoice = char.innerVoiceEnabled === false ? undefined : heart.innerVoice;
+    aiContent = await replyStep(() => consumeWorkroomActions(heart.text, char.id, message => addToast('造物间操作未完成：'+message,'info'), ctx.replyRun?.signal));
+    aiContent = await replyStep(() => consumeIncomingCallInvites(aiContent, char.id, messageTimestamp));
     aiContent = normalizeAiContent(aiContent);
+    aiContent = await replyStep(() => consumePhotoChoices(aiContent, char.id, contextMsgs, message => addToast(message, 'info')));
     // 先于 lead-in / 二轮渲染消费：否则控制标签会作为普通气泡短暂闪给用户看。
     aiContent = await replyStep(async () => consumeScheduleChanges(aiContent, utteranceAt));
     // 在任何 lead-in/二轮渲染之前先剥掉仿卡片文本，防止它被 chunkText 拆成灰色普通气泡。
@@ -826,6 +857,17 @@ export async function applyAssistantPostProcessing(
     // 与原 inline 末尾逻辑一致。抽出来是为了让"执行功能前的本轮正文 A"能在二轮前先展示, 二轮结果 B 复用同一套。
     let sarSurfaceClaimed = false;
     const renderAndPersist = async (rawContent: string, firstThinkingChain: string | null): Promise<void> => {
+        if(!responseStatusAllowed)rawContent=proactiveResponseText(rawContent);
+        const status = extractResponseStatus(rawContent);
+        if (status) {
+            pendingInnerVoice = undefined;
+            await replyStep(() => persistMessage({ charId: char.id, role: 'assistant', type: 'score_card',
+                content: JSON.stringify(status), metadata: { ...(mcdInheritMeta || {}), responseStatus: status } }));
+            setMessages(await replyStep(() => DB.getRecentMessagesByCharId(char.id, 200)));
+            await scheduleAlongsideStatus(rawContent);
+            return;
+        }
+
         let firstMeta: any = firstThinkingChain ? { thinkingChain: firstThinkingChain } : null;
         const surfaceChunks = !sarSurfaceClaimed && sarModuleSurface?.surface
             ? splitSARChatSurfaceBubbles(sarModuleSurface.surface)
@@ -849,19 +891,21 @@ export async function applyAssistantPostProcessing(
             return merged;
         };
 
-        // 表情按模型写的位置原地插发。名字在表情库里找不到时落一条降级文本气泡，不静默丢：
-        // 后台主动消息会把每个 [[SEND_EMOJI]] 切成独立一条 push，找不到就是整条 0 气泡，而
-        // 系统横幅和未读数照常 +1 —— 用户点进去空空如也。名字对不上有两条常见来路：模型自己
-        // 编了个不存在的名字，或者用户在上次打包之后删了 / 改名了这个表情。
-        // 降级文案跟横幅那边（sanitizeIntoSegments 的 [表情：x]）对齐，锁屏看到什么点进去就是什么。
+        // Failed names are system delivery notices, never pretend assistant speech/stickers.
+        let emojiFailureNotified = false;
         const sendEmojiBubble = async (name: string): Promise<void> => {
             await replyStep(async () => typingPause(Math.random() * 500 + 300));
             const foundEmoji = resolveEmojiForSend(name, emojis, ctx.categories);
             if (foundEmoji) {
                 await replyStep(async () => persistMessage({ charId: char.id, role: 'assistant', type: 'emoji', content: foundEmoji.url, metadata: takeMeta(mcdInheritMeta) } as any));
             } else {
-                console.warn('[emoji] 表情库里没有这个名字，落降级文本气泡', { name, charId: char.id });
-                await replyStep(async () => persistMessage({ charId: char.id, role: 'assistant', type: 'text', content: `[表情：${name}]`, metadata: takeMeta(mcdInheritMeta) } as any));
+                console.warn('[emoji] 无法唯一匹配当前表情库，未发送', { name, charId: char.id });
+                if (!emojiFailureNotified) {
+                    emojiFailureNotified = true;
+                    await replyStep(async () => persistMessage({ charId: char.id, role: 'system', type: 'system',
+                        content: '表情包未发送：未匹配到当前可用库中的唯一表情。',
+                        metadata: { ...(mcdInheritMeta || {}), emojiSendFailed: { requestedName: name } } }));
+                }
             }
             setMessages(await replyStep(async () => DB.getRecentMessagesByCharId(char.id, 200)));
         };
@@ -901,6 +945,7 @@ export async function applyAssistantPostProcessing(
         const firstQuoteMatch = rawContent.match(QUOTE_RE_DOUBLE) || rawContent.match(QUOTE_RE_SINGLE) || rawContent.match(REPLY_RE_CN) || rawContent.match(QUOTE_RE_NL);
         if (firstQuoteMatch) aiReplyTarget = resolveQuoteTarget(firstQuoteMatch[1]);
 
+        rawContent = await replyStep(() => consumePhotoChoices(rawContent, char.id, contextMsgs, message => addToast(message, 'info')));
         let content = ChatParser.sanitize(rawContent, { keepCitations: true });
         content = content.replace(/\[\[INNER_STATE:\s*[\s\S]*?\]\]/g, '').trim();
         if (!content) return;
@@ -2318,6 +2363,7 @@ export async function applyAssistantPostProcessing(
         (d): d is Extract<PostProcessDirective, { type: 'music_action' }> =>
             d.type === 'music_action' && !!d.song,
     )?.song;
+    aiContent = await replyStep(() => consumeIncomingCallInvites(aiContent, char.id, messageTimestamp));
     aiContent = await replyStep(async () => ChatParser.parseAndExecuteActions(aiContent, char.id, char.name, addToast, musicHooks, resolveCharTimeZone(char), messageTimestamp, mcdInheritMeta, frozenMusicSong, ctx.replyRun));
 
     // ─── Step 4: thinking chain 抽取 (本轮末尾展示用) ───
@@ -2381,5 +2427,10 @@ export async function applyAssistantPostProcessing(
         } else {
             setMessages(await replyStep(async () => DB.getRecentMessagesByCharId(char.id, 200)));
         }
+    }
+    // Attach one heart to the final assistant message of this response, not its first bubble.
+    if (pendingInnerVoice && lastAssistantMessageId != null) {
+        await replyStep(async () => DB.updateMessageMetadata(lastAssistantMessageId!, previous => ({ ...(previous || {}), innerVoice: pendingInnerVoice })));
+        setMessages(await replyStep(async () => DB.getRecentMessagesByCharId(char.id, 200)));
     }
 }

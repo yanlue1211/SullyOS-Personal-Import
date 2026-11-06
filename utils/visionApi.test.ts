@@ -101,3 +101,14 @@ describe('independent vision API', () => {
     expect(JSON.stringify(apiMessages)).toContain(image);
   });
 });
+
+it('recognizes stickers through the independent vision API only when the chat switch is enabled',async()=>{
+ const fetchMock=vi.fn().mockResolvedValue(new Response(JSON.stringify({choices:[{message:{content:'一只小狗举着加油牌'}}]}),{status:200}));vi.stubGlobal('fetch',fetchMock);vi.spyOn(DB,'updateMessageMetadata').mockResolvedValue(undefined);
+ const sticker={...message(88),type:'emoji'} as Message;
+ await materializeVisionDescriptions([sticker],config);expect(fetchMock).not.toHaveBeenCalled();
+ const [prepared]=await materializeVisionDescriptions([sticker],config,{includeEmojis:true});expect(fetchMock).toHaveBeenCalledTimes(1);
+ const char={id:'char-1',name:'角色',stickerVisionEnabled:true} as CharacterProfile;
+ const history=ChatPrompts.buildMessageHistory([prepared],10,char,{name:'我'} as UserProfile,[],undefined,{useVisionDescriptions:true});
+ expect(JSON.stringify(history.apiMessages)).toContain('一只小狗举着加油牌');expect(JSON.stringify(history.apiMessages)).not.toContain('image_url');
+ const closed=ChatPrompts.buildMessageHistory([prepared],10,{...char,stickerVisionEnabled:false},{name:'我'} as UserProfile,[],undefined,{useVisionDescriptions:true});expect(JSON.stringify(closed.apiMessages)).not.toContain('一只小狗举着加油牌');
+});

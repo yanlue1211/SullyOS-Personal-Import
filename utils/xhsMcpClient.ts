@@ -1014,7 +1014,9 @@ export const normalizeNote = (n: any): {
     shareCount: number;
     xsecToken?: string;
     coverUrl?: string;
+    images?: string[];
     type?: string;
+    videoUrl?: string;
 } => {
     const card = n.noteCard || n.note_card || n.notecard;
     // 封面：cover 对象 / 字符串，或笔记图片列表首图（feed detail 返回 image_list）。
@@ -1023,6 +1025,17 @@ export const normalizeNote = (n: any): {
         : coverObj?.urlDefault || coverObj?.url_default || coverObj?.url || coverObj?.urlPre
         || coverObj?.info_list?.[0]?.url || undefined;
     const coverUrl = rawCoverUrl?.replace(/^http:\/\//, 'https://');
+    // Preserve every picture returned by note detail, not only the first cover.
+    const rawImages = n.image_list || n.imageList || n.images || card?.image_list || card?.imageList || card?.images;
+    const images: string[] = Array.isArray(rawImages) ? [...new Set(rawImages.flatMap((entry: any) => {
+        const values = typeof entry === 'string' ? [entry] : [
+            entry?.urlDefault, entry?.url_default, entry?.url, entry?.urlPre,
+            entry?.info_list?.[0]?.url, entry?.infoList?.[0]?.url,
+        ];
+        const first = values.find((value: unknown) => typeof value === 'string' && /^https?:\/\//i.test(value as string));
+        return first ? [String(first).replace(/^http:\/\//, 'https://')] : [];
+    }))] : [];
+
     // 点赞数：支持 interactInfo.likedCount (profile notes) 和 interact_info.liked_count (search results)
     const interact = n.interact_info || n.interactInfo
         || card?.interact_info || card?.interactInfo || {};
@@ -1042,7 +1055,15 @@ export const normalizeNote = (n: any): {
         shareCount: parseXhsCount(shareCountRaw),
         xsecToken: n.xsecToken || n.xsec_token || card?.xsec_token || card?.xsecToken || undefined,
         coverUrl,
+        images,
         type: n.type || card?.type || undefined,
+        videoUrl: [n, card].filter(Boolean).flatMap(source => {
+            const video = source.video || {};
+            const stream = video.media?.stream || {};
+            return [source.videoUrl, source.video_url, video.url, video.masterUrl, video.master_url,
+                ...['h264', 'h265', 'av1'].flatMap(codec => (Array.isArray(stream[codec]) ? stream[codec] : [])
+                    .flatMap((item: any) => [item.masterUrl, item.master_url, ...(item.backupUrls || item.backup_urls || [])]))];
+        }).find((url: unknown) => typeof url === 'string' && /^https?:\/\//i.test(url as string)) as string | undefined,
     };
 };
 

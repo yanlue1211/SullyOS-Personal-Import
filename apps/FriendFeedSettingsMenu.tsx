@@ -1,3 +1,4 @@
+import FriendFeedPublicFigureSettings from './FriendFeedPublicFigureSettings';
 import React from 'react';
 import {CaretRight} from '@phosphor-icons/react';
 
@@ -24,7 +25,7 @@ export default function FriendFeedSettingsMenu({onPreferences, onApi, onSources,
         <section><h2>阅读与外观</h2><div className="ff-settings-menu">
             {preference('appearance', '主题 · 字号 · 排版')}
         </div></section>
-        <section><h2>账号与互动</h2><div className="ff-settings-menu">
+        <section><h2>账号与互动</h2><FriendFeedPublicFigureSettings/><div className="ff-settings-menu">
             {preference('profile')}
             {preference('accounts')}
             {row('关注与身份关系', onRelations)}

@@ -141,6 +141,8 @@ export async function parseVideoShareUrl(url: string): Promise<ExtractedWebpage>
     collectCount: toCount(stats.collect_count),
     publishTime: String(stats.publish_time || '') || undefined,
     imageCount: isImagePost ? imagelist.length : undefined,
+    images: isImagePost ? imagelist : undefined,
+    videoUrl: !isImagePost && typeof d.video_url === 'string' && /^https?:\/\//i.test(d.video_url) ? d.video_url : undefined,
   };
 
   const finalUrl = String(source.original_url || '') || undefined;

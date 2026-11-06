@@ -1,3 +1,5 @@
+import {resolveBlobRefsInRequestBody} from '../utils/apiBlobRefs';
+import type {ExperienceMessage} from '../features/experience/media';
 import { resolveDialogueApi } from '../utils/characterApi';
 import { useDateMessageHistory } from '../utils/useDateMessageHistory';
 import { loadCharacterContextMessages } from '../utils/chatContextRange';
@@ -203,7 +205,7 @@ const DateApp: React.FC = () => {
         const response = await fetch(`${dialogueApi.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${dialogueApi.apiKey}` },
-            body: JSON.stringify({
+            body: await resolveBlobRefsInRequestBody(JSON.stringify({
                 model: dialogueApi.model,
                 messages,
                 temperature,
@@ -212,7 +214,7 @@ const DateApp: React.FC = () => {
                 // 与私聊 (useChatAI.ts) 对齐，统一带 8000。
                 max_tokens: 8000,
                 stream: dialogueApi.stream ?? false,
-            })
+            })) as string
         });
         if (!response.ok) throw new Error(`API Error ${response.status}`);
         const data = await safeResponseJson(response);
@@ -381,7 +383,7 @@ const DateApp: React.FC = () => {
     }, [memoryPalaceConfig, apiConfig, userProfile?.name, updateCharacter, addToast]);
 
     // --- Session API Logic ---
-    const handleSendMessage = async (text: string, kind?: 'continue'): Promise<string> => {
+    const handleSendMessage = async (text: string, kind?: 'continue', attachmentMetadata?:Record<string,any>): Promise<string> => {
         const currentEncounterId = encounterIdRef.current;
         if (!char) throw new Error("No char");
         const sarModulePlan = getSARModuleRuntimePlan(char, userProfile);
@@ -393,6 +395,7 @@ const DateApp: React.FC = () => {
             && recentCheck[0].metadata?.dateEncounterId === currentEncounterId
             && recentCheck[0].role === 'user'
             && recentCheck[0].content === text
+            && (!attachmentMetadata?.realMedia || recentCheck[0].metadata?.realMedia?.originalRef===attachmentMetadata.realMedia.originalRef)
             && recentCheck[0].metadata?.source === 'date';
         // API 中断后的重试只会带回显示文本；从已落库标记恢复“继续”的完整语义。
         const isContinueTurn = kind === 'continue'
@@ -406,7 +409,7 @@ const DateApp: React.FC = () => {
                 role: 'user',
                 type: 'text',
                 content: text,
-                metadata: { source: 'date', dateEncounterId: currentEncounterId, ...(isContinueTurn ? { meetingContinue: true } : {}) },
+                metadata: { ...attachmentMetadata, source: 'date', dateEncounterId: currentEncounterId, ...(isContinueTurn ? { meetingContinue: true } : {}) },
             });
             markDateTurnDirty(char);
         }
@@ -1110,6 +1113,7 @@ const DateApp: React.FC = () => {
                     messages={dateMessages}
                     peekStatus={peekStatus}
                     encounterId={encounterIdRef.current}
+                    onExperienceSend={message=>handleSendMessage(message.content,undefined,message.metadata)}
                     onSendMessage={handleSendMessage}
                     onReroll={handleReroll}
                     onExit={onExitSession}

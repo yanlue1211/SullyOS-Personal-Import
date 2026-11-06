@@ -1,0 +1,25 @@
+name: Commerce and character diary verification
+on:
+  push:
+    branches: [personal/commerce-character-diary, personal/commerce-stores-access, personal/store-prompts-audio-presets]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NODE_OPTIONS: '--max-old-space-size=4096'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec vitest run utils/audioApiFields.test.ts utils/commerceAppUI.test.ts utils/personalCommerce.test.ts utils/characterDiary.test.ts utils/chatPrompts.test.ts utils/sanitize.test.ts utils/messageFormat.cards.test.ts utils/applyAssistantPostProcessing.test.ts utils/journalRerollRuntime.test.ts utils/personalInnerVoice.test.ts
+      - run: pnpm run build

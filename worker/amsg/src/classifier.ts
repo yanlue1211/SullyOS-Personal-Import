@@ -49,6 +49,7 @@ export interface MusicActionSong {
 }
 
 export type Directive =
+  | { type: 'save_photo'; messageId: number }
   | { type: 'friend_feed_reply'; action: unknown }
   | { type: 'home_visit_reply'; action: unknown }
   | { type: 'poke' }
@@ -184,6 +185,7 @@ interface SideEffectSpec {
 }
 
 const SIDE_EFFECT_TAGS: SideEffectSpec[] = [
+  { re: /\[\[SAVE_PHOTO\s*[:：]\s*(\d+)\s*\]\]/gi, toDirective: m => ({ type: 'save_photo', messageId: Number(m[1]) }) },
   // [[ACTION:POKE]]
   {
     re: /\[\[ACTION:POKE\]\]/g,

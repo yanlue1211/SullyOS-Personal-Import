@@ -1,0 +1,61 @@
+name: Private Moments verification
+on:
+  push:
+    branches: [personal/moments-v1, personal/social-music-edit]
+  pull_request:
+    branches: [personal/audio-listening]
+    paths: ['features/moments/**', 'apps/Moments*', 'apps/moments.css', 'utils/moments*', 'utils/audioApi.ts', 'utils/songListening.ts', 'utils/songAudioTransport.test.ts', 'docs/personal-moments.md', '.github/workflows/moments-verify.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      NODE_OPTIONS: --max-old-space-size=6144
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Private Moments and public-account boundaries
+        run: pnpm vitest run utils/songAudioTransport.test.ts utils/personalAudioProtocol.test.ts utils/audioApiFields.test.ts utils/musicPlaybackRecovery.test.tsx utils/momentsApiMonitor.test.ts utils/momentsRevisions.test.ts utils/musicLibraryUI.test.tsx utils/musicProfileLinkageUI.test.tsx utils/playlistSongButton.test.tsx utils/personalMusicLibrary.test.ts utils/moments.test.ts utils/momentsRuntime.test.ts utils/momentsComments.test.ts utils/momentsNames.test.ts utils/momentsReplies.test.ts utils/momentsMemory.test.ts utils/momentsUI.test.tsx utils/momentsScheduler.test.tsx utils/friendFeedPublicFigure.test.ts utils/chatCardLongPress.test.tsx utils/yueqiText.test.ts utils/minimaxTts.voice.test.ts utils/yueqiContext.test.ts utils/yueqiRuntime.test.ts utils/yueqiUI.test.tsx --maxWorkers=2 --minWorkers=1
+      - name: Shared chat, public feed, memory and backup regressions
+        run: pnpm vitest run utils/friendFeedApp.test.ts utils/friendFeedGraph.test.ts utils/friendFeedSocial.test.ts utils/friendFeedEmotion.test.ts utils/activityBackup.test.ts utils/backupFormat.test.ts utils/contextWorldbook.test.ts utils/chatRequestPayload.test.ts utils/memoryPalace/innerVoiceMemory.test.ts utils/workroomStorage.test.ts --maxWorkers=2 --minWorkers=1
+      - name: Build
+        run: pnpm run build
+      - name: Install isolated browser runtime
+        run: |
+          mkdir -p "$RUNNER_TEMP/moments-browser"
+          pnpm --dir "$RUNNER_TEMP/moments-browser" add playwright@1.56.1
+          pnpm --dir "$RUNNER_TEMP/moments-browser" exec playwright install --with-deps chromium
+      - name: Browser verification
+        env:
+          MOMENTS_BROWSER_MODULE: ${{ runner.temp }}/moments-browser/node_modules/playwright/index.mjs
+        run: |
+          pnpm exec vite --host 127.0.0.1 --port 4188 --strictPort > /tmp/moments-vite.log 2>&1 &
+          vite_pid=$!
+          trap 'kill "$vite_pid" 2>/dev/null || true' EXIT
+          for attempt in {1..60}; do
+            if curl --silent --fail http://127.0.0.1:4188/test/fixtures/moments.html > /dev/null; then
+              break
+            fi
+            if ! kill -0 "$vite_pid" 2>/dev/null || [ "$attempt" -eq 60 ]; then
+              cat /tmp/moments-vite.log
+              exit 1
+            fi
+            sleep 1
+          done
+          node scripts/test-moments-browser.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: moments-browser-screenshots
+          path: /tmp/moments-browser
+          if-no-files-found: ignore

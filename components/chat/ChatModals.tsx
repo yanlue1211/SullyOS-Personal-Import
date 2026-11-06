@@ -1,3 +1,5 @@
+import LocalScheduledMessages from './LocalScheduledMessages';
+import { isEmotionFeatureOn } from '../../utils/scheduleFeature';
 
 import React, { useRef, useState } from 'react';
 import Modal from '../os/Modal';
@@ -109,6 +111,8 @@ interface ChatModalsProps {
     xhsEnabled?: boolean;
     onToggleXhs?: () => void;
     // HTML mode
+    stickerVisionEnabled?: boolean;
+    onToggleStickerVision?: () => void;
     htmlModeEnabled?: boolean;
     onToggleHtmlMode?: () => void;
     htmlModeCustomPrompt?: string;
@@ -156,7 +160,7 @@ interface ChatModalsProps {
         waterlineAlreadyAhead: boolean;
     } | null;
     onForceVectorize?: () => void;
-    // Emotion (embedded under schedule modal, synced on/off with scheduleStyle)
+    // Emotion (independent settings modal)
     apiPresets?: ApiPreset[];
     onAddApiPreset?: (name: string, config: APIConfig) => void;
     onSaveEmotion?: (config: NonNullable<CharacterProfile['emotionConfig']>) => void;
@@ -266,7 +270,7 @@ const ChatModals: React.FC<ChatModalsProps> = ({
     allCharacters = [], onSaveCategoryVisibility,
     translationEnabled, onToggleTranslation, translationExpanded, onToggleTranslationExpanded, translateSourceLang, translateTargetLang, onSetTranslateSourceLang, onSetTranslateLang,
     xhsEnabled, onToggleXhs,
-    htmlModeEnabled, onToggleHtmlMode, htmlModeCustomPrompt, setHtmlModeCustomPrompt,
+    stickerVisionEnabled, onToggleStickerVision, htmlModeEnabled, onToggleHtmlMode, htmlModeCustomPrompt, setHtmlModeCustomPrompt,
     chatVoiceEnabled, onToggleChatVoice, chatVoiceAutoPlay, onToggleChatVoiceAutoPlay, chatVoiceLang, onSetChatVoiceLang,
     onGenerateVoice, voiceAvailable, onDownloadVoice, voiceDownloadable, voiceCollectable, onToggleVoiceFavorite, voiceFavorited,
     scheduleData, isScheduleGenerating, onScheduleEdit, onScheduleDelete, onScheduleReroll, onScheduleCoverChange,
@@ -649,7 +653,13 @@ const ChatModals: React.FC<ChatModalsProps> = ({
                             )}
                         </div>
                     </ChatSettingsSection>
-                    <ChatSettingsSection title="扩展功能" summary="小红书与 HTML 卡片">
+                    <ChatSettingsSection title="扩展功能" summary="稍后联系、表情包识图与 HTML 卡片">
+                        {activeCharacter && <LocalScheduledMessages charId={activeCharacter.id} />}
+                        <div className="pt-2 border-t border-slate-100">
+                            <button type="button" role="switch" aria-checked={!!stickerVisionEnabled} onClick={onToggleStickerVision} className="w-full flex justify-between items-center text-xs font-bold text-slate-500">
+                                表情包真实识图<span className={`w-10 h-6 rounded-full p-1 ${stickerVisionEnabled?'bg-emerald-500':'bg-slate-200'}`}><span className={`block w-4 h-4 rounded-full bg-white transition-transform ${stickerVisionEnabled?'translate-x-4':''}`}/></span>
+                            </button><p className="text-[10px] text-slate-400 mt-2">开启后将表情图片交给当前模型识图；关闭时只读取表情名称。需要支持图片的模型。</p>
+                        </div>
                         {/* XHS Toggle */}
                         <div className="pt-2 border-t border-slate-100">
                             <div className="flex justify-between items-center cursor-pointer" onClick={onToggleXhs}>
@@ -1174,7 +1184,7 @@ const ChatModals: React.FC<ChatModalsProps> = ({
 
             {/* Schedule Modal */}
             <Modal
-                isOpen={modalType === 'schedule'} title={`${activeCharacter?.name || '角色'}の日程/情绪`} onClose={() => setModalType('none')}
+                isOpen={modalType === 'schedule'} title={`${activeCharacter?.name || '角色'}的日程`} onClose={() => setModalType('none')}
             >
                 <div className="max-h-[70vh] overflow-y-auto -mx-2 px-2">
                     {/* 总开关：关闭时不调副 API、不生成日程、不注入情绪 buff */}
@@ -1182,16 +1192,16 @@ const ChatModals: React.FC<ChatModalsProps> = ({
                         <div className="mb-4 bg-slate-50 border border-slate-200 rounded-2xl p-3">
                             <div className="flex items-center justify-between">
                                 <div className="flex-1 min-w-0 pr-3">
-                                    <p className="text-xs font-bold text-slate-700">日程与情绪 Buff</p>
+                                    <p className="text-xs font-bold text-slate-700">今日日程</p>
                                     <p className="text-[10px] text-slate-500 leading-relaxed mt-0.5">
                                         {isScheduleFeatureEnabled
-                                            ? '已开启：角色会有今日日程，并在聊天中带上当下情绪。'
-                                            : '已关闭：不调副 API，不生成日程，不注入情绪 buff。'}
+                                            ? '每天生成一次大致安排，默认进入当天上下文，可随实际情况调整。'
+                                            : '已关闭日程，不影响独立的情绪设置。'}
                                     </p>
                                 </div>
                                 <button
                                     onClick={onToggleScheduleFeature}
-                                    aria-label="切换日程与情绪总开关"
+                                    aria-label="切换日程"
                                     className={`w-10 h-6 rounded-full p-1 transition-colors flex items-center flex-shrink-0 ${isScheduleFeatureEnabled ? 'bg-primary' : 'bg-slate-300'}`}
                                 >
                                     <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${isScheduleFeatureEnabled ? 'translate-x-4' : ''}`}></div>
@@ -1209,7 +1219,7 @@ const ChatModals: React.FC<ChatModalsProps> = ({
                                         <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3 mb-3">
                                             <p className="text-xs text-amber-700 font-bold mb-1">请选择日程风格</p>
                                             <p className="text-[11px] text-amber-600 leading-relaxed">
-                                                不同风格会影响角色的内心独白生成方式。选择后会自动重新生成今日日程。
+                                                风格影响日程内容；当天已有日程时保留，下一天生成时生效。
                                             </p>
                                         </div>
                                     )}
@@ -1248,28 +1258,21 @@ const ChatModals: React.FC<ChatModalsProps> = ({
                                 compact={false}
                                 onEdit={onScheduleEdit}
                                 onDelete={onScheduleDelete}
-                                onReroll={onScheduleReroll}
+                                onReroll={undefined}
                                 onCoverImageChange={onScheduleCoverChange}
                                 onPlayTheater={onPlayTheater}
                                 isGenerating={isScheduleGenerating}
                             />
                             <p className="text-[10px] text-slate-400 text-center mt-3 leading-relaxed">
-                                点击日程项可编辑 · 长按可删除
+                                当天只生成一次 · 点击可编辑 · 长按可删除
                             </p>
 
-                            {/* 情绪 / 意识流 API — 与日程强制同步 */}
-                            {activeCharacter && apiPresets && onAddApiPreset && onSaveEmotion && onClearBuffs && (
-                                <EmotionSettingsPanel
-                                    char={activeCharacter}
-                                    apiPresets={apiPresets}
-                                    addApiPreset={onAddApiPreset}
-                                    onSave={onSaveEmotion}
-                                    onClearBuffs={onClearBuffs}
-                                />
-                            )}
                         </>
                     )}
                 </div>
+            </Modal>
+            <Modal isOpen={modalType === 'emotion'} title="情绪" onClose={() => setModalType('none')}>
+              {activeCharacter && apiPresets && onAddApiPreset && onSaveEmotion && onClearBuffs && <EmotionSettingsPanel char={{ ...activeCharacter, emotionConfig: { ...activeCharacter.emotionConfig, enabled: isEmotionFeatureOn(activeCharacter) } }} apiPresets={apiPresets} addApiPreset={onAddApiPreset} onSave={onSaveEmotion} onClearBuffs={onClearBuffs} />}
             </Modal>
         </>
     );

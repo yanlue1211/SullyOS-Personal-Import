@@ -29,6 +29,11 @@ const Gallery: React.FC = () => {
     const [selectedImage, setSelectedImage] = useState<GalleryImage | null>(null);
     const [isReviewing, setIsReviewing] = useState(false);
     const [showChatContext, setShowChatContext] = useState(false);
+    const [selecting, setSelecting] = useState(false);
+    const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+    const deletingRef = useRef(false);
+    const [deleting, setDeleting] = useState(false);
+    useEffect(() => { setSelecting(false); setSelectedIds(new Set()); }, [activeCharId, view]);
     const [imageFavorited, setImageFavorited] = useState(false);
 
     // Long-press delete state
@@ -66,6 +71,8 @@ const Gallery: React.FC = () => {
     };
 
     const handleImageClick = (img: GalleryImage) => {
+        if (selecting) { setSelectedIds(prev => {const next=new Set(prev);if(next.has(img.id))next.delete(img.id);else next.add(img.id);return next;});return; }
+
         setSelectedImage(img);
         setView('detail');
     };
@@ -340,6 +347,18 @@ CRITICAL: Stay in character. If there's conversation context, your comment shoul
 
     const renderGrid = () => (
         <div className="flex-1 overflow-y-auto p-1.5 animate-fade-in">
+            <div className="flex gap-3 p-3 items-center sticky top-0 bg-white z-10 text-sm">
+                <button disabled={deleting} onClick={()=>{setSelecting(!selecting);setSelectedIds(new Set());}}>{selecting?'取消':'批量选择'}</button>
+                {selecting&&<><button disabled={deleting} onClick={()=>setSelectedIds(selectedIds.size===images.length?new Set():new Set(images.map(i=>i.id)))}>全选 / 全不选</button>
+                <button className="text-red-600" disabled={deleting||!selectedIds.size} onClick={()=>{
+                    const ids=[...selectedIds], owner=activeCharId;
+                    setConfirmDialog({isOpen:true,title:'批量删除照片',message:`删除选中的 ${ids.length} 张照片？`,variant:'danger',onConfirm:async()=>{
+                        if(deletingRef.current)return;deletingRef.current=true;setDeleting(true);
+                        try{await DB.deleteGalleryImages(ids);setImages(prev=>prev.filter(i=>!ids.includes(i.id)));setAlbumCounts(prev=>({...prev,[owner!]:Math.max(0,(prev[owner!]||images.length)-ids.length)}));setSelectedIds(new Set());setSelecting(false);addToast('已删除选中照片','success');}
+                        catch{addToast('删除失败，请重试','error');}finally{deletingRef.current=false;setDeleting(false);setConfirmDialog(null);}
+                    }});
+                }}>{deleting?'删除中…':`删除 (${selectedIds.size})`}</button></>}
+            </div>
             {images.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-slate-300 gap-3 py-20">
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1} stroke="currentColor" className="w-14 h-14 opacity-40"><path strokeLinecap="round" strokeLinejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" /></svg>
@@ -352,6 +371,7 @@ CRITICAL: Stay in character. If there's conversation context, your comment shoul
                             {/* 相册图存的是 blobref 令牌（见 utils/blobRef.ts），TokenImg 会解析成 objectURL；
                                 旧的 base64 / http 图原样透传，两种都显示得出来 */}
                             <TokenImg value={img.url} className="w-full h-full object-cover hover:scale-105 transition-transform duration-300" loading="lazy" />
+                            {selecting&&<span className="absolute top-2 left-2 rounded-full bg-white text-slate-800 px-1">{selectedIds.has(img.id)?'☑':'□'}</span>}
                             {img.review && <div className="absolute top-1.5 right-1.5 w-2 h-2 bg-primary rounded-full ring-2 ring-white shadow-sm"></div>}
                             {img.savedDate && <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/50 to-transparent px-1.5 pb-1 pt-3"><span className="text-[8px] text-white/80 font-mono">{img.savedDate}</span></div>}
                         </div>

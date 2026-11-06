@@ -437,3 +437,11 @@ describe('classifyLLMOutput — 日程修改走 directive 通道', () => {
   });
 });
 
+
+it('preserves photo choices as replayable directives even when they have no spoken text', () => {
+  const result = classifyLLMOutput('[[SAVE_PHOTO: 42]]\n[[SAVE_PHOTO: 42]]');
+  expect(result.kind).toBe('finish');
+  if (result.kind !== 'finish') return;
+  expect(result.cleanedText).toBe('');
+  expect(result.directives).toEqual([{ type: 'save_photo', messageId: 42 }]);
+});

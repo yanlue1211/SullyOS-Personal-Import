@@ -1,7 +1,8 @@
+import {consumeOpeningClick} from '../../utils/consumeOpeningClick';
 import EmojiExportDialog from './EmojiExportDialog';
 import ChatCamera from './ChatCamera';
 import React, { useRef, useState, useEffect, useMemo } from 'react';
-import { ShareNetwork, Trash, Plus, Smiley, PaperPlaneTilt, Lightning, Money, BookOpenText, GearSix, Image, Lock, ArrowsClockwise, ChatCircleDots, CalendarBlank, ForkKnife, Coffee, Code, Brain, PencilSimple, BellSimpleRinging, Alarm, Sparkle, FadersHorizontal, LinkSimple, Star, Briefcase } from '@phosphor-icons/react';
+import { ShareNetwork, Trash, Plus, Smiley, PaperPlaneTilt, Lightning, Money, BookOpenText, GearSix, Image, Lock, ArrowsClockwise, ChatCircleDots, CalendarBlank, ForkKnife, Coffee, Code, Brain, PencilSimple, BellSimpleRinging, Alarm, Sparkle, FadersHorizontal, LinkSimple, Star, Briefcase, Microphone, Images } from '@phosphor-icons/react';
 import { CharacterProfile, ChatTheme, EmojiCategory, Emoji } from '../../types';
 import { PRESET_THEMES } from './ChatConstants';
 import TokenImg from '../os/TokenImg';
@@ -10,12 +11,14 @@ import { isIOSStandaloneWebApp } from '../../utils/iosStandalone';
 import { trackEvent } from '../../utils/analytics';
 import { findEmojiSuggestions } from '../../utils/emojiSuggestions';
 import { useEmojiThumbnailCache } from '../../utils/useEmojiThumbnailCache';
+import { useReducedBlur } from '../../utils/blurPolicy';
 
 const EMOJI_PAGE_SIZE = 40;
 const ACTION_PAGE_SIZE = 8;
 
 interface ChatInputAreaProps {
     compactHome?: boolean;
+    personalMediaEnabled?: boolean;
 
     /** Initial page for static decoration previews; does not run menu actions. */
     previewActionsPage?: number;
@@ -74,6 +77,12 @@ interface ChatInputAreaProps {
     luckinActivated?: boolean;
     // HTML 模块模式
     htmlModeEnabled?: boolean;
+    realSongListeningEnabled?: boolean;
+    humanStyleEnabled?: boolean;
+    innerVoiceEnabled?: boolean;
+    allowIncomingVoiceCalls?: boolean;
+    allowIncomingVideoCalls?: boolean;
+    workroomLinkEnabled?: boolean;
     // 思考过程展示（会话级）
     showThinkingChain?: boolean;
     // Input style
@@ -85,7 +94,7 @@ interface ChatInputAreaProps {
 }
 
 const ChatInputArea: React.FC<ChatInputAreaProps> = ({
-    input, setInput, isTyping, selectionMode, compactHome=false,
+    input, setInput, isTyping, selectionMode, compactHome=false, personalMediaEnabled=false,
     showPanel, setShowPanel, onSend, onDeleteSelected, onForwardSelected, onFavoriteSelected, favoriteSelectedCount = 0, selectedCount,
     sendButtonGenerates = false, enterToSend = true, onGenerate,
     autoReplyEnabled = false, autoReplySeconds = null, onCancelAutoReply, onInputFocusChange,
@@ -104,6 +113,12 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
     luckinConfigured = false,
     luckinActivated = false,
     htmlModeEnabled = false,
+    realSongListeningEnabled = false,
+    humanStyleEnabled = true,
+    innerVoiceEnabled = true,
+    allowIncomingVoiceCalls = false,
+    allowIncomingVideoCalls = false,
+    workroomLinkEnabled = false,
     showThinkingChain = false,
     inputStyle = 'default',
     sendButtonStyle = 'circle',
@@ -146,7 +161,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
         const blurOnOutsidePointer = (event: PointerEvent) => {
             const target = event.target;
             if (!(target instanceof Node)) return;
-            if (textareaRef.current?.contains(target) || sendButtonRef.current?.contains(target) || suggestionsRef.current?.contains(target)) return;
+            if ((target instanceof Element&&target.closest('[data-chat-panel-toggle]')) || textareaRef.current?.contains(target) || sendButtonRef.current?.contains(target) || suggestionsRef.current?.contains(target)) return;
             textareaRef.current?.blur();
         };
         document.addEventListener('pointerdown', blurOnOutsidePointer, true);
@@ -339,10 +354,21 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
         }
     };
 
+    const openPanel = (panel:'actions'|'emojis') => {
+        textareaRef.current?.blur();
+        setIsInputFocused(false);
+        setShowPanel(showPanel===panel?'none':panel);
+    };
+    const openingClickCleanup=useRef<(()=>void)|null>(null);useEffect(()=>()=>openingClickCleanup.current?.(),[]);
+    const panelPointer = (event:React.PointerEvent, panel:'actions'|'emojis') => {
+        if(event.button!==0)return;
+        // Complete the switch before blur/viewport changes can move the click target.
+        event.preventDefault();openingClickCleanup.current?.();openingClickCleanup.current=consumeOpeningClick();openPanel(panel);
+    };
     const handleInputFocus = () => {
         setIsInputFocused(true);
-        if (!useIOSStandaloneInputFix) return;
         setShowPanel('none');
+        if (!useIOSStandaloneInputFix) return;
         const textarea = textareaRef.current;
         if (!textarea) return;
         window.requestAnimationFrame(() => {
@@ -379,6 +405,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
 
     const isDiscordStyle = inputStyle === 'discord';
     const isPixelStyle = inputStyle === 'pixel' || chromeStyle === 'pixel';
+    const reducedBlur = useReducedBlur();
     const shellClass = acnh
         ? 'bg-[#a8d6bb] border-t-[3px] border-[#86c29a] shadow-[0_-3px_0_rgba(110,160,130,0.18)]'
         : chromeStyle === 'pixel'
@@ -386,8 +413,8 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
         : chromeStyle === 'flat'
           ? 'bg-white border-t border-slate-200 shadow-none'
           : chromeStyle === 'floating'
-            ? 'bg-white/80 backdrop-blur-2xl border-t border-white/60 shadow-[0_-12px_30px_rgba(148,163,184,0.18)]'
-            : 'bg-white/90 backdrop-blur-2xl border-t border-slate-200/50 shadow-[0_-5px_15px_rgba(0,0,0,0.02)]';
+            ? `${reducedBlur ? 'bg-white/95' : 'bg-white/80 backdrop-blur-2xl'} border-t border-white/60 shadow-[0_-12px_30px_rgba(148,163,184,0.18)]`
+            : `${reducedBlur ? 'bg-white/95' : 'bg-white/90 backdrop-blur-2xl'} border-t border-slate-200/50 shadow-[0_-5px_15px_rgba(0,0,0,0.02)]`;
     const actionButtonClass = acnh
         ? 'w-11 h-11 shrink-0 rounded-full bg-[#4cb89e] flex items-center justify-center text-white hover:bg-[#43ad93] transition-colors shadow-sm'
         : isPixelStyle
@@ -483,7 +510,13 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
     const selectedEmojiNames = emojiSelectionMode ? new Set(selectedEmojis.map(se => se.name)) : new Set();
 
     // Keep one ordered list so removed or added entries cannot leave holes between pages.
+    const mediaTile = (key: string, label: string, icon: React.ReactNode) => <button key={key} onClick={() => onPanelAction(key)} className={`flex flex-col items-center gap-2 active:scale-95 transition-transform ${isDiscordStyle ? 'text-slate-200' : 'text-slate-600'}`}><span className={`w-14 h-14 rounded-2xl grid place-items-center border shadow-sm ${isDiscordStyle ? 'bg-slate-800 border-slate-600 text-slate-200' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>{icon}</span><span className="text-xs font-bold">{label}</span></button>;
+    const firstPageOrder = ['voice-input', 'virtual-media', 'image', 'transfer', 'poke', 'reroll', 'meetup', 'settings'];
     const actionTiles = [
+        mediaTile('video','视频',<Images className="w-6 h-6"/>),
+        mediaTile('oracle','我谕',<Sparkle className="w-6 h-6"/>),
+        mediaTile('archived-cleanup','清理旧缓存',<Trash className="w-6 h-6"/>),
+        ...(personalMediaEnabled ? [mediaTile('voice-input', '语音', <Microphone className="w-6 h-6" />), mediaTile('virtual-media', '图片／视频', <Images className="w-6 h-6" />), mediaTile('emotion', '情绪', <Sparkle className="w-6 h-6" />)] : []),
         <button key="collaboration" onClick={() => onPanelAction('collaboration')} className={`flex flex-col items-center gap-2 active:scale-95 transition-transform ${acnh ? 'text-[#725d42]' : isDiscordStyle ? 'text-slate-200' : 'text-slate-600'}`}>
             <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm border ${acnh ? 'bg-white/70 border-[#e6dab4] text-[#7c6ee6]' : isDiscordStyle ? 'bg-slate-800 text-indigo-300 border-indigo-400/20' : 'bg-indigo-50 text-indigo-500 border-indigo-100'}`}>
                 <Briefcase className="w-6 h-6" weight="fill" />
@@ -533,7 +566,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
             <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm border ${isDiscordStyle ? 'bg-slate-800 text-cyan-300 border-cyan-400/20' : 'bg-cyan-50 text-cyan-500 border-cyan-100'}`}>
                 <CalendarBlank className="w-6 h-6" weight="bold" />
             </div>)}
-            <span className="text-xs font-bold">日程/情绪</span>
+            <span className="text-xs font-bold">日程</span>
         </button>,
         <button key="proactive" onClick={() => onPanelAction('proactive')} className={`flex flex-col items-center gap-2 active:scale-95 transition-transform relative ${acnh ? 'text-[#725d42]' : isDiscordStyle ? 'text-slate-200' : 'text-slate-600'}`}>
             {acnh ? <AcnhActionTile kind="proactive" /> : (
@@ -585,6 +618,15 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
           </div>
           <span className="text-xs font-bold">{luckinActivated ? '结束瑞一杯' : '瑞一杯'}</span>
         </button>,
+        <button key="workroom" onClick={() => onPanelAction('workroom-toggle')} className="flex flex-col items-center gap-2 text-slate-600"><span className={`w-14 h-14 rounded-2xl flex items-center justify-center border text-2xl ${workroomLinkEnabled ? 'bg-amber-100 border-amber-300' : 'bg-slate-50 border-slate-200'}`}>🧸</span><span className="text-xs font-bold">{workroomLinkEnabled ? '造物间联动已开' : '造物间联动'}</span></button>,
+        <button key="real-song-listening" onClick={() => onPanelAction('real-song-listening-toggle')} className={`flex flex-col items-center gap-2 active:scale-95 transition-transform ${acnh ? 'text-[#725d42]' : isDiscordStyle ? 'text-slate-200' : 'text-slate-600'}`}>
+          <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm border relative ${realSongListeningEnabled ? 'bg-emerald-100 text-emerald-700 border-emerald-300' : 'bg-slate-50 text-slate-500 border-slate-200'}`}>
+            <span className="text-2xl" aria-hidden="true">🎧</span>
+            {realSongListeningEnabled && <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-emerald-500 border-2 border-white" />}
+          </div>
+          <span className="text-xs font-bold">{realSongListeningEnabled ? '真实听歌已开' : '真实听歌'}</span>
+        </button>,
+        ...([{ key: 'human-style-toggle', label: '拟人提示词', icon: '🌿', enabled: humanStyleEnabled }, { key: 'inner-voice-toggle', label: '心声', icon: '💭', enabled: innerVoiceEnabled }, { key: 'incoming-voice-toggle', label: '主动电话', icon: '📞', enabled: allowIncomingVoiceCalls }, { key: 'incoming-video-toggle', label: '主动视频', icon: '📹', enabled: allowIncomingVideoCalls }].map(item => <button key={item.key} aria-pressed={item.enabled} onClick={() => onPanelAction(item.key)} className={`flex flex-col items-center gap-2 active:scale-95 transition-transform ${acnh ? 'text-[#725d42]' : isDiscordStyle ? 'text-slate-200' : 'text-slate-600'}`}><span className={`w-14 h-14 rounded-2xl flex items-center justify-center border text-2xl ${item.enabled ? 'bg-emerald-100 border-emerald-300 text-emerald-700' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>{item.icon}</span><span className="text-xs font-bold">{item.label}{item.key === 'inner-voice-toggle' ? '设置' : item.enabled ? '已开' : '已关'}</span></button>)),
         <button key="html-mode-toggle"
           onClick={() => onPanelAction('html-mode-toggle')}
           onContextMenu={(e) => { e.preventDefault(); onPanelAction('html-mode-settings'); }}
@@ -654,7 +696,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
           <span className={`w-14 h-14 rounded-2xl grid place-items-center shadow-sm border ${acnh ? 'bg-white/70 border-[#e6dab4]' : isDiscordStyle ? 'bg-slate-800 border-slate-600' : 'bg-slate-50 border-slate-200'}`}><BookOpenText className="w-6 h-6" weight="bold" /></span>
           <span className="text-xs font-bold">导出记录</span>
         </button>
-    ].filter(tile=>!compactHome||['transfer','poke','image','reroll','memory-link','favorites'].includes(String(tile.key)));
+    ].filter(tile=>!compactHome||['voice-input','virtual-media','transfer','poke','image','reroll','memory-link','favorites'].includes(String(tile.key))).sort((a,b) => { if(a.key==='archived-cleanup')return 1;if(b.key==='archived-cleanup')return -1;if (!personalMediaEnabled) return 0; const rank = (key: string) => key==='archived-cleanup'?10000:key === 'schedule' ? 8 : firstPageOrder.includes(key) ? firstPageOrder.indexOf(key) : 9; return rank(String(a.key)) - rank(String(b.key)); });
     const actionPageCount = Math.max(1, Math.ceil(actionTiles.length / ACTION_PAGE_SIZE));
     useEffect(() => setActionsPage(page => Math.min(page, actionPageCount - 1)), [actionPageCount]);
 
@@ -699,7 +741,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
             )}
         <div className={`sully-chat-inputbar ${shellClass} pb-safe shrink-0 z-40 relative`}>
             {selectionMode ? (
-                <div className={`p-3 flex gap-2 ${isPixelStyle ? 'bg-[#f3e7d6]' : isDiscordStyle ? 'bg-slate-900/60 backdrop-blur-md' : 'bg-white/50 backdrop-blur-md'}`}>
+                <div className={`p-3 flex gap-2 ${isPixelStyle ? 'bg-[#f3e7d6]' : isDiscordStyle ? (reducedBlur ? 'bg-slate-900/95' : 'bg-slate-900/60 backdrop-blur-md') : (reducedBlur ? 'bg-white/95' : 'bg-white/50 backdrop-blur-md')}`}>
                     {onFavoriteSelected && <button type="button" onClick={onFavoriteSelected} disabled={!favoriteSelectedCount}
                         className="flex-1 min-w-0 py-3 text-xs font-bold rounded-xl bg-amber-100 text-amber-900 disabled:opacity-40 flex flex-col items-center justify-center gap-1">
                         <Star size={18} weight="bold" />合并收藏 ({favoriteSelectedCount})
@@ -724,7 +766,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                 </div>
             ) : (
                 <div className="sully-chat-composer p-3 px-4 flex gap-3 items-end relative">
-                    <button aria-label="聊天功能" aria-expanded={showPanel === 'actions'} onClick={() => setShowPanel(showPanel === 'actions' ? 'none' : 'actions')} className={`sully-chat-actions-button ${actionButtonClass}`}>
+                    <button data-chat-panel-toggle aria-label="聊天功能" aria-expanded={showPanel === 'actions'} onPointerDown={e=>panelPointer(e,'actions')} onClick={e=>{if(e.detail===0)openPanel('actions');}} className={`sully-chat-actions-button ${actionButtonClass}`}>
                         <Plus className="w-6 h-6" weight="bold" />
                     </button>
                     <div className={`sully-chat-input-wrap flex-1 min-w-0 flex items-center px-1 transition-all ${useIOSStandaloneInputFix ? 'overflow-visible' : 'overflow-hidden'} ${inputWrapClass} ${isPixelStyle ? 'focus-within:bg-[#fff7ed]' : isDiscordStyle ? 'focus-within:bg-slate-800 focus-within:border-white/20' : 'border border-transparent focus-within:bg-white focus-within:border-primary/30'}`}>
@@ -734,6 +776,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                             value={input}
                             onChange={(e) => setInput(e.target.value)}
                             onKeyDown={handleKeyDown}
+                            onPointerDown={e=>{if(e.button!==0||showPanel==='none')return;e.preventDefault();textareaRef.current?.focus({preventScroll:true});setShowPanel('none');}}
                             onFocus={handleInputFocus}
                             onBlur={() => setIsInputFocused(false)}
                             onCompositionStart={() => setIsComposing(true)}
@@ -746,7 +789,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                             placeholder="Message..."
                             style={{ height: 'auto' }}
                         />
-                        <button hidden={compactHome} onClick={() => setShowPanel(showPanel === 'emojis' ? 'none' : 'emojis')} className={`p-2 shrink-0 ${isDiscordStyle ? 'text-slate-400 hover:text-sky-300' : isPixelStyle ? 'text-[#8f674a] hover:text-[#a16207]' : 'text-slate-400 hover:text-primary'}`}>
+                        <button data-chat-panel-toggle aria-label="表情包" aria-expanded={showPanel==='emojis'} hidden={compactHome} onPointerDown={e=>panelPointer(e,'emojis')} onClick={e=>{if(e.detail===0)openPanel('emojis');}} className={`p-2 shrink-0 ${isDiscordStyle ? 'text-slate-400 hover:text-sky-300' : isPixelStyle ? 'text-[#8f674a] hover:text-[#a16207]' : 'text-slate-400 hover:text-primary'}`}>
                             <Smiley className="w-6 h-6" weight="regular" />
                         </button>
                     </div>

@@ -43,3 +43,11 @@ describe('视频通话回复分流', () => {
     expect(inferAvatarPerformanceFromText('……对不起，我今天有点难过。')).toMatchObject({ emotion: 'sad', gesture: 'shy', gaze: 'down' });
   });
 });
+
+it('removes leaked source labels including fullwidth and Markdown-wrapped forms but keeps speech and sound cues',()=>{
+ for(const tag of ['[通话]','［通话］','【通话】','[[通话]]','**［通话］**','[聊天]','［约会］']){
+  expect(stripCallTextFormatting(`${tag} [laughs] 好啦，继续通话。`)).toBe('[laughs] 好啦，继续通话。');
+  expect(stripCallTextFormatting(`<语音>${tag}喂。</语音>`)).toBe('<语音>喂。</语音>');
+ }
+ expect(parseCallAssistantMessage({content:'［通话］喂，听得到吗？'}).text).toBe('喂，听得到吗？');
+});

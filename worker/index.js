@@ -2405,7 +2405,7 @@ const XHSLite = (() => {
     const payload = { source_note_id: feedId, image_formats: IMG_FORMATS, extra: { need_body_topic: '1' }, xsec_source: xsecSource || 'pc_feed', xsec_token: xsecToken || '' };
     const r = await signedPost(apiBase, '/api/sns/web/v1/feed', payload, cookieStr, ck, { 'xy-direction': '13' });
     const nc = r?.data?.items?.[0]?.note_card || {};
-    const note = { note_id: feedId, title: nc.title || '', content: nc.desc || '', desc: nc.desc || '', user: nc.user || {}, interact_info: nc.interact_info || {}, image_list: nc.image_list || [], xsec_token: xsecToken || '' };
+    const note = { note_id: feedId, title: nc.title || '', content: nc.desc || '', desc: nc.desc || '', user: nc.user || {}, interact_info: nc.interact_info || {}, image_list: nc.image_list || [], xsec_token: xsecToken || '', type: nc.type, video: nc.video };
     const embeddedComments = findCommentArray(nc?.comments) || [];
     let comments = embeddedComments.map(normComment).filter((comment) => comment.content);
     let commentsStatus = comments.length ? 'loaded' : 'not_requested';

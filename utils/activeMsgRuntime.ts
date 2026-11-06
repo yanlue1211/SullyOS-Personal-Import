@@ -1,7 +1,12 @@
+import {extractResponseStatus,proactiveResponseText,isProactiveStatusDelivery} from '../features/personal/responseStatus/protocol';
+import { diagnosticRunId } from './amsgReproduction';
+import { recordDiagnosticInbox } from './amsgReproductionStore';
 import { createReplyRun, isReplyStopped, withReplyCancellation, type ReplyRun } from './chatReplyCancellation';
 import { loadCharacterContextMessages } from './chatContextRange';
 import { ActiveMsg2InboxMessage, ActiveMsg2TaskRecord, APIConfig, RealtimeConfig, UserProfile } from '../types';
 import { DB } from './db';
+import { consumeIncomingCallInvites } from '../features/personal/calls/incoming';
+import { extractInnerVoice } from '../features/personal/innerVoice/protocol';
 import { ChatPrompts } from './chatPrompts';
 import { ActiveMsgStore } from './activeMsgStore';
 import { ActiveMsgClient, type AmsgOutboxEntry, type RemoteTaskStatus } from './activeMsgClient';
@@ -656,6 +661,7 @@ const processInboxMessageWithPostProcessing = async (
   ));
 
   await replyStep(async () => applyAssistantPostProcessing(message.body || '', {
+    isProactive: isProactiveStatusDelivery(message),
     replyRun,
     char,
     userProfile,
@@ -1569,6 +1575,15 @@ const flushInboxToChatImpl = async (trigger: FlushTrigger, charId?: string): Pro
   // 降级回原来的 "原文一次性 saveMessage" 防止消息丢失。dispatchEvent 始终 fire 一次,
   // 保证 toast / 未读 / 通知语义不变。
   for (const message of pendingMessages) {
+    // 包括重启后的补收与重复推送：任何诊断消息都不能进入角色业务。
+    if (diagnosticRunId(message.metadata)) {
+      try { await recordDiagnosticInbox(message, trigger); }
+      catch {
+        retainedInboxMessageIds.add(message.messageId);
+        try { await ActiveMsgStore.saveInboxMessage(message); } catch { /* 云端账不销，下次补收 */ }
+      }
+      continue;
+    }
     if (isReplyStopped(message.taskUuid)) {
       if (message.taskUuid && (message.metadata as any)?.amsgUsage) {
         settleInstantChatApiLog(message.taskUuid, message.metadata);
@@ -1732,15 +1747,21 @@ const flushInboxToChatImpl = async (trigger: FlushTrigger, charId?: string): Pro
       }
 
       if (!routed) {
+        // 2.0 fallback: even when the rich post-processing pipeline fails, never
+        // persist the raw inner-voice protocol as a public chat bubble.
+        const recoveredVoice = extractInnerVoice(await replyStep(() => consumeIncomingCallInvites(isProactiveStatusDelivery(message)?proactiveResponseText(message.body||''):(message.body||''),message.charId,persistTimestamp)));
+        const recoveredStatus=extractResponseStatus(recoveredVoice.text);
+        const heartEnabled = (await replyStep(() => DB.getCharacter(message.charId)))?.innerVoiceEnabled !== false;
         try {
-          await replyStep(async () => (replyRun?.saveMessage ?? DB.saveMessage)({
+          if(recoveredVoice.text.trim())await replyStep(async () => (replyRun?.saveMessage ?? DB.saveMessage)({
             charId: message.charId,
             role: 'assistant',
-            type: 'text',
-            content: message.body,
+            type: recoveredStatus?'score_card':'text',
+            content: recoveredStatus?JSON.stringify(recoveredStatus):recoveredVoice.text,
             timestamp: persistTimestamp,
             metadata: {
               source: 'active_msg_2',
+              ...(recoveredStatus?{responseStatus:recoveredStatus}:heartEnabled && recoveredVoice.innerVoice ? { innerVoice: recoveredVoice.innerVoice } : {}),
               activeMsg2: {
                 messageId: message.messageId,
                 taskId: message.taskId,

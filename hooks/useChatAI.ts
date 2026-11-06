@@ -1,3 +1,5 @@
+import {momentsEnabled} from '../features/moments/gate';
+import { isEmotionFeatureOn } from '../utils/scheduleFeature';
 import { resolveDialogueApi, dialogueMaxTokens } from '../utils/characterApi';
 import { createReplyRun, withReplyCancellation } from '../utils/chatReplyCancellation';
 
@@ -575,7 +577,7 @@ export const useChatAI = ({
 
     const [lastDigestResult, setLastDigestResult] = useState<DigestResult | null>(null);
     const [lastTokenUsage, setLastTokenUsage] = useState<number | null>(null);
-    const [tokenBreakdown, setTokenBreakdown] = useState<{ prompt: number; completion: number; total: number; msgCount: number; pass: string } | null>(null);
+    const [tokenBreakdown, setTokenBreakdown] = useState<{ prompt: number; completion: number; total: number; cacheRead: number | null; cacheWrite: number | null; msgCount: number; pass: string } | null>(null);
     const [lastSystemPrompt, setLastSystemPrompt] = useState<string>('');
 
     // 意识流：由副 API 的情绪评估同轮产出（innerState 字段）
@@ -642,6 +644,9 @@ export const useChatAI = ({
                 prompt: data.usage.prompt_tokens || 0,
                 completion: data.usage.completion_tokens || 0,
                 total: data.usage.total_tokens,
+                cacheRead: data.usage.cache_read_input_tokens ?? data.usage.prompt_tokens_details?.cached_tokens ?? null,
+                cacheWrite: data.usage.cache_creation_input_tokens ??
+                    (data.usage.cache_creation ? ((data.usage.cache_creation.ephemeral_5m_input_tokens || 0) + (data.usage.cache_creation.ephemeral_1h_input_tokens || 0)) : null),
                 msgCount,
                 pass
             };
@@ -923,6 +928,7 @@ export const useChatAI = ({
                 reason: instantChatRoute ? null : (instantChatReadiness.reason ?? instantChatVeto),
             });
 
+            if(momentsEnabled())await replyStep(async()=>{const {prepareMomentsQuery}=await import('../features/moments/bridge');await prepareMomentsQuery(char.id,contextMsgs);});
             const payload = await replyStep(async () => stageT('payload', buildChatRequestPayload({
                 char: charForGen, userProfile, groups, emojis, categories,
                 homePhoneContext:homePhoneContext?.(),
@@ -955,7 +961,7 @@ export const useChatAI = ({
                     unansweredUserTurn: hasUnansweredUserTurn(currentMsgs, contextMsgs),
                 });
             const promptBuildSkipped = payload.flags.promptBuildSkipped;
-            if (!promptBuildSkipped) {
+            if (!promptBuildSkipped && char.humanStyleEnabled !== false) {
                 try {
                     friendFeedMainTask = await prepareFriendFeedMainTask(char.id,friendFeedUserDisclosure(contextMsgs));
                     if (friendFeedMainTask) fullMessages.splice(Math.max(1, payload.volatileTailIndex), 0,
@@ -989,7 +995,7 @@ export const useChatAI = ({
             //      双跑双扣费. 见下方即时对话分支 + activeMsgRuntime.
             //    走哪条跟着 instantChatRoute（构建 payload 前冻结的同一回合终值）走，这里绝不自己
             //    再判一次，否则可能「按上云把评估打包走了，实际却走本地」，情绪底色悄悄停更。
-            const emotionEvalEnabled = !!(!promptBuildSkipped && !isEmotionEvalSkipped() && isScheduleFeatureOn(char) && char.emotionConfig?.enabled);
+            const emotionEvalEnabled = !!(char.humanStyleEnabled !== false && !promptBuildSkipped && !isEmotionEvalSkipped() && isEmotionFeatureOn(char));
             // 评估跟随全局流式开关（专用情绪 API 自带 stream 字段时以它为准）
             const evalStream: boolean = !!(apiConfig.stream ?? false);
             const emotionApi = emotionEvalEnabled

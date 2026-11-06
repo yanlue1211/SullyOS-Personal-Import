@@ -1,3 +1,4 @@
+import { isEmotionFeatureOn } from './scheduleFeature';
 /**
  * 日程小剧场（窥视演出）生成器。
  *
@@ -60,7 +61,7 @@ function buildTheaterPrompt(
     const backdropBlock = backdrop
         ? `\n\n这个时段，「${char.name}」心里盘旋的念头大致是这样（作为情绪底色，别照抄，要化进行为里）：\n${backdrop}`
         : '';
-    const buffBlock = (isScheduleFeatureOn(char) && char.emotionConfig?.enabled && char.buffInjection)
+    const buffBlock = (isEmotionFeatureOn(char) && char.buffInjection)
         ? `\n\n${char.buffInjection}`
         : '';
 

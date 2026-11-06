@@ -10,6 +10,7 @@ import {
   VinylDisc, GlassProgress, PlayControls, BokehBg,
   MetaChip, SubActions,
 } from './music/MusicUI';
+import MusicLibraryManager from './music/MusicLibraryManager';
 import NeteaseProfilePage from './music/NeteaseProfilePage';
 import CharVisitPage from './music/CharVisitPage';
 import { shareOrDownloadBlob } from '../utils/shareExport';
@@ -94,6 +95,8 @@ const MusicApp: React.FC = () => {
   // 把 OS toast 注入到 Music Context（这样全局播放报错也能弹 toast）
   useEffect(() => { setToastHandler(addToast); }, [addToast, setToastHandler]);
 
+  const [managePlaylist,setManagePlaylist]=useState('');
+  const [manageLibrary, setManageLibrary] = useState(false);
   const [view, setView] = useState<View>('profile');
   // ── 手动对轴 modal state ──
   const [showLyricSync, setShowLyricSync] = useState(false);
@@ -556,12 +559,14 @@ const MusicApp: React.FC = () => {
 
   return (
     <div className="absolute inset-0 overflow-hidden">
+      {manageLibrary&&<MusicLibraryManager initialPlaylist={managePlaylist} initialOwner={view==='visit_char'?visitCharId||'':''} onClose={()=>setManageLibrary(false)}/>}
       {view === 'search' && renderSearch()}
       {view === 'player' && renderPlayer()}
       {view === 'settings' && renderSettings()}
       {view === 'profile' && (
         <NeteaseProfilePage
           onBack={closeApp}
+          onManage={id=>{setManagePlaylist(id||'');setManageLibrary(true);}}
           onOpenPlayer={() => setView('player')}
           onOpenSearch={() => setView('search')}
           onOpenSettings={() => setView('settings')}
@@ -595,7 +600,7 @@ const MusicApp: React.FC = () => {
         const saveSync = () => {
           if (!current) return;
           // 把 draft 写到 song.lyricLineTimings 里 → addLocalSong 上行覆盖
-          const updated: Song = { ...current, lyricLineTimings: syncDraft };
+          const updated: Song = { ...current, lyricLineTimings: syncDraft, lyricTimingMode: 'synced' };
           addLocalSong(updated);
           // 重新 playSong 让 LyricLine 立即用新时间
           playSong(updated, { alsoSetQueue: false });
@@ -737,6 +742,7 @@ const MusicApp: React.FC = () => {
       {view === 'visit_char' && visitCharId && (
         <CharVisitPage
           charId={visitCharId}
+          onManage={()=>{setManagePlaylist('');setManageLibrary(true);}}
           onBack={() => { setView('profile'); setVisitCharId(null); }}
           onOpenPlayer={() => setView('player')}
         />

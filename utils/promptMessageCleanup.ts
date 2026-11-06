@@ -45,3 +45,4 @@ export function flattenImageContentParts(
         return { ...msg, content: flattenContentPartsToText(msg.content) };
     });
 }
+

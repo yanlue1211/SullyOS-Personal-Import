@@ -1,0 +1,24 @@
+name: Response status and media verification
+on:
+  push:
+    branches: [personal/response-status-media-fixes]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NODE_OPTIONS: '--max-old-space-size=4096'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec vitest run utils/responseStatus.test.ts utils/responseStatusUI.test.ts utils/recordingRecognitionDelivery.test.ts utils/personalChatMediaComposer.test.ts utils/chatAutoReply.test.ts utils/applyAssistantPostProcessing.test.ts utils/chatPrompts.test.ts utils/sanitize.test.ts utils/streamPreview.test.ts utils/messageFormat.cards.test.ts utils/personalRecordingEdit.test.ts
+      - run: pnpm run build

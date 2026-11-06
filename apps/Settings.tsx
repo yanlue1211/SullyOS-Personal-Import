@@ -1,3 +1,9 @@
+import CleanupManager from '../features/experience/CleanupManager';
+import AudioApiFields from '../components/settings/AudioApiFields';
+import RecordingManager from '../features/personal/chatMedia/RecordingManager';
+import AudioApiTestButton from '../components/settings/AudioApiTestButton';
+import {CharacterWeatherCities} from '../components/settings/CharacterAwarenessSettings';
+import {cleanCharacterWeatherCities} from '../utils/characterWeather';
 import NavigationBallSettings from '../components/settings/NavigationBallSettings';
 import { useSettingsFocus } from '../utils/settingsNavigation';
 import ApiPresetGroups from '../components/settings/ApiPresetGroups';
@@ -45,6 +51,7 @@ import { PushVapidSettingsModal } from '../components/settings/PushVapidSettings
 import AmsgCloudDataModal from '../components/settings/AmsgCloudDataModal';
 import PushSubscriptionPanel from '../components/settings/PushSubscriptionPanel';
 import ActiveMsgGlobalSettingsModal from '../components/settings/ActiveMsgGlobalSettingsModal';
+import { BackgroundApiEditor } from '../components/settings/BackgroundApiEditor';
 import { syncAmsgLlmCredentials, syncAmsgToolConfig, syncAmsgToolConfigAndPrompts } from '../utils/amsgStateSync';
 import { ActiveMsgClient } from '../utils/activeMsgClient';
 import VersionInfo from '../components/settings/VersionInfo';
@@ -489,6 +496,13 @@ const McpServersCard: React.FC<{
 };
 
 const Settings: React.FC = () => {
+  const [exportConfirmation, setExportConfirmation] = useState<{ message: string; resolve: (ok: boolean) => void } | null>(null);
+  const finishExportConfirmation = (ok: boolean) => {
+      exportConfirmation?.resolve(ok);
+      setExportConfirmation(null);
+  };
+  const [archivedMediaCleanupOpen,setArchivedMediaCleanupOpen]=useState(false);
+  const [recordingManagerOpen, setRecordingManagerOpen] = useState(false);
   const {
       apiConfig, updateApiConfig, closeApp, availableModels, setAvailableModels,
       theme, updateTheme, resetAppearance,
@@ -708,6 +722,7 @@ const Settings: React.FC = () => {
   useLocalBackHandler(() => { closeRealtimePage(); return true; }, 30, showRealtimeModal);
   const [rtUserHolidays, setRtUserHolidays] = useState<UserHolidayConfig>(() => ({ ...(realtimeConfig.userHolidays || { enabled: false, countryCode: '' }), ...(holidaySettingsFocus ? { enabled: true } : {}) }));
   const [rtWeatherKey, setRtWeatherKey] = useState(realtimeConfig.weatherApiKey);
+  const [rtWeatherCities, setRtWeatherCities] = useState(()=>cleanCharacterWeatherCities(realtimeConfig.weatherCities));
   const [rtWeatherCity, setRtWeatherCity] = useState(realtimeConfig.weatherCity);
   const [rtNewsEnabled, setRtNewsEnabled] = useState(realtimeConfig.newsEnabled);
   const [rtNewsApiKey, setRtNewsApiKey] = useState(realtimeConfig.newsApiKey || '');
@@ -1481,11 +1496,12 @@ const Settings: React.FC = () => {
   };
 
   const handleExport = async (mode: 'text_only' | 'media_only' | 'full') => {
+      if (exportConfirmation || sysOperation.status === 'processing') return;
       trackEvent('导出本地备份', { scope: mode });
       try {
           // 二次确认：整包备份（full / text_only）本就包含你的 API 密钥等设置——这是预期行为，
           // 但绝不能发给别人。media_only 只有媒体、不含密钥，视为可分享。
-          if (typeof window !== 'undefined' && typeof window.confirm === 'function') {
+          {
               const includesSettings = mode !== 'media_only';
               const includesBackend = includesSettings && exportBackendConnection;
               const msg = includesBackend
@@ -1493,7 +1509,7 @@ const Settings: React.FC = () => {
                   : includesSettings
                   ? '该导出数据包含了明文密钥，请不要发送给任何人'
                   : '该导出内容安全，可以用于分享';
-              if (!window.confirm(`${msg}\n\n点「确定」继续导出，「取消」中止。`)) {
+              if (!await new Promise<boolean>(resolve => setExportConfirmation({ message: msg, resolve }))) {
                   trackEvent('取消导出前的密钥确认', { mode });
                   return;
               }
@@ -1905,7 +1921,8 @@ const Settings: React.FC = () => {
           weatherEnabled: rtWeatherEnabled,
           userHolidays: { ...rtUserHolidays, introChoice: rtUserHolidays.enabled ? 'configured' as const : 'declined' as const },
           weatherApiKey: rtWeatherKey,
-          weatherCity: rtWeatherCity,
+          weatherCity: rtWeatherCity.trim(),
+          weatherCities: cleanCharacterWeatherCities(rtWeatherCities),
           newsEnabled: rtNewsEnabled,
           newsApiKey: rtNewsApiKey,
           newsPlatforms: rtNewsPlatforms,
@@ -2126,6 +2143,13 @@ const Settings: React.FC = () => {
 
   return (
     <div className="h-full w-full bg-[#f3f4f8] flex flex-col font-light relative isolate">
+      <Modal isOpen={!!exportConfirmation} title="确认导出备份" onClose={() => finishExportConfirmation(false)} footer={<>
+          <button className="flex-1 py-3 rounded-2xl bg-slate-100" onClick={() => finishExportConfirmation(false)}>取消</button>
+          <button className="flex-1 py-3 rounded-2xl bg-primary text-white" onClick={() => finishExportConfirmation(true)}>继续导出</button>
+      </>}>
+          <p className="text-sm leading-relaxed">{exportConfirmation?.message}</p>
+      </Modal>
+
 
       {/* GLOBAL PROGRESS OVERLAY */}
       {sysOperation.status === 'processing' && (
@@ -2551,6 +2575,12 @@ const Settings: React.FC = () => {
             </p>
         </SettingsSection>
 
+        <SettingsSection title="图片与视频存储" icon={<span className="text-xl">🎬</span>}><button onClick={()=>setArchivedMediaCleanupOpen(true)} className="w-full rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-700">清理已归档的图片与视频 ›</button></SettingsSection>
+        {archivedMediaCleanupOpen&&<CleanupManager onClose={()=>setArchivedMediaCleanupOpen(false)}/>}
+        <SettingsSection title="录音存储" icon={<span className="text-xl">🎙</span>}>
+          <button type="button" onClick={() => setRecordingManagerOpen(true)} className="w-full flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-700"><span>管理用户录音</span><span className="text-slate-400">批量清理 ›</span></button>
+        </SettingsSection>
+        {recordingManagerOpen && <RecordingManager onClose={() => setRecordingManagerOpen(false)} onChanged={() => {}} />}
         {/* AI 连接设置区域 */}
         <SettingsSection
             title="API 配置"
@@ -2691,6 +2721,21 @@ const Settings: React.FC = () => {
                         {testApiResult}
                     </div>
                 )}
+            </div>
+        </SettingsSection>
+
+        {/* Dedicated audio-analysis API; does not change the main dialogue model. */}
+        <SettingsSection title="真实听歌 · 音频 API" icon={<span className="text-xl">🎧</span>}>
+            <div className="space-y-3 text-sm">
+                <p className="text-xs text-slate-500">使用支持 input_audio 的 OpenAI 兼容音频模型。角色听歌时会发送歌曲音频，并把听后感写入音乐档案。</p>
+                <label className="flex items-center gap-2"><input type="checkbox" checked={apiConfig.audioApi?.enabled === true} onChange={e => updateApiConfig({ audioApi: { baseUrl: '', apiKey: '', model: '', ...apiConfig.audioApi, enabled: e.target.checked } })} />开启真实听歌</label>
+                <AudioApiFields config={apiConfig.audioApi} presets={apiPresets} onChange={audioApi => updateApiConfig({audioApi})} />
+                <label className="block text-xs">音质
+                    <select className="w-full mt-1 p-2 border rounded-lg" value={apiConfig.audioApi?.songQuality || 'exhigh'} onChange={e => updateApiConfig({ audioApi: { enabled: false, baseUrl: '', apiKey: '', model: '', ...apiConfig.audioApi, songQuality: e.target.value as 'standard' | 'exhigh' | 'lossless' } })}>
+                        <option value="standard">标准 · 更省流量</option><option value="exhigh">极高 · 推荐</option><option value="lossless">无损 · 可能超出 API 限制</option>
+                    </select>
+                </label>
+                <AudioApiTestButton config={apiConfig.audioApi} />
             </div>
         </SettingsSection>
 
@@ -2851,6 +2896,8 @@ const Settings: React.FC = () => {
                 )}
             </div>
         </SettingsSection>
+
+        <BackgroundApiEditor presets={apiPresets} inheritedApi={apiConfig} title="主动消息 API" help="所有角色共用，适用于主动消息 1.0 / 2.0；未配置时跟随各角色原有 API，不影响即时聊天。" value={apiConfig.proactiveApi} onSave={value => { updateApiConfig({proactiveApi:value}); syncAmsgLlmCredentials({...apiConfig,proactiveApi:value}); }} />
 
         {/* API 调用记录入口 — 点开看最近 5 天各 App / 角色 / 用途的调用明细 */}
         <button
@@ -4142,7 +4189,7 @@ const Settings: React.FC = () => {
               </div>
               <div className="space-y-1.5">
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">URL</label>
-                  <select aria-label="预设接口类型" value={editPresetApiType} onChange={e => setEditPresetApiType(e.target.value as LlmApiType)} className="w-full bg-slate-100 rounded-xl px-4 py-2.5 text-sm"><option value="openai">OpenAI 兼容</option><option value="anthropic">Anthropic 原生 Messages</option></select>
+                  <select aria-label="预设接口类型" value={editPresetApiType} onChange={e => setEditPresetApiType(e.target.value as LlmApiType)} className="w-full bg-slate-100 rounded-xl px-4 py-2.5 text-sm"><option value="openai">OpenAI 兼容</option><option value="anthropic">Anthropic 原生 Messages</option><option value="gemini">Gemini 原生（自动缓存）</option></select>
                   <input value={editPresetUrl} onChange={e => setEditPresetUrl(e.target.value)} placeholder="https://..." className="w-full bg-slate-100 rounded-xl px-4 py-2.5 text-sm font-mono focus:outline-primary" />
               </div>
               <div className="space-y-1.5">
@@ -4264,7 +4311,7 @@ const Settings: React.FC = () => {
       >
           <div className="space-y-5 max-h-[60vh] overflow-y-auto no-scrollbar">
               {rtUserLocationPage === 'main' && <UserHolidaySettings value={rtUserHolidays} onChange={setRtUserHolidays} />}
-              <UserLocationSettings value={rtUserLocation} onChange={setRtUserLocation} onSave={handleSaveUserLocation} page={rtUserLocationPage} onNavigate={setRtUserLocationPage} onBusyChange={setRtUserLocationBusy} userName={userProfile.name} />
+              <UserLocationSettings characters={characters} value={rtUserLocation} onChange={setRtUserLocation} onSave={handleSaveUserLocation} page={rtUserLocationPage} onNavigate={setRtUserLocationPage} onBusyChange={setRtUserLocationBusy} userName={userProfile.name} />
               {rtUserLocationPage === 'main' && <>
               {/* 天气配置 */}
               <div className="bg-emerald-50/50 p-4 rounded-2xl space-y-3">
@@ -4285,11 +4332,12 @@ const Settings: React.FC = () => {
                               <input type="password" value={rtWeatherKey} onChange={e => setRtWeatherKey(e.target.value)} className="w-full bg-white/80 border border-emerald-200 rounded-xl px-3 py-2 text-sm font-mono" placeholder="留空则用免费的 Open-Meteo，无需注册" />
                           </div>
                           <div>
-                              <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">城市</label>
+                              <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">默认天气城市</label>
                               <input type="text" value={rtWeatherCity} onChange={e => setRtWeatherCity(e.target.value)} className="w-full bg-white/80 border border-emerald-200 rounded-xl px-3 py-2 text-sm" placeholder="北京 / Beijing / Shanghai" />
                           </div>
 <button onClick={testWeatherApi} className="w-full py-2 bg-emerald-100 text-emerald-600 text-xs font-bold rounded-xl active:scale-95 transition-transform">测试天气API</button>
                           {renderRtTestStatus('weather')}
+                          <CharacterWeatherCities characters={characters} value={rtWeatherCities} defaultCity={rtWeatherCity} onChange={setRtWeatherCities}/>
                       </div>
                   )}
               </div>

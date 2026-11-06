@@ -1,0 +1,23 @@
+name: Recording preview verification
+on:
+  push:
+    branches: [personal/recording-preview-recognition]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      NODE_OPTIONS: '--max-old-space-size=4096'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec vitest run utils/personalChatMediaComposer.test.ts utils/personalAudioProtocol.test.ts utils/callAudioFeed.test.ts utils/personalRecordingEdit.test.ts
+      - run: pnpm run build

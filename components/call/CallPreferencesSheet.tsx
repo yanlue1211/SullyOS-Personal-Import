@@ -1,3 +1,4 @@
+import { VOICE_LANGUAGE_OPTIONS, CANTONESE_VOICE_SUPPORT_NOTE } from '../../utils/voiceLanguage';
 import React from 'react';
 import { ChatCircleDots, Gear, Microphone, Phone, SpeakerHigh, X } from '@phosphor-icons/react';
 import type { CallPreferences } from '../../utils/callPreferences';
@@ -5,6 +6,10 @@ import type { APIConfig, SttProvider } from '../../types';
 import { STT_PROVIDER_OPTIONS, isSttProviderConfigured, resolveSttProvider } from '../../utils/speechToText';
 
 interface CallPreferencesSheetProps {
+  showTranslation?: boolean;
+  onTranslationChange?: (value: boolean) => void;
+  voiceLanguage?: string;
+  onVoiceLanguageChange?: (value: string) => void;
   incrementalVoice?: boolean;
   onIncrementalChange?: (enabled: boolean) => void;
   preferences: CallPreferences;
@@ -18,7 +23,7 @@ interface CallPreferencesSheetProps {
 }
 
 const CallPreferencesSheet: React.FC<CallPreferencesSheetProps> = ({
-  preferences,
+  preferences, showTranslation, onTranslationChange, voiceLanguage, onVoiceLanguageChange,
   incrementalVoice,
   onIncrementalChange,
   apiConfig,
@@ -66,6 +71,9 @@ const CallPreferencesSheet: React.FC<CallPreferencesSheetProps> = ({
           </button>
         </header>
 
+        {onTranslationChange && <label className={`flex gap-3 items-center text-sm mt-4 ${lightTheme ? 'text-slate-600' : 'text-white/70'}`}><input type="checkbox" checked={!!showTranslation} onChange={event => onTranslationChange(event.target.checked)} />显示翻译字幕</label>}
+        {onVoiceLanguageChange && <label className={`block text-sm mt-3 ${lightTheme ? 'text-slate-600' : 'text-white/70'}`}>朗读语种<select value={voiceLanguage || ''} onChange={event => onVoiceLanguageChange(event.target.value)} className="ml-3 bg-transparent border rounded-lg p-1">{VOICE_LANGUAGE_OPTIONS.map(option => <option key={option.value} value={option.value} className="text-slate-700">{option.label}</option>)}</select></label>}
+        {voiceLanguage === 'yue' && <p className="text-xs text-amber-500 mt-2">{CANTONESE_VOICE_SUPPORT_NOTE}</p>}
         <div className={`mt-5 divide-y border-y ${lightTheme ? 'divide-[#262239]/10 border-[#262239]/10' : 'divide-white/10 border-white/10'}`}>
           <div className="py-3">
             <div className="flex items-center gap-3">

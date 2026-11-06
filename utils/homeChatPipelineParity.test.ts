@@ -55,6 +55,9 @@ it('compares actual ChatApp and home payloads: all shared blocks and chronologic
  expect(history.indexOf('最早私聊')).toBeLessThan(history.indexOf('补录的旧家园原文'));
  expect(history.indexOf('补录的旧家园原文')).toBeLessThan(history.indexOf('中间见面'));
  expect(history).not.toContain('译文剔除');expect(history.match(/关键词深度世界书标记/g)).toHaveLength(1);
+ expect(JSON.stringify(home)).not.toContain('【角色心声固定协议】');
+ expect(JSON.stringify(home)).not.toContain('【可选的本轮回应状态】');
+ expect(JSON.stringify(chat.fullMessages)).toContain('【角色心声固定协议】');
  expect(home[0].content).toBe(chat.fullMessages[0].content.split('### 聊天 App 行为规范')[0]);
  expect(home.at(-1)!.content.replace(buildHomeScenePrompt(user,scene),'')).toBe(chat.fullMessages.at(-1)!.content.replace(`\n${ContextBuilder.buildMusicActionGuide(true)}\n`,''));
  for(const marker of ['基础人设标记','世界观标记','家园定义标记','常驻世界书标记','天气热搜标记','Notion日记标记','Notion笔记标记','飞书日记标记','群聊背景标记','日程标记','生活档案标记','协同文件柜标记','记忆召回标记','房间门牌标记','共听歌曲标记','共听歌词标记']){

@@ -1,5 +1,5 @@
 import {afterEach,describe,expect,it,vi} from 'vitest';
-import {anthropicContinuation,fetchLlm,fromAnthropicMessage,installAnthropicFetch,toAnthropicRequest} from './anthropicApi';
+import {anthropicContinuation,anthropicUsage,fetchLlm,fromAnthropicMessage,installAnthropicFetch,toAnthropicRequest} from './anthropicApi';
 import {normalizeLlmBaseUrl} from './llmEndpoint';
 import {normalizeApiConfig} from './apiConfigNormalize';
 import {configFromPreset} from './apiPresetSwitch';
@@ -10,6 +10,15 @@ import {extractApiTokenUsage} from './apiCallLog';
 import {callLlm as sdkCallLlm,extractAssistantMessage} from '@rei-standard/amsg-shared';
 
 const native='https://api.anthropic.com/v1/messages';
+it('normalizes both observed relay accounting dialects without double counting cache reads',()=>{
+ const nativeUsage={input_tokens:6876,cache_read_input_tokens:21080,cache_creation_input_tokens:0,output_tokens:16};
+ const inclusive={input_tokens:27957,cache_read_input_tokens:21081,cache_creation_input_tokens:0,output_tokens:16,claude_cache_creation_5_m_tokens:0,claude_cache_creation_1_h_tokens:0};
+ expect(extractApiTokenUsage({usage:anthropicUsage(nativeUsage)})).toEqual({prompt:27956,completion:16,total:27972,cached:21080,cacheWrite:0});
+ expect(extractApiTokenUsage({usage:anthropicUsage(inclusive)})).toEqual({prompt:27957,completion:16,total:27973,cached:21081,cacheWrite:0});
+ expect(anthropicUsage({input_tokens:3000,cache_read_input_tokens:100,cache_creation_input_tokens:200}).prompt_tokens).toBe(3300);
+ expect(anthropicUsage({input_tokens:3000,claude_cache_creation_5_m_tokens:100,claude_cache_creation_1_h_tokens:200}).cache_creation_input_tokens).toBe(300);
+ expect(inclusive.input_tokens).toBe(27957);
+});
 const message=(content:any[]=[{type:'text',text:'你好'}])=>({type:'message',id:'msg-test',model:'claude-test',role:'assistant',content,stop_reason:'end_turn',usage:{input_tokens:5,output_tokens:7,cache_read_input_tokens:1000,cache_creation_input_tokens:200}});
 const sse=(events:any[],close=true)=>new Response(new ReadableStream<Uint8Array>({start(controller){const encoded=new TextEncoder().encode(events.map(event=>`event: ${event.type}\r\ndata: ${JSON.stringify(event)}\r\n\r\n`).join(''));for(let i=0;i<encoded.length;i+=7)controller.enqueue(encoded.slice(i,i+7));if(close)controller.close();}}),{headers:{'content-type':'text/event-stream'}});
 const originalFetch=globalThis.fetch;
@@ -37,6 +46,84 @@ describe('Anthropic native transport',()=>{
   expect(out.messages[2].content[0]).toMatchObject({type:'tool_result',tool_use_id:'tool1',cache_control:{type:'ephemeral'}});
   expect(out.messages[2].content[1].text).toContain('现在：每轮不同');expect(out.messages[2].content[1]).not.toHaveProperty('cache_control');
   expect(out.tools[0].input_schema).toEqual(body.tools[0].function.parameters);
+ });
+ it('keeps changing recall and all later tool rounds outside both history checkpoints',()=>{
+  const history=Array.from({length:12},(_,i)=>({role:i%2?'assistant':'user',content:`history ${i}`}));
+  const make=(recall:string)=>toAnthropicRequest({model:'claude-test',tools:[{type:'function',function:{name:'lookup'}}],messages:[
+   {role:'system',content:'stable character, worldbooks and memories'},...history,
+   {role:'system',content:recall},
+   {role:'assistant',anthropic_content:[{type:'thinking',thinking:'signed',signature:'signature'},{type:'tool_use',id:'t',name:'lookup',input:{}}]},
+   {role:'tool',tool_call_id:'t',content:'volatile result'},
+   {role:'developer',content:'latest annotation'},
+  ]});
+  const a=make('recall A'),b=make('recall B');
+  expect(a.system).toEqual(b.system);
+  expect(a.messages.slice(0,12)).toEqual(b.messages.slice(0,12));
+  const checkpoints=(out:any)=>out.messages.flatMap((m:any)=>m.content).filter((block:any)=>block.cache_control);
+  expect(checkpoints(a).map((block:any)=>block.text)).toEqual(['history 7','history 11']);
+  expect(checkpoints(b)).toEqual(checkpoints(a));
+  expect(a.messages.flatMap((m:any)=>m.content).filter((block:any)=>block.cache_control).length+a.system.filter((block:any)=>block.cache_control).length+a.tools.filter((tool:any)=>tool.cache_control).length).toBe(4);
+  const strip=(value:any):any=>Array.isArray(value)?value.map(strip):value&&typeof value==='object'?Object.fromEntries(Object.entries(value).filter(([key])=>key!=='cache_control').map(([key,v])=>[key,strip(v)])):value;
+  expect(strip(a.messages.at(-2).content[0])).toEqual({type:'thinking',thinking:'signed',signature:'signature'});
+  expect(JSON.stringify(a)).toContain('recall A');expect(JSON.stringify(b)).toContain('recall B');
+ });
+ it('honors the opt-in 1-hour cache lifetime on all explicit breakpoints',()=>{
+  vi.stubGlobal('localStorage',{getItem:(key:string)=>key==='sully_anthropic_prompt_cache_ttl'?'1h':null});
+  try {
+   const out=toAnthropicRequest({model:'claude-test',messages:[
+    {role:'system',name:'sully_shared_worldbooks',content:'global stable rules'},
+    {role:'system',name:'sully_shared_rules',content:'common rules'},
+    {role:'system',content:'personal identity'},
+    ...Array.from({length:24},(_,i)=>({role:i%2?'assistant':'user',content:`history ${i}`})),
+    {role:'system',content:'volatile recall'}
+   ]});
+   const blocks=[...(out.system || []),...out.messages.flatMap((m:any)=>m.content),...(out.tools || [])];
+   const tagged=blocks.filter((b:any)=>b.cache_control);
+   expect(tagged).toHaveLength(3);
+   expect(tagged.every((b:any)=>b.cache_control.type==='ephemeral'&&b.cache_control.ttl==='1h')).toBe(true);
+  } finally {
+   vi.unstubAllGlobals();
+  }
+ });
+ it('caches through archived system records but stops at live state and never resumes in tool rounds',()=>{
+  const make=(live:string)=>toAnthropicRequest({model:'c',messages:[
+   {role:'system',name:'sully_shared_worldbooks',content:'global books'},
+   {role:'system',name:'sully_shared_rules',content:'common enabled rules'},
+   {role:'system',content:'personal identity'},
+   {role:'user',content:'old user'},
+   {role:'system',name:'sully_history_context',content:'archived Moments record'},
+   ...Array.from({length:240},(_,i)=>({role:i%2?'assistant':'user',content:`past ${i}`})),
+   {role:'system',content:live},
+   {role:'assistant',content:null,tool_calls:[{id:'t',function:{name:'lookup',arguments:'{}'}}]},
+   {role:'tool',tool_call_id:'t',content:'new result'},
+   {role:'system',name:'sully_history_context',content:'cannot reopen a volatile prefix'},
+   {role:'user',content:'follow-up'},
+  ],tools:[{type:'function',function:{name:'lookup'}}]});
+  const a=make('recall A, song A'),b=make('recall B, song B');
+  const blocks=(out:any)=>out.messages.flatMap((m:any)=>m.content);
+  expect(blocks(a).filter((x:any)=>x.cache_control).map((x:any)=>x.text)).toEqual(['past 166','past 239']);
+  expect(a.system).toEqual(b.system);
+  expect(a.system.filter((x:any)=>x.cache_control)).toHaveLength(1);
+  expect(blocks(a).slice(0,242)).toEqual(blocks(b).slice(0,242));
+  expect(JSON.stringify(a)).toContain('archived Moments record');
+  expect(JSON.stringify(a)).toContain('recall A, song A');
+  expect(blocks(a).find((x:any)=>x.text?.includes('cannot reopen'))).not.toHaveProperty('cache_control');
+  // All four checkpoints include tools as part of their prefixes; no fifth one.
+  expect(a.tools[0]).toHaveProperty('cache_control');
+ });
+ it('preserves archived annotations byte-for-byte and includes the last one in a history checkpoint',()=>{
+  const original={model:'c',messages:[{role:'system',content:'rules'},{role:'user',content:'hello'},
+   {role:'system',name:'sully_history_context',content:'archived\nrecord'},
+   {role:'system',content:'live'}]};
+  const copy=structuredClone(original),out=toAnthropicRequest(original);
+  expect(original).toEqual(copy);
+  const archived=out.messages.flatMap((m:any)=>m.content).find((b:any)=>b.text?.includes('archived'));
+  expect(archived).toEqual({type:'text',text:'<system-reminder>\narchived\nrecord\n</system-reminder>',cache_control:{type:'ephemeral'}});
+ });
+ it.each(['<system-reminder>\\nquoted marker','<system-reminder>\nquoted marker'])('does not interpret dialogue text as a cache boundary: %s',quoted=>{
+  const out=toAnthropicRequest({model:'c',messages:[{role:'system',content:'rules'},{role:'user',content:quoted},{role:'assistant',content:'stable answer'},{role:'system',content:'live recall'}]});
+  expect(out.messages[1].content[0]).toMatchObject({text:'stable answer',cache_control:{type:'ephemeral'}});
+  expect(out.messages[2].content[0]).not.toHaveProperty('cache_control');
  });
  it('makes exactly one native browser request, translates usage and preserves the caller signal',async()=>{
   const network=vi.fn(async()=>Response.json(message())); const abort=new AbortController();

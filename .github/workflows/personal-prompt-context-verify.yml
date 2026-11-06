@@ -1,0 +1,25 @@
+name: Verify personal prompt context
+on:
+  push:
+    branches: [personal/prompt-order-heart-settings]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Verify context, worldbooks, cache and heart preferences
+        run: pnpm vitest run utils/personalPromptOrder.test.ts utils/innerVoiceSettings.test.tsx utils/chatPromptPreferences.test.ts utils/anthropicApi.test.ts utils/chatRequestPayload.test.ts utils/chatPrompts.test.ts utils/chatPrompts.firePack.test.ts utils/contextVolatileSplit.test.ts utils/contextWorldbook.test.ts utils/worldbookScope.test.ts utils/globalWorldbookUI.test.tsx utils/worldbookPersistence.test.ts utils/emojiCacheBoundary.test.ts utils/personalInnerVoice.test.ts utils/personalInnerVoiceUI.test.ts utils/memoryPalace/innerVoiceMemory.test.ts
+      - name: Build
+        run: pnpm run build
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096

@@ -150,3 +150,17 @@ describe('two-second automatic reply', () => {
         expect(options.onGenerate).toHaveBeenCalledTimes(1);
     });
 });
+
+it.each(['真实录音','虚拟语音','虚拟图片','虚拟视频'])('waits while the %s composer is open and restarts two seconds after close', () => {
+    send(); advance(1500);
+    render({ mediaComposerOpen: true });
+    advance(8000);
+    expect(options.onGenerate).not.toHaveBeenCalled();
+    expect(controls.seconds).toBeNull();
+    // A new send inside the sheet still cannot start the clock.
+    send(); advance(5000);
+    expect(options.onGenerate).not.toHaveBeenCalled();
+    render({ mediaComposerOpen: false });
+    advance(1999); expect(options.onGenerate).not.toHaveBeenCalled();
+    advance(1); expect(options.onGenerate).toHaveBeenCalledTimes(1);
+});

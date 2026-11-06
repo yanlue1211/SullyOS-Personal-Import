@@ -474,7 +474,7 @@ export async function synthesizeSpeechDetailed(
   text: string,
   char: CharacterProfile,
   apiConfig: APIConfig,
-  options?: { languageBoost?: string; groupId?: string; emotion?: string }
+  options?: { languageBoost?: string; groupId?: string; emotion?: string; textAlreadyPrepared?: boolean }
 ): Promise<TtsResult> {
   const apiKey = resolveMiniMaxApiKey(apiConfig);
   if (!apiKey) throw new Error('缺少 MiniMax API Key');
@@ -487,6 +487,7 @@ export async function synthesizeSpeechDetailed(
   const payload = buildMiniMaxTtsPayload(text, vp, {
     languageBoost: options?.languageBoost,
     emotion: options?.emotion,
+    textAlreadyPrepared: options?.textAlreadyPrepared,
   });
 
   // Check the shared cache before hitting the network. Two call sites that
@@ -553,7 +554,7 @@ export async function synthesizeSpeech(
   text: string,
   char: CharacterProfile,
   apiConfig: APIConfig,
-  options?: { languageBoost?: string; groupId?: string; emotion?: string }
+  options?: { languageBoost?: string; groupId?: string; emotion?: string; textAlreadyPrepared?: boolean }
 ): Promise<string> {
   const { url } = await synthesizeSpeechDetailed(text, char, apiConfig, options);
   return url;

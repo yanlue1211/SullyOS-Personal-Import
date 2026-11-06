@@ -71,7 +71,7 @@ const ProactiveSettingsModal: React.FC<ProactiveSettingsModalProps> = ({
             <div className="space-y-5">
                 {/* Description */}
                 <p className="text-xs text-slate-400 leading-relaxed">
-                    开启后，{char.name} 会按照设定的间隔主动给你发消息，就像真人一样随手发来一条。
+                    开启后，{char.name} 在连续达到设定时长没有收到你的回复后，才会主动给你发消息。聊天、通话、见面及真实陪伴中的回复都会重新计时。
                 </p>
 
                 {/* Enable Toggle */}
@@ -97,7 +97,7 @@ const ProactiveSettingsModal: React.FC<ProactiveSettingsModalProps> = ({
                 {enabled && (
                     <>
                         <div>
-                            <label className="text-sm font-bold text-slate-700 block mb-2">发送间隔</label>
+                            <label className="text-sm font-bold text-slate-700 block mb-2">未回复时长</label>
                             <div className="grid grid-cols-3 gap-2">
                                 {INTERVAL_OPTIONS.map(opt => (
                                     <button

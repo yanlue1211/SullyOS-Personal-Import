@@ -1,3 +1,4 @@
+import {desktopSlots,desktopPages,isDesktopEmpty,moveDesktopSlot} from '../utils/desktopSlots';
 import React, { useMemo, useEffect, useLayoutEffect, useState, useRef, useCallback } from 'react';
 import { isPaperWallpaper, useOS } from '../context/OSContext';
 import { INSTALLED_APPS, DOCK_APPS } from '../constants';
@@ -16,6 +17,7 @@ import { getDailyScheduleForChar } from '../utils/dailySchedule';
 import { useLocalDateKey } from '../hooks/useLocalDateKey';
 import { resolveCharTimeZone } from '../utils/timezone';
 import { trackEvent } from '../utils/analytics';
+import { resolveReducedGlassCardStyle, useReducedBlur } from '../utils/blurPolicy';
 
 const CompanionHome = React.lazy(() => import('../components/os/CompanionHome'));
 const HomelyHome = React.lazy(() => import('../components/os/HomelyHome'));
@@ -130,6 +132,7 @@ const CharacterWidget = React.memo(({
     paper?: boolean,
 }) => {
     const { theme } = useOS();
+    const reducedBlur = useReducedBlur();
     const acnh = theme.skin === 'animalcrossing'; // 动森彩蛋：会"说话"的村民卡
     // 卡片底的虚化头像画在 CSS background-image 上，吃不到 TokenImg 的解析，这里自己解析一次。
     const avatarUrl = useBlobRefUrl(char?.avatar);
@@ -183,7 +186,7 @@ const CharacterWidget = React.memo(({
                     background: 'rgb(247,243,223)',
                     border: '2px solid #e8e2d6',
                     boxShadow: '0 8px 24px 0 rgba(61,52,40,0.14)',
-                } : {
+                } : reducedBlur ? resolveReducedGlassCardStyle(contentColor) : {
                     background: 'rgba(255,255,255,0.08)',
                     backdropFilter: 'blur(24px) saturate(1.4)',
                     WebkitBackdropFilter: 'blur(24px) saturate(1.4)',
@@ -191,8 +194,8 @@ const CharacterWidget = React.memo(({
                     boxShadow: '0 8px 32px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.08)',
                 }}
              >
-                 {/* 背景虚化角色头像（动森模式下省略，避免糊在奶油底上） */}
-                 {!acnh && !paper && avatarUrl && (
+                 {/* 背景虚化角色头像（动森与无实时模糊模式下省略） */}
+                 {!acnh && !paper && !reducedBlur && avatarUrl && (
                      <div className="absolute inset-0 opacity-25 pointer-events-none"
                          style={{
                              backgroundImage: `url(${avatarUrl})`,
@@ -257,15 +260,17 @@ const AppGridPage = React.memo(({
     openApp,
     acnh = false,
     editing = false,
+    dense = false,
 }: {
+    dense?: boolean,
     apps: typeof INSTALLED_APPS,
     openApp: (id: AppID) => void,
     acnh?: boolean,
     editing?: boolean,
 }) => {
     return (
-        <div className={`grid place-items-center animate-fade-in relative ${acnh ? 'grid-cols-4 gap-y-6 gap-x-2' : 'grid-cols-4 gap-y-6 gap-x-2'}`}>
-             {apps.map(app => (
+        <div data-app-grid className={`grid place-items-center relative grid-cols-4 gap-x-2 ${dense?'gap-y-3':'gap-y-6'}`}>
+             {apps.map(app => isDesktopEmpty(app.id) ? <div key={app.id} data-launcher-item={app.id} data-launcher-kind="app" data-launcher-empty className={`w-14 h-[78px] rounded-2xl ${editing?'border border-dashed border-current opacity-20':''}`} aria-label="桌面空位"/> : (
                  <div
                     key={app.id}
                     data-launcher-item={app.id}
@@ -287,7 +292,7 @@ const AppGridPage = React.memo(({
 const AppQuadGrid = React.memo(({ apps, openApp, editing = false }: { apps: typeof INSTALLED_APPS, openApp: (id: AppID) => void, editing?: boolean }) => {
     return (
         <div className="w-full h-full grid grid-cols-2 grid-rows-2 place-items-center gap-x-2 gap-y-3">
-            {apps.map(app => (
+            {apps.map(app => isDesktopEmpty(app.id) ? <div key={app.id} data-launcher-item={app.id} data-launcher-kind="app" data-launcher-empty className={`w-14 h-[78px] rounded-2xl ${editing?'border border-dashed border-current opacity-20':''}`} aria-label="桌面空位"/> : (
                 <div key={app.id} data-launcher-item={app.id} data-launcher-kind="app" className={`relative transition-transform duration-200 active:scale-95 ${editing ? 'launcher-edit-item' : ''}`}>
                     <AppIcon app={app} onClick={() => { if (!editing) openApp(app.id); }} />
                 </div>
@@ -540,7 +545,7 @@ const Launcher: React.FC<{ staticPreview?: boolean }> = ({ staticPreview = false
   }, []);
 
   const availableGridIds = useMemo(() => availableGridApps.map(app => app.id), [availableGridApps]);
-  const [launcherAppOrder, setLauncherAppOrder] = useState<string[]>(() => normalizeOrder(theme.launcherAppOrder, INSTALLED_APPS.filter(app => !DOCK_APPS.includes(app.id)).map(app => app.id)));
+  const [launcherAppOrder, setLauncherAppOrder] = useState<string[]>(() => desktopSlots(theme.launcherAppSlots || theme.launcherAppOrder, availableGridIds));
   const [launcherDockOrder, setLauncherDockOrder] = useState<string[]>(() => normalizeOrder(theme.launcherDockOrder, DOCK_APPS));
   const [pinwheelOrder, setPinwheelOrder] = useState<Array<'music' | 'appsA' | 'appsB' | 'image'>>(() => {
       const available = ['music', 'appsA', 'appsB', 'image'] as const;
@@ -553,7 +558,7 @@ const Launcher: React.FC<{ staticPreview?: boolean }> = ({ staticPreview = false
 
   useEffect(() => {
       setLauncherAppOrder(prev => {
-          const next = normalizeOrder(prev.length ? prev : theme.launcherAppOrder, availableGridIds);
+          const next = desktopSlots(prev.length ? prev : theme.launcherAppSlots || theme.launcherAppOrder, availableGridIds);
           launcherAppOrderRef.current = next;
           return next;
       });
@@ -578,7 +583,7 @@ const Launcher: React.FC<{ staticPreview?: boolean }> = ({ staticPreview = false
 
   const gridApps = useMemo(() => {
       const byId = new Map(availableGridApps.map(app => [app.id, app]));
-      return launcherAppOrder.map(id => byId.get(id as AppID)).filter(Boolean) as typeof INSTALLED_APPS;
+      return launcherAppOrder.map(id => isDesktopEmpty(id) ? {...availableGridApps[0], id:id as AppID, name:''} : byId.get(id as AppID)).filter(Boolean) as typeof INSTALLED_APPS;
   }, [availableGridApps, launcherAppOrder]);
 
   const dockAppsConfig = useMemo(() => {
@@ -586,18 +591,8 @@ const Launcher: React.FC<{ staticPreview?: boolean }> = ({ staticPreview = false
       return launcherDockOrder.map(id => byId.get(id as AppID)).filter(Boolean) as typeof INSTALLED_APPS;
   }, [launcherDockOrder]);
 
-  // Split apps into pages of 8 (4 cols x 2 rows fit comfortably below widget)
-  // Pages: 0 = clock+chat+music+grid (original), 1 = pinwheel, 2 = widget images + grid,
-  //        3+ = plain grid. Pad to at least 3 slots so the pinwheel/widget pages always exist.
-  const APPS_PER_PAGE = 8;
-  const appPages = useMemo(() => {
-      const pages: typeof INSTALLED_APPS[] = [];
-      for (let i = 0; i < gridApps.length; i += APPS_PER_PAGE) {
-          pages.push(gridApps.slice(i, i + APPS_PER_PAGE));
-      }
-      while (pages.length < 3) pages.push([]);
-      return pages;
-  }, [gridApps]);
+  // Preserve both original eight-app pages; later app pages use four rows.
+  const appPages = useMemo(() => desktopPages(gridApps), [gridApps]);
 
   // Page 2 (pinwheel) uses appPages[1]: split into two 2x2 quads
   const page2Apps = appPages[1] || [];
@@ -748,7 +743,7 @@ const Launcher: React.FC<{ staticPreview?: boolean }> = ({ staticPreview = false
           return next;
       };
       if (kind === 'app') {
-          const next = reorder(launcherAppOrderRef.current);
+          const next = moveDesktopSlot(launcherAppOrderRef.current, source, target);
           launcherAppOrderRef.current = next;
           setLauncherAppOrder(next);
       } else if (kind === 'dock') {
@@ -845,7 +840,7 @@ const Launcher: React.FC<{ staticPreview?: boolean }> = ({ staticPreview = false
       if (!item) return;
       const key = item.dataset.launcherItem;
       const kind = item.dataset.launcherKind;
-      if (!key || !kind) return;
+      if (!key || !kind || isDesktopEmpty(key)) return;
       clearLayoutPressTimer();
       layoutPointer.current = { pointerId: e.pointerId, key, kind, x: e.clientX, y: e.clientY, active: layoutEditing, element: item };
       if (layoutEditing) {
@@ -915,7 +910,8 @@ const Launcher: React.FC<{ staticPreview?: boolean }> = ({ staticPreview = false
           pointer.targetElement?.classList.remove('launcher-drop-target');
           if (pointer.lastTarget) reorderByTarget(pointer.kind, pointer.key, pointer.lastTarget);
           void updateTheme({
-              launcherAppOrder: launcherAppOrderRef.current,
+              launcherAppOrder: launcherAppOrderRef.current.filter(id=>!isDesktopEmpty(id)),
+              launcherAppSlots: launcherAppOrderRef.current,
               launcherDockOrder: launcherDockOrderRef.current,
               launcherPinwheelOrder: pinwheelOrderRef.current,
           });
@@ -974,14 +970,11 @@ const Launcher: React.FC<{ staticPreview?: boolean }> = ({ staticPreview = false
       <style>{`
         .launcher-pages { min-height: 0; }
         .launcher-page {
-          overflow-y: auto;
-          overscroll-behavior-y: contain;
           padding-top: max(3rem, calc(var(--chrome-top, 24px) + 12px));
           padding-left: max(1.5rem, env(safe-area-inset-left));
           padding-right: max(1.5rem, env(safe-area-inset-right));
         }
-        .launcher-page > * { flex-shrink: 0; }
-        .launcher-pinwheel-content { flex: 0 0 auto; margin-block: auto; }
+        .launcher-pinwheel-content { flex: 1 1 0%; min-height: 0; justify-content: center; }
         .launcher-editing .launcher-page { padding-top: max(5rem, calc(var(--safe-top, 0px) + 4rem)); }
         .launcher-widget-remove {
           position: absolute; top: 0; right: 0; z-index: 30;
@@ -990,7 +983,12 @@ const Launcher: React.FC<{ staticPreview?: boolean }> = ({ staticPreview = false
           font-size: 12px; touch-action: manipulation;
         }
         @media (orientation: landscape) {
-          .launcher-page > * { width: 100%; max-width: 680px; margin-left: auto; margin-right: auto; }
+          .launcher-page {
+            overflow-y: auto;
+            overscroll-behavior-y: contain;
+          }
+          .launcher-page > * { flex-shrink: 0; width: 100%; max-width: 680px; margin-left: auto; margin-right: auto; }
+          .launcher-pinwheel-content { flex: 0 0 auto; min-height: auto; justify-content: flex-start; margin-block: auto; }
           .launcher-page > .launcher-pinwheel-content { max-width: 480px; }
         }
         @media (orientation: landscape) and (min-width: 1000px) {
@@ -1024,7 +1022,7 @@ const Launcher: React.FC<{ staticPreview?: boolean }> = ({ staticPreview = false
       {layoutEditing && (
           <div className="absolute top-[calc(var(--safe-top)+0.65rem)] left-4 right-4 z-50 flex items-center justify-between rounded-full px-3 py-2"
               style={{ background: 'rgba(75,65,54,0.88)', color: '#fffdf8', boxShadow: '0 8px 24px rgba(75,65,54,0.20)' }}>
-              <span className="text-[10px] font-semibold tracking-wide">按住拖动，松手交换位置</span>
+              <span className="text-[10px] font-semibold tracking-wide">按住拖动，可移入空位</span>
               <button onClick={finishLayoutEditing} className="ml-3 px-3 py-1 rounded-full text-[10px] font-bold bg-white/15 active:scale-95">完成</button>
           </div>
       )}
@@ -1186,6 +1184,7 @@ const Launcher: React.FC<{ staticPreview?: boolean }> = ({ staticPreview = false
 
                           <AppGridPage
                                 apps={pageApps}
+                                dense
                                 openApp={openApp}
                                 acnh={acnh}
                                 editing={layoutEditing}
@@ -1260,7 +1259,6 @@ const Launcher: React.FC<{ staticPreview?: boolean }> = ({ staticPreview = false
           onSwitchCharacter={(id) => setScheduleCharId(id)}
           schedule={scheduleData}
           activeCharacter={scheduleChar}
-          contentColor={contentColor}
       />
 
     </div>

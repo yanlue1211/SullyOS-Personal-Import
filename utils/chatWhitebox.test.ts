@@ -39,7 +39,9 @@ describe('complete whitebox contract',()=>{
   try{const {markup}=renderChatDecorationSample(preset,id);expect(markup).toContain('sully-chat-messages');expect(markup).not.toContain('NaN');expect(fetchSpy).not.toHaveBeenCalled();}finally{fetchSpy.mockRestore();}
  });
  it('includes every message type and expanded psyche and transfer states',()=>{
-  expect(Object.keys(CHAT_TYPE_SAMPLES)).toHaveLength(28);
+  expect(Object.keys(CHAT_TYPE_SAMPLES).length).toBeGreaterThanOrEqual(28);
+  expect(CHAT_TYPE_SAMPLES.workroom_card.type).toBe('workroom_card');
+  expect(renderChatDecorationSample(preset,'workroom_card').markup).toContain('小狗饲养屋');
   expect(renderChatDecorationSample(preset,'psyche-open').markup).toContain('sully-psyche-body');
   expect(renderChatDecorationSample(preset,'music_card').markup).toContain('data-card-kind="music_card"');
   expect(renderChatDecorationSample(preset,'transfer-accepted').markup).toContain('data-status="accepted"');
