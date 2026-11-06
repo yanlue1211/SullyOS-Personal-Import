@@ -312,11 +312,20 @@ export function extractApiTokenUsage(response: unknown): { prompt?: number; comp
     const usage = root?.usage || root?.usage_metadata || root?.usageMetadata;
     if (!usage || typeof usage !== 'object') return {};
     const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
+    // Some Gemini relays return 0 in the outer OpenAI-compatible usage while
+    // supplying the actual billed cached tokens in a separate usageMetadata.
+    // Only trust explicitly identified billing sources; never infer cache hits.
+    const billing = root?.usageMetadata?.billing_usage ?? root?.usage_metadata?.billing_usage ?? usage.billing_usage;
+    const billedOpenAI = billing?.source === 'oai_chat' ? billing.openai_usage : undefined;
+    const billedGemini = billing?.source === 'gemini_chat' ? billing.gemini_usage_metadata : undefined;
+    const cached = num(billedOpenAI?.prompt_tokens_details?.cached_tokens ?? billedGemini?.cachedContentTokenCount)
+        ?? num(usage.cache_read_input_tokens ?? usage.prompt_tokens_details?.cached_tokens
+            ?? usage.cachedContentTokenCount ?? usage.total_cached_tokens);
     return {
         prompt: num(usage.prompt_tokens ?? usage.input_tokens ?? usage.promptTokenCount),
         completion: num(usage.completion_tokens ?? usage.output_tokens ?? usage.candidatesTokenCount),
         total: num(usage.total_tokens ?? usage.totalTokenCount),
-        ...(num(usage.cache_read_input_tokens ?? usage.prompt_tokens_details?.cached_tokens) !== undefined ? {cached:num(usage.cache_read_input_tokens ?? usage.prompt_tokens_details?.cached_tokens)} : {}),
+        ...(cached !== undefined ? {cached} : {}),
         ...(num(usage.cache_creation_input_tokens) !== undefined ? {cacheWrite:num(usage.cache_creation_input_tokens)} : {}),
     };
 }
