@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { DB } from '../../utils/db';
 import { isVisibleChatMessage } from '../../utils/chatMessageVisibility';
 
@@ -10,7 +11,7 @@ import { isVisibleChatMessage } from '../../utils/chatMessageVisibility';
  * Prototype limitation: SullyOS Chat must stay mounted, and browser
  * background timers must not be suspended.
  */
-type PetEvent = {id: string; text: string};
+type PetEvent = {id: string; text: string; at?: number};
 type Reply = {ok?: boolean; error?: string; token?: string; events?: PetEvent[]};
 type BridgeState = 'off' | 'connecting' | 'connected' | 'error';
 const URL = 'http://127.0.0.1:18347';
@@ -37,13 +38,15 @@ async function call(path: string, token?: string, body?: unknown): Promise<Reply
 }
 
 type Props = {
+    open: boolean;
+    onClose: () => void;
     charId: string;
     charName: string;
     isTyping: boolean;
     onPetMessage: (text: string, id: string) => Promise<boolean>;
 };
 
-export default function TapNestLocalBridge({charId,charName,isTyping,onPetMessage}:Props) {
+export default function TapNestLocalBridge({open,onClose,charId,charName,isTyping,onPetMessage}:Props) {
     const [state,setState] = useState<BridgeState>('off');
     const [info,setInfo] = useState('');
     const token = useRef('');
@@ -90,6 +93,7 @@ export default function TapNestLocalBridge({charId,charName,isTyping,onPetMessag
         let disposed=false;
         let timer:ReturnType<typeof setTimeout>|null=null;
         let running=false;
+        const pollMs=() => document.visibilityState==='visible' ? 320 : 700;
         const pump=async () => {
             if (disposed || running || !token.current) return;
             running=true;
@@ -107,7 +111,11 @@ export default function TapNestLocalBridge({charId,charName,isTyping,onPetMessag
                             if (accepted) {
                                 pending.current={cursor,deadline:Date.now()+90000,quietSince:0,gotReply:false};
                                 await call('/ack',secret,{ids:[event.id]});
-                                if (alive.current) setInfo('已交给 '+charName+' 的原生聊天，等待回复');
+                                if (alive.current) {
+                                    const elapsed = typeof event.at==='number' ? (Date.now()-event.at)/1000 : NaN;
+                                    const latency = Number.isFinite(elapsed) && elapsed>=0 ? ' · 传输 '+elapsed.toFixed(1)+' 秒' : '';
+                                    setInfo('已送达 '+charName+' 的原生聊天'+latency+'，等待角色回复');
+                                }
                             }
                         } finally { busy.current=false; }
                     }
@@ -133,7 +141,7 @@ export default function TapNestLocalBridge({charId,charName,isTyping,onPetMessag
                         }
                         if(!isTypingRef.current && stateNow.gotReply && !replies.length) {
                             if(!stateNow.quietSince)stateNow.quietSince=Date.now();
-                            if(Date.now()-stateNow.quietSince>8000)pending.current=null;
+                            if(Date.now()-stateNow.quietSince>1800)pending.current=null;
                         }
                     }
                 }
@@ -144,20 +152,52 @@ export default function TapNestLocalBridge({charId,charName,isTyping,onPetMessag
                 }
             } finally {
                 running=false;
-                if(!disposed)timer=setTimeout(pump,1200);
+                if(!disposed)timer=setTimeout(pump,pollMs());
             }
         };
-        timer=setTimeout(pump,550);
-        return ()=>{disposed=true;if(timer)clearTimeout(timer)};
+        const wake=()=>{
+            if(disposed || running || !token.current) return;
+            if(timer) clearTimeout(timer);
+            timer=setTimeout(pump,0);
+        };
+        document.addEventListener('visibilitychange',wake);
+        window.addEventListener('focus',wake);
+        timer=setTimeout(pump,100);
+        return ()=>{
+            disposed=true;
+            if(timer)clearTimeout(timer);
+            document.removeEventListener('visibilitychange',wake);
+            window.removeEventListener('focus',wake);
+        };
     },[state,charId,charName]);
 
-    return <div className="flex items-center gap-2 px-3 py-1 text-[11px] text-slate-500 bg-emerald-50/70">
-        <button type="button" onClick={state==='connected'?disconnect:connect}
-            disabled={state==='connecting'}
-            className="shrink-0 rounded-full px-2 py-1 bg-emerald-100 text-emerald-700 font-semibold disabled:opacity-50"
-            title="使用当前 Char 原生聊天/记忆；不上传记忆库">
-            {state==='connected'?'🐶 断开桌宠':state==='connecting'?'🐶 连接中…':'🐶 连接桌宠'}
-        </button>
-        <span className="min-w-0 truncate">{info||'双击桌宠发送消息 · 需同机开启糯米机聊天页'}</span>
-    </div>;
+    // The component remains mounted while the sheet is closed. Closing the UI
+    // must not interrupt a paired pet or trigger chat reinitialization.
+    if (!open) return null;
+    return createPortal(
+      <div className="fixed inset-0 z-[10000] flex items-end justify-center bg-black/25" onMouseDown={e=>{if(e.target===e.currentTarget)onClose()}}>
+        <div role="dialog" aria-modal="true" aria-label="点点栖桌宠连接" className="mb-safe w-full max-w-md rounded-t-3xl border border-emerald-100 bg-white p-5 shadow-2xl">
+          <div className="mb-3 flex items-center justify-between">
+            <strong className="text-base text-emerald-800">🐶 点点栖 · {charName}</strong>
+            <button type="button" className="rounded-full px-3 py-2 text-slate-500" onClick={onClose} aria-label="收起桌宠连接面板">收起</button>
+          </div>
+          <p className="mb-4 text-sm leading-relaxed text-slate-600">
+            桌宠就是当前 Char 的桌面分身。角色回复由糯米机原生聊天生成，仍使用现有角色与记忆。
+          </p>
+          <button type="button" onClick={state==='connected'?disconnect:connect}
+              disabled={state==='connecting'}
+              className="w-full rounded-xl bg-emerald-100 px-4 py-3 font-semibold text-emerald-800 disabled:opacity-50"
+              title="本机连接；不会导出原生记忆库">
+              {state==='connected'?'断开桌宠连接':state==='connecting'?'正在连接…':'连接桌宠（输入配对码）'}
+          </button>
+          <p role="status" className="mt-3 break-words text-xs leading-relaxed text-slate-500">
+            {info||'使用 AutoJs6 运行桌宠；双击输入；保持糯米机聊天页挂载。'}
+          </p>
+          <p className="mt-2 text-xs leading-relaxed text-amber-700">
+            当前为同机实验版：浏览器进入后台后可能暂停 JS，导致发送变慢。
+          </p>
+        </div>
+      </div>,
+      document.body
+    );
 }
