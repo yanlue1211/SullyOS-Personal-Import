@@ -47,7 +47,7 @@ export default function TapNestLocalBridge({charId,charName,isTyping,onPetMessag
     const [state,setState] = useState<BridgeState>('off');
     const [info,setInfo] = useState('');
     const token = useRef('');
-    const pending = useRef<{cursor: number; deadline: number; quietSince: number}|null>(null);
+    const pending = useRef<{cursor: number; deadline: number; quietSince: number; gotReply: boolean}|null>(null);
     const busy = useRef(false);
     const alive = useRef(true);
     const onMessageRef = useRef(onPetMessage);
@@ -105,7 +105,7 @@ export default function TapNestLocalBridge({charId,charName,isTyping,onPetMessag
                             const cursor=before.reduce((n,m)=>Math.max(n,Number(m.id)||0),0);
                             const accepted=await onMessageRef.current(event.text.slice(0,300),event.id);
                             if (accepted) {
-                                pending.current={cursor,deadline:Date.now()+90000,quietSince:0};
+                                pending.current={cursor,deadline:Date.now()+90000,quietSince:0,gotReply:false};
                                 await call('/ack',secret,{ids:[event.id]});
                                 if (alive.current) setInfo('已交给 '+charName+' 的原生聊天，等待回复');
                             }
@@ -127,12 +127,13 @@ export default function TapNestLocalBridge({charId,charName,isTyping,onPetMessag
                             if (!answer) continue;
                             await call('/speech',secret,{text:answer.slice(0,1000)});
                             stateNow.cursor=Math.max(stateNow.cursor,Number(m.id));
+                            stateNow.gotReply=true;
                             stateNow.quietSince=0;
                             if(alive.current) setInfo(charName+' 已回复桌宠 🐶');
                         }
-                        if(!isTypingRef.current && stateNow.cursor>0 && !replies.length) {
+                        if(!isTypingRef.current && stateNow.gotReply && !replies.length) {
                             if(!stateNow.quietSince)stateNow.quietSince=Date.now();
-                            if(Date.now()-stateNow.quietSince>3000)pending.current=null;
+                            if(Date.now()-stateNow.quietSince>8000)pending.current=null;
                         }
                     }
                 }
