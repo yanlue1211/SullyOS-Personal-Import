@@ -4467,6 +4467,11 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
                         isTyping={isTyping || instantChatPending}
                         onPetMessage={async (text, eventId) => {
                             if (!char || isTyping || instantChatPending) return false;
+                            // At-least-once delivery from the local bridge.
+                            // If the ack was lost after a successful send, do
+                            // not duplicate a real user turn or charge the API twice.
+                            const prior = await DB.getRecentMessagesByCharId(char.id, 100);
+                            if (prior.some(m => m.role === 'user' && m.metadata?.tapnestEventId === eventId)) return true;
                             autoReply.cancel();
                             const accepted = await sendText(text, 'text', {
                                 source: 'tapnest', tapnestEventId: eventId,
