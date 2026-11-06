@@ -7,6 +7,7 @@ import { recordingToWav } from '../features/personal/chatMedia/recording';
 import PersonalMediaComposer from '../features/personal/chatMedia/Composer';
 import {avatarFrameLayer} from '../utils/avatarFrameTarget';
 import ChatRuntimeStyle from '../components/chat/ChatRuntimeStyle';
+import TapNestLocalBridge from '../features/tapnest/TapNestLocalBridge';
 import {homePhoneAppearance,HOME_PHONE_BUBBLES} from './room3d/homePhoneAppearance';
 
 import { publishReplyDisplay, stopReplyRuns } from '../utils/chatReplyCancellation';
@@ -4522,6 +4523,33 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
                         await handleSendText(ref, 'audio', { duration, fileName: 'voice.wav', ...(completedRecognition ? recordingMetadata(completedRecognition, true) : {}) });
                     } else await handleSendText(content, 'text');
                 }} />}
+                {/* TapNest desktop-pet experiment: opt-in, foreground-only,
+                    calls the exact existing sendText + useChatAI trigger pipeline.
+                    No independent model/API settings or memory copies. */}
+                {!homePhone && char && (
+                  <TapNestLocalBridge
+                    key={char.id}
+                    charId={char.id}
+                    charName={char.name}
+                    isTyping={isTyping || instantChatPending}
+                    onPetMessage={async (message, eventId) => {
+                      if (!char || isTyping || instantChatPending) return false;
+                      // Explicit deskpet send should reply immediately, regardless
+                      // of chat's normal manual/automatic send preferences.
+                      // A lost ack can retry an already-persisted user turn.
+                      const prior = await DB.getRecentMessagesByCharId(char.id, 100);
+                      if (prior.some(m => m.role === 'user' && m.metadata?.tapnestEventId === eventId)) return true;
+                      autoReply.cancel();
+                      const sent = await sendText(message, 'text', {
+                        source: 'tapnest', tapnestEventId: eventId,
+                      });
+                      if (sent !== true) return false;
+                      const recent = await DB.getRecentMessagesByCharId(char.id, 200);
+                      void triggerAI(recent); // existing SAR, recall, caches & memories
+                      return true;
+                    }}
+                  />
+                )}
                 <ChatInputArea
                     personalMediaEnabled
                     compactHome={!!homePhone}
