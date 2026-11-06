@@ -159,6 +159,20 @@ describe('one-shot full API request capture', () => {
             .toEqual({ prompt: 70, completion: 20, total: undefined });
         expect(extractApiTokenUsage({ usageMetadata: { promptTokenCount: 80, candidatesTokenCount: 10, totalTokenCount: 90 } }))
             .toEqual({ prompt: 80, completion: 10, total: 90 });
+        // Gemini-compatible relay may expose billing usage separately from the
+        // zero-valued outer usage. Display billed cache reads without inventing writes.
+        expect(extractApiTokenUsage({
+            usage: { prompt_tokens: 32786, completion_tokens: 84, total_tokens: 32870, prompt_tokens_details: { cached_tokens: 0 } },
+            usageMetadata: { cachedContentTokenCount: 0, billing_usage: { source: 'oai_chat',
+                openai_usage: { prompt_tokens: 32786, prompt_tokens_details: { cached_tokens: 30727 } } } },
+        })).toEqual({ prompt: 32786, completion: 84, total: 32870, cached: 30727 });
+        expect(extractApiTokenUsage({
+            usageMetadata: { promptTokenCount: 9000, candidatesTokenCount: 20, totalTokenCount: 9020, cachedContentTokenCount: 8400 },
+        })).toEqual({ prompt: 9000, completion: 20, total: 9020, cached: 8400 });
+        expect(extractApiTokenUsage({
+            usage: { prompt_tokens: 8000, completion_tokens: 15, prompt_tokens_details: { cached_tokens: 0 } },
+        })).toEqual({ prompt: 8000, completion: 15, total: undefined, cached: 0 });
+
     });
 
     it('backfills the real response usage into the same one-shot capture', async () => {
