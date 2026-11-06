@@ -6,6 +6,7 @@ import {realMediaContent} from '../../../features/experience/format';
 import type {ExperienceMessage} from '../../../features/experience/media';
 import {oracleContext} from '../../../features/experience/oracle';
 import {materializeVisionDescriptions} from '../../../utils/visionApi';
+import { selectCurrentStoryMedia } from '../../../utils/storyTheaterVisionTurn';
 import {resolveBlobRefsInRequestBody} from '../../../utils/apiBlobRefs';
 import {meetingAppearance} from '../../../utils/meetingAppearance';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -773,9 +774,7 @@ const StoryTheaterSession: React.FC<Props> = ({ entry, preset, masks, onBack, on
             // Reroll: userMessageId is the previous user turn.
             // Retry: userMessageId is the pending user turn.
             // Continue/new text: do not reattach historical images.
-            const turnMedia = userMessageId > 0
-                ? current.find(message => message.id === userMessageId && message.role === 'user' && message.metadata?.realMedia)
-                : undefined;
+            const turnMedia = selectCurrentStoryMedia(current, userMessageId);
             if (turnMedia) {
                 const prepared = (await materializeVisionDescriptions([turnMedia], apiConfig.visionApi))[0];
                 const evidence = {
