@@ -765,8 +765,26 @@ const StoryTheaterSession: React.FC<Props> = ({ entry, preset, masks, onBack, on
             if (promptEntry.forceUserLastMessage && payload[payload.length - 1]?.role !== 'user') {
                 payload.push({ role: 'user', content: '请按以上要求继续本轮剧情。' });
             }
-            const latestMedia=[...current].reverse().find(m=>m.metadata?.realMedia);
-            if(latestMedia){const prepared=(await materializeVisionDescriptions([latestMedia],apiConfig.visionApi))[0];const evidence={role:'user',content:realMediaContent(prepared,apiConfig.visionApi?.enabled===true)};const index=compiled.assistantPrefill&&!promptEntry.forceUserLastMessage?payload.length-1:payload.length;payload.splice(index,0,evidence as any);}
+            // Image evidence belongs ONLY to the user turn being answered.
+            // Previously picking the latest image from all historical messages
+            // re-injected the SAME old photo in every later story turn, causing
+            // the actor to repeatedly see and discuss it.
+            //
+            // Reroll: userMessageId is the previous user turn.
+            // Retry: userMessageId is the pending user turn.
+            // Continue/new text: do not reattach historical images.
+            const turnMedia = userMessageId > 0
+                ? current.find(message => message.id === userMessageId && message.role === 'user' && message.metadata?.realMedia)
+                : undefined;
+            if (turnMedia) {
+                const prepared = (await materializeVisionDescriptions([turnMedia], apiConfig.visionApi))[0];
+                const evidence = {
+                    role: 'user',
+                    content: realMediaContent(prepared, apiConfig.visionApi?.enabled === true),
+                };
+                const index = compiled.assistantPrefill && !promptEntry.forceUserLastMessage ? payload.length - 1 : payload.length;
+                payload.splice(index, 0, evidence as any);
+            }
             let promptTokenCount = estimateStoryTokens(payload.map(message => `${message.role}\n${message.content}`).join('\n'));
             let promptTokenCountExact = false;
             setContextTokens(promptTokenCount);
