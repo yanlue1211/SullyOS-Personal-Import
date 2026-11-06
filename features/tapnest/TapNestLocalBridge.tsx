@@ -57,6 +57,19 @@ export default function TapNestLocalBridge({open,onClose,charId,charName,isTypin
     const isTypingRef = useRef(isTyping);
     onMessageRef.current = onPetMessage;
     isTypingRef.current = isTyping;
+    // The shell owns the Chat keep-alive lifecycle only while paired.
+    // Hiding the optional pairing sheet does not emit any disconnect event.
+    useEffect(() => {
+        window.dispatchEvent(new CustomEvent('tapnest-bridge-pairing', {
+            detail: { connected: state === 'connected' },
+        }));
+    }, [state]);
+    useEffect(() => () => {
+        window.dispatchEvent(new CustomEvent('tapnest-bridge-pairing', {
+            detail: { connected: false },
+        }));
+    }, []);
+
 
     useEffect(() => {
         alive.current=true;
