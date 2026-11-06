@@ -18,7 +18,7 @@ const URL = 'http://127.0.0.1:18347';
 
 async function call(path: string, token?: string, body?: unknown): Promise<Reply> {
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 7000);
+    const timer = setTimeout(() => ctrl.abort(), path === '/watch' ? 17000 : 7000);
     try {
         const init: RequestInit & {targetAddressSpace?: string} = {
             method: body ? 'POST' : 'GET', mode: 'cors', cache: 'no-store',
@@ -100,7 +100,7 @@ export default function TapNestLocalBridge({open,onClose,charId,charName,isTypin
             try {
                 const secret=token.current;
                 if (!pending.current && !busy.current && !isTypingRef.current) {
-                    const result=await call('/events',secret);
+                    const result=await call('/watch',secret);
                     const event=result.events?.find(e=>e && typeof e.id==='string' && typeof e.text==='string' && e.text.trim());
                     if (event && !disposed) {
                         busy.current=true;
