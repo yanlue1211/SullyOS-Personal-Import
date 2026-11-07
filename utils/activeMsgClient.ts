@@ -22,7 +22,7 @@ import {
   UserProfile,
 } from '../types';
 import { getLastRealUserMessageAt } from './amsg2ExpireGuard';
-import { resolveAmsgInteractionLock, isAmsgActiveCall, isAmsgActiveDate } from './amsgInteractionGuard';
+import { resolveAmsgInteractionLock, isAmsgActiveCall, isAmsgActiveDate, getAmsgActiveDateEncounterId, getAmsgDateEndedAt } from './amsgInteractionGuard';
 import { AMSG_BUNDLE_VERSION } from './amsgBundleVersion';
 import { parseAmsgSelfUpdateState, type AmsgSelfUpdateReport } from './amsgSelfUpdateState';
 import { AMSG_AWAY_DELAY_META, AMSG_AWAY_MESSAGE_META, buildAwayTaskInstruction, buildTaskInstruction, resolveSendAtMs } from './amsgFireSchedule';
@@ -1568,7 +1568,8 @@ const buildLimitsEntry = (char: CharacterProfile, updatedAt: number) => ({
   owner: { type: 'character', id: char.id, label: char.name },
   key: AMSG_LIMITS_KEY,
   value: JSON.stringify(buildAmsgLimitsRecord(char.activeMsg2Config, isAmsg2EnabledForChar(char), char.awayMessage?.quietHours, char.awayMessage,
-    isAmsgActiveCall(char.id) ? 'call' : isAmsgActiveDate(char.id) ? 'date' : null)),
+    isAmsgActiveCall(char.id) ? 'call' : isAmsgActiveDate(char.id) ? 'date' : null,
+    getAmsgActiveDateEncounterId(char.id), getAmsgDateEndedAt(char.id))),
   updatedAt,
 });
 
@@ -2594,6 +2595,8 @@ export const ActiveMsgClient = {
       expirePolicy?: ActiveMsg2ExpirePolicy;
       /** 角色自己排的（工具桥传 true）。带上 metadata 标记，连发上限的到点兜底闸只拦它。 */
       selfScheduled?: boolean;
+      /** 仅线下会话预约：实际发送线上消息后结束这次见面，不能作用于新见面。 */
+      dateExitEncounterId?: string;
       /** 离开后消息（见 docs/away-message.md）：不占任务名额，指令换成「对方离开了这么久」那份。 */
       away?: { delayMinutes: number };
     };
@@ -2668,6 +2671,7 @@ export const ActiveMsgClient = {
         amsgExpirePolicy: resolveExpirePolicy(task.mode, task.expirePolicy),
         // 自排标记：到点兜底闸只拦带它的任务（用户面板排的不带、不受连发上限管）。
         ...(task.selfScheduled ? { amsgSelfScheduled: true } : {}),
+        ...(task.selfScheduled && task.dateExitEncounterId ? { amsgDateExitEncounterId: task.dateExitEncounterId } : {}),
         ...(task.away ? { [AMSG_AWAY_MESSAGE_META]: true, [AMSG_AWAY_DELAY_META]: task.away.delayMinutes } : {}),
       },
     };
