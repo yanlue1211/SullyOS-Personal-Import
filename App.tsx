@@ -11,6 +11,7 @@ import VRBroadcast from './components/VRBroadcast';
 import WorldBroadcast from './components/WorldBroadcast';
 import ChatBroadcast from './components/ChatBroadcast';
 import WebUpdateNotice from './components/WebUpdateNotice';
+import AmsgOwnerConflictNotice from './components/AmsgOwnerConflictNotice';
 import { isIOSStandaloneWebApp } from './utils/iosStandalone';
 import { installDevDebugLifecycleCapture } from './utils/devDebug';
 
@@ -47,6 +48,7 @@ const App: React.FC = () => {
             <IncomingCallOverlay />
             <Amsg2DebugPanel />
             <WebUpdateNotice />
+            <AmsgOwnerConflictNotice />
           </OSProvider>
         </div>
       </div>

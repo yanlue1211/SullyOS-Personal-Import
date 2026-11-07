@@ -19,6 +19,7 @@ import {
     isAccountScopedToken,
     uploadWorkerScript,
     ensureSubdomain,
+    guardReusedDatabase,
     type AmsgSecrets,
 } from './cfProvision';
 
@@ -434,6 +435,69 @@ describe('ensureSubdomain', () => {
 
         expect(result).toEqual({ ok: true, subdomain: 'kaede' });
         expect(seen).toContain('PUT /accounts/acc-1/workers/subdomain');
+    });
+});
+
+describe('one-click deployment: never replace the old Master Key silently', () => {
+    const base = { token: 'fake', accountId: 'account-1', databaseId: 'db-1', databaseName: 'sullyos-amsg' };
+    const fakeD1 = (tables: string[], hasData: boolean, responseInvalid = false) => {
+        const sqls: string[] = [];
+        vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+            const sql = String(JSON.parse(String(init?.body ?? '{}')).sql ?? '');
+            sqls.push(sql);
+            const rows = sql.includes('sqlite_master')
+                ? tables.map(name => ({ name }))
+                : sql.includes('has_data') ? [{ has_data: Number(hasData) }] : [];
+            const response = responseInvalid ? {} : { success: true, result: [{ results: rows }] };
+            return new Response(JSON.stringify(response), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }));
+        return sqls;
+    };
+    afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+    it('已有加密任务而缺旧钥匙时拦截部署，绝不自动执行 DELETE', async () => {
+        const sqls = fakeD1(['client_state','scheduled_messages'], true);
+        const result = await guardReusedDatabase({ ...base, hasExistingMasterKey: false });
+        expect(result).toMatchObject({ ok: false, code: 'DATABASE_KEY_MISSING' });
+        expect(sqls.some(x => x.includes('DELETE'))).toBe(false);
+    });
+    it('旧钥匙存在时无需破坏性数据库探测，仍能沿用', async () => {
+        const sqls = fakeD1(['client_state'], true);
+        expect(await guardReusedDatabase({ ...base, hasExistingMasterKey: true }))
+            .toEqual({ ok: true, cleared: false });
+        expect(sqls).toHaveLength(0);
+    });
+    it('数据库空表或者没有加密表，直接允许部署', async () => {
+        fakeD1(['client_state','scheduled_messages','d1_migrations'], false);
+        expect(await guardReusedDatabase({ ...base, hasExistingMasterKey: false }))
+            .toEqual({ ok: true, cleared: false });
+    });
+    it('用户明确确认后，只清理已知 AMSG 数据表，决不碰 D1 和 SQLite 内部表', async () => {
+        const sqls = fakeD1(['scheduled_messages','client_state','worker_diagnostics','sqlite_sequence','d1_migrations','_cf_KV'], true);
+        expect(await guardReusedDatabase({ ...base, hasExistingMasterKey: false, reset: true }))
+            .toEqual({ ok: true, cleared: true });
+        expect(sqls.filter(x => x.startsWith('DELETE'))).toEqual([
+            'DELETE FROM "scheduled_messages"', 'DELETE FROM "client_state"', 'DELETE FROM "worker_diagnostics"',
+        ]);
+    });
+    it('旧库含不认识的业务表时，即使确认重置也阻止误删', async () => {
+        const sqls = fakeD1(['client_state','important_unrelated_table'], true);
+        const result = await guardReusedDatabase({ ...base, hasExistingMasterKey: false, reset: true });
+        expect(result).toMatchObject({ ok: false, code: 'CF_ERROR' });
+        expect(sqls.filter(x => x.startsWith('DELETE'))).toHaveLength(0);
+    });
+    it('没有加密表但是同名库被别的业务占用时，不碰任何已有表', async () => {
+        const sqls = fakeD1(['unrelated_private_data'], true);
+        expect(await guardReusedDatabase({ ...base, hasExistingMasterKey: false }))
+            .toMatchObject({ ok: false, code: 'CF_ERROR' });
+        expect(sqls.some(x => x.startsWith('DELETE'))).toBe(false);
+    });
+
+    it('Cloudflare 回了异常结构，禁止误把未知状态判断为空库', async () => {
+        const sqls = fakeD1(['client_state'], true, true);
+        expect(await guardReusedDatabase({ ...base, hasExistingMasterKey: false }))
+            .toMatchObject({ ok: false, code: 'CF_ERROR' });
+        expect(sqls.some(x => x.startsWith('DELETE'))).toBe(false);
     });
 });
 

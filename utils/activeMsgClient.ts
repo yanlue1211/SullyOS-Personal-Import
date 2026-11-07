@@ -1,7 +1,7 @@
 import { usesHumanStyle, usesInnerVoice, INNER_VOICE_FORMAT_REMINDER, CHAT_EXPRESSION_TAIL_REMINDER } from './chatPromptPreferences';
 import { buildChatOutputStylePrompt, readChatTranslationConfig } from './chatOutputStylePrompt';
 import { buildReproductionTask, DIAGNOSTIC_NAMESPACE, diagnosticRunId, type DiagnosticEvent } from './amsgReproduction';
-import { resolveDialogueApi } from './characterApi';
+import { resolveScheduledMessageApi } from './characterApi';
 import { isAnthropicEndpoint, isGeminiEndpoint } from './llmEndpoint';
 import { ackStoppedReplyReceipts, stoppedReplyStateEntries } from './amsgStoppedReplyClient';
 import { loadCharacterContextMessages } from './chatContextRange';
@@ -24,10 +24,11 @@ import {
   UserProfile,
 } from '../types';
 import { getLastRealUserMessageAt } from './amsg2ExpireGuard';
+import { resolveAmsgInteractionLock, isAmsgActiveCall, isAmsgActiveDate, getAmsgActiveDateEncounterId, getAmsgDateEndedAt } from './amsgInteractionGuard';
 import { AMSG_BUNDLE_VERSION } from './amsgBundleVersion';
 import { describeD1LimitCode } from './amsgD1Limits';
 import { explainCfTokenRejection, parseAmsgSelfUpdateState, type AmsgSelfUpdateReport } from './amsgSelfUpdateState';
-import { buildTaskInstruction, resolveSendAtMs } from './amsgFireSchedule';
+import { AMSG_AWAY_DELAY_META, AMSG_AWAY_MESSAGE_META, buildAwayTaskInstruction, buildTaskInstruction, resolveSendAtMs } from './amsgFireSchedule';
 import {
   getPendingTasks, isAmsg2EnabledForChar,
   parseRemoteTaskLastError, RemoteTaskLastError, type RemoteTaskProjection,
@@ -98,6 +99,7 @@ import {
 } from './amsgFirePack';
 import {
   AMSG_BACKGROUND_JOB_SUBTYPE,
+  classifyTaskRow,
   AMSG_JOB_ID_KEY,
   AMSG_JOB_NAMESPACE,
   AMSG_TASK_KIND_KEY,
@@ -589,7 +591,7 @@ const initializeClient = (config: ActiveMsg2GlobalConfig) => {
 };
 
 const resolveApiConfig = (char: CharacterProfile, _config: ActiveMsg2CharacterConfig, apiConfig: APIConfig) => {
-  const source = resolveDialogueApi(apiConfig, char, apiConfig.proactiveApi?.baseUrl ? apiConfig.proactiveApi : undefined);
+  const source = resolveScheduledMessageApi(apiConfig, char, _config);
 
   if (!source.baseUrl || !source.apiKey || !source.model) {
     throw new Error('主动消息 2.0 缺少可用的 API URL / Key / Model。');
@@ -683,7 +685,12 @@ const putLlmCredentialRows = async (
   for (const batch of chunkCredRows(pending)) {
     const response = await client.putLlmCredentials(batch.map(row => stampCloudWrite(client, row)));
     if (!response?.success) {
-      throw new Error(formatAmsgServerError(response, '登记 LLM 凭据失败。'));
+      // 保留服务端的结构化原因，允许同步层按角色拆分「已停用」批次；
+      // 其他错误原样抛出，不会误将鉴权/网络故障当成角色停用。
+      const cause = response?.error?.cause as { code?: unknown } | undefined;
+      const code = typeof cause?.code === 'string'
+        ? cause.code : response?.error?.code;
+      throw Object.assign(new Error(formatAmsgServerError(response, '登记 LLM 凭据失败。')), { code });
     }
     // 逐批记账：后面那批失败时，前面已经落地的不必再传一遍。
     rememberCredRows(batch);
@@ -714,7 +721,7 @@ const formatHistoryLine =(role: string, content: any, char: CharacterProfile, us
 };
 
 const buildTimeGapHint = async (charId: string) => {
-  const recentMessages = await DB.getRecentMessagesByCharId(charId, 200);
+  const recentMessages = await DB.getRecentMessagesByCharId(charId, 200, true);
   return {
     // 时间差在渲染时刻才算（formatTimeSinceUser），这里只取原始时间戳——
     // 满血链路会把它放进 fire_pack，worker 到点用「fire 时刻」重算，不吃排程时的陈旧值。
@@ -781,7 +788,7 @@ export const buildFirePack = async (
     const { buildRoomPlatesInjection } = await import('./memoryPalace/roomPlates');
     char.roomPlatesInjection = await buildRoomPlatesInjection(char.id, userProfile.name);
   }
-  const [{ lastUserMessageAt }, recentMessages, library, schedule] = await Promise.all([
+  const [{ lastUserMessageAt, recentMessages: activityMessages }, recentMessages, library, schedule] = await Promise.all([
     buildTimeGapHint(char.id),
     templateStub ? Promise.resolve([]) : loadCharacterContextMessages(char),
     // 表情库只喂系统提示词/近史渲染：占位模板路径整库都不用读（表情记录带图片数据，
@@ -952,6 +959,7 @@ export const buildFirePack = async (
     template,
     thinkingChainEnabled: outputStyle.thinkingActive,
     lastUserMessageAt,
+    awaySceneLock: resolveAmsgInteractionLock(activityMessages, isAmsgActiveCall(char.id), isAmsgActiveDate(char.id)),
     // 角色的时间参照系（见上面的 tzId / userTzId）：前者是角色自己的钟，后者是用户那边的，
     // worker 渲染时两者各管各的一行，绝不混用。
     tzId,
@@ -1213,6 +1221,12 @@ const formatAmsgErrorDetails = (details: unknown, topLevel?: Record<string, unkn
   return parts.join('；');
 };
 
+/** Preserve existing encrypted schedules: never recommend clearing cloud data before restoring original master key. */
+const STORED_DATA_UNDECRYPTABLE_CODE = 'STORED_DATA_UNDECRYPTABLE';
+const STORED_DATA_UNDECRYPTABLE_HINT =
+  'Worker 无法用当前 Master Key 解密已有云端数据。请先尝试找回并恢复原密钥，勿直接重装或清库。'
+  + '若确实决定放弃旧云端排程与状态，可在确认后手动从设置「高级信息」清空云端数据，再点「重新连接并验证」；清空操作不可撤销。';
+
 const formatAmsgErrorCause = (cause: unknown): string => {
   if (typeof cause === 'string') return cause.trim();
   if (!cause || typeof cause !== 'object' || Array.isArray(cause)) return '';
@@ -1222,6 +1236,9 @@ const formatAmsgErrorCause = (cause: unknown): string => {
   if (limitText) return `${limitText}（${code}）`;
   const name = typeof c.name === 'string' ? c.name.trim() : '';
   const message = typeof c.message === 'string' ? c.message.trim() : '';
+  if (code === STORED_DATA_UNDECRYPTABLE_CODE || (name === 'OperationError' && /decrypt/i.test(message))) {
+    return `${STORED_DATA_UNDECRYPTABLE_HINT}（${code || name}）`;
+  }
   const head = code
     ? (message.startsWith(code) ? '' : code)
     : (name && name !== 'Error' ? name : '');
@@ -1234,6 +1251,9 @@ export const formatAmsgErrorObject = (errorObj: unknown): string => {
   const err = errorObj as Record<string, unknown>;
   const message = typeof err.message === 'string' ? err.message.trim() : '';
   const code = typeof err.code === 'string' ? err.code.trim() : '';
+  if (code === STORED_DATA_UNDECRYPTABLE_CODE) {
+    return `${STORED_DATA_UNDECRYPTABLE_HINT}（${code}）`;
+  }
   const detailsText = formatAmsgErrorDetails(err.details, err);
   const causeText = formatAmsgErrorCause(err.cause);
 
@@ -1590,7 +1610,9 @@ const buildLimitsEntry = (char: CharacterProfile, updatedAt: number) => ({
   namespace: amsgStateNamespace(char.id),
   owner: { type: 'character', id: char.id, label: char.name },
   key: AMSG_LIMITS_KEY,
-  value: JSON.stringify(buildAmsgLimitsRecord(char.activeMsg2Config, isAmsg2EnabledForChar(char))),
+  value: JSON.stringify(buildAmsgLimitsRecord(char.activeMsg2Config, isAmsg2EnabledForChar(char), char.awayMessage?.quietHours, char.awayMessage,
+    isAmsgActiveCall(char.id) ? 'call' : isAmsgActiveDate(char.id) ? 'date' : null,
+    getAmsgActiveDateEncounterId(char.id), getAmsgDateEndedAt(char.id))),
   updatedAt,
 });
 
@@ -1760,6 +1782,18 @@ const subscribeOrThrow = async (
   throw withFailKind(new Error(message), failure ? SUBSCRIBE_FAIL_KIND[failure.kind] : '订阅失败');
 };
 
+/**
+ * amsg-client 对部分 Worker 4xx/5xx 只返回失败信封，不会抛异常。
+ * 登记不成功就必须报错，避免误认为推送可用而丢失后续线上主动消息。
+ */
+const putPushSubscriptionOrThrow = async (
+  client: ReiClient,
+  subscription: Parameters<ReiClient['putPushSubscription']>[0],
+): Promise<void> => {
+  const response = await client.putPushSubscription(subscription);
+  if (!response?.success) throw new Error(formatAmsgServerError(response, 'Worker 没有收下推送订阅。'));
+};
+
 /** 重置的公共尾段：拿 worker 的 VAPID → 重新订阅 → 覆盖登记回 worker。 */
 const resubscribeAndRegister = async (client: ReiClient): Promise<void> => {
   const vapidPublicKey = await fetchWorkerVapidKey(client);
@@ -1767,7 +1801,7 @@ const resubscribeAndRegister = async (client: ReiClient): Promise<void> => {
   const sub = await subscribeOrThrow(registration, vapidPublicKey);
 
   try {
-    await client.putPushSubscription(sub);
+    await putPushSubscriptionOrThrow(client, sub);
   } catch (error) {
     throw normalizeActiveMsgApiError(error, '登记推送订阅');
   }
@@ -1996,7 +2030,7 @@ export const ActiveMsgClient = {
     const config = await ensureWorkerReady();
     if (config.pushMode === 'third-party') return;
     const client = await initializeClient(config);
-    await client.putPushSubscription({ endpoint: `fcm:${value}` });
+    await putPushSubscriptionOrThrow(client, { endpoint: `fcm:${value}` });
   },
 
   async getGlobalConfig() {
@@ -2192,7 +2226,7 @@ export const ActiveMsgClient = {
     const client = await initializeClient(config);
     const subscription = await this.ensurePushSubscription();
     try {
-      await client.putPushSubscription(subscription);
+      await putPushSubscriptionOrThrow(client, subscription);
     } catch (error) {
       throw normalizeActiveMsgApiError(error, '登记推送订阅');
     }
@@ -2277,7 +2311,7 @@ export const ActiveMsgClient = {
         console.warn('[ActiveMsg] 重置推送订阅：删除 Worker 旧订阅失败，继续覆盖', error);
       }
       const subscription = await this.ensurePushSubscription();
-      await client.putPushSubscription(subscription);
+      await putPushSubscriptionOrThrow(client, subscription);
       return;
     }
 
@@ -2380,7 +2414,7 @@ export const ActiveMsgClient = {
         if (!subscription?.endpoint || !subscription.keys?.p256dh || !subscription.keys?.auth) return 'skipped';
         const config = await ensureWorkerReady();
         const client = await initializeClient(config);
-        await client.putPushSubscription({ endpoint: subscription.endpoint, keys: subscription.keys });
+        await putPushSubscriptionOrThrow(client, { endpoint: subscription.endpoint, keys: subscription.keys });
         return 'registered';
       } catch (error) {
         console.warn('[ActiveMsg] 连接后补登记 UnifiedPush 订阅失败', error);
@@ -2510,7 +2544,9 @@ export const ActiveMsgClient = {
    */
   async listRemoteTasksForChar(charId: string): Promise<RemoteTaskProjection[]> {
     const tasks = await this.listAllTasks();
-    if (tasks.length > 0 && tasks.every((t) => t?.charId == null)) {
+    // 新 Worker 3.2+ 解不开的任务本来就没 charId；不能据此误判成老 Worker。
+    const readable = tasks.filter((t) => !t?.error);
+    if (readable.length > 0 && readable.every((t) => t?.charId == null)) {
       throw new Error('worker 版本过旧：任务列表没有 charId 投影，无法按角色对账，请在设置里重新粘贴部署。');
     }
     return tasks
@@ -2709,7 +2745,7 @@ export const ActiveMsgClient = {
     let targets: string[];
     try {
       targets = (await this.listRemoteTasksForChar(charId))
-        .filter((task) => task.messageSubtype !== AMSG_INSTANT_CHAT_SUBTYPE)
+        .filter((task) => classifyTaskRow(task) === 'scheduled')
         .map((task) => task.uuid);
     } catch {
       targets = localTaskUuids;
@@ -2736,6 +2772,10 @@ export const ActiveMsgClient = {
       expirePolicy?: ActiveMsg2ExpirePolicy;
       /** 角色自己排的（工具桥传 true）。带上 metadata 标记，连发上限的到点兜底闸只拦它。 */
       selfScheduled?: boolean;
+      /** 仅线下会话预约：实际发送线上消息后结束这次见面，不能作用于新见面。 */
+      dateExitEncounterId?: string;
+      /** 离开后消息（见 docs/away-message.md）：不占任务名额，指令换成「对方离开了这么久」那份。 */
+      away?: { delayMinutes: number };
     };
     /** 编辑/续期时传旧任务 uuid：先取消它再新建（不传 = 纯新建）。 */
     replaceTaskUuid?: string;
@@ -2759,7 +2799,8 @@ export const ActiveMsgClient = {
     const maxActiveTasks = resolveAmsgLimits(config).maxActiveTasks;
     const pendingOthers = getPendingTasks(config, Date.now())
       .filter((t) => t.taskUuid !== replaceTaskUuid);
-    if (pendingOthers.length >= maxActiveTasks) {
+    // 离开后消息是用户开的系统任务，不跟角色抢名额；名额满时它也不能建不出来。
+    if (!task.away && pendingOthers.length >= maxActiveTasks) {
       throw new Error(`该角色已经排好了 ${maxActiveTasks} 次主动消息，到上限了（上限在「主动频率」里调），请先取消或合并已有的。`);
     }
 
@@ -2777,7 +2818,7 @@ export const ActiveMsgClient = {
       : await buildFirePack(char, userProfile, groups, realtimeConfig);
     // 任务身份：客户端自造 clientTaskId——远端 uuid 要创建成功后才有，而 metadata
     // 必须在创建时就带上归属键；push 原样透传，送达归属全靠它。
-    const clientTaskId = crypto.randomUUID();
+    const clientTaskId = task.away ? `away-${crypto.randomUUID()}` : crypto.randomUUID();
 
     const remoteAvatarUrl = toRemoteAvatarUrl(char.avatar);
     const payload: Record<string, any> = {
@@ -2808,6 +2849,8 @@ export const ActiveMsgClient = {
         amsgExpirePolicy: resolveExpirePolicy(task.mode, task.expirePolicy),
         // 自排标记：到点兜底闸只拦带它的任务（用户面板排的不带、不受连发上限管）。
         ...(task.selfScheduled ? { amsgSelfScheduled: true } : {}),
+        ...(task.selfScheduled && task.dateExitEncounterId ? { amsgDateExitEncounterId: task.dateExitEncounterId } : {}),
+        ...(task.away ? { [AMSG_AWAY_MESSAGE_META]: true, [AMSG_AWAY_DELAY_META]: task.away.delayMinutes } : {}),
       },
     };
 
@@ -2824,7 +2867,9 @@ export const ActiveMsgClient = {
       const activeApi = resolveApiConfig(char, config, apiConfig);
       await requireAnthropicWorker([normalizeChatApiUrl(activeApi.baseUrl, activeApi.apiType)]);
       // 「本次任务」指令随任务 metadata 走，worker 到点拿它填 fire_pack 的指令槽。
-      payload.metadata.amsgTaskInstruction = buildTaskInstruction(task.mode, task.promptHint);
+      payload.metadata.amsgTaskInstruction = task.away
+        ? buildAwayTaskInstruction(task.away.delayMinutes)
+        : buildTaskInstruction(task.mode, task.promptHint);
       // 服务端要求「completePrompt 或 messages」二选一，且 messages 必须非空、
       // content 必须非空字符串，所以这里给一条占位。到点真正发给 LLM 的 messages 由
       // worker 的 onBeforeFire 返回值覆盖（库用 { ...payload, messages } 调 LLM），
@@ -3134,6 +3179,8 @@ export const ActiveMsgClient = {
     char: CharacterProfile;
     /** 本地生成会 POST 给 /chat/completions 的那串 fullMessages，原样带上去。 */
     chatMessages: Array<{ role: string; content: unknown }>;
+    /** Worker 时效信息的注入位置；缺失时兼容旧版末尾追加。 */
+    timelyInsertAt?: number;
     /**
      * 这一轮该用的聊天凭据——**必须是本地生成那一轮会用的同一份**（effectiveApi）。
      */
@@ -3190,7 +3237,12 @@ export const ActiveMsgClient = {
       ...(await buildFirePack(char, userProfile, groups, realtimeConfig, undefined, { templateStub })),
       // 先还原图片令牌再算体积预算——反过来会让一份「看着没超」的包在云端胀成几 MB，
       // 而 worker 那边根本解不开令牌（见 resolveChatMessagesForUpload）。
-      chat: { messages: toFirePackChatMessages(await resolveChatMessagesForUpload(chatMessages)), builtAt: now },
+      chat: {
+        messages: toFirePackChatMessages(await resolveChatMessagesForUpload(chatMessages)),
+        builtAt: now,
+        ...(params.timelyInsertAt !== undefined && params.timelyInsertAt >= 0
+          ? { timelyInsertAt: params.timelyInsertAt } : {}),
+      },
     };
 
     const clientTaskId = crypto.randomUUID();
@@ -4001,7 +4053,8 @@ export const ActiveMsgClient = {
       for (const remote of remoteTasks) {
         if (remote.charId !== char.id || remote.status !== 'pending') continue;
         if (remote.messageType !== 'auto' && remote.messageType !== 'prompted') continue;
-        if (remote.messageSubtype === AMSG_INSTANT_CHAT_SUBTYPE) {
+        const rowClass = classifyTaskRow(remote);
+        if (rowClass === 'instant-chat') {
           // 上游自排会继承父任务的 subtype。只看标签会漏掉从即时对话排出的子任务；
           // 读 metadata 确认是自排任务，不能改用户正在等待的那一轮即时回复。
           try {
@@ -4017,12 +4070,12 @@ export const ActiveMsgClient = {
             }
             const client = await initializeClient(globalConfig);
             const metadata = (await decryptPayload(client, response.data))?.task?.metadata;
-            if (metadata?.amsgInstantChat || metadata?.amsgSelfScheduled !== true) continue;
+            if (classifyTaskRow({ ...remote, metadata }) !== 'scheduled') continue;
           } catch {
             failed += 1;
             continue;
           }
-        } else if (remote.messageSubtype && remote.messageSubtype !== 'chat') continue;
+        } else if (rowClass !== 'scheduled') continue;
         tasksByUuid.set(remote.uuid, { taskUuid: remote.uuid, mode: remote.messageType } as ActiveMsg2TaskRecord);
       }
       const tasks = [...tasksByUuid.values()];

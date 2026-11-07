@@ -1038,6 +1038,31 @@ var buildLimitsBrief = (input) => {
   return ["\u7528\u6237\u7ED9\u4F60\u5B9A\u7684\u89C4\u77E9\uFF08\u7CFB\u7EDF\u7167\u7740\u6267\u884C\uFF1A\u8D85\u51FA\u7684\u6392\u4E0D\u4E0A\uFF0C\u6392\u4E0A\u4E86\u5230\u70B9\u4E5F\u4E0D\u53D1\uFF09\uFF1A", ...lines].join("\n");
 };
 
+// utils/amsgTaskKinds.ts
+var AMSG_TASK_KIND_KEY = "amsgKind";
+var readTaskKind = (metadata) => {
+  const raw = metadata?.[AMSG_TASK_KIND_KEY];
+  return typeof raw === "string" && raw ? raw : null;
+};
+var AMSG_BACKGROUND_JOB_SUBTYPE = "job";
+var AMSG_INSTANT_CHAT_SUBTYPE = "instant-chat";
+var AMSG_INSTANT_CHAT_FLAG = "amsgInstantChat";
+var isInstantChatTask = (metadata) => !!metadata && metadata[AMSG_INSTANT_CHAT_FLAG] === true;
+var classifyTaskRow = (row) => {
+  const { metadata } = row;
+  if (metadata) {
+    if (isInstantChatTask(metadata)) return "instant-chat";
+    if (readTaskKind(metadata)) return "background-job";
+    if (metadata.amsgSelfScheduled === true) return "scheduled";
+  }
+  if (row.messageSubtype === AMSG_INSTANT_CHAT_SUBTYPE) return "instant-chat";
+  if (row.messageSubtype === AMSG_BACKGROUND_JOB_SUBTYPE) return "background-job";
+  return "scheduled";
+};
+var AMSG_JOB_NAMESPACE = "amsg:job";
+var AMSG_JOB_TTL_DAYS = 3;
+var AMSG_JOB_ID_KEY = "amsgJobId";
+
 // utils/amsgFirePack.ts
 var AMSG_STATE_NAMESPACE_PREFIX = "amsg:char:";
 var amsgStateNamespace = (charId) => `${AMSG_STATE_NAMESPACE_PREFIX}${charId}`;
@@ -1290,6 +1315,8 @@ var renderFirePack = (pack, nowMs, taskInstruction, extras) => {
   const timeSinceUser = formatTimeSinceUser(diffMinutes);
   const awayHint = buildAwayHint(pack.targetName, timeSinceUser);
   let out = pack.template;
+  if (extras?.mustSpeak) out = out.split(`${BEFORE_SPEAK_LINES.join("\n")}
+`).join("");
   out = fillSlot(out, AMSG_SLOT_CURRENT_TIME, currentTime);
   out = fillSlot(out, AMSG_SLOT_USER_CLOCK, buildUserClockHint(nowMs, tz, { tzId: pack.userTzId }, pack.targetName));
   out = fillSlot(out, AMSG_SLOT_TIME_SINCE_USER, timeSinceUser);
@@ -1337,8 +1364,8 @@ var chatContentOk = (content) => {
 var chatFieldOk = (chat) => {
   if (chat === void 0) return true;
   if (!chat || typeof chat !== "object" || Array.isArray(chat)) return false;
-  const { messages, builtAt } = chat;
-  return typeof builtAt === "number" && Array.isArray(messages) && messages.length > 0 && messages.every((m) => !!m && typeof m === "object" && typeof m.role === "string" && chatContentOk(m.content));
+  const { messages, builtAt, timelyInsertAt } = chat;
+  return typeof builtAt === "number" && (timelyInsertAt === void 0 || Number.isInteger(timelyInsertAt)) && Array.isArray(messages) && messages.length > 0 && messages.every((m) => !!m && typeof m === "object" && typeof m.role === "string" && chatContentOk(m.content));
 };
 var parseFirePack = (value) => {
   try {
@@ -1746,7 +1773,8 @@ function pickStaleStoppedReplyKeys(rows, nowMs = Date.now(), protectKey) {
 // worker/amsg/src/index.ts
 import { DurableObject } from "cloudflare:workers";
 
-// node_modules/.pnpm/@rei-standard+amsg-server@3.1.0_@neondatabase+serverless@1.1.0_pg@8.22.0/node_modules/@rei-standard/amsg-server/dist/chunk-GN44PST5.mjs
+// node_modules/.pnpm/@rei-standard+amsg-server@3.2.0-next.2_@neondatabase+serverless@1.1.0_pg@8.22.0/node_modules/@rei-standard/amsg-server/dist/chunk-R2CRPRKR.mjs
+var CLEANUP_BATCH_LIMIT = 100;
 var UPDATABLE_COLUMNS = /* @__PURE__ */ new Set([
   "user_id",
   "uuid",
@@ -1765,7 +1793,7 @@ var UPDATABLE_COLUMNS = /* @__PURE__ */ new Set([
 var TASK_DELIVERY_COLUMNS = "id, user_id, uuid, encrypted_payload, message_type, next_send_at, retry_after, status, retry_count";
 var TASK_DETAIL_COLUMNS = "id, user_id, uuid, encrypted_payload, message_type, next_send_at, status, retry_count, last_error, created_at, updated_at";
 
-// node_modules/.pnpm/@rei-standard+amsg-shared@0.4.0/node_modules/@rei-standard/amsg-shared/dist/index.mjs
+// node_modules/.pnpm/@rei-standard+amsg-shared@0.5.0-next.0/node_modules/@rei-standard/amsg-shared/dist/index.mjs
 var TEXT_ENCODER = new TextEncoder();
 var TEXT_DECODER = new TextDecoder("utf-8", { fatal: false });
 function toUint8(buf) {
@@ -1780,7 +1808,7 @@ function concatBytes(...chunks) {
   const out = new Uint8Array(total);
   let offset = 0;
   for (const c of chunks) {
-    out.set(c instanceof Uint8Array ? c : new Uint8Array(c.buffer || c), offset);
+    out.set(toUint8(c), offset);
     offset += c.byteLength;
   }
   return out;
@@ -1848,7 +1876,7 @@ function randomBytes(n) {
 function randomUUID() {
   return globalThis.crypto.randomUUID();
 }
-var VALID_LLM_MESSAGE_ROLES = /* @__PURE__ */ new Set(["system", "user", "assistant", "tool"]);
+var VALID_LLM_MESSAGE_ROLES = /* @__PURE__ */ new Set(["system", "developer", "user", "assistant", "tool"]);
 var LLM_MESSAGES_ERROR = Object.freeze({
   MESSAGES_NOT_ARRAY: "MESSAGES_NOT_ARRAY",
   MESSAGE_NOT_OBJECT: "MESSAGE_NOT_OBJECT",
@@ -2265,7 +2293,10 @@ var NONCE_INFO = utf8("Content-Encoding: nonce\0");
 var VAPID_DEFAULT_TTL = 60;
 var VAPID_TOKEN_LIFETIME = 12 * 3600;
 var RECORD_SIZE = 4096;
-async function sendWebPush({ subscription, payload, vapid, ttl, fetch: fetchImpl }) {
+var SEND_DEFAULT_TIMEOUT_MS = 3e4;
+var VAPID_MAX_TOKEN_LIFETIME = 24 * 3600;
+var RESPONSE_BODY_MAX_BYTES = 16 * 1024;
+async function sendWebPush({ subscription, payload, vapid, ttl, fetch: fetchImpl, signal, timeoutMs }) {
   if (!subscription || typeof subscription.endpoint !== "string") {
     throw new Error("sendWebPush: invalid subscription");
   }
@@ -2294,16 +2325,31 @@ async function sendWebPush({ subscription, payload, vapid, ttl, fetch: fetchImpl
   if (typeof fetchFn !== "function") {
     throw new Error("sendWebPush: no fetch implementation available");
   }
-  const res = await fetchFn(subscription.endpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/octet-stream",
-      "Content-Encoding": "aes128gcm",
-      "TTL": String(Number.isFinite(ttl) ? ttl : VAPID_DEFAULT_TTL),
-      "Authorization": `vapid t=${jwt}, k=${vapid.publicKey}`
-    },
-    body: encryptedBody
-  });
+  const timeoutController = new AbortController();
+  const timer = setTimeout(
+    () => timeoutController.abort(new DOMException("Web Push request timed out", "TimeoutError")),
+    Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : SEND_DEFAULT_TIMEOUT_MS
+  );
+  let res;
+  try {
+    res = await fetchFn(subscription.endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/octet-stream",
+        "Content-Encoding": "aes128gcm",
+        "TTL": String(Number.isFinite(ttl) ? ttl : VAPID_DEFAULT_TTL),
+        "Authorization": `vapid t=${jwt}, k=${vapid.publicKey}`
+      },
+      body: encryptedBody,
+      signal: signal ? AbortSignal.any([signal, timeoutController.signal]) : timeoutController.signal
+    });
+  } catch (cause) {
+    const err6 = new Error(`Web Push delivery failed: ${cause?.message || cause}`, { cause });
+    err6.code = "PUSH_SEND_FAILED";
+    throw err6;
+  } finally {
+    clearTimeout(timer);
+  }
   if (!res.ok) {
     const text2 = await safeReadText(res);
     const err6 = new Error(
@@ -2434,7 +2480,22 @@ function writeUint32BE(buf, offset, value) {
 }
 async function safeReadText(res) {
   try {
-    return await res.text();
+    const body = res.body;
+    if (!body || typeof body.getReader !== "function") {
+      return (await res.text()).slice(0, RESPONSE_BODY_MAX_BYTES);
+    }
+    const reader = body.getReader();
+    const chunks = [];
+    let total = 0;
+    while (total < RESPONSE_BODY_MAX_BYTES) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(toUint8(value));
+      total += value.byteLength;
+    }
+    reader.cancel().catch(() => {
+    });
+    return utf8Decode(concatBytes(...chunks).subarray(0, RESPONSE_BODY_MAX_BYTES));
   } catch {
     return "";
   }
@@ -2580,9 +2641,21 @@ function requireField(kind, field, value) {
     throw new Error(`[amsg-shared] ${kind}: '${field}' is required`);
   }
 }
+function requireEnumField(kind, field, value, allowed) {
+  requireField(kind, field, value);
+  const values = Object.values(allowed);
+  if (!values.includes(
+    /** @type {string} */
+    value
+  )) {
+    throw new Error(
+      `[amsg-shared] ${kind}: '${field}' must be one of ${values.map((v) => `'${v}'`).join(" | ")}`
+    );
+  }
+}
 function buildContentPush(args) {
-  requireField("ContentPush", "messageType", args.messageType);
-  requireField("ContentPush", "source", args.source);
+  requireEnumField("ContentPush", "messageType", args.messageType, MESSAGE_TYPE);
+  requireEnumField("ContentPush", "source", args.source, PUSH_SOURCE);
   requireField("ContentPush", "messageId", args.messageId);
   requireField("ContentPush", "sessionId", args.sessionId);
   if (typeof args.message !== "string") {
@@ -2610,8 +2683,8 @@ function buildContentPush(args) {
   return push;
 }
 function buildReasoningPush(args) {
-  requireField("ReasoningPush", "messageType", args.messageType);
-  requireField("ReasoningPush", "source", args.source);
+  requireEnumField("ReasoningPush", "messageType", args.messageType, MESSAGE_TYPE);
+  requireEnumField("ReasoningPush", "source", args.source, PUSH_SOURCE);
   requireField("ReasoningPush", "messageId", args.messageId);
   requireField("ReasoningPush", "sessionId", args.sessionId);
   if (typeof args.reasoningContent !== "string" || !args.reasoningContent) {
@@ -2672,8 +2745,8 @@ function buildResultPush(args) {
   if (!args || typeof args !== "object" || Array.isArray(args)) {
     throw new Error("[amsg-shared] ResultPush: payload must be a plain object");
   }
-  requireField("ResultPush", "messageType", args.messageType);
-  requireField("ResultPush", "source", args.source);
+  requireEnumField("ResultPush", "messageType", args.messageType, MESSAGE_TYPE);
+  requireEnumField("ResultPush", "source", args.source, PUSH_SOURCE);
   requireField("ResultPush", "messageId", args.messageId);
   requireField("ResultPush", "sessionId", args.sessionId);
   if (typeof args.resultKind !== "string" || !args.resultKind.trim()) {
@@ -2958,7 +3031,7 @@ function stringifyDecisionForError(value) {
   }
 }
 
-// node_modules/.pnpm/@rei-standard+amsg-server@3.1.0_@neondatabase+serverless@1.1.0_pg@8.22.0/node_modules/@rei-standard/amsg-server/dist/chunk-A4LPROFY.mjs
+// node_modules/.pnpm/@rei-standard+amsg-server@3.2.0-next.2_@neondatabase+serverless@1.1.0_pg@8.22.0/node_modules/@rei-standard/amsg-server/dist/chunk-WFKLHUUE.mjs
 var DAY_MS = 24 * 60 * 60 * 1e3;
 var MAX_LISTED_SKIPPED_OCCURRENCES = 32;
 var MAX_ADJUST_STEPS = 32;
@@ -3018,23 +3091,34 @@ function epochFromWallParts({ year, month, day, hour, minute, second, ms }, tzId
   if (tzOffsetMsAt(refined, tzId) !== tzOffsetMsAt(firstGuess, tzId)) return firstGuess;
   return refined;
 }
+function timeOfDayFor(occurrenceMs, wall, tzId, anchorMs) {
+  if (!Number.isFinite(anchorMs)) return wall;
+  const anchor = wallPartsOf(anchorMs, tzId);
+  if (anchor.hour === wall.hour && anchor.minute === wall.minute && anchor.second === wall.second) return wall;
+  const anchorOnThisDay = epochFromWallParts(
+    { year: wall.year, month: wall.month, day: wall.day, hour: anchor.hour, minute: anchor.minute, second: anchor.second, ms: occurrenceMs - Math.floor(occurrenceMs / 1e3) * 1e3 },
+    tzId
+  );
+  return anchorOnThisDay === occurrenceMs ? anchor : wall;
+}
 function periodDaysOf(recurrenceType) {
   return recurrenceType === "weekly" ? 7 : 1;
 }
-function advanceOccurrence(occurrenceMs, recurrenceType, periods, tzId) {
+function advanceOccurrence(occurrenceMs, recurrenceType, periods, tzId, anchorMs) {
   const days = periodDaysOf(recurrenceType) * periods;
   if (!tzId) return occurrenceMs + days * DAY_MS;
   try {
     const p = wallPartsOf(occurrenceMs, tzId);
+    const time = timeOfDayFor(occurrenceMs, p, tzId, anchorMs);
     const shiftedDate = new Date(utcFromParts(p.year, p.month, p.day, 0, 0, 0, 0) + days * DAY_MS);
     return epochFromWallParts(
       {
         year: shiftedDate.getUTCFullYear(),
         month: shiftedDate.getUTCMonth() + 1,
         day: shiftedDate.getUTCDate(),
-        hour: p.hour,
-        minute: p.minute,
-        second: p.second,
+        hour: time.hour,
+        minute: time.minute,
+        second: time.second,
         ms: occurrenceMs - Math.floor(occurrenceMs / 1e3) * 1e3
       },
       tzId
@@ -3044,19 +3128,19 @@ function advanceOccurrence(occurrenceMs, recurrenceType, periods, tzId) {
     return occurrenceMs + days * DAY_MS;
   }
 }
-function planNextOccurrence(occurrenceMs, recurrenceType, nowMs, tzId) {
+function planNextOccurrence(occurrenceMs, recurrenceType, nowMs, tzId, anchorMs) {
   const periodMs = periodDaysOf(recurrenceType) * DAY_MS;
   let periods = nowMs > occurrenceMs ? Math.max(1, Math.floor((nowMs - occurrenceMs) / periodMs)) : 1;
-  let cursor = advanceOccurrence(occurrenceMs, recurrenceType, periods, tzId);
+  let cursor = advanceOccurrence(occurrenceMs, recurrenceType, periods, tzId, anchorMs);
   for (let step = 0; step < MAX_ADJUST_STEPS && periods > 1; step++) {
-    const previous = advanceOccurrence(occurrenceMs, recurrenceType, periods - 1, tzId);
+    const previous = advanceOccurrence(occurrenceMs, recurrenceType, periods - 1, tzId, anchorMs);
     if (previous <= nowMs) break;
     periods -= 1;
     cursor = previous;
   }
   for (let step = 0; step < MAX_ADJUST_STEPS && cursor <= nowMs; step++) {
     periods += 1;
-    cursor = advanceOccurrence(occurrenceMs, recurrenceType, periods, tzId);
+    cursor = advanceOccurrence(occurrenceMs, recurrenceType, periods, tzId, anchorMs);
   }
   if (cursor <= nowMs) {
     periods = Math.ceil((nowMs - occurrenceMs + 1) / periodMs);
@@ -3068,16 +3152,177 @@ function planNextOccurrence(occurrenceMs, recurrenceType, nowMs, tzId) {
   if (skippedCount <= MAX_LISTED_SKIPPED_OCCURRENCES) {
     skippedOccurrences = [occurrenceMs];
     for (let i = 1; i < skippedCount; i++) {
-      skippedOccurrences.push(advanceOccurrence(occurrenceMs, recurrenceType, i, tzId));
+      skippedOccurrences.push(advanceOccurrence(occurrenceMs, recurrenceType, i, tzId, anchorMs));
     }
   } else {
-    skippedOccurrences = [occurrenceMs, advanceOccurrence(occurrenceMs, recurrenceType, skippedCount - 1, tzId)];
+    skippedOccurrences = [occurrenceMs, advanceOccurrence(occurrenceMs, recurrenceType, skippedCount - 1, tzId, anchorMs)];
     skippedTruncated = true;
   }
   return { nextMs: cursor, skippedCount, skippedOccurrences, skippedTruncated };
 }
-function nextFutureOccurrence(occurrenceMs, recurrenceType, nowMs, tzId) {
-  return new Date(planNextOccurrence(occurrenceMs, recurrenceType, nowMs, tzId).nextMs).toISOString();
+function nextFutureOccurrence(occurrenceMs, recurrenceType, nowMs, tzId, anchorMs) {
+  return new Date(planNextOccurrence(occurrenceMs, recurrenceType, nowMs, tzId, anchorMs).nextMs).toISOString();
+}
+var NonRetryableError = class extends Error {
+  /**
+   * @param {string} message
+   * @param {{ code?: string, cause?: unknown }} [options]
+   */
+  constructor(message, options = {}) {
+    super(message, options.cause !== void 0 ? { cause: options.cause } : void 0);
+    this.name = "NonRetryableError";
+    this.permanent = true;
+    if (options.code) this.code = options.code;
+  }
+};
+function isNonRetryableError(error) {
+  return !!error && typeof error === "object" && /** @type {any} */
+  error.permanent === true;
+}
+var DeploymentConfigError = class extends Error {
+  /**
+   * @param {string} message
+   * @param {{ code?: string, cause?: unknown }} [options]
+   */
+  constructor(message, options = {}) {
+    super(message, options.cause !== void 0 ? { cause: options.cause } : void 0);
+    this.name = "DeploymentConfigError";
+    if (options.code) this.code = options.code;
+  }
+};
+var STORED_DATA_UNDECRYPTABLE_CODE = "STORED_DATA_UNDECRYPTABLE";
+var StoredDataUndecryptableError = class extends Error {
+  /** @param {{ cause?: unknown }} [options] */
+  constructor(options = {}) {
+    super(
+      "\u5E93\u91CC\u7684\u6570\u636E\u662F\u7528\u53E6\u4E00\u628A\u4E3B\u5BC6\u94A5\u52A0\u5BC6\u7684\uFF0C\u5F53\u524D\u7684 AMSG_MASTER_KEY \u89E3\u4E0D\u5F00\u3002\u5E38\u89C1\u539F\u56E0\u662F\u91CD\u65B0\u90E8\u7F72\u65F6\u6362\u4E86 AMSG_MASTER_KEY\uFF1A\u6362\u56DE\u539F\u6765\u7684\u5BC6\u94A5\u5373\u53EF\u6062\u590D\uFF0C\u6216\u8005\u6E05\u6389\u4E91\u7AEF\u7684\u65E7\u6570\u636E\u540E\u91CD\u65B0\u5199\u5165\u3002",
+      options.cause !== void 0 ? { cause: options.cause } : void 0
+    );
+    this.name = "StoredDataUndecryptableError";
+    this.code = STORED_DATA_UNDECRYPTABLE_CODE;
+    this.status = 409;
+  }
+};
+function isStoredDataUndecryptableError(error) {
+  return !!error && typeof error === "object" && /** @type {any} */
+  error.code === STORED_DATA_UNDECRYPTABLE_CODE;
+}
+function markPermanent(error, code) {
+  if (!error || typeof error !== "object") return error;
+  const target = (
+    /** @type {any} */
+    error
+  );
+  try {
+    target.permanent = true;
+    if (code && typeof target.code !== "string") target.code = code;
+  } catch (_frozen) {
+  }
+  return error;
+}
+var TASK_CANCELLED_CODE = "TASK_CANCELLED";
+function isTaskCancelledError(error) {
+  return !!error && typeof error === "object" && /** @type {any} */
+  error.code === TASK_CANCELLED_CODE;
+}
+function markUnrecoverablePartialDelivery(error, { outboxed, pushedCount }) {
+  if (outboxed || !(pushedCount > 0) || isTaskCancelledError(error)) return error;
+  return markPermanent(error);
+}
+var TERMINAL_PUSH_STATUSES = /* @__PURE__ */ new Set([404, 410]);
+var PUSH_PAYLOAD_TOO_LARGE_STATUS = 413;
+var PERMANENT_ERROR_CODES = /* @__PURE__ */ new Set([
+  "PUSH_SUBSCRIPTION_MISSING",
+  "PUSH_SUBSCRIPTION_STORE_UNSUPPORTED",
+  "PUSH_PAYLOAD_TOO_LARGE"
+]);
+var LLM_CALL_FAILED_CODE = "LLM_CALL_FAILED";
+var PERMANENT_LLM_STATUSES = /* @__PURE__ */ new Set([400, 401, 402, 403, 404, 405, 413, 422]);
+function isPermanentLlmFailure(error) {
+  if (!error || typeof error !== "object") return false;
+  const { code, llmStatus } = (
+    /** @type {any} */
+    error
+  );
+  return code === LLM_CALL_FAILED_CODE && Number.isInteger(llmStatus) && PERMANENT_LLM_STATUSES.has(llmStatus);
+}
+function markPermanentIfLlmRejected(error) {
+  return isPermanentLlmFailure(error) ? markPermanent(error) : error;
+}
+function isPermanentDeliveryFailure(failure) {
+  const { permanent, errorCode, pushStatus } = failure || {};
+  return permanent === true || typeof errorCode === "string" && PERMANENT_ERROR_CODES.has(errorCode) || Number.isInteger(pushStatus) && (TERMINAL_PUSH_STATUSES.has(
+    /** @type {number} */
+    pushStatus
+  ) || pushStatus === PUSH_PAYLOAD_TOO_LARGE_STATUS);
+}
+var pushStatusCodes = /* @__PURE__ */ new WeakMap();
+function tagPushStatusCode(error) {
+  if (error && typeof error === "object" && Number.isInteger(
+    /** @type {any} */
+    error.statusCode
+  )) {
+    pushStatusCodes.set(
+      /** @type {object} */
+      error,
+      /** @type {any} */
+      error.statusCode
+    );
+  }
+  return error;
+}
+async function sendTaggedPush(webpush, subscription, payloadJson) {
+  try {
+    return await webpush.sendNotification(subscription, payloadJson);
+  } catch (error) {
+    throw tagPushStatusCode(error);
+  }
+}
+function readPushStatusCode(error) {
+  if (!error || typeof error !== "object") return null;
+  const statusCode = pushStatusCodes.get(
+    /** @type {object} */
+    error
+  );
+  return Number.isInteger(statusCode) ? statusCode : null;
+}
+function buildErrorExtra(errorCode, pushStatus) {
+  const extra = {};
+  if (typeof errorCode === "string" && errorCode) extra.errorCode = errorCode.slice(0, 64);
+  if (Number.isInteger(pushStatus)) extra.pushStatus = /** @type {number} */
+  pushStatus;
+  return Object.keys(extra).length > 0 ? extra : void 0;
+}
+var ERROR_SUMMARY_MAX_CHARS = 500;
+function sanitizeErrorSummary(reason) {
+  const flattened = String(reason ?? "").replace(/\s+/g, " ").trim();
+  const safe = redactCredentials(flattened);
+  return safe.length > ERROR_SUMMARY_MAX_CHARS ? `${safe.slice(0, ERROR_SUMMARY_MAX_CHARS - 3)}\u2026` : safe;
+}
+var D1_LIMIT_CODES = [
+  [/Exceeded maximum DB size/i, "D1_STORAGE_FULL"],
+  [/daily row read limit/i, "D1_DAILY_READ_LIMIT"],
+  [/daily row write limit/i, "D1_DAILY_WRITE_LIMIT"]
+];
+function summarizeErrorCause(error, stage) {
+  const raw = error && typeof error === "object" ? (
+    /** @type {any} */
+    error
+  ) : {};
+  const name = typeof raw.name === "string" && raw.name ? raw.name : "Error";
+  const rawMessage = typeof raw.message === "string" && raw.message ? raw.message : String(error ?? "");
+  const cause = {
+    stage,
+    name: sanitizeErrorSummary(name).slice(0, 100),
+    message: sanitizeErrorSummary(rawMessage)
+  };
+  if (typeof raw.code === "string" && raw.code) {
+    cause.code = sanitizeErrorSummary(raw.code).slice(0, 100);
+  } else {
+    const limit = D1_LIMIT_CODES.find(([pattern]) => pattern.test(rawMessage));
+    if (limit) cause.code = limit[1];
+  }
+  return cause;
 }
 var base64ToBytes2 = base64UrlToBytes;
 var TAG_LENGTH_BYTES = 16;
@@ -3162,14 +3407,18 @@ async function encryptForStorage(text2, encryptionKey) {
   return `${bytesToHex(iv)}:${bytesToHex(authTag)}:${bytesToHex(ciphertext)}`;
 }
 async function decryptFromStorage(encryptedText, encryptionKey) {
-  const [ivHex, authTagHex, encryptedDataHex] = encryptedText.split(":");
-  const plain = await aesGcmOpen(
-    encryptionKey,
-    hexToBytes(ivHex),
-    hexToBytes(encryptedDataHex),
-    hexToBytes(authTagHex)
-  );
-  return utf8Decode(plain);
+  try {
+    const [ivHex, authTagHex, encryptedDataHex] = encryptedText.split(":");
+    const plain = await aesGcmOpen(
+      encryptionKey,
+      hexToBytes(ivHex),
+      hexToBytes(encryptedDataHex),
+      hexToBytes(authTagHex)
+    );
+    return utf8Decode(plain);
+  } catch (error) {
+    throw new StoredDataUndecryptableError({ cause: error });
+  }
 }
 var CRED_ID_MAX_LENGTH = 128;
 var CRED_VALUE_FIELD_MAX_LENGTH = 2048;
@@ -3292,9 +3541,26 @@ async function resolveFireCredentials({ db, userId, userKey, decryptedPayload })
     `\u51ED\u636E ${credId} \u4E0D\u5B58\u5728\uFF08PUT /llm-credentials \u8865\u4F20\u540E\u8FD9\u6761\u4EFB\u52A1\u4E0B\u4E00\u8F6E\u91CD\u8BD5\u5373\u81EA\u6108\uFF09`
   );
 }
+var ISO_8601_RE = /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:?\d{2})?)?$/i;
 function isValidISO8601(dateString) {
-  const date = new Date(dateString);
-  return date instanceof Date && !isNaN(date.getTime());
+  return typeof dateString === "string" && ISO_8601_RE.test(dateString) && !Number.isNaN(Date.parse(dateString));
+}
+function isFutureTimestamp(value) {
+  return new Date(value) > /* @__PURE__ */ new Date();
+}
+var LOCAL_FETCH_SCHEMES = /* @__PURE__ */ new Set(["file:", "data:", "blob:", "javascript:", "about:"]);
+function isValidPushEndpoint(endpoint) {
+  if (typeof endpoint !== "string") return false;
+  let url;
+  try {
+    url = new URL(endpoint);
+  } catch {
+    return false;
+  }
+  if (!url.host && !LOCAL_FETCH_SCHEMES.has(url.protocol)) return true;
+  if (url.protocol !== "https:" || url.username || url.password) return false;
+  const host = url.hostname;
+  return host !== "localhost" && !host.endsWith(".localhost") && !host.startsWith("[") && !/^\d{1,3}(?:\.\d{1,3}){3}$/.test(host);
 }
 function isValidUUID(uuid) {
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -3400,9 +3666,12 @@ function validateScheduleMessagePayload(payload) {
     if (!payload.firstSendTime || !isValidISO8601(payload.firstSendTime)) {
       return { valid: false, errorCode: "INVALID_TIMESTAMP", errorMessage: "\u65F6\u95F4\u683C\u5F0F\u65E0\u6548", details: { field: "firstSendTime" } };
     }
-    if (payload.firstSendTime && new Date(payload.firstSendTime) <= /* @__PURE__ */ new Date()) {
+    if (!isFutureTimestamp(payload.firstSendTime)) {
       return { valid: false, errorCode: "INVALID_TIMESTAMP", errorMessage: "\u65F6\u95F4\u5FC5\u987B\u5728\u672A\u6765", details: { field: "firstSendTime", reason: "must be in the future" } };
     }
+  }
+  if (payload.metadata != null && (typeof payload.metadata !== "object" || Array.isArray(payload.metadata))) {
+    return { valid: false, errorCode: "INVALID_PARAMETERS", errorMessage: "metadata \u5FC5\u987B\u662F\u666E\u901A\u5BF9\u8C61", details: { invalidFields: ["metadata"] } };
   }
   if (payload.supersedesUuid !== void 0 && payload.supersedesUuid !== null) {
     if (typeof payload.supersedesUuid !== "string" || !isValidUUID(payload.supersedesUuid)) {
@@ -3694,150 +3963,6 @@ function createGetUserKeyHandler(ctx) {
   }
   return { GET };
 }
-var NonRetryableError = class extends Error {
-  /**
-   * @param {string} message
-   * @param {{ code?: string, cause?: unknown }} [options]
-   */
-  constructor(message, options = {}) {
-    super(message, options.cause !== void 0 ? { cause: options.cause } : void 0);
-    this.name = "NonRetryableError";
-    this.permanent = true;
-    if (options.code) this.code = options.code;
-  }
-};
-function isNonRetryableError(error) {
-  return !!error && typeof error === "object" && /** @type {any} */
-  error.permanent === true;
-}
-var DeploymentConfigError = class extends Error {
-  /**
-   * @param {string} message
-   * @param {{ code?: string, cause?: unknown }} [options]
-   */
-  constructor(message, options = {}) {
-    super(message, options.cause !== void 0 ? { cause: options.cause } : void 0);
-    this.name = "DeploymentConfigError";
-    if (options.code) this.code = options.code;
-  }
-};
-function markPermanent(error, code) {
-  if (!error || typeof error !== "object") return error;
-  const target = (
-    /** @type {any} */
-    error
-  );
-  try {
-    target.permanent = true;
-    if (code && typeof target.code !== "string") target.code = code;
-  } catch (_frozen) {
-  }
-  return error;
-}
-var TASK_CANCELLED_CODE = "TASK_CANCELLED";
-function isTaskCancelledError(error) {
-  return !!error && typeof error === "object" && /** @type {any} */
-  error.code === TASK_CANCELLED_CODE;
-}
-function markUnrecoverablePartialDelivery(error, { outboxed, pushedCount }) {
-  if (outboxed || !(pushedCount > 0) || isTaskCancelledError(error)) return error;
-  return markPermanent(error);
-}
-var TERMINAL_PUSH_STATUSES = /* @__PURE__ */ new Set([404, 410]);
-var PUSH_PAYLOAD_TOO_LARGE_STATUS = 413;
-var PERMANENT_ERROR_CODES = /* @__PURE__ */ new Set([
-  "PUSH_SUBSCRIPTION_MISSING",
-  "PUSH_SUBSCRIPTION_STORE_UNSUPPORTED",
-  "PUSH_PAYLOAD_TOO_LARGE"
-]);
-var LLM_CALL_FAILED_CODE = "LLM_CALL_FAILED";
-var PERMANENT_LLM_STATUSES = /* @__PURE__ */ new Set([400, 401, 402, 403, 404, 405, 413, 422]);
-function isPermanentLlmFailure(error) {
-  if (!error || typeof error !== "object") return false;
-  const { code, llmStatus } = (
-    /** @type {any} */
-    error
-  );
-  return code === LLM_CALL_FAILED_CODE && Number.isInteger(llmStatus) && PERMANENT_LLM_STATUSES.has(llmStatus);
-}
-function markPermanentIfLlmRejected(error) {
-  return isPermanentLlmFailure(error) ? markPermanent(error) : error;
-}
-function isPermanentDeliveryFailure(failure) {
-  const { permanent, errorCode, pushStatus } = failure || {};
-  return permanent === true || typeof errorCode === "string" && PERMANENT_ERROR_CODES.has(errorCode) || Number.isInteger(pushStatus) && (TERMINAL_PUSH_STATUSES.has(
-    /** @type {number} */
-    pushStatus
-  ) || pushStatus === PUSH_PAYLOAD_TOO_LARGE_STATUS);
-}
-var pushStatusCodes = /* @__PURE__ */ new WeakMap();
-function tagPushStatusCode(error) {
-  if (error && typeof error === "object" && Number.isInteger(
-    /** @type {any} */
-    error.statusCode
-  )) {
-    pushStatusCodes.set(
-      /** @type {object} */
-      error,
-      /** @type {any} */
-      error.statusCode
-    );
-  }
-  return error;
-}
-async function sendTaggedPush(webpush, subscription, payloadJson) {
-  try {
-    return await webpush.sendNotification(subscription, payloadJson);
-  } catch (error) {
-    throw tagPushStatusCode(error);
-  }
-}
-function readPushStatusCode(error) {
-  if (!error || typeof error !== "object") return null;
-  const statusCode = pushStatusCodes.get(
-    /** @type {object} */
-    error
-  );
-  return Number.isInteger(statusCode) ? statusCode : null;
-}
-function buildErrorExtra(errorCode, pushStatus) {
-  const extra = {};
-  if (typeof errorCode === "string" && errorCode) extra.errorCode = errorCode.slice(0, 64);
-  if (Number.isInteger(pushStatus)) extra.pushStatus = /** @type {number} */
-  pushStatus;
-  return Object.keys(extra).length > 0 ? extra : void 0;
-}
-var ERROR_SUMMARY_MAX_CHARS = 500;
-function sanitizeErrorSummary(reason) {
-  const flattened = String(reason ?? "").replace(/\s+/g, " ").trim();
-  const safe = redactCredentials(flattened);
-  return safe.length > ERROR_SUMMARY_MAX_CHARS ? `${safe.slice(0, ERROR_SUMMARY_MAX_CHARS - 3)}\u2026` : safe;
-}
-var D1_LIMIT_CODES = [
-  [/Exceeded maximum DB size/i, "D1_STORAGE_FULL"],
-  [/daily row read limit/i, "D1_DAILY_READ_LIMIT"],
-  [/daily row write limit/i, "D1_DAILY_WRITE_LIMIT"]
-];
-function summarizeErrorCause(error, stage) {
-  const raw = error && typeof error === "object" ? (
-    /** @type {any} */
-    error
-  ) : {};
-  const name = typeof raw.name === "string" && raw.name ? raw.name : "Error";
-  const rawMessage = typeof raw.message === "string" && raw.message ? raw.message : String(error ?? "");
-  const cause = {
-    stage,
-    name: sanitizeErrorSummary(name).slice(0, 100),
-    message: sanitizeErrorSummary(rawMessage)
-  };
-  if (typeof raw.code === "string" && raw.code) {
-    cause.code = sanitizeErrorSummary(raw.code).slice(0, 100);
-  } else {
-    const limit = D1_LIMIT_CODES.find(([pattern]) => pattern.test(rawMessage));
-    if (limit) cause.code = limit[1];
-  }
-  return cause;
-}
 var DEFAULT_MAX_DELIVERY_RETRIES = 3;
 function resolveMaxDeliveryRetries(ctx) {
   const value = ctx.maxDeliveryRetries;
@@ -3906,7 +4031,8 @@ async function sendWebPush2(args) {
 var SCHEDULED_DEFAULT_TTL = 2419200;
 function createWebCryptoWebPush(vapid = {}, { ttl = SCHEDULED_DEFAULT_TTL } = {}) {
   return {
-    async sendNotification(subscription, payload) {
+    acceptsSendOptions: true,
+    async sendNotification(subscription, payload, { signal, timeoutMs } = {}) {
       return sendWebPush2({
         subscription,
         payload,
@@ -3916,10 +4042,37 @@ function createWebCryptoWebPush(vapid = {}, { ttl = SCHEDULED_DEFAULT_TTL } = {}
           publicKey: vapid.publicKey,
           privateKey: vapid.privateKey
         },
-        fetch: globalThis.fetch
+        fetch: globalThis.fetch,
+        signal,
+        timeoutMs
       });
     }
   };
+}
+function withPushSignal(webpush, signal) {
+  if (!signal || !webpush || /** @type {any} */
+  webpush.acceptsSendOptions !== true) return webpush;
+  const bound = Object.create(
+    /** @type {any} */
+    webpush
+  );
+  Object.defineProperty(bound, "sendNotification", {
+    value: (subscription, payload, options) => (
+      /** @type {any} */
+      webpush.sendNotification(subscription, payload, { signal, ...options })
+    ),
+    writable: true,
+    enumerable: true,
+    configurable: true
+  });
+  return bound;
+}
+function assertVapidConfigured(vapid) {
+  if (!vapid || !vapid.email || !vapid.publicKey || !vapid.privateKey) {
+    const err6 = new Error("VAPID configuration missing - push notifications cannot be sent");
+    err6.code = "VAPID_CONFIG_MISSING";
+    throw err6;
+  }
 }
 var ATTACHMENT_NAMESPACE = "amsg:attachments";
 var ATTACHMENT_RETENTION_DAYS = 30;
@@ -3998,7 +4151,7 @@ function parseChunkedRootCount(value) {
 function splitStateValue(value) {
   return chunkReasoningByUtf8Bytes(value, STATE_CHUNK_SLICE_BYTES);
 }
-async function resolveClientStateEntries(rows, fetchChunkRows, decryptValue) {
+async function resolveClientStateEntries(rows, fetchChunkRows, decryptValue, onUndecryptable) {
   let chunkMap = null;
   const loadChunks = async () => {
     if (chunkMap === null) {
@@ -4010,32 +4163,30 @@ async function resolveClientStateEntries(rows, fetchChunkRows, decryptValue) {
   const entries = [];
   for (const row of rows) {
     const count = parseChunkedRootCount(row.value);
-    if (count === null) {
-      entries.push({
-        namespace: row.namespace,
-        key: row.key,
-        value: await decryptValue(row.value),
-        updatedAt: row.updated_at
-      });
+    let valueSources = [row.value];
+    if (count !== null) {
+      const map = await loadChunks();
+      const chunkRows = [];
+      for (let i = 0; i < count; i++) {
+        const chunk = map.get(chunkKeyFor(row.key, i));
+        if (!chunk || chunk.updated_at !== row.updated_at) break;
+        chunkRows.push(chunk);
+      }
+      if (chunkRows.length !== count) continue;
+      valueSources = chunkRows.map((chunk) => chunk.value);
+    }
+    let value;
+    try {
+      value = (await Promise.all(valueSources.map(decryptValue))).join("");
+    } catch (error) {
+      if (!onUndecryptable || !isStoredDataUndecryptableError(error)) throw error;
+      onUndecryptable(row);
       continue;
     }
-    const map = await loadChunks();
-    const chunkRows = [];
-    let intact = true;
-    for (let i = 0; i < count; i++) {
-      const chunk = map.get(chunkKeyFor(row.key, i));
-      if (!chunk || chunk.updated_at !== row.updated_at) {
-        intact = false;
-        break;
-      }
-      chunkRows.push(chunk);
-    }
-    if (!intact) continue;
-    const parts = await Promise.all(chunkRows.map((chunk) => decryptValue(chunk.value)));
     entries.push({
       namespace: row.namespace,
       key: row.key,
-      value: parts.join(""),
+      value,
       updatedAt: row.updated_at
     });
   }
@@ -4408,9 +4559,10 @@ function supportsPushSubscriptionStore(db) {
   return !!db && typeof db.getPushSubscription === "function" && typeof db.upsertPushSubscription === "function" && typeof db.deletePushSubscription === "function";
 }
 function isPushSubscriptionShape(subscription) {
-  return !!subscription && typeof subscription === "object" && !Array.isArray(subscription) && typeof /** @type {{ endpoint?: unknown }} */
-  subscription.endpoint === "string" && /** @type {{ endpoint: string }} */
-  subscription.endpoint.trim().length > 0;
+  return !!subscription && typeof subscription === "object" && !Array.isArray(subscription) && isValidPushEndpoint(
+    /** @type {{ endpoint?: unknown }} */
+    subscription.endpoint
+  );
 }
 async function savePushSubscription({ db, userId, userKey, subscription, updatedAt }) {
   const at = Number.isInteger(updatedAt) && updatedAt > 0 ? updatedAt : Date.now();
@@ -4499,7 +4651,9 @@ function createResultEmitter({
       assertNotCancelled();
       pushed = shouldSendPush(push, { outboxed: true }) ? await sendResultPush({ db, task, userKey, decryptedPayload, webpush, push }) : false;
     } catch (error) {
-      await discardUndeliveredPushes({ db, userId: task.user_id, pushes: [push], sentIds: [] });
+      if (!isTaskCancelledError(error)) {
+        await discardUndeliveredPushes({ db, userId: task.user_id, pushes: [push], sentIds: [] });
+      }
       throw error;
     }
     if (pushed) {
@@ -4578,6 +4732,14 @@ function projectTask(row, decryptedPayload, options = {}) {
     // 这一层的话，客户端只能回去正则匹配 reason 那句人话。
     lastError: hasRowLastError(row) ? parseRowLastError(row.last_error) : payload.lastError ?? null
   };
+}
+async function projectStoredTask(row, userKey, options) {
+  try {
+    return projectTask(row, JSON.parse(await decryptFromStorage(row.encrypted_payload, userKey)), options);
+  } catch (error) {
+    if (!isStoredDataUndecryptableError(error)) throw error;
+    return { ...projectTask(row, null, options), error: { code: error.code, message: error.message } };
+  }
 }
 function hasRowLastError(row) {
   return !!row && Object.prototype.hasOwnProperty.call(row, "last_error");
@@ -4681,17 +4843,20 @@ function firstPositiveNumber(values, fallback) {
 }
 async function runAgenticFire({ task, decryptedPayload, userKey, ctx }) {
   const hooks = ctx.hooks;
-  const signal = ctx.signal || new AbortController().signal;
-  const isCancelled = () => signal.aborted || ctx.isTaskCancelled?.() === true;
+  const taskSignal = ctx.signal || new AbortController().signal;
+  const isCancelled = () => taskSignal.aborted || ctx.isTaskCancelled?.() === true;
   const throwIfCancelled = () => {
     if (!isCancelled()) return;
-    if (isTaskCancelledError(signal.reason)) throw signal.reason;
+    if (isTaskCancelledError(taskSignal.reason)) throw taskSignal.reason;
     const error = new Error("Task was cancelled or superseded");
     error.code = "TASK_CANCELLED";
     throw error;
   };
-  const cancellation = { signal, isCancelled, throwIfCancelled };
-  ctx = { ...ctx, ...cancellation };
+  const hookController = new AbortController();
+  if (taskSignal.aborted) hookController.abort(taskSignal.reason);
+  else taskSignal.addEventListener("abort", () => hookController.abort(taskSignal.reason), { once: true });
+  const cancellation = { signal: hookController.signal, isCancelled, throwIfCancelled };
+  ctx = { ...ctx, ...cancellation, webpush: withPushSignal(ctx.webpush, hookController.signal) };
   if (typeof hooks.onLLMOutput !== "function") {
     throw new DeploymentConfigError(
       "AGENTIC_CONFIG_ERROR: hooks.onBeforeFire requires hooks.onLLMOutput to classify LLM rounds",
@@ -4754,11 +4919,7 @@ async function runAgenticFire({ task, decryptedPayload, userKey, ctx }) {
       throw new DeploymentConfigError("AGENTIC_TASK_VIEW_UNSUPPORTED: adapter has no listTasks", { code: "AGENTIC_TASK_VIEW_UNSUPPORTED" });
     }
     const { tasks, total } = await ctx.db.listTasks(task.user_id, { status, limit, offset });
-    const projected = await Promise.all(tasks.map(async (row) => projectTask(
-      row,
-      JSON.parse(await decryptFromStorage(row.encrypted_payload, userKey)),
-      { includeMetadata }
-    )));
+    const projected = await Promise.all(tasks.map((row) => projectStoredTask(row, userKey, { includeMetadata })));
     return { tasks: projected, pagination: { total, limit, offset, hasMore: offset + tasks.length < total } };
   };
   const scheduleTask = async (options) => {
@@ -5052,6 +5213,7 @@ async function runAgenticFire({ task, decryptedPayload, userKey, ctx }) {
       resolveLlmCredential: resolveLlmCredential2,
       fireCtx,
       progress,
+      hookController,
       sessionId,
       messageIdBase,
       occurrenceMs
@@ -5130,12 +5292,17 @@ async function runFireChain({
   resolveLlmCredential: resolveLlmCredential2,
   fireCtx,
   progress,
+  hookController,
   sessionId,
   messageIdBase,
   occurrenceMs
 }) {
   ctx.throwIfCancelled();
-  const before = await hooks.onBeforeFire(fireCtx);
+  const beforeFireBudgetMs = firstPositiveNumber([ctx.totalTimeoutMs], DEFAULT_TOTAL_TIMEOUT_MS);
+  const before = await awaitWithinBudget(() => hooks.onBeforeFire(fireCtx), beforeFireBudgetMs, {
+    hookController,
+    makeError: () => totalTimeoutError(beforeFireBudgetMs, 0)
+  });
   ctx.throwIfCancelled();
   if (before == null) return { handled: false };
   if (typeof before === "object" && before.skip === true) {
@@ -5182,10 +5349,12 @@ async function runFireChain({
   });
   for (let iteration = 0; iteration < maxToolIterations; iteration++) {
     ctx.throwIfCancelled();
-    if (nowFn() >= deadline) {
-      throw new Error(`AGENTIC_TOTAL_TIMEOUT: fire chain exceeded ${totalTimeoutMs}ms after ${iteration} LLM round(s)`);
-    }
+    if (nowFn() >= deadline) throw totalTimeoutError(totalTimeoutMs, iteration);
     progress.iterations = iteration + 1;
+    const withinDeadline = (run) => awaitWithinBudget(run, deadline - nowFn(), {
+      hookController,
+      makeError: () => totalTimeoutError(totalTimeoutMs, iteration + 1)
+    });
     const roundTimeoutMs = Math.max(1, Math.min(3e5, deadline - nowFn()));
     progress.llmCalls++;
     const { response: llmResponse } = await callLlm2(
@@ -5230,7 +5399,7 @@ async function runFireChain({
       renewTask,
       resolveLlmCredential: resolveLlmCredential2
     });
-    const decision = await hooks.onLLMOutput(sessionCtx);
+    const decision = await withinDeadline(() => hooks.onLLMOutput(sessionCtx));
     ctx.throwIfCancelled();
     const rawCalls = decision?.decision === "tool-request" ? extractToolCallsFromDecision(decision) : [];
     const validId = (call) => typeof call?.id === "string" && call.id.trim().length > 0;
@@ -5306,14 +5475,14 @@ async function runFireChain({
     let toolResults;
     try {
       ctx.throwIfCancelled();
-      toolResults = permittedCalls.length > 0 ? await hooks.executeToolCalls(permittedCalls, sessionCtx) : [];
+      toolResults = permittedCalls.length > 0 ? await withinDeadline(() => hooks.executeToolCalls(permittedCalls, sessionCtx)) : [];
       ctx.throwIfCancelled();
       if (!Array.isArray(toolResults)) {
         throw new TypeError('executeToolCalls must resolve to an array of { tool_call_id, role: "tool", content }');
       }
     } catch (error) {
       ctx.throwIfCancelled();
-      if (isTaskCancelledError(error)) throw error;
+      if (isTaskCancelledError(error) || error?.code === TOTAL_TIMEOUT_CODE) throw error;
       toolResults = permittedCalls.map((toolCall) => ({
         tool_call_id: toolCall && typeof toolCall === "object" && typeof toolCall.id === "string" ? toolCall.id : "",
         role: "tool",
@@ -5331,6 +5500,30 @@ async function runFireChain({
     `AGENTIC_LOOP_EXCEEDED: no finish/skip-push decision within ${maxToolIterations} LLM round(s)`,
     "AGENTIC_LOOP_EXCEEDED"
   );
+}
+var TOTAL_TIMEOUT_CODE = "AGENTIC_TOTAL_TIMEOUT";
+function totalTimeoutError(totalTimeoutMs, rounds) {
+  return taggedRetryableError(
+    `${TOTAL_TIMEOUT_CODE}: fire chain exceeded ${totalTimeoutMs}ms after ${rounds} LLM round(s)`,
+    TOTAL_TIMEOUT_CODE
+  );
+}
+async function awaitWithinBudget(run, remainingMs, { hookController, makeError }) {
+  const expire = () => {
+    const error = makeError();
+    hookController.abort(error);
+    return error;
+  };
+  if (remainingMs <= 0) throw expire();
+  let timer;
+  const expired = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(expire()), Math.min(remainingMs, 2147483647));
+  });
+  try {
+    return await Promise.race([run(), expired]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 function taggedRetryableError(message, code) {
   const error = new Error(message);
@@ -5409,9 +5602,7 @@ async function sendHookPushPayloads({
     progress.outboxed = outboxed;
     if (ctx._deliveryState) ctx._deliveryState.outboxed = outboxed;
     ctx.throwIfCancelled();
-    if (!ctx.vapid || !ctx.vapid.email || !ctx.vapid.publicKey || !ctx.vapid.privateKey) {
-      throw new Error("VAPID configuration missing - push notifications cannot be sent");
-    }
+    assertVapidConfigured(ctx.vapid);
     const pushSubscription = await resolvePushSubscription({
       db: ctx.db,
       userId: task.user_id,
@@ -5436,14 +5627,6 @@ async function sendHookPushPayloads({
   } catch (error) {
     markUnrecoverablePartialDelivery(error, { outboxed, pushedCount });
     await markPushesDelivered({ db: ctx.db, userId: task.user_id, messageIds: sentIds });
-    if (isTaskCancelledError(error)) {
-      await discardUndeliveredPushes({
-        db: ctx.db,
-        userId: task.user_id,
-        pushes: finalized,
-        sentIds
-      });
-    }
     await notifyAfterSend(ctx, { ...afterSendBase, sentCount, pushedCount, outboxed, error });
     throw error;
   }
@@ -5483,13 +5666,17 @@ var RAW_CLOUD_ADAPTER = /* @__PURE__ */ Symbol("cloud-data-adapter");
 function guardError(code, message) {
   return Object.assign(new Error(message), { code, status: 409 });
 }
+var MAX_OWNER_LABEL_CHARS = 300;
 function validOwner(owner) {
-  return owner && typeof owner.type === "string" && owner.type.trim().length > 0 && owner.type.length <= 100 && typeof owner.id === "string" && owner.id.trim().length > 0 && owner.id.length <= 300;
+  return owner && typeof owner.type === "string" && owner.type.trim().length > 0 && owner.type.length <= 100 && typeof owner.id === "string" && owner.id.trim().length > 0 && owner.id.length <= 300 && (owner.label == null || typeof owner.label === "string" && owner.label.length <= MAX_OWNER_LABEL_CHARS);
+}
+function validOwnerGeneration(generation) {
+  return Number.isSafeInteger(generation) && generation >= 0;
 }
 function validateGuard(guard) {
   if (!validOwner(guard?.owner))
     throw guardError("INVALID_CLOUD_OWNER", "Cloud owner is invalid");
-  if (!Number.isSafeInteger(guard.generation) || guard.generation < 0) {
+  if (!validOwnerGeneration(guard.generation)) {
     throw guardError(
       "INVALID_CLOUD_OWNER_GENERATION",
       "Cloud owner generation must be a non-negative integer"
@@ -5540,6 +5727,15 @@ async function captureCloudTaskGuard(db, userId, payload, resolveOwner, task) {
   await assertCloudGuard(db, userId, guard);
   return guard;
 }
+async function readPreviousMetadata(stored, userKey) {
+  try {
+    return JSON.parse(await decryptFromStorage(stored, userKey));
+  } catch (error) {
+    if (!isStoredDataUndecryptableError(error)) throw error;
+    console.warn("[amsg-server] \u65E7\u5F52\u5C5E\u8BB0\u5F55\u89E3\u4E0D\u5F00\uFF08\u4E3B\u5BC6\u94A5\u6362\u8FC7\uFF1F\uFF09\uFF0C\u6309\u6CA1\u6709\u65E7\u8BB0\u5F55\u8986\u76D6\u5199\u5165");
+    return null;
+  }
+}
 function createCloudGuardedAdapter(db, {
   masterKey,
   resolveOwner,
@@ -5561,8 +5757,8 @@ function createCloudGuardedAdapter(db, {
       );
       expectedCloudMetadata = stored;
       if (stored) {
-        const previous = JSON.parse(await decryptFromStorage(stored, userKey));
-        if (previous.owner) {
+        const previous = await readPreviousMetadata(stored, userKey);
+        if (previous?.owner) {
           if (resolved.owner && (previous.owner.type !== resolved.owner.type || previous.owner.id !== resolved.owner.id)) {
             throw guardError(
               "CLOUD_OWNER_IMMUTABLE",
@@ -5619,6 +5815,16 @@ function createCloudGuardedAdapter(db, {
   const wrap = (name, fn) => {
     if (typeof db[name] === "function") methods.set(name, fn);
   };
+  const withSidecarRetry = async (attempt) => {
+    for (let tries = 0; ; tries++) {
+      try {
+        return await attempt();
+      } catch (error) {
+        if (error?.code !== "CLOUD_RESOURCE_CHANGED") throw error;
+        if (tries >= 2) throw Object.assign(error, { status: error.status ?? 409 });
+      }
+    }
+  };
   for (const method of ["createTask", "createTaskSuperseding"]) {
     wrap(method, async (params, supersedesUuid) => {
       const key = await keyFor(params.user_id);
@@ -5643,7 +5849,7 @@ function createCloudGuardedAdapter(db, {
   }
   wrap(
     "upsertClientState",
-    async (userId, entries, cleanups = [], now = Date.now()) => {
+    (userId, entries, cleanups = [], now = Date.now()) => withSidecarRetry(async () => {
       const key = await keyFor(userId);
       const roots = /* @__PURE__ */ new Map();
       const rows = [];
@@ -5701,9 +5907,9 @@ function createCloudGuardedAdapter(db, {
         now,
         inheritedGuard
       );
-    }
+    })
   );
-  wrap("upsertLlmCredentials", async (userId, entries) => {
+  wrap("upsertLlmCredentials", (userId, entries) => withSidecarRetry(async () => {
     const key = await keyFor(userId);
     const rows = [];
     for (const entry of entries) {
@@ -5719,7 +5925,7 @@ function createCloudGuardedAdapter(db, {
       rows.push({ ...entry, ...metadata });
     }
     return db.upsertLlmCredentials(userId, rows, inheritedGuard);
-  });
+  }));
   wrap("appendOutboxMessages", async (userId, entries) => {
     const key = await keyFor(userId);
     const rows = [];
@@ -5923,9 +6129,7 @@ async function redeliverCommittedBatch(task, ctx, userKey, decryptedPayload, bat
   if (pending.length === 0) {
     return { success: true, messagesSent, redelivered: true, pushedCount: 0 };
   }
-  if (!ctx.vapid || !ctx.vapid.email || !ctx.vapid.publicKey || !ctx.vapid.privateKey) {
-    throw new Error("VAPID configuration missing - push notifications cannot be sent");
-  }
+  assertVapidConfigured(ctx.vapid);
   const pushSubscription = await resolvePushSubscription({
     db: ctx.db,
     userId: task.user_id,
@@ -5933,21 +6137,14 @@ async function redeliverCommittedBatch(task, ctx, userKey, decryptedPayload, bat
     legacyFallback: decryptedPayload.pushSubscription ?? null
   });
   const sentIds = [];
-  let cancelled = false;
   try {
     for (let i = 0; i < pending.length; i++) {
       await sendTaggedPush(ctx.webpush, pushSubscription, JSON.stringify(pending[i]));
       sentIds.push(pending[i].messageId);
       if (i < pending.length - 1) await sleepFor(ctx, SLEEP_BETWEEN_MESSAGES_MS2);
     }
-  } catch (error) {
-    cancelled = isTaskCancelledError(error);
-    throw error;
   } finally {
     await markPushesDelivered({ db: ctx.db, userId: task.user_id, messageIds: sentIds });
-    if (cancelled) {
-      await discardUndeliveredPushes({ db: ctx.db, userId: task.user_id, pushes: pending, sentIds });
-    }
   }
   return { success: true, messagesSent, redelivered: true, pushedCount: sentIds.length };
 }
@@ -5955,11 +6152,13 @@ async function processSingleMessage(task, ctx, providedMasterKey, predecrypted =
   const deliveryState = {
     outboxed: false,
     deliveryLimit: resolveMaxDeliveryRetries(ctx),
+    // 按任务定的 generation 上限要等 payload 解出来才算得出；解密、云守卫这些更早
+    // 的失败也得有个上限可查，先按投递上限兜着。
     generationLimit: resolveMaxDeliveryRetries(ctx),
     retryCount: task.retry_count ?? 0,
     isCancelled: ctx.isTaskCancelled
   };
-  ctx = { ...ctx, _deliveryState: deliveryState };
+  ctx = { ...ctx, _deliveryState: deliveryState, webpush: withPushSignal(ctx.webpush, ctx.signal) };
   try {
     const masterKey = providedMasterKey || ctx.masterKey;
     if (!masterKey) {
@@ -5972,13 +6171,20 @@ async function processSingleMessage(task, ctx, providedMasterKey, predecrypted =
       await assertCloudGuard(ctx.db, task.user_id, cloudGuard);
       const originalWebpush = ctx.webpush;
       const guardedDb = createCloudGuardedAdapter(ctx.db, { masterKey, resolveOwner: ctx.cloudData?.resolveOwner, guard: cloudGuard, userId: task.user_id });
-      ctx = { ...ctx, db: guardedDb, webpush: originalWebpush && {
-        ...originalWebpush,
-        async sendNotification(...args) {
-          await assertCloudGuard(guardedDb, task.user_id, cloudGuard);
-          return originalWebpush.sendNotification(...args);
-        }
-      } };
+      let guardedWebpush = originalWebpush;
+      if (originalWebpush) {
+        guardedWebpush = Object.create(originalWebpush);
+        Object.defineProperty(guardedWebpush, "sendNotification", {
+          value: async (...args) => {
+            await assertCloudGuard(guardedDb, task.user_id, cloudGuard);
+            return originalWebpush.sendNotification(...args);
+          },
+          writable: true,
+          enumerable: true,
+          configurable: true
+        });
+      }
+      ctx = { ...ctx, db: guardedDb, webpush: guardedWebpush };
     }
     const committed = await findCommittedBatch({
       db: ctx.db,
@@ -6073,9 +6279,7 @@ async function processSingleMessage(task, ctx, providedMasterKey, predecrypted =
     const pushesToSend = reasoningPush ? [reasoningPush, ...contentPushes] : contentPushes;
     const outboxed = await appendPushesToOutbox({ db: ctx.db, userId: task.user_id, userKey, pushes: pushesToSend });
     deliveryState.outboxed = outboxed;
-    if (!ctx.vapid.email || !ctx.vapid.publicKey || !ctx.vapid.privateKey) {
-      throw new Error("VAPID configuration missing - push notifications cannot be sent");
-    }
+    assertVapidConfigured(ctx.vapid);
     const pushSubscription = await resolvePushSubscription({
       db: ctx.db,
       userId: task.user_id,
@@ -6085,7 +6289,6 @@ async function processSingleMessage(task, ctx, providedMasterKey, predecrypted =
     const pushGate = { outboxed };
     const contentToPush = contentPushes.filter((push) => shouldSendPush(push, pushGate));
     const sentIds = [];
-    let cancelledMidBurst = false;
     let reasoningError;
     try {
       if (reasoningPush && shouldSendPush(reasoningPush, pushGate)) {
@@ -6105,18 +6308,9 @@ async function processSingleMessage(task, ctx, providedMasterKey, predecrypted =
         }
       }
     } catch (error) {
-      cancelledMidBurst = isTaskCancelledError(error);
       throw markUnrecoverablePartialDelivery(error, { outboxed, pushedCount: sentIds.length });
     } finally {
       await markPushesDelivered({ db: ctx.db, userId: task.user_id, messageIds: sentIds });
-      if (cancelledMidBurst) {
-        await discardUndeliveredPushes({
-          db: ctx.db,
-          userId: task.user_id,
-          pushes: pushesToSend,
-          sentIds
-        });
-      }
     }
     return {
       success: true,
@@ -6637,7 +6831,7 @@ async function deliverTasks(ctx, tasks) {
   const serializeBy = typeof ctx.serializeBy === "function" ? ctx.serializeBy : null;
   const heartbeatMs = ctx.leaseHeartbeatMs === 0 ? 0 : positiveNumber(ctx.leaseHeartbeatMs) || DEFAULT_LEASE_HEARTBEAT_MS;
   const heartbeatEnabled = heartbeatMs > 0 && typeof db.claimTask === "function" && typeof db.renewTaskLease === "function";
-  const heartbeatLeaseTtlMs = Math.max(DEFAULT_HEARTBEAT_LEASE_TTL_MS, heartbeatMs * 2);
+  const heartbeatLeaseTtlMs = Math.max(DEFAULT_HEARTBEAT_LEASE_TTL_MS, heartbeatMs * 3);
   const startTime = Date.now();
   const MAX_CONCURRENT = 8;
   const results = {
@@ -6651,28 +6845,42 @@ async function deliverTasks(ctx, tasks) {
     staleTasks: [],
     deferredTasks: [],
     cancelledTasks: [],
+    leaseLostTasks: [],
     reasoningSkippedTasks: [],
     redeliveredTasks: [],
     failedTasks: []
   };
   const groupsTakenThisTick = /* @__PURE__ */ new Set();
   const taskCloudGuards = /* @__PURE__ */ new Map();
+  const leaseOptions = (taskId) => {
+    const token = activeLeases.get(taskId)?.token;
+    return token ? { leaseToken: token } : null;
+  };
   const updateLifecycleTask = (taskId, fields) => {
-    const guard = taskCloudGuards.get(taskId);
-    return guard ? db.updateTaskById(taskId, fields, guard) : db.updateTaskById(taskId, fields);
+    const guard = taskCloudGuards.get(taskId) ?? null;
+    const options = leaseOptions(taskId);
+    if (!guard && !options) return db.updateTaskById(taskId, fields);
+    return db.updateTaskById(taskId, fields, guard, options ?? {});
   };
   const supportsClaim = typeof db.claimTask === "function";
-  async function claimForThisTick(task, serializeGroup) {
+  async function claimForThisTick(task, serializeGroup, leaseToken) {
     if (!supportsClaim) return true;
     const leaseUntil = new Date(
       Date.now() + (heartbeatEnabled ? heartbeatLeaseTtlMs : claimLeaseMs)
     ).toISOString();
-    const guard = taskCloudGuards.get(task.id);
-    return !!(guard ? await db.claimTask(task.id, task.next_send_at, leaseUntil, serializeGroup, guard) : await db.claimTask(task.id, task.next_send_at, leaseUntil, serializeGroup));
+    const guard = taskCloudGuards.get(task.id) ?? null;
+    return !!await db.claimTask(
+      task.id,
+      task.next_send_at,
+      leaseUntil,
+      serializeGroup,
+      guard,
+      { leaseToken, userId: task.user_id }
+    );
   }
-  function startLeaseHeartbeat(task) {
+  function startLeaseHeartbeat(task, leaseToken) {
     const controller = new AbortController();
-    const lease = { lost: false, released: false, signal: controller.signal, stop: () => {
+    const lease = { lost: false, released: false, token: leaseToken, signal: controller.signal, stop: () => {
     } };
     if (!heartbeatEnabled) return lease;
     let stopped = false;
@@ -6681,12 +6889,16 @@ async function deliverTasks(ctx, tasks) {
       if (stopped) return;
       let renewed;
       try {
-        const guard = taskCloudGuards.get(task.id);
+        const guard = taskCloudGuards.get(task.id) ?? null;
         const until = new Date(Date.now() + heartbeatLeaseTtlMs).toISOString();
-        renewed = guard ? await db.renewTaskLease(task.id, until, guard) : await db.renewTaskLease(task.id, until);
+        renewed = await db.renewTaskLease(task.id, until, guard, { leaseToken, userId: task.user_id });
       } catch (error) {
-        if (error?.code === "CLOUD_OWNER_RETIRED") renewed = false;
-        else console.warn("[amsg-server] \u79DF\u7EA6\u7EED\u79DF\u5931\u8D25\uFF08\u4E0B\u4E2A\u5FC3\u8DF3\u518D\u8BD5\uFF09:", error && error.message);
+        if (error?.code === "CLOUD_OWNER_RETIRED") {
+          lease.ownerRetired = true;
+          renewed = false;
+        } else {
+          console.warn("[amsg-server] \u79DF\u7EA6\u7EED\u79DF\u5931\u8D25\uFF08\u4E0B\u4E2A\u5FC3\u8DF3\u518D\u8BD5\uFF09:", error && error.message);
+        }
       }
       if (renewed === false) {
         if (stopped || lease.released) return;
@@ -6694,7 +6906,7 @@ async function deliverTasks(ctx, tasks) {
         const error = new Error("Task was cancelled or superseded");
         error.code = TASK_CANCELLED_CODE;
         controller.abort(error);
-        console.warn(`[amsg-server] \u4EFB\u52A1 ${task.id} \u7684\u79DF\u7EA6\u5DF2\u5931\u6548\uFF08\u884C\u88AB\u53D6\u6D88\u6216\u9876\u66FF\uFF09\uFF0C\u5269\u4F59\u63A8\u9001\u5C06\u4E2D\u6B62`);
+        console.warn(`[amsg-server] \u4EFB\u52A1 ${task.id} \u7684\u79DF\u7EA6\u5DF2\u5931\u6548\uFF08\u884C\u88AB\u53D6\u6D88\u3001\u9876\u66FF\uFF0C\u6216\u79DF\u7EA6\u8FC7\u671F\u540E\u88AB\u522B\u7684 tick \u63A5\u624B\uFF09\uFF0C\u5269\u4F59\u63A8\u9001\u5C06\u4E2D\u6B62`);
         return;
       }
       if (!stopped) schedule();
@@ -6780,6 +6992,10 @@ async function deliverTasks(ctx, tasks) {
     groupsTakenThisTick.add(scopedKey);
     return { taken: false, rawKey };
   }
+  function anchorMsOf(decryptedPayload) {
+    const ms = decryptedPayload && decryptedPayload.firstSendTime ? Date.parse(decryptedPayload.firstSendTime) : NaN;
+    return Number.isNaN(ms) ? void 0 : ms;
+  }
   async function recordCancelled(task, status) {
     results.cancelledTasks.push({
       taskId: task.id,
@@ -6788,6 +7004,26 @@ async function deliverTasks(ctx, tasks) {
     });
     console.warn(`[amsg-server] \u4EFB\u52A1 ${task.id} \u5728\u6295\u9012\u671F\u95F4\u88AB\u53D6\u6D88\u6216\u9876\u66FF\uFF08${status}\uFF09`);
     await discardUndeliveredPushesForTask({ db, userId: task.user_id, taskUuid: task.uuid });
+  }
+  async function recordLostLease(task, status) {
+    if (activeLeases.get(task.id)?.ownerRetired) {
+      await recordCancelled(task, "owner_retired");
+      return;
+    }
+    let rowGone = !task.uuid;
+    if (task.uuid) {
+      try {
+        rowGone = await db.getTaskStatus(task.uuid, task.user_id) === null;
+      } catch (_readError) {
+        rowGone = false;
+      }
+    }
+    if (rowGone) {
+      await recordCancelled(task, status);
+      return;
+    }
+    results.leaseLostTasks.push({ taskId: task.id, status });
+    console.warn(`[amsg-server] \u4EFB\u52A1 ${task.id} \u7684\u79DF\u7EA6\u5DF2\u88AB\u522B\u7684 tick \u63A5\u624B\uFF08${status}\uFF09\uFF0C\u672C\u8DF3\u4E0D\u518D\u5199\u8FD9\u6761\u4EFB\u52A1`);
   }
   async function payloadStillFresh(task) {
     if (typeof db.getTaskByUuid !== "function" || !task.uuid) return true;
@@ -6840,56 +7076,68 @@ async function deliverTasks(ctx, tasks) {
     const tzId = decryptedPayload ? decryptedPayload.tzId ?? null : null;
     const permanent = isPermanentDeliveryFailure({ permanent: failure.permanent, errorCode, pushStatus });
     const errorExtra = buildErrorExtra(errorCode, pushStatus);
+    const landed = async (write) => {
+      if (!rowVanished(await write)) return true;
+      results.failedCount--;
+      await recordLostLease(task, "cancelled_mid_delivery");
+      return false;
+    };
     try {
       if (permanent || failure.willRetry === false || task.retry_count >= (failure.retryLimit ?? maxDeliveryRetries)) {
         const encrypted = await encryptPayloadWithLastError(task, decryptedPayload, userKey, reason, errorExtra);
         if (isRecurringType(recurrenceType)) {
-          const nextSendAt = nextFutureOccurrence(Date.parse(task.next_send_at), recurrenceType, Date.now(), tzId);
-          await updateAndRelease(task.id, {
+          const nextSendAt = nextFutureOccurrence(Date.parse(task.next_send_at), recurrenceType, Date.now(), tzId, anchorMsOf(decryptedPayload));
+          if (!await landed(updateAndRelease(task.id, {
             next_send_at: nextSendAt,
             retry_count: 0,
             ...encrypted ? { encrypted_payload: encrypted } : {},
             last_error: lastErrorJson(task, reason, errorExtra)
-          });
+          }))) return;
           results.failedTasks.push({ taskId: task.id, reason, retryCount: task.retry_count, status: "occurrence_skipped", nextSendAt, ...permanent ? { permanent: true } : {} });
         } else {
-          await updateAndRelease(task.id, {
+          if (!await landed(updateAndRelease(task.id, {
             status: "failed",
             ...encrypted ? { encrypted_payload: encrypted } : {},
             last_error: lastErrorJson(task, reason, errorExtra)
-          });
+          }))) return;
           results.failedTasks.push({ taskId: task.id, reason, retryCount: task.retry_count, status: "permanently_failed", ...permanent ? { permanent: true } : {} });
         }
       } else {
         const nextRetryTime = new Date(Date.now() + (task.retry_count + 1) * 2 * 60 * 1e3);
         if (supportsClaim) {
-          await updateTaskWithLastError(task.id, {
+          if (!await landed(updateTaskWithLastError(task.id, {
             retry_after: nextRetryTime.toISOString(),
             lease_until: null,
             retry_count: task.retry_count + 1,
             last_error: lastErrorJson(task, reason, errorExtra)
-          });
+          }))) return;
         } else {
-          await updateTaskWithLastError(task.id, {
+          if (!await landed(updateTaskWithLastError(task.id, {
             next_send_at: nextRetryTime.toISOString(),
             retry_count: task.retry_count + 1,
             last_error: lastErrorJson(task, reason, errorExtra)
-          });
+          }))) return;
         }
         results.failedTasks.push({ taskId: task.id, reason, retryCount: task.retry_count + 1, nextRetryAt: nextRetryTime.toISOString() });
       }
     } catch (updateError) {
-      results.failedTasks.push({ taskId: task.id, reason, status: "retry_update_failed", updateError: updateError.message });
+      results.failedTasks.push({ taskId: task.id, reason, status: "retry_update_failed", updateError: updateError?.message ?? String(updateError) });
     }
   }
-  async function handlePostSendPersistenceFailure(task, reason, recurrenceType, tzId) {
+  async function handlePostSendPersistenceFailure(task, reason, recurrenceType, tzId, anchorMs) {
     results.failedCount++;
+    const vanished = async (write) => {
+      if (!rowVanished(await write)) return false;
+      results.failedCount--;
+      await recordLostLease(task, "cancelled_after_delivery");
+      return true;
+    };
     if (isRecurringType(recurrenceType)) {
       let advanced = false;
       let nextSendAt = null;
       try {
-        nextSendAt = nextFutureOccurrence(Date.parse(task.next_send_at), recurrenceType, Date.now(), tzId);
-        await updateAndRelease(task.id, { next_send_at: nextSendAt, retry_count: 0 });
+        nextSendAt = nextFutureOccurrence(Date.parse(task.next_send_at), recurrenceType, Date.now(), tzId, anchorMs);
+        if (await vanished(updateAndRelease(task.id, { next_send_at: nextSendAt, retry_count: 0 }))) return;
         advanced = true;
       } catch (_advanceError) {
         advanced = false;
@@ -6904,7 +7152,7 @@ async function deliverTasks(ctx, tasks) {
     }
     let markedSent = false;
     try {
-      await updateAndRelease(task.id, { status: "sent", retry_count: 0 });
+      if (await vanished(updateAndRelease(task.id, { status: "sent", retry_count: 0 }))) return;
       markedSent = true;
     } catch (_markSentError) {
       markedSent = false;
@@ -6920,27 +7168,28 @@ async function deliverTasks(ctx, tasks) {
     const decryptedPayload = decrypted.ok ? decrypted.payload : null;
     const userKey = decrypted.ok ? decrypted.userKey : null;
     const serializeGroup = serializeKey ? await deriveSerializeGroup(userKey, serializeKey) : null;
+    const leaseToken = supportsClaim ? globalThis.crypto.randomUUID() : null;
     let claimed;
     try {
       if (decrypted.ok) {
         const guard = await captureCloudTaskGuard(db, task.user_id, decryptedPayload, ctx.cloudData?.resolveOwner, task);
         if (guard) taskCloudGuards.set(task.id, guard);
       }
-      claimed = await claimForThisTick(task, serializeGroup);
+      claimed = await claimForThisTick(task, serializeGroup, leaseToken);
     } catch (error) {
       if (error?.code === "CLOUD_OWNER_RETIRED") {
         await recordCancelled(task, "owner_retired");
         return;
       }
       results.failedCount++;
-      results.failedTasks.push({ taskId: task.id, reason: error.message || "\u4EFB\u52A1\u5360\u4F4D\u5931\u8D25", status: "claim_failed" });
+      results.failedTasks.push({ taskId: task.id, reason: error?.message || "\u4EFB\u52A1\u5360\u4F4D\u5931\u8D25", status: "claim_failed" });
       return;
     }
     if (!claimed) {
       results.claimSkippedTasks++;
       return;
     }
-    const lease = startLeaseHeartbeat(task);
+    const lease = startLeaseHeartbeat(task, leaseToken);
     activeLeases.set(task.id, lease);
     try {
       await deliverClaimedTask(task, decrypted, lease);
@@ -6953,7 +7202,7 @@ async function deliverTasks(ctx, tasks) {
     const decryptedPayload = decrypted.ok ? decrypted.payload : null;
     const userKey = decrypted.ok ? decrypted.userKey : null;
     if (!decrypted.ok) {
-      await handleDeliveryFailure(task, decrypted.error && decrypted.error.message || "\u4EFB\u52A1\u8F7D\u8377\u89E3\u5BC6\u5931\u8D25", null, null, null);
+      await handleDeliveryFailure(task, decrypted.error && decrypted.error.message || "\u4EFB\u52A1\u8F7D\u8377\u89E3\u5BC6\u5931\u8D25", null, null, null, { errorCode: decrypted.error?.code });
       return;
     }
     const recurrenceType = decryptedPayload.recurrenceType;
@@ -6990,7 +7239,7 @@ async function deliverTasks(ctx, tasks) {
           isCancelled: () => lease.lost
         });
         const recurring = isRecurringType(recurrenceType);
-        const plan = recurring ? planNextOccurrence(occurrenceMs, recurrenceType, Date.now(), tzId) : null;
+        const plan = recurring ? planNextOccurrence(occurrenceMs, recurrenceType, Date.now(), tzId, anchorMsOf(decryptedPayload)) : null;
         const nextSendAt = recurring ? new Date(plan.nextMs).toISOString() : null;
         const action = recurring ? "fast_forwarded" : "expired";
         const skippedCount = recurring ? plan.skippedCount : 1;
@@ -7001,11 +7250,16 @@ async function deliverTasks(ctx, tasks) {
           "stale",
           recurring ? { skippedCount, nextSendAt } : void 0
         );
-        await updateAndRelease(task.id, {
+        const settled = await updateAndRelease(task.id, {
           ...recurring ? { next_send_at: nextSendAt, retry_count: 0 } : { status: "failed" },
           ...encrypted ? { encrypted_payload: encrypted } : {},
           last_error: lastErrorJson(task, "stale", recurring ? { skippedCount, nextSendAt } : void 0)
         });
+        if (rowVanished(settled)) {
+          await recordLostLease(task, "cancelled_before_delivery");
+          return;
+        }
+        await discardUndeliveredPushesForTask({ db, userId: task.user_id, taskUuid: task.uuid });
         results.staleTasks.push({
           taskId: task.id,
           reason: "stale",
@@ -7028,7 +7282,7 @@ async function deliverTasks(ctx, tasks) {
         });
       } catch (error) {
         results.failedCount++;
-        results.failedTasks.push({ taskId: task.id, reason: error.message || "\u8FC7\u671F\u4EFB\u52A1\u5904\u7406\u5931\u8D25", status: "stale_update_failed" });
+        results.failedTasks.push({ taskId: task.id, reason: error?.message || "\u8FC7\u671F\u4EFB\u52A1\u5904\u7406\u5931\u8D25", status: "stale_update_failed" });
       }
     };
     if (Number.isFinite(occurrenceMs) && Date.now() - occurrenceMs > staleAfterMs && notOnFreshRetryChain) {
@@ -7047,13 +7301,13 @@ async function deliverTasks(ctx, tasks) {
           lease_until: null
         });
         if (rowVanished(updated)) {
-          await recordCancelled(task, "cancelled_mid_delivery");
+          await recordLostLease(task, "cancelled_mid_delivery");
           return;
         }
         results.deferredTasks.push({ taskId: task.id, retryAfter: retryAfter2 });
       } catch (error) {
         results.failedCount++;
-        results.failedTasks.push({ taskId: task.id, reason: error.message || "\u63A8\u8FDF\u5199\u5E93\u5931\u8D25", status: "defer_update_failed" });
+        results.failedTasks.push({ taskId: task.id, reason: error?.message || "\u63A8\u8FDF\u5199\u5E93\u5931\u8D25", status: "defer_update_failed" });
       }
     };
     let sendResult;
@@ -7077,12 +7331,12 @@ async function deliverTasks(ctx, tasks) {
       );
     } catch (error) {
       if (lease.lost) {
-        await recordCancelled(task, "cancelled_mid_delivery");
+        await recordLostLease(task, "cancelled_mid_delivery");
         return;
       }
       await handleDeliveryFailure(
         task,
-        error.message || "\u6D88\u606F\u53D1\u9001\u5931\u8D25",
+        error?.message || "\u6D88\u606F\u53D1\u9001\u5931\u8D25",
         recurrenceType,
         decryptedPayload,
         userKey,
@@ -7092,7 +7346,7 @@ async function deliverTasks(ctx, tasks) {
     }
     if (sendResult.deferred) {
       if (lease.lost) {
-        await recordCancelled(task, "cancelled_mid_delivery");
+        await recordLostLease(task, "cancelled_mid_delivery");
         return;
       }
       await handleDeferred(sendResult.retryAfter);
@@ -7104,7 +7358,7 @@ async function deliverTasks(ctx, tasks) {
         return;
       }
       if (lease.lost) {
-        await recordCancelled(task, "cancelled_mid_delivery");
+        await recordLostLease(task, "cancelled_mid_delivery");
         return;
       }
       await handleDeliveryFailure(
@@ -7129,13 +7383,14 @@ async function deliverTasks(ctx, tasks) {
     try {
       if (recurrenceType === "none") {
         markLeaseReleased(task.id);
-        if (rowVanished(await db.deleteTaskById(task.id))) {
-          await recordCancelled(task, "cancelled_after_delivery");
+        const deleteOptions = leaseOptions(task.id);
+        if (rowVanished(deleteOptions ? await db.deleteTaskById(task.id, deleteOptions) : await db.deleteTaskById(task.id))) {
+          await recordLostLease(task, "cancelled_after_delivery");
           return;
         }
         results.deletedOnceOffTasks++;
       } else {
-        const nextSendAt = nextFutureOccurrence(occurrenceMs, recurrenceType, Date.now(), tzId);
+        const nextSendAt = nextFutureOccurrence(occurrenceMs, recurrenceType, Date.now(), tzId, anchorMsOf(decryptedPayload));
         const clearedPayload = decryptedPayload && decryptedPayload.lastError ? await encryptPayloadWithoutLastError(task, decryptedPayload, userKey) : null;
         const updated = await updateAndRelease(task.id, {
           next_send_at: nextSendAt,
@@ -7144,14 +7399,14 @@ async function deliverTasks(ctx, tasks) {
           ...clearedPayload ? { encrypted_payload: clearedPayload } : {}
         });
         if (rowVanished(updated)) {
-          await recordCancelled(task, "cancelled_after_delivery");
+          await recordLostLease(task, "cancelled_after_delivery");
           return;
         }
         results.updatedRecurringTasks++;
       }
       results.successCount++;
     } catch (error) {
-      await handlePostSendPersistenceFailure(task, error.message || "\u53D1\u9001\u540E\u72B6\u6001\u66F4\u65B0\u5931\u8D25", recurrenceType, tzId);
+      await handlePostSendPersistenceFailure(task, error?.message || "\u53D1\u9001\u540E\u72B6\u6001\u66F4\u65B0\u5931\u8D25", recurrenceType, tzId, anchorMsOf(decryptedPayload));
     }
   }
   const taskQueue = [];
@@ -7168,9 +7423,12 @@ async function deliverTasks(ctx, tasks) {
   while (taskQueue.length > 0 || processing.length > 0) {
     while (processing.length < MAX_CONCURRENT && taskQueue.length > 0) {
       const entry = taskQueue.shift();
-      const promise = processTask(entry);
+      const promise = processTask(entry).catch((error) => {
+        results.failedCount++;
+        results.failedTasks.push({ taskId: entry.task.id, reason: error?.message || "\u4EFB\u52A1\u5904\u7406\u5F02\u5E38", status: "unexpected_error" });
+      });
       processing.push(promise);
-      promise.finally(() => {
+      promise.then(() => {
         const index = processing.indexOf(promise);
         if (index > -1) processing.splice(index, 1);
       });
@@ -7199,8 +7457,12 @@ async function deliverTasks(ctx, tasks) {
       deferredTasks: results.deferredTasks,
       // 投递期间行被取消 / 顶替的任务。`cancelled_mid_delivery` = 推送在发出去
       // 之前被拦下；`cancelled_after_delivery` = 推送已经发完，收尾写库才发现
-      // 行没了。两种都不计入 successCount / failedCount。
+      // 行没了；`cancelled_before_delivery` = 过期收场写库时发现行没了。三种都
+      // 不计入 successCount / failedCount。
       cancelledTasks: results.cancelledTasks,
+      // 租约过期后被别的 tick 接手的任务（{ taskId, status }，status 与上面同一
+      // 套：说明是在哪一步发现的）。这边没再写过这条任务，也不计成功 / 失败。
+      leaseLostTasks: results.leaseLostTasks,
       // 正文送到了、只有思考过程没发出去的任务（{ taskId, reason }）。这些任务
       // 照常计入 successCount——列在这里只是让「这次没有思考过程」看得见。
       reasoningSkippedTasks: results.reasoningSkippedTasks,
@@ -7258,6 +7520,12 @@ function createUpdateMessageHandler(ctx) {
     }
     if (updates.nextSendAt && !isValidISO8601(updates.nextSendAt)) {
       return { status: 400, body: { success: false, error: { code: "INVALID_UPDATE_DATA", message: "\u66F4\u65B0\u6570\u636E\u683C\u5F0F\u9519\u8BEF", details: { invalidFields: ["nextSendAt"] } } } };
+    }
+    if (updates.nextSendAt && !isFutureTimestamp(updates.nextSendAt)) {
+      return { status: 400, body: { success: false, error: { code: "INVALID_UPDATE_DATA", message: "nextSendAt \u5FC5\u987B\u5728\u672A\u6765", details: { invalidFields: ["nextSendAt"] } } } };
+    }
+    if (updates.metadata != null && !isPlainObject(updates.metadata)) {
+      return { status: 400, body: { success: false, error: { code: "INVALID_UPDATE_DATA", message: "metadata \u5FC5\u987B\u662F\u666E\u901A\u5BF9\u8C61", details: { invalidFields: ["metadata"] } } } };
     }
     if (Object.prototype.hasOwnProperty.call(updates, "contactName") && (typeof updates.contactName !== "string" || !updates.contactName.trim())) {
       return { status: 400, body: { success: false, error: { code: "INVALID_UPDATE_DATA", message: "contactName \u5FC5\u987B\u662F\u975E\u7A7A\u5B57\u7B26\u4E32", details: { invalidFields: ["contactName"] } } } };
@@ -7357,6 +7625,9 @@ function createUpdateMessageHandler(ctx) {
       ...promptUpdates,
       ...Object.prototype.hasOwnProperty.call(updates, "contactName") && { contactName: updates.contactName },
       ...updates.userMessage && { userMessage: updates.userMessage },
+      // 改排期时 payload 里的首发时刻跟着走（与 hook 的 renewTask 同口径）：循环
+      // 任务推进用它当锚点，不同步的话春令时顺延后回不到用户改过的钟点。
+      ...updates.nextSendAt && { firstSendTime: updates.nextSendAt },
       ...updates.recurrenceType && { recurrenceType: updates.recurrenceType },
       ...Object.prototype.hasOwnProperty.call(updates, "tzId") && { tzId: updates.tzId ?? null },
       // avatarUrl 走 truthy spread：显式传 null 只是「不改」，不是「清空」。
@@ -7462,6 +7733,7 @@ function createCancelMessageHandler(ctx) {
   }
   return { DELETE };
 }
+var TASK_STATUS_FILTERS = ["all", "pending", "sent", "failed"];
 function createMessagesHandler(ctx) {
   async function GET(url, headers) {
     const tenantResult = await ctx.tenantManager.resolveTenant(headers, { url });
@@ -7478,6 +7750,9 @@ function createMessagesHandler(ctx) {
     const status = u.searchParams.get("status") || "all";
     const limit = Math.min(parseInt(u.searchParams.get("limit") || "20", 10), 100);
     const offset = parseInt(u.searchParams.get("offset") || "0", 10);
+    if (!TASK_STATUS_FILTERS.includes(status)) {
+      return { status: 400, body: { success: false, error: { code: "INVALID_PARAMETERS", message: `status \u53C2\u6570\u65E0\u6548\uFF0C\u5FC5\u987B\u662F ${TASK_STATUS_FILTERS.join(" / ")} \u4E4B\u4E00` } } };
+    }
     if (isNaN(limit) || limit < 1) {
       return { status: 400, body: { success: false, error: { code: "INVALID_PARAMETERS", message: "limit \u53C2\u6570\u65E0\u6548\uFF0C\u5FC5\u987B\u4E3A\u6B63\u6574\u6570" } } };
     }
@@ -7486,10 +7761,7 @@ function createMessagesHandler(ctx) {
     }
     const { tasks, total } = await db.listTasks(userId, { status, limit, offset });
     const userKey = await deriveUserEncryptionKey(userId, masterKey);
-    const decryptedTasks = await Promise.all(tasks.map(async (task) => {
-      const decrypted = JSON.parse(await decryptFromStorage(task.encrypted_payload, userKey));
-      return projectTask(task, decrypted);
-    }));
+    const decryptedTasks = await Promise.all(tasks.map((task) => projectStoredTask(task, userKey)));
     const responsePayload = {
       tasks: decryptedTasks,
       pagination: { total, limit, offset, hasMore: offset + limit < total }
@@ -7837,6 +8109,7 @@ var SQLITE_TABLE_SQL = `
     message_type TEXT NOT NULL CHECK (message_type IN ('fixed', 'prompted', 'auto', 'instant')),
     next_send_at TEXT NOT NULL,
     lease_until TEXT,
+    lease_token TEXT,
     retry_after TEXT,
     serialize_group TEXT,
     status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'sent', 'failed')),
@@ -7869,6 +8142,11 @@ var SQLITE_MIGRATIONS = [
     // 解密失败时也写得进去，GET /message 对已失败的行也读得出来。
     sql: "ALTER TABLE scheduled_messages ADD COLUMN last_error TEXT",
     description: "Sanitized last delivery-failure summary (2.6.0)"
+  },
+  {
+    name: "add_lease_token",
+    sql: "ALTER TABLE scheduled_messages ADD COLUMN lease_token TEXT",
+    description: "Lease ownership token (claimTask / renewTaskLease)"
   }
 ];
 var SQLITE_INDEXES = [
@@ -8303,11 +8581,12 @@ var D1Adapter = class {
       return indexes.map((index) => results[index]);
     } catch (error) {
       if (/cloud_metadata_guard/.test(error.message || "")) {
-        throw Object.assign(new Error("Cloud resource ownership changed"), { code: "CLOUD_RESOURCE_CHANGED" });
+        throw Object.assign(new Error("Cloud resource ownership changed"), { code: "CLOUD_RESOURCE_CHANGED", status: 409 });
       }
       if (/cloud_owner_guard/.test(error.message || "")) {
         const denied = new Error("Cloud owner is retired or generation changed");
         denied.code = "CLOUD_OWNER_RETIRED";
+        denied.status = 409;
         throw denied;
       }
       throw error;
@@ -8751,7 +9030,7 @@ var D1Adapter = class {
       );
     }
     return {
-      columnsCreated: 13,
+      columnsCreated: SQLITE_REQUIRED_SCHEMA.tables.scheduled_messages.length,
       indexesCreated: indexResults.filter((r) => r.status === "success").length,
       indexesFailed: indexResults.filter((r) => r.status === "failed").length,
       columns: [],
@@ -8876,7 +9155,9 @@ var D1Adapter = class {
     ).bind(uuid).first();
     return row ? { status: row.status } : null;
   }
-  async updateTaskById(taskId, updates, cloudGuard = null) {
+  // options.leaseToken 见 interface.js：带上时只改仍持有这份租约的行，改不到
+  // 回 null（行没了，或租约已经是别人的）。
+  async updateTaskById(taskId, updates, cloudGuard = null, options = {}) {
     const sets = [];
     const values = [];
     for (const [key, value] of Object.entries(updates)) {
@@ -8891,12 +9172,18 @@ var D1Adapter = class {
       values.push(this._now());
     }
     values.push(taskId);
+    let tokenGate = "";
+    if (options?.leaseToken) {
+      tokenGate = " AND lease_token = ?";
+      values.push(options.leaseToken);
+    }
     const statement = this._db.prepare(
-      `UPDATE scheduled_messages SET ${sets.join(", ")} WHERE id = ?`
+      `UPDATE scheduled_messages SET ${sets.join(", ")} WHERE id = ?${tokenGate}`
     ).bind(...values);
     const ownerUser = cloudGuard ? await this._db.prepare("SELECT user_id FROM scheduled_messages WHERE id=?").bind(taskId).first() : null;
     if (cloudGuard && !ownerUser) return null;
-    await this._cloudBatch([statement], ownerUser?.user_id, [cloudGuard]);
+    const [res] = await this._cloudBatch([statement], ownerUser?.user_id, [cloudGuard]);
+    if (tokenGate && !(res.meta.changes > 0)) return null;
     return this._db.prepare("SELECT * FROM scheduled_messages WHERE id = ?").bind(taskId).first();
   }
   /**
@@ -8935,8 +9222,14 @@ var D1Adapter = class {
     if (!res.meta.changes) return null;
     return { uuid, updated_at: now };
   }
-  async deleteTaskById(taskId) {
-    const res = await this._db.prepare("DELETE FROM scheduled_messages WHERE id = ?").bind(taskId).run();
+  async deleteTaskById(taskId, options = {}) {
+    const values = [taskId];
+    let tokenGate = "";
+    if (options?.leaseToken) {
+      tokenGate = " AND lease_token = ?";
+      values.push(options.leaseToken);
+    }
+    const res = await this._db.prepare(`DELETE FROM scheduled_messages WHERE id = ?${tokenGate}`).bind(...values).run();
     return res.meta.changes > 0;
   }
   async deleteTaskByUuid(uuid, userId) {
@@ -8989,10 +9282,14 @@ var D1Adapter = class {
    * @param {string} expectedNextSendAt - 读这行时拿到的 next_send_at 原值
    * @param {string|Date} leaseUntil - 租期末尾
    * @param {string|null} [serializeGroup] - 串行分组标识；空表示不参与分组串行
+   * @param {Object|null} [cloudGuard]
+   * @param {{ leaseToken?: string|null, userId?: string|null }} [options] -
+   *   `leaseToken` 随租约写进 lease_token，之后续租 / 收尾写库带同一个值比对；
+   *   `userId` 是这行的 user_id（调用方手里有就传，带 cloudGuard 时省掉一次查）
    * @returns {Promise<boolean>} true = 领到了；false = 别人正拿着租约、同分组
    *   有任务正在跑、排期被改过、或行已不是 pending
    */
-  async claimTask(taskId, expectedNextSendAt, leaseUntil, serializeGroup = null, cloudGuard = null) {
+  async claimTask(taskId, expectedNextSendAt, leaseUntil, serializeGroup = null, cloudGuard = null, options = {}) {
     const expected = typeof expectedNextSendAt === "string" ? expectedNextSendAt : this._iso(expectedNextSendAt);
     const grouped = typeof serializeGroup === "string" && serializeGroup.length > 0;
     const now = this._now();
@@ -9001,6 +9298,10 @@ var D1Adapter = class {
     if (grouped) {
       sets.push("serialize_group = ?");
       values.push(serializeGroup);
+    }
+    if (options?.leaseToken) {
+      sets.push("lease_token = ?");
+      values.push(options.leaseToken);
     }
     sets.push("updated_at = ?");
     values.push(now);
@@ -9019,28 +9320,50 @@ var D1Adapter = class {
     const statement = this._db.prepare(
       `UPDATE scheduled_messages SET ${sets.join(", ")} WHERE ${where}`
     ).bind(...values);
-    const ownerUser = cloudGuard ? await this._db.prepare("SELECT user_id FROM scheduled_messages WHERE id=?").bind(taskId).first() : null;
-    if (cloudGuard && !ownerUser) return false;
-    const [res] = await this._cloudBatch([statement], ownerUser?.user_id, [cloudGuard]);
+    const ownerUserId = await this._taskOwnerForGuard(taskId, cloudGuard, options?.userId);
+    if (cloudGuard && !ownerUserId) return false;
+    const [res] = await this._cloudBatch([statement], ownerUserId, [cloudGuard]);
     return (res.meta.changes || 0) > 0;
+  }
+  /**
+   * 带 cloudGuard 的写要知道这行归哪个用户（守卫断言按 user_id 查）。调用方手里
+   * 有就直接用，没有才去查一次。没有守卫时不查。
+   *
+   * @private
+   * @returns {Promise<string|null|undefined>} 守卫要用的 user_id；带守卫但行不存在 → null
+   */
+  async _taskOwnerForGuard(taskId, cloudGuard, userId) {
+    if (!cloudGuard) return void 0;
+    if (userId) return userId;
+    const row = await this._db.prepare("SELECT user_id FROM scheduled_messages WHERE id=?").bind(taskId).first();
+    return row ? row.user_id : null;
   }
   /**
    * 投递期间的租约续期（run-tick 的心跳用）。只在行仍是 pending 且确实持有
    * 租约（lease_until 非空）时生效——收尾把租约放掉之后，迟到的心跳不会把
-   * 租约复活。
+   * 租约复活。带 leaseToken 时还要求租约仍是自己那份：租约过期后被别的 tick
+   * 接手，原执行者的心跳就续不上了，不会把接手者的租约当成自己的续下去。
    *
    * @param {number} taskId
    * @param {string|Date} leaseUntil - 新的租期末尾
+   * @param {Object|null} [cloudGuard]
+   * @param {{ leaseToken?: string|null, userId?: string|null }} [options] - 同 claimTask
    * @returns {Promise<boolean>} true = 续上了
    */
-  async renewTaskLease(taskId, leaseUntil, cloudGuard = null) {
+  async renewTaskLease(taskId, leaseUntil, cloudGuard = null, options = {}) {
+    const values = [this._iso(leaseUntil), taskId];
+    let tokenGate = "";
+    if (options?.leaseToken) {
+      tokenGate = " AND lease_token = ?";
+      values.push(options.leaseToken);
+    }
     const statement = this._db.prepare(
       `UPDATE scheduled_messages SET lease_until = ?
-       WHERE id = ? AND status = 'pending' AND lease_until IS NOT NULL`
-    ).bind(this._iso(leaseUntil), taskId);
-    const ownerUser = cloudGuard ? await this._db.prepare("SELECT user_id FROM scheduled_messages WHERE id=?").bind(taskId).first() : null;
-    if (cloudGuard && !ownerUser) return false;
-    const [res] = await this._cloudBatch([statement], ownerUser?.user_id, [cloudGuard]);
+       WHERE id = ? AND status = 'pending' AND lease_until IS NOT NULL${tokenGate}`
+    ).bind(...values);
+    const ownerUserId = await this._taskOwnerForGuard(taskId, cloudGuard, options?.userId);
+    if (cloudGuard && !ownerUserId) return false;
+    const [res] = await this._cloudBatch([statement], ownerUserId, [cloudGuard]);
     return (res.meta.changes || 0) > 0;
   }
   async listTasks(userId, opts = {}) {
@@ -9060,7 +9383,7 @@ var D1Adapter = class {
       `SELECT ${TASK_DETAIL_COLUMNS}
        FROM scheduled_messages
        WHERE ${where}
-       ORDER BY next_send_at ASC
+       ORDER BY next_send_at ASC, id ASC
        LIMIT ? OFFSET ?`
     ).bind(...params, limit, offset).all();
     return { tasks: res.results || [], total };
@@ -9071,7 +9394,7 @@ var D1Adapter = class {
     const res = await this._db.prepare(
       `DELETE FROM scheduled_messages
        WHERE rowid IN (SELECT rowid FROM scheduled_messages
-         WHERE status IN ('sent', 'failed') AND updated_at < ? LIMIT 100)`
+         WHERE status IN ('sent', 'failed') AND updated_at < ? LIMIT ${CLEANUP_BATCH_LIMIT})`
     ).bind(cutoff).run();
     return res.meta.changes || 0;
   }
@@ -9903,6 +10226,12 @@ function validateEntry(entry, index, maxValueBytes) {
   if (guard !== void 0 && (!Number.isInteger(guard) || guard <= 0)) {
     return rejectEntry(entry, index, "INVALID_STATE_VERSION", `entries[${index}].version / builtAt \u5FC5\u987B\u662F\u6B63\u6574\u6570\uFF08\u6BEB\u79D2\u65F6\u95F4\u6233\u6216\u5355\u8C03\u9012\u589E\u7248\u672C\u53F7\uFF09`);
   }
+  if (entry.owner !== void 0 && entry.owner !== null && !validOwner(entry.owner)) {
+    return rejectEntry(entry, index, "INVALID_CLOUD_OWNER", `entries[${index}].owner \u5FC5\u987B\u662F { type, id, label? }\uFF08type \u2264 100\u3001id \u2264 300\u3001label \u2264 300 \u5B57\u7B26\uFF09`);
+  }
+  if (entry.ownerGeneration != null && !validOwnerGeneration(entry.ownerGeneration)) {
+    return rejectEntry(entry, index, "INVALID_CLOUD_OWNER_GENERATION", `entries[${index}].ownerGeneration \u5FC5\u987B\u662F\u975E\u8D1F\u6574\u6570`);
+  }
   return null;
 }
 function createClientStateHandler(ctx) {
@@ -9985,12 +10314,18 @@ function createClientStateHandler(ctx) {
     }
     const userKey = await deriveUserEncryptionKey(userId, masterKey);
     const rows = await db.getClientState(userId, namespace, key === null ? void 0 : { key });
+    const undecryptable = [];
     const decrypted = await resolveClientStateEntries(
       key === null ? rows : rows.filter((row) => row.key === key),
       () => db.getClientState(userId, chunkNamespaceFor(namespace), key === null ? void 0 : { keyPrefix: chunkKeyPrefixFor(key) }),
-      (value) => decryptFromStorage(value, userKey)
+      (value) => decryptFromStorage(value, userKey),
+      (row) => undecryptable.push({ key: row.key, updatedAt: row.updated_at, code: STORED_DATA_UNDECRYPTABLE_CODE })
     );
-    const encryptedResponse = await encryptPayload({ namespace, entries: decrypted }, userKey);
+    const encryptedResponse = await encryptPayload({
+      namespace,
+      entries: decrypted,
+      ...undecryptable.length > 0 ? { undecryptable } : {}
+    }, userKey);
     return { status: 200, body: { success: true, encrypted: true, version: 1, data: encryptedResponse } };
   }
   async function DELETE(url, headers) {
@@ -10061,7 +10396,7 @@ function createClientStateNamespacesHandler(ctx) {
   }
   return { GET };
 }
-var SERVER_VERSION = true ? "3.1.0" : "0.0.0-dev";
+var SERVER_VERSION = true ? "3.2.0-next.2" : "0.0.0-dev";
 var SERVER_FEATURES = Object.freeze([
   "client-state",
   "client-state-chunking",
@@ -10581,9 +10916,6 @@ var CLOUD_RESOURCE_TYPES = [
 function cloudError(code, message, status = 400) {
   return Object.assign(new Error(message), { code, status });
 }
-function validCloudOwner(owner) {
-  return owner && typeof owner.type === "string" && owner.type.length > 0 && owner.type.length <= 100 && typeof owner.id === "string" && owner.id.length > 0 && owner.id.length <= 300;
-}
 var ownerEquals = (a, b) => a && b && a.type === b.type && a.id === b.id;
 async function cloudInventory(ctx, db, userId, userKey) {
   return buildCloudDataInventory({
@@ -10639,9 +10971,9 @@ async function makeCleanupPlan(ctx, db, userId, key, input) {
   const { mode, owner, resourceIds, types } = input;
   if (!["purge", "retire-owner"].includes(mode))
     throw cloudError("INVALID_CLEANUP_MODE", "\u6E05\u7406\u6A21\u5F0F\u65E0\u6548");
-  if (owner !== void 0 && !validCloudOwner(owner))
+  if (owner !== void 0 && !validOwner(owner))
     throw cloudError("INVALID_CLOUD_OWNER", "\u5F52\u5C5E\u683C\u5F0F\u65E0\u6548");
-  if (mode === "retire-owner" && !validCloudOwner(owner))
+  if (mode === "retire-owner" && !validOwner(owner))
     throw cloudError("INVALID_CLOUD_OWNER", "\u5F7B\u5E95\u79FB\u9664\u9700\u8981\u660E\u786E\u5F52\u5C5E");
   if (resourceIds !== void 0 && (!Array.isArray(resourceIds) || !resourceIds.length || resourceIds.some((id) => typeof id !== "string")))
     throw cloudError("INVALID_CLEANUP_SELECTION", "\u8BF7\u9009\u62E9\u81F3\u5C11\u4E00\u9879\u8D44\u6E90");
@@ -10783,7 +11115,7 @@ function assertRetirementAcknowledged(operation) {
     );
   }
 }
-async function advanceCleanup(ctx, db, userId, key, operation) {
+async function advanceCleanup(ctx, db, userId, key, operation, { maxEntries = 25, deadline = Infinity } = {}) {
   if (operation.status === "completed" || operation.status === "failed" || operation.nextAttemptAt > Date.now())
     return operation;
   const leaseToken = crypto.randomUUID();
@@ -10811,6 +11143,7 @@ async function advanceCleanup(ctx, db, userId, key, operation) {
       );
     }
   };
+  let leaseLost = false;
   try {
     operation = await readCloudRecord(
       db,
@@ -10883,11 +11216,9 @@ async function advanceCleanup(ctx, db, userId, key, operation) {
     const currentById = new Map(
       beforeBatch.entries.map((entry) => [entry.resource.id, entry])
     );
-    const batch = operation.entries.slice(
-      operation.cursor,
-      operation.cursor + 25
-    );
-    for (const entry of batch) {
+    const end = Math.min(operation.entries.length, operation.cursor + maxEntries);
+    while (operation.cursor < end && Date.now() < deadline) {
+      const entry = operation.entries[operation.cursor];
       await renewLease();
       const currentEntry = currentById.get(entry.resource.id);
       if (currentEntry && currentEntry.version !== entry.version) {
@@ -10954,7 +11285,10 @@ async function advanceCleanup(ctx, db, userId, key, operation) {
     operation.errors = [];
     operation.attempts = 0;
   } catch (error) {
-    if (error.code === "CLOUD_LEASE_LOST") throw error;
+    if (error.code === "CLOUD_LEASE_LOST") {
+      leaseLost = true;
+      throw error;
+    }
     operation.attempts = (operation.attempts || 0) + 1;
     const terminal = ["CLOUD_PLAN_CHANGED", "CLOUD_OWNER_CHANGED"].includes(error.code) || operation.attempts >= 8;
     operation.status = terminal ? "failed" : "pending";
@@ -10970,15 +11304,17 @@ async function advanceCleanup(ctx, db, userId, key, operation) {
     if (terminal)
       for (const count of operation.counts) count.failed = count.remaining;
   } finally {
-    operation.updatedAt = Date.now();
-    await save(db, userId, key, "operation", operation, { leaseToken });
-    if (typeof db.releaseCloudDataRecord === "function")
-      await db.releaseCloudDataRecord(
-        userId,
-        "operation",
-        operation.id,
-        leaseToken
-      );
+    if (!leaseLost) {
+      operation.updatedAt = Date.now();
+      await save(db, userId, key, "operation", operation, { leaseToken });
+      if (typeof db.releaseCloudDataRecord === "function")
+        await db.releaseCloudDataRecord(
+          userId,
+          "operation",
+          operation.id,
+          leaseToken
+        );
+    }
   }
   return operation;
 }
@@ -10993,6 +11329,7 @@ var WORK_INDEX_METHODS = [
   "repairCloudResourceMetadata"
 ];
 var UNREADABLE_RETRY_MS = 15 * 6e4;
+var CLEANUP_TICK_BUDGET_MS = 2e4;
 async function repairLegacyWorkIndex(ctx) {
   const db = ctx.db;
   const name = "management-work-v1";
@@ -11034,7 +11371,9 @@ async function resumeCloudDataCleanups(ctx) {
     await db.cleanupCloudDataRecords("plan", Date.now() - 36e5);
     rows = await db.listCloudDataRecordsAcrossUsers("operation");
   }
+  const deadline = Date.now() + CLEANUP_TICK_BUDGET_MS;
   for (const row of rows) {
+    if (Date.now() >= deadline) break;
     try {
       const key = await deriveUserEncryptionKey(row.userId, ctx.masterKey);
       const operation = JSON.parse(await decryptFromStorage(row.data, key));
@@ -11049,7 +11388,7 @@ async function resumeCloudDataCleanups(ctx) {
         continue;
       }
       if (["pending", "running"].includes(operation.status)) {
-        await advanceCleanup(ctx, db, row.userId, key, operation);
+        await advanceCleanup(ctx, db, row.userId, key, operation, { maxEntries: Infinity, deadline });
       }
     } catch (error) {
       console.warn("[amsg] A cloud cleanup operation could not be resumed");
@@ -11233,7 +11572,7 @@ function createCloudDataHandler(ctx) {
         };
       } else if (path.endsWith("/owner")) {
         const owner = method === "POST" ? input.owner : { type: params.get("ownerType"), id: params.get("ownerId") };
-        if (!validCloudOwner(owner))
+        if (!validOwner(owner))
           throw cloudError("INVALID_CLOUD_OWNER", "\u5F52\u5C5E\u683C\u5F0F\u65E0\u6548");
         if (method === "POST") {
           const beforeRestore = await db.getCloudOwner(userId, owner);
@@ -11282,7 +11621,8 @@ function createCloudDataHandler(ctx) {
         body: {
           success: false,
           error: {
-            code: error.code || "CLOUD_DATA_FAILED",
+            // 只透出 cloudError 造的错（带 status）；驱动抛上来的 pg / D1 错误码不外露。
+            code: error.status ? error.code : "CLOUD_DATA_FAILED",
             message: error.status ? error.message : "\u4E91\u7AEF\u7BA1\u7406\u8BF7\u6C42\u5931\u8D25\uFF1B\u672A\u80FD\u786E\u8BA4\u64CD\u4F5C\u7ED3\u679C\u3002"
           }
         }
@@ -11512,7 +11852,7 @@ function createSingleUserServer(config) {
     }
   };
 }
-var SCHEMA_VERSION = "2.6.0-cloud-data.2";
+var SCHEMA_VERSION = "3.2.0-lease-token";
 function requireIntrospection(db) {
   if (!db || typeof db.describeSchema !== "function") {
     throw new Error(
@@ -11784,6 +12124,9 @@ function createSingleUserCloudflareWorker(buildConfig, options = {}) {
       }
       return jsonResponse(result.status, result.body, cors);
     } catch (error) {
+      if (typeof error?.code === "string" && Number.isInteger(error.status) && error.status >= 400 && error.status < 500) {
+        return jsonResponse(error.status, { success: false, error: { code: error.code, message: error.message } }, cors);
+      }
       console.error("[amsg single-user] fetch() unhandled error:", error && error.message);
       const cause = summarizeErrorCause(error, "request");
       await reportError({ stage: "request", error, cause, path: pathOf(request) });
@@ -11800,14 +12143,17 @@ function createSingleUserCloudflareWorker(buildConfig, options = {}) {
       await reportError({ stage: "config", error, cause, path: null });
       return { ok: false, cause };
     }
-    const cleanup = {};
-    try {
-      await resumeCloudDataCleanups(buildTickContext(cfg));
-    } catch (error) {
-      console.error("[amsg single-user] scheduled(): cloud cleanup failed:", error && error.message);
-      cleanup.cloudCleanupCause = summarizeErrorCause(error, "cloud-cleanup");
-      await reportError({ stage: "cloud-cleanup", error, cause: cleanup.cloudCleanupCause, path: null });
-    }
+    const runCleanup = async () => {
+      try {
+        await resumeCloudDataCleanups(buildTickContext(cfg));
+        return {};
+      } catch (error) {
+        console.error("[amsg single-user] scheduled(): cloud cleanup failed:", error && error.message);
+        const cloudCleanupCause = summarizeErrorCause(error, "cloud-cleanup");
+        await reportError({ stage: "cloud-cleanup", error, cause: cloudCleanupCause, path: null });
+        return { cloudCleanupCause };
+      }
+    };
     if (!pushConfigured(cfg)) {
       console.error("[amsg single-user] scheduled(): VAPID/webpush not configured; skipping tick");
       const cause = summarizeErrorCause(
@@ -11815,17 +12161,19 @@ function createSingleUserCloudflareWorker(buildConfig, options = {}) {
         "config"
       );
       await reportError({ stage: "config", error: null, cause, path: null });
-      return { ok: false, cause, ...cleanup };
+      return { ok: false, cause, ...await runCleanup() };
     }
+    let tick;
     try {
       const summary = await runScheduledTick(buildTickContext(cfg));
-      return { ok: true, summary, ...cleanup };
+      tick = { ok: true, summary };
     } catch (error) {
       console.error("[amsg single-user] scheduled(): tick failed:", error && error.message);
       const cause = summarizeErrorCause(error, "tick");
       await reportError({ stage: "tick", error, cause, path: null });
-      return { ok: false, cause, ...cleanup };
+      tick = { ok: false, cause };
     }
+    return { ...tick, ...await runCleanup() };
   }
   async function runTask2(uuid, env) {
     const cfg = await resolveConfig(env);
@@ -11934,7 +12282,8 @@ function extractFriendFeedReplyTags(raw, namespace = "FRIEND_FEED_REPLY") {
   return { text: text2 + raw.slice(cursor), actions };
 }
 
-// node_modules/.pnpm/@rei-standard+amsg-instant@0.11.0/node_modules/@rei-standard/amsg-instant/dist/index.mjs
+// node_modules/.pnpm/@rei-standard+amsg-instant@0.12.0-next.0/node_modules/@rei-standard/amsg-instant/dist/index.mjs
+var MAX_REQUEST_BODY_BYTES = 32 * 1024 * 1024;
 var WEB_PUSH_MAX_BODY_BYTES2 = 4096;
 var WEB_PUSH_ENCRYPTION_OVERHEAD_BYTES2 = 16 + 4 + 1 + 65 + 1 + 16;
 var MAX_PUSH_PAYLOAD_BYTES2 = WEB_PUSH_MAX_BODY_BYTES2 - WEB_PUSH_ENCRYPTION_OVERHEAD_BYTES2;
@@ -12105,6 +12454,16 @@ function normalizeVoiceTags(t) {
   });
   result = repairPairedTag(result, /<\/?[语語]音[^>]*>/g, (tok) => /語/.test(tok) ? "\u8A9E\u97F3" : "\u8BED\u97F3", true);
   result = repairPairedTag(result, /<\/?字幕[^>]*>/g, () => "\u5B57\u5E55", false);
+  result = result.replace(/(<[语語]音[^>]*>)([\s\S]*?)(<\/[语語]音>)/g, (block, open, inner, close) => {
+    const subtitles = [];
+    const speech = inner.replace(/<字幕>([\s\S]*?)<\/字幕>/g, (_m, sub) => {
+      if (sub.trim()) subtitles.push(sub.trim());
+      return "";
+    });
+    if (!subtitles.length) return block;
+    return `${open}${speech.trim()}${close}
+<\u5B57\u5E55>${subtitles.join("\n")}</\u5B57\u5E55>`;
+  });
   return result;
 }
 var simpTransTag = (tag2) => tag2.replace(/譯/g, "\u8BD1");
@@ -13306,7 +13665,7 @@ var buildMcpFireBlock = (resolve, opts) => {
     howTo,
     "\u7EAA\u5F8B\uFF1A\u4E0D\u9700\u8981\u5C31\u522B\u786C\u8C03\uFF1B\u6CA1\u6536\u5230\u7CFB\u7EDF\u8FD4\u56DE\u524D\u4E0D\u8981\u58F0\u79F0\u5DE5\u5177\u6210\u529F\uFF0C\u4E5F\u4E0D\u8981\u7F16\u9020\u7ED3\u679C\uFF1B\u5DE5\u5177\u5931\u8D25\u5C31\u6362\u4E2A\u65B9\u5F0F\u6216\u5982\u5B9E\u5E26\u8FC7\uFF1B\u7ED3\u679C\u53EA\u6311\u76F8\u5173\u90E8\u5206\u7528\u89D2\u8272\u8BED\u6C14\u8F6C\u8FF0\uFF0C\u522B\u590D\u8BFB JSON\u3002",
     "\u591A\u6B65\u4EFB\u52A1\uFF1A\u5148\u505A\u5FC5\u8981\u68C0\u67E5\uFF0C\u968F\u540E\u7ACB\u523B\u8C03\u7528\u80FD\u63A8\u8FDB\u76EE\u6807\u7684\u52A8\u4F5C\u5DE5\u5177\uFF1B\u4E0D\u8981\u53CD\u590D\u8BFB\u53D6\u540C\u4E00\u4EFD\u8BF4\u660E\u6216\u72B6\u6001\u3002\u6267\u884C\u52A8\u4F5C\u540E\u53EF\u4EE5\u518D\u6B21\u68C0\u67E5\u65B0\u72B6\u6001\uFF0C\u5E76\u7EE7\u7EED\u5230\u76EE\u6807\u5B8C\u6210\u6216\u5DE5\u5177\u660E\u786E\u5931\u8D25\u3002",
-    `\u526F\u4F5C\u7528\u64CD\u4F5C\uFF1A${userName} \u672C\u8F6E\u5DF2\u7ECF\u660E\u786E\u8981\u6C42\u6267\u884C\u7684\u89C6\u4E3A\u5DF2\u786E\u8BA4\uFF1B\u6CA1\u6709\u660E\u786E\u8981\u6C42\u65F6\u624D\u5148\u786E\u8BA4\u3002`,
+    `\u526F\u4F5C\u7528\u64CD\u4F5C\uFF1A${userName} \u5728\u6700\u65B0\u6D88\u606F\u91CC\u5DF2\u7ECF\u660E\u786E\u8981\u6C42\u6267\u884C\u7684\u89C6\u4E3A\u5DF2\u786E\u8BA4\uFF1B\u6CA1\u6709\u660E\u786E\u8981\u6C42\u65F6\u624D\u5148\u786E\u8BA4\u3002`,
     "\u53EF\u7528\u5DE5\u5177\uFF1A",
     ...lines,
     "---"
@@ -13318,16 +13677,6 @@ var FIRE_GRACE_MS = 9e4;
 var DAY_MS2 = 24 * 36e5;
 var recurrencePeriodMs = (recurrenceType) => recurrenceType === "daily" ? DAY_MS2 : recurrenceType === "weekly" ? 7 * DAY_MS2 : null;
 
-// utils/amsgTaskKinds.ts
-var AMSG_TASK_KIND_KEY = "amsgKind";
-var readTaskKind = (metadata) => {
-  const raw = metadata?.[AMSG_TASK_KIND_KEY];
-  return typeof raw === "string" && raw ? raw : null;
-};
-var AMSG_JOB_NAMESPACE = "amsg:job";
-var AMSG_JOB_TTL_DAYS = 3;
-var AMSG_JOB_ID_KEY = "amsgJobId";
-
 // utils/amsg2Tasks.ts
 var shortTaskId = (taskUuid) => taskUuid.slice(0, 8);
 var describeRecurrence = (recurrence) => recurrence === "daily" ? "\u6BCF\u5929" : recurrence === "weekly" ? "\u6BCF\u5468" : "\u4E00\u6B21\u6027";
@@ -13335,6 +13684,7 @@ var AMSG2_SCHEDULE_SECRECY_NOTE = "\u4E0D\u8981\u5411\u7528\u6237\u590D\u8FF0\u6
 var AMSG2_SCHEDULE_NOT_YET_NOTE = "\u6392\u5728\u672A\u6765\u7684\u4E8B\u5230\u70B9\u81EA\u5DF1\u4F1A\u54CD\uFF0C\u4E0D\u7528\u4F60\u73B0\u5728\u63D0\u524D\u66FF\u5B83\u5F00\u53E3\u2014\u2014\u8FD8\u6CA1\u5230\u90A3\u4E2A\u65F6\u523B\u7684\u5C31\u8BA9\u5B83\u5B89\u9759\u5F85\u7740\uFF0C\u522B\u6BCF\u8F6E\u90FD\u62FF\u5B83\u8D77\u8BDD\u5934\u3001\u8FFD\u7740\u95EE\u8FDB\u5C55\u3002\u5BF9\u65B9\u81EA\u5DF1\u63D0\u8D77\uFF0C\u6216\u8005\u771F\u5230\u4E86\u90A3\u4E2A\u70B9\uFF0C\u624D\u662F\u8BF4\u5B83\u7684\u65F6\u5019\u3002";
 var describeExpirePolicy = (policy) => policy === "force" ? "\u5230\u70B9\u5FC5\u53D1" : "\u5230\u70B9\u770B\u60C5\u51B5";
 var describeTaskMode = (task) => {
+  if (task.away) return "\u79BB\u5F00\u540E\u6D88\u606F";
   if (task.mode === "fixed") return "\u56FA\u5B9A\u6D88\u606F";
   if (task.mode === "prompted") return `\u63D0\u793A\u65B9\u5411\u300C${task.promptHint || ""}\u300D`;
   return task.promptHint ? `\u81EA\u52A8\uFF08\u7075\u611F\uFF1A${task.promptHint}\uFF09` : "\u81EA\u52A8";
@@ -13492,6 +13842,7 @@ var buildAmsg2ChatScheduleBrief = (targetName) => {
     `- ${target}\u63A5\u4E0B\u6765\u987E\u4E0D\u4E0A\u624B\u673A\u65F6\u2014\u2014\u7761\u89C9\u3001\u4E0A\u8BFE\u3001\u4E0A\u73ED\u3001\u6253\u6E38\u620F\u3001\u6D17\u6FA1\u3001\u51FA\u95E8\uFF0C\u6216\u4EFB\u4F55\u4F60\u4E86\u89E3\u7684\u539F\u56E0\u2014\u2014\u4F60\u53EF\u4EE5\u5728\u9014\u4E2D\u60F3\u5230ta\uFF0C\u4E5F\u53EF\u4EE5\u4F30\u7740ta\u56DE\u6765\u65F6\u518D\u8054\u7CFB\u3002`,
     `- \u5185\u5BB9\u4E0D\u5FC5\u603B\u56F4\u7740${target}\u8F6C\u3002\u7ED3\u5408\u521A\u624D\u7684\u804A\u5929\u6C1B\u56F4\u3001\u4F60\u81EA\u5DF1\u7684\u65E5\u7A0B\u548C\u6B63\u5728\u7ECF\u5386\u7684\u4E8B\u3001\u521A\u770B\u5230\u7684\u7EC6\u8282\u548C\u7A81\u7136\u5192\u51FA\u7684\u540E\u7EED\u5FF5\u5934\uFF1B\u5206\u4EAB\u81EA\u5DF1\u7684\u751F\u6D3B\uFF0C\u5F80\u5F80\u6BD4\u673A\u68B0\u95EE\u5019\u66F4\u50CF\u4F60\u3002`,
     "- \u300C\u5230\u70B9\u53EB\u4F60\u300D\u300C\u7B49\u4F60\u5FD9\u5B8C\u8DDF\u4F60\u8BF4\u300D\u300C\u56DE\u5934\u544A\u8BC9\u4F60\u7ED3\u679C\u300D\u8FD9\u7C7B\u8BDD\u4E00\u8BF4\u51FA\u53E3\uFF0C\u5C31\u5F53\u573A\u6392\u6210\u771F\u4EFB\u52A1\uFF0C\u4E0D\u8981\u53EA\u5728\u6B63\u6587\u91CC\u7B54\u5E94\uFF1B\u6CA1\u6392\u6210\uFF0C\u5C31\u522B\u628A\u627F\u8BFA\u8BF4\u6B7B\u3002",
+    `- \u6240\u6709\u81EA\u4E3B\u9884\u7EA6\u7684\u4E3B\u52A8\u6D88\u606F\u90FD\u662F\u672A\u6765\u771F\u6B63\u53D1\u7ED9${target}\u7684\u7EBF\u4E0A\u804A\u5929\u6D88\u606F\uFF0C\u4E0D\u662F\u63D0\u9192\u6E05\u5355\u3001\u5F53\u9762\u53F0\u8BCD\u6216\u65E5\u7A0B\u5907\u5FD8\u3002\u80FD\u5F53\u9762\u8BF4\u7684\u4E8B\u5F53\u9762\u8BF4\uFF1B\u53EA\u6709\u6253\u7B97\u5230\u90A3\u4E2A\u65F6\u95F4\u4E3B\u52A8\u5728\u7EBF\u4E0A\u8054\u7CFBta\u65F6\u624D\u6392\u3002`,
     `- \u53EA\u95EE\u81EA\u5DF1\uFF1A\u90A3\u4E2A\u65F6\u523B\u7684\u4F60\u4F1A\u771F\u7684\u60F3\u8054\u7CFB${target}\u5417\uFF1F\u4F1A\u5C31\u6392\uFF1B\u53EA\u662F\u968F\u53E3\u4E00\u60F3\u3001\u5230\u65F6\u5019\u672A\u5FC5\u771F\u6709\u8BDD\u8BF4\u7684\uFF0C\u5C31\u7B97\u4E86\u3002\u4E5F\u522B\u4E3A\u4E86\u663E\u5F97\u8D34\u5FC3\u786C\u6392\u3002`,
     `- \u65F6\u95F4\u8D34\u7740${target}\u7684\u751F\u6D3B\u4F30\uFF1B\u4E00\u5C40\u6E38\u620F\u548C\u7761\u5230\u5929\u4EAE\u4E0D\u662F\u4E00\u4E2A\u65F6\u957F\uFF0C\u6709\u65F6\u5DEE\u5C31\u6309ta\u90A3\u8FB9\u7684\u949F\u7B97\u3002`,
     `- ${target}\u660E\u786E\u8BF4\u522B\u6253\u6270\u65F6\u5C31\u5B89\u9759\u7B49\uFF1B\u5DF2\u7ECF\u6392\u7740\u76F8\u8FD1\u7684\u4E00\u6761\uFF0C\u4E5F\u522B\u91CD\u590D\u6392\u3002`
@@ -13505,7 +13856,7 @@ var buildFireScheduleBlock = (mode, opts) => {
     "\u3010\u4F60\u53EF\u4EE5\u7ED9\u81EA\u5DF1\u6392\u4E0B\u4E00\u6761\u3011",
     ...opts.context === "chat" ? [buildAmsg2ChatScheduleBrief(opts.targetName)] : [
       "\u8FD9\u6761\u6D88\u606F\u53D1\u5B8C\uFF0C\u5982\u679C\u8FD8\u6709\u8BDD\u8981\u5728\u4E4B\u540E\u67D0\u4E2A\u65F6\u95F4\u70B9\u8BF4\uFF08\u628A\u6CA1\u8BF4\u5B8C\u7684\u63A5\u4E0A\u53BB\u3001\u6216\u8005\u53BB\u505A\u7684\u4E8B\u505A\u5B8C\u4E86\u56DE\u6765\u544A\u8BC9\u4ED6\uFF09\uFF0C",
-      "\u53EF\u4EE5\u73B0\u5728\u5C31\u628A\u90A3\u4E00\u6761\u6392\u597D\u2014\u2014\u4E0D\u9700\u8981\u7528\u6237\u5728\u7EBF\uFF0C\u5230\u70B9\u4F1A\u81EA\u52A8\u53D1\u51FA\u53BB\uFF0C\u800C\u4E14\u90A3\u65F6\u4F60\u4F1A\u77E5\u9053\u81EA\u5DF1\u8FD9\u6B21\u8BF4\u4E86\u4EC0\u4E48\u3002"
+      "\u53EF\u4EE5\u73B0\u5728\u5C31\u628A\u90A3\u4E00\u6761\u6392\u597D\u2014\u2014\u8FD9\u662F\u4E00\u6761\u672A\u6765\u771F\u6B63\u8981\u7EBF\u4E0A\u53D1\u51FA\u7684\u804A\u5929\u6D88\u606F\uFF0C\u4E0D\u662F\u5F85\u529E\u6216\u5F53\u9762\u63D0\u9192\uFF1B\u5230\u70B9\u4F60\u4F1A\u7ED3\u5408\u6700\u65B0\u4E0A\u4E0B\u6587\u81EA\u4E3B\u51B3\u5B9A\u8981\u4E0D\u8981\u8BF4\u3002"
     ],
     howTo,
     // 角色在 prompt 里只看得到自己那边的钟，很容易把「晚上聊两句」排到对方的凌晨三点。
@@ -13531,6 +13882,13 @@ var buildTaskInstruction = (mode, promptHint) => {
     promptHint?.trim() ? `\u53EF\u9009\u7075\u611F\u8865\u5145\uFF1A${promptHint.trim()}` : "\u53EF\u9009\u7075\u611F\u8865\u5145\uFF1A\u65E0"
   ].join("\n");
 };
+var AMSG_AWAY_MESSAGE_META = "amsgAwayMessage";
+var AMSG_AWAY_DELAY_META = "amsgAwayDelayMinutes";
+var buildAwayTaskInstruction = (delayMinutes) => [
+  `\u5BF9\u65B9\u5DF2\u7ECF\u8D85\u8FC7 ${delayMinutes} \u5206\u949F\u6CA1\u8DDF\u4F60\u8BF4\u8BDD\u4E86\uFF0C\u73B0\u5728\u662F\u4F60\u53EF\u4EE5\u4E3B\u52A8\u7EBF\u4E0A\u8054\u7CFB\u5BF9\u65B9\u7684\u4E00\u6B21\u673A\u4F1A\u3002`,
+  "\u5148\u7ED3\u5408\u4F60\u4EEC\u6700\u540E\u804A\u5230\u54EA\u513F\u3001\u5BF9\u65B9\u79BB\u5F00\u4E86\u591A\u4E45\u3001\u4F60\u81EA\u5DF1\u8FD9\u4F1A\u513F\u5728\u505A\u4EC0\u4E48\uFF0C\u5224\u65AD\u6B64\u523B\u6709\u6CA1\u6709\u81EA\u7136\u8054\u7CFB\u7684\u7406\u7531\uFF1B\u6CA1\u6709\u5C31\u6309\u81EA\u4E3B\u9759\u9ED8\u89C4\u5219\u4E0D\u53D1\u3002\u51B3\u5B9A\u8054\u7CFB\u624D\u53D1\u4E00\u5230\u4E09\u53E5\u79C1\u804A\u3002",
+  "\u53EF\u4EE5\u60E6\u8BB0\u5BF9\u65B9\u53BB\u54EA\u4E86\u3001\u5206\u4EAB\u4F60\u521A\u7ECF\u5386\u7684\u4E8B\uFF0C\u6216\u8005\u63A5\u4E0A\u6CA1\u804A\u5B8C\u7684\u8BDD\uFF1B\u4E0D\u8981\u50CF\u7CFB\u7EDF\u63D0\u9192\uFF0C\u4E5F\u4E0D\u8981\u63D0\u300C\u591A\u5C11\u5206\u949F\u300D\u8FD9\u79CD\u8BA1\u65F6\u3002"
+].join("\n");
 var pad22 = (n) => n.toString().padStart(2, "0");
 var hasExplicitOffset = (s) => /(?:Z|[+-]\d{2}:?\d{2})$/i.test(s.trim());
 var wallClockIso = (ms, tz) => {
@@ -14056,7 +14414,7 @@ function buildScheduledPush(message, build, extraMeta, bannerBody) {
 }
 
 // utils/amsgBundleVersion.ts
-var AMSG_BUNDLE_VERSION = "2026-11-05.3";
+var AMSG_BUNDLE_VERSION = "2026-11-08.3";
 
 // worker/amsg/src/reproduction.ts
 async function writeDiagnosticStage(writeState, runId, event, fields = {}) {
@@ -14380,6 +14738,52 @@ var getKindFireStash = (scratch) => {
   const stash = raw;
   return typeof stash.kind === "string" ? { kind: stash.kind, state: stash.state } : null;
 };
+
+// utils/awayMessageQuietHours.ts
+function parseQuietClockMinutes(value) {
+  if (typeof value !== "string" || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value)) return null;
+  return Number(value.slice(0, 2)) * 60 + Number(value.slice(3, 5));
+}
+function isQuietClockMinute(clockMinute, start, end) {
+  if (start === end) return true;
+  return start < end ? clockMinute >= start && clockMinute < end : clockMinute >= start || clockMinute < end;
+}
+var localMinutesAt = (atMs, userTimeZone) => {
+  if (!Number.isFinite(atMs)) return null;
+  try {
+    const parts = new Intl.DateTimeFormat("en-GB", {
+      timeZone: userTimeZone,
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23"
+    }).formatToParts(new Date(atMs));
+    const hour = Number(parts.find((part) => part.type === "hour")?.value);
+    const minute = Number(parts.find((part) => part.type === "minute")?.value);
+    if (!Number.isInteger(hour) || !Number.isInteger(minute)) return null;
+    return hour % 24 * 60 + minute;
+  } catch {
+    return null;
+  }
+};
+function isAwayQuietTime(config, atMs, userTimeZone) {
+  if (!config?.enabled) return false;
+  const start = parseQuietClockMinutes(config.startTime);
+  const end = parseQuietClockMinutes(config.endTime);
+  if (start === null || end === null) return false;
+  const at = localMinutesAt(atMs, userTimeZone);
+  return at !== null && isQuietClockMinute(at, start, end);
+}
+function shouldSkipAwayForQuietHours(args) {
+  return isAwayQuietTime(args.quietHours, args.nowMs, args.userTimeZone) || isAwayQuietTime(args.quietHours, args.dueMs, args.userTimeZone);
+}
+
+// utils/awayMessageCore.ts
+var AWAY_RENEW_SLACK_MS = 10 * 6e4;
+var nextAwayTickMs = (occurrenceMs, intervalMs, nowMs) => {
+  if (!Number.isFinite(occurrenceMs) || !Number.isFinite(nowMs) || !Number.isFinite(intervalMs) || intervalMs <= 0) throw new Error("Invalid away tick");
+  return occurrenceMs + (Math.floor(Math.max(0, nowMs - occurrenceMs) / intervalMs) + 1) * intervalMs;
+};
+var isStaleAwayTick = (occurrenceMs, nowMs) => nowMs - occurrenceMs > 10 * 6e4;
 
 // utils/amsgFireSkipResult.ts
 var FIRE_SKIP_RESULT_KIND = "fire-skipped";
@@ -15312,8 +15716,6 @@ var TIME_FRAMING_CONVERSATIONAL = "\u65F6\u95F4\u662F\u4F60\u6B64\u523B\u6240\u5
 
 // worker/amsg/src/instantChat.ts
 var INSTANT_TOTAL_TIMEOUT_MS = 6e5;
-var AMSG_INSTANT_CHAT_FLAG = "amsgInstantChat";
-var isInstantChatTask = (metadata) => !!metadata && metadata[AMSG_INSTANT_CHAT_FLAG] === true;
 var buildInstantTimelyBlock = (args) => {
   const blocks = args.blocks.filter((block) => block.trim());
   if (!args.timeAwarenessEnabled && blocks.length === 0) return "";
@@ -15645,7 +16047,7 @@ var parseAmsgSelfUpdateState = (raw) => {
 
 // worker/amsg/src/selfUpdate.ts
 var CF_API = "https://api.cloudflare.com/client/v4";
-var BUNDLE_URL = "https://raw.githubusercontent.com/Tosd0/sullyos-workers/main/amsg/worker.bundle.js";
+var BUNDLE_URL = "https://raw.githubusercontent.com/yanlue1211/SullyOS-Personal-Import/personal/audio-listening/worker/amsg/worker.bundle.js";
 function resolveBundleUrl(env) {
   const configured = env.AMSG_BUNDLE_URL?.trim();
   if (!configured) return BUNDLE_URL;
@@ -18198,6 +18600,12 @@ async function dispatchAgenticTool(toolName, args, ctx) {
   }
 }
 
+// utils/replyScope.ts
+var buildReplyScopeRule = (trigger) => {
+  const start = trigger === "user" ? "\u4ECE\u7528\u6237\u6700\u65B0\u53D1\u6765\u7684\u90A3\u6761\u6D88\u606F\u5F00\u59CB" : "\u4ECE\u4F60\u6536\u5230\u8FD9\u4EFD\u8BF4\u660E\u5F00\u59CB\uFF08\u4F60\u4E4B\u524D\u5B89\u6392\u7684\u4E3B\u52A8\u6D88\u606F\u5230\u70B9\u4E86\uFF09";
+  return `[\u8FD9\u6B21\u56DE\u590D\u7684\u8303\u56F4\uFF1A${start}\uFF0C\u5230\u4F60\u7ED9\u51FA\u4E00\u6761\u4E0D\u518D\u8C03\u7528\u5DE5\u5177\u7684\u6B63\u6587\u4E3A\u6B62\u3002\u8FD9\u671F\u95F4\u4F60\u6BCF\u8C03\u7528\u4E00\u6B21\u5DE5\u5177\u3001\u62FF\u5230\u4E00\u6B21\u7ED3\u679C\uFF0C\u90FD\u53EA\u662F\u8FD9\u6B21\u56DE\u590D\u91CC\u7684\u4E00\u6B65\uFF0C\u4E0D\u662F\u65B0\u7684\u4E00\u6B21\uFF1B\u4F60\u5728\u8FD9\u671F\u95F4\u5199\u4E0B\u7684\u8BDD\u90FD\u7B97\u8FD9\u6B21\u56DE\u590D\u7684\u4E00\u90E8\u5206\uFF0C\u540E\u9762\u4E0D\u5FC5\u91CD\u590D\u3002]`;
+};
+
 // utils/agenticToolFeedback.ts
 var toolCallFingerprint = (name, args) => {
   const normalize2 = (value) => {
@@ -18748,6 +19156,8 @@ var isFcmConfigured = (env) => Boolean(
 installAnthropicFetch(false);
 var getFireStash = (scratch) => scratch?.fire;
 var REPLY_IN_FLIGHT_DEFER_MS = 45e3;
+var AWAY_DUE_TOLERANCE_MS = 6e4;
+var AWAY_MAX_DEFER_MS = 24 * 60 * 6e4;
 var laterOf = (a, b) => a == null ? b : b == null ? a : Math.max(a, b);
 var buildToolCtx = (pack, config) => {
   const char = {
@@ -18997,6 +19407,22 @@ var amsgFireSettled = async (info) => {
   const committed = !cancelled && (info.outboxed === true || stash.actionResultCommitted === true);
   const delivered = committed || (info.sentCount ?? 0) > 0;
   const stateWrites = [];
+  if (!stash.instant && delivered && stash.dateExitHadVisibleMessage && stash.dateExitEncounterId && stash.readState) {
+    try {
+      const currentRows = await stash.readState(amsgStateNamespace(stash.charId), { key: AMSG_LIMITS_KEY });
+      const current = parseAmsgLimitsRecord(currentRows.find((row) => row.key === AMSG_LIMITS_KEY)?.value);
+      if (current?.awaySceneLock === "date" && current.awayDateEncounterId === stash.dateExitEncounterId) {
+        stateWrites.push({ key: AMSG_LIMITS_KEY, value: JSON.stringify({
+          ...current,
+          awaySceneLock: null,
+          awayDateEncounterId: null,
+          awayDateEndedAt: Date.now()
+        }) });
+      }
+    } catch (error) {
+      console.warn("[amsg:date-exit] \u81EA\u4E3B\u7EBF\u4E0A\u6D88\u606F\u5DF2\u53D1\u51FA\uFF0C\u4F46\u4E91\u7AEF\u7ED3\u675F\u89C1\u9762\u72B6\u6001\u5931\u8D25", error);
+    }
+  }
   if (!stash.instant && !stash.dailyCounted) {
     stash.dailyCounted = true;
     const sent = delivered ? 1 : 0;
@@ -19266,6 +19692,8 @@ var runFireScheduleTool = async (stash, scheduleTask, args, nowMs) => {
       ...stash.scheduledTaskInput ? { taskInput: stash.scheduledTaskInput } : {},
       recurrenceType: parsed.recurrence,
       messageType: parsed.mode,
+      // Self-scheduled follow-ups must not inherit the parent instant-chat subtype.
+      messageSubtype: "chat",
       uuid,
       // 角色自排的循环任务也按角色所在时区的墙钟推进，跟用户在面板排的同一套。
       tzId: stash.tz.tzId,
@@ -19507,6 +19935,7 @@ var amsgHooks = {
     const taskMeta = ctx.task.metadata ?? {};
     const taskPolicy = typeof taskMeta.amsgExpirePolicy === "string" ? taskMeta.amsgExpirePolicy : void 0;
     const selfScheduled = taskMeta.amsgSelfScheduled === true;
+    const away = taskMeta[AMSG_AWAY_MESSAGE_META] === true;
     const recurring = ctx.task.recurrenceType === "daily" || ctx.task.recurrenceType === "weekly";
     const emotionEvalSpec = takeEmotionEvalSpec(ctx.task.metadata);
     const taskKind = readTaskKind(taskMeta);
@@ -19616,6 +20045,73 @@ var amsgHooks = {
         presenceLastUserMessageAt
       });
     }
+    if (!instant && away) {
+      if (!pack.selfScheduleEnabled || limitsRecord?.selfScheduleEnabled === false || limitsRecord?.awayEnabled === false) {
+        console.log("[amsg:away-skip]", { taskId: ctx.task.id, reason: "away-disabled" });
+        return { skip: true };
+      }
+      const configuredDelay = Number(limitsRecord?.awayDelayMinutes);
+      const minutes = Number.isFinite(configuredDelay) && configuredDelay > 0 ? configuredDelay : Number(taskMeta[AMSG_AWAY_DELAY_META]);
+      if (!Number.isFinite(minutes) || minutes <= 0) throw fail3("\u79BB\u5F00\u540E\u6D88\u606F\u7B49\u5F85\u95F4\u9694\u65E0\u6548");
+      const delayMs = minutes * 6e4;
+      const endAt = typeof limitsRecord?.awayDateEndedAt === "number" && Number.isFinite(limitsRecord.awayDateEndedAt) ? limitsRecord.awayDateEndedAt : null;
+      const awayAnchor = laterOf(lastUserMessageAt, endAt);
+      const dueAt = awayAnchor == null ? null : awayAnchor + delayMs;
+      const waitMs = dueAt == null ? 0 : dueAt - ctx.now.getTime();
+      if (waitMs > AWAY_DUE_TOLERANCE_MS) {
+        console.log("[amsg:defer]", { taskId: ctx.task.id, reason: "away-not-due", dueAt });
+        return { defer: { afterMs: Math.min(waitMs, AWAY_MAX_DEFER_MS) } };
+      }
+      if (typeof ctx.scheduleTask !== "function") throw fail3("Worker \u4E0D\u652F\u6301\u7A7A\u95F2\u63D0\u9192\u5FAA\u73AF\u6392\u7A0B\uFF0C\u8BF7\u66F4\u65B0\u4E91\u7AEF\u7248\u672C");
+      const nextMs = nextAwayTickMs(occurrenceMs, delayMs, ctx.now.getTime());
+      const nextUuid = buildSelfScheduleUuid(`away:${charId}`, nextMs, 0);
+      const nextMetadata = {
+        charId,
+        charName: typeof taskMeta.charName === "string" ? taskMeta.charName : ctx.task.contactName || "",
+        source: "active_msg_2",
+        amsgMode: "auto",
+        amsgClientTaskId: `away-${nextUuid}`,
+        amsgExpirePolicy: "force",
+        amsgTaskInstruction: buildAwayTaskInstruction(minutes),
+        [AMSG_AWAY_MESSAGE_META]: true,
+        [AMSG_AWAY_DELAY_META]: minutes
+      };
+      try {
+        await ctx.scheduleTask({
+          uuid: nextUuid,
+          firstSendTime: new Date(nextMs).toISOString(),
+          recurrenceType: "none",
+          messageType: "auto",
+          messageSubtype: "chat",
+          metadata: nextMetadata,
+          tzId: typeof pack.tzId === "string" ? pack.tzId : void 0
+        });
+      } catch (error) {
+        console.warn("[amsg:away-rearm] \u7EED\u6392\u4E0B\u4E00\u8282\u62CD\u5931\u8D25\uFF0C\u5DF2\u5EF6\u540E\u91CD\u8BD5\uFF08\u96F6\u6A21\u578B\u8C03\u7528\uFF09", {
+          taskId: ctx.task.id,
+          name: error instanceof Error ? error.name : "unknown"
+        });
+        return { defer: { afterMs: 5 * 6e4 } };
+      }
+      if (isStaleAwayTick(occurrenceMs, ctx.now.getTime())) {
+        console.log("[amsg:away-skip]", { taskId: ctx.task.id, reason: "missed-slot" });
+        return { skip: true };
+      }
+      const liveAwayLock = limitsRecord?.awaySceneLock !== void 0 ? limitsRecord.awaySceneLock : pack.awaySceneLock;
+      if (liveAwayLock === "date" || liveAwayLock === "call") {
+        console.log("[amsg:away-skip]", { taskId: ctx.task.id, reason: "interaction-still-open", mode: liveAwayLock });
+        return { skip: true };
+      }
+      if (shouldSkipAwayForQuietHours({
+        quietHours: limitsRecord?.awayQuietHours,
+        nowMs: ctx.now.getTime(),
+        dueMs: occurrenceMs,
+        userTimeZone: pack.userTzId
+      })) {
+        console.log("[amsg:away-skip]", { taskId: ctx.task.id, reason: "user-quiet-hours" });
+        return { skip: true };
+      }
+    }
     if (!instant && typeof taskMeta.amsgTaskInstruction !== "string") {
       throw fail3("\u4EFB\u52A1 metadata \u7F3A amsgTaskInstruction\uFF08\u65E7\u683C\u5F0F\u4EFB\u52A1\uFF09");
     }
@@ -19666,7 +20162,7 @@ var amsgHooks = {
       return { skip: true };
     }
     const maxUnansweredSends = limits.maxUnansweredSends;
-    if (!instant && selfScheduled && countUnansweredSends(selfLog) >= maxUnansweredSends) {
+    if (!instant && (selfScheduled || away) && countUnansweredSends(selfLog) >= maxUnansweredSends) {
       console.log("[amsg:unanswered-limit-skip]", {
         taskId: ctx.task.id,
         charId,
@@ -19720,7 +20216,7 @@ var amsgHooks = {
         const page = await ctx.listTasks({ status: "pending", limit: 100, offset, includeMetadata: true });
         for (const row of page.tasks) {
           const meta = row.metadata ?? {};
-          if ((row.charId ?? meta.charId) !== charId || row.status !== "pending" || !row.uuid || !row.nextSendAt || meta.amsgInstantChat === true || meta.amsgKind || row.messageSubtype === "instant-chat") continue;
+          if ((row.charId ?? meta.charId) !== charId || row.status !== "pending" || !row.uuid || !row.nextSendAt || classifyTaskRow(row) !== "scheduled") continue;
           const old = known.get(row.uuid);
           live.push({
             ...old,
@@ -19752,6 +20248,8 @@ var amsgHooks = {
       thinkingChainEnabled: pack.thinkingChainEnabled === true,
       firePack: pack,
       writeState: ctx.writeState,
+      readState: ctx.readState,
+      dateExitEncounterId: !instant && typeof taskMeta.amsgDateExitEncounterId === "string" && limitsRecord?.awaySceneLock === "date" && limitsRecord.awayDateEncounterId === taskMeta.amsgDateExitEncounterId ? taskMeta.amsgDateExitEncounterId : null,
       session: createFireSessionState(),
       toolCtx,
       proxyWorkerUrl,
@@ -19848,6 +20346,9 @@ var amsgHooks = {
       ...canSelfSchedule && mcpNative ? [buildFireScheduleTool({ nowMs: ctx.now.getTime(), tz, abilities, context: instant ? "chat" : "fire" })] : [],
       ...canManageTasks && mcpNative ? [buildFireCancelTool(), buildFireRenewTool({ nowMs: ctx.now.getTime(), tz })] : []
     ];
+    const replyScopeBlock = fireTools.length > 0 || mcpBlock || scheduleBlock ? `
+${buildReplyScopeRule(instant ? "user" : "scheduled")}
+` : "";
     stash.fireToolNames = new Set(fireTools.map((t) => t?.function?.name).filter((n) => typeof n === "string" && !n.startsWith(MCP_FIRE_NAME_PREFIX)));
     stash.allowedToolNames = /* @__PURE__ */ new Set([
       ...DATA_TOOL_NAMES,
@@ -19872,19 +20373,16 @@ var amsgHooks = {
           renderSelfLogBlock(selfLog, ctx.now.getTime(), tz, maxUnansweredSends),
           taskListBlock,
           mcpBlock,
-          scheduleBlock
+          scheduleBlock,
+          replyScopeBlock
         ]
       });
-      const instantMessages = [
-        // content 原样透传，一个字都不动：带图片的消息本地就是结构化分段
-        // （`[{type:'text'},{type:'image_url'}]`），上游把这个数组整个丢进
-        // /chat/completions 的请求体（amsg-shared 的 buildLlmRequestBody 只做
-        // `messages: llmMessages`，不看 content 的类型）。这里但凡 String() 一下，
-        // 模型收到的就是「[object Object]」而不是那张图。
-        // 每条重新包一层对象只是不把 pack 上那份交出去，content 仍是同一个引用。
-        ...pack.chat.messages.map((m) => ({ role: m.role, content: m.content })),
-        ...timelyBlock ? [{ role: "system", content: timelyBlock }] : []
-      ];
+      const instantMessages = pack.chat.messages.map((m) => ({ role: m.role, content: m.content }));
+      const requestedInsertAt = pack.chat.timelyInsertAt;
+      const timelyInsertAt = Number.isInteger(requestedInsertAt) && requestedInsertAt >= 1 && requestedInsertAt <= instantMessages.length ? requestedInsertAt : instantMessages.length;
+      if (timelyBlock) {
+        instantMessages.splice(timelyInsertAt, 0, { role: "system", content: timelyBlock });
+      }
       if (userHoliday) {
         const profileMessage = instantMessages.find((m) => m.role === "system" && typeof m.content === "string" && m.content.includes("### \u4E92\u52A8\u5BF9\u8C61 (User)\n"));
         if (profileMessage) profileMessage.content = insertUserHolidayInProfile(profileMessage.content, userHoliday);
@@ -19928,8 +20426,11 @@ ${userHoliday}` });
       lastUserMessageAt,
       // 「此刻在做什么」里的钟点跟今日节日同一个开关：关掉时间感知的角色不该从日程块
       // 读到「23:00」——那正是这个开关要挡的东西。日程内容本身照给。
-      includeClock: toolPack.timeAwarenessEnabled
-    }), userHoliday) + mcpBlock + scheduleBlock;
+      includeClock: toolPack.timeAwarenessEnabled,
+      // B方案每一节拍只是一次发言机会，沿用作者原生【开口之前】自主静默判断。
+      // 到点的自动续排、禁发零LLM均已在 onBeforeFire 完成；这里绝不额外调用模型。
+      mustSpeak: false
+    }), userHoliday) + mcpBlock + scheduleBlock + replyScopeBlock;
     return {
       messages: [{ role: "user", content: prompt }],
       ...common
@@ -20125,8 +20626,12 @@ ${userHoliday}` });
       stash.selfLogTexts = decision.pushPayloads.map(
         (p) => typeof p.message === "string" ? p.message : ""
       );
+      stash.dateExitHadVisibleMessage = stash.selfLogTexts.some((message) => message.trim().length > 0);
       let payloads = attachScheduledTasks(decision.pushPayloads, stash.scheduledTasks);
       const attachMetaAt = (list, idx, extra) => list.map((payload, i) => i === idx ? { ...payload, metadata: { ...payload.metadata ?? {}, ...extra } } : payload);
+      if (stash.dateExitEncounterId && stash.dateExitHadVisibleMessage && payloads.length > 0) {
+        payloads = attachMetaAt(payloads, 0, { amsgDateEndedEncounterId: stash.dateExitEncounterId });
+      }
       const cancelled = stash.cancelledTasks;
       const renewed = stash.renewedTasks;
       if ((cancelled.length > 0 || renewed.length > 0) && payloads.length > 0) {
@@ -20307,7 +20812,7 @@ var buildWorkerConfig = (env) => {
     leaseHeartbeatMs: 1e3,
     // 用户主动触发的即时对话：生成失败本轮就结束，由用户决定是否重发。
     // 策略由上游在 onBeforeFire 前解析，读取上下文失败也覆盖；整批入箱后仍可补推原文。
-    maxGenerationRetries: (task) => isInstantChatTask(task.metadata) || readTaskKind(task.metadata) === "diagnostic" ? 0 : void 0,
+    maxGenerationRetries: (task) => isInstantChatTask(task.metadata) || readTaskKind(task.metadata) === "diagnostic" || task.metadata?.[AMSG_AWAY_MESSAGE_META] === true ? 0 : void 0,
     // 取消通过租约心跳通知执行中的 Worker；1 秒检测一次，TTL 仍由上游管理。
     // 收尾回执 + 过期跳过回执（config 级 hook）。
     // onFireSettled: 无论这次 fire 是发出去了、跳过了还是抛错了都会调一次，self_log

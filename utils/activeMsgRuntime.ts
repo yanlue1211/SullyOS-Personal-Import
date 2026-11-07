@@ -37,6 +37,7 @@ import {
 import { dispatchAmsgResult } from './amsgResults';
 import { requestStartupUpdateCheck } from './amsgAutoUpdateTrigger';
 import { flushAmsgState } from './amsgStateSync';
+import { endAmsgDateFromScheduledMessage } from './amsgInteractionGuard';
 import { describeInstantChatFailure, pruneStaleTasks, type RemoteTaskLastError } from './amsg2Tasks';
 // 线协议常量的唯一出处是 shared（amsg-sw 只是 re-export 同一份）。
 import { MULTIPART_FAILURE_REASON } from '@rei-standard/amsg-shared';
@@ -766,6 +767,15 @@ const processInboxMessageWithPostProcessing = async (
     // 交给后处理逐气泡对齐写进 metadata.sarModuleSurface——和本地路径同一处消费。
     sarModuleSurface,
   }));
+
+  // 只有真正落库的线上主动消息才能结束对应线下见面；旧任务不能结束新见面。
+  const endedEncounterId = (message.metadata as any)?.amsgDateEndedEncounterId;
+  if (typeof endedEncounterId === 'string' && endedEncounterId
+      && endAmsgDateFromScheduledMessage(message.charId, endedEncounterId, message.sentAt || Date.now())) {
+    // Worker 自己已清云端锁，这里清本机持久化状态，避免下次上传旧锁将其覆盖。
+    try { await ActiveMsgClient.putCharLimits(char); }
+    catch (error) { log.warn('见面已结束，本地清锁成功但云端限制状态同步失败', { charId: message.charId, error }); }
+  }
 
   if(isLastChunk(message) && message.taskUuid) {
     const {settleFriendFeedCloudTask}=await import('./friendFeedEmotion');

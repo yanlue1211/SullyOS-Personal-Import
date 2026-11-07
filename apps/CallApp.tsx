@@ -12,6 +12,10 @@ import CallRecordingPlayback, { type CallRecording } from '../features/personal/
 import { CALL_RECORDING_GUIDE, VIDEO_NARRATION_GUIDE, VOICE_CALL_NARRATION_GUIDE, stripCallNarration, splitCallNarration } from '../features/personal/chatMedia/callFormat';
 import { audioBlobToPayload, recognizeUserRecording, isAudioApiReady } from '../utils/audioApi';
 import { resolveDialogueApi } from '../utils/characterApi';
+import { setAmsgActiveCall } from '../utils/amsgInteractionGuard';
+import { ActiveMsgClient } from '../utils/activeMsgClient';
+import { syncCloudAwayTask } from '../utils/awayMessage';
+import { isAmsg2EnabledForChar } from '../utils/amsg2Tasks';
 import { loadCharacterContextMessages } from '../utils/chatContextRange';
 import { canAnalyzeVoiceSource, isVoiceAudioPriming, primeVoiceAudio, voicePlaybackErrorMessage } from '../utils/voicePlayback';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -1758,6 +1762,7 @@ const CallApp: React.FC = () => {
     resetCurrentCall();
     primeCallAudioFromGesture();
     setViewMode('in-call');
+    if (selectedChar?.id) { setAmsgActiveCall(selectedChar.id, true); void (isAmsg2EnabledForChar(selectedChar) ? ActiveMsgClient.putCharLimits(selectedChar) : Promise.resolve()).catch(error => console.warn('[CallApp] 云端通话锁同步失败', error)); markCallTurnDirty(); }
     setCallStartedAt(Date.now());
     setCallState('listening');
     trackEvent('发起通话');
@@ -1800,38 +1805,52 @@ const CallApp: React.FC = () => {
     beginSelectedCall(setupCameraMode);
   };
   const finishCall = async () => {
-    if (selectedChar?.id) {
-      const userTurns = bubbles.filter(b => b.role === 'user').length;
-      const keepsakeLine = summarizeKeepsakeLine(bubbles, selectedChar.name);
-      const payload = {
-        characterId: selectedChar.id,
-        characterName: selectedChar.name,
-        characterAvatar: selectedChar.avatar,
-        durationSec: elapsedSeconds,
-        turnCount: userTurns,
-        keepsakeLine,
-        callMode,
-        endedAt: Date.now(),
-      };
-      await DB.saveMessage({
-        charId: selectedChar.id,
-        role: 'system',
-        type: 'system',
-        content: `通话结束 · ${selectedChar.name}｜${formatDuration(elapsedSeconds)}｜${Math.max(1, userTurns)}轮对话`,
-        metadata: { source: 'call-end-popup', callSessionId: currentSessionId, ...payload },
-      });
-      await loadCallRecords(selectedChar.id);
-      trackEvent('结束一通通话', { 模式: callMode === 'video' ? '视频' : '语音' });
-      // 挂断这一下最要紧：用户多半接着就把 App 关了，得把这最后一条也打脏——
-      // 打脏即传，微任务内就会冲刷上传。
-      markCallTurnDirty();
-      runCallMemoryPalaceHook(selectedChar);
+    const finishingChar = selectedChar;
+    let saved = !finishingChar;
+    try {
+      if (finishingChar) {
+        const userTurns = bubbles.filter(b => b.role === 'user').length;
+        const keepsakeLine = summarizeKeepsakeLine(bubbles, finishingChar.name);
+        const payload = {
+          characterId: finishingChar.id,
+          characterName: finishingChar.name,
+          characterAvatar: finishingChar.avatar,
+          durationSec: elapsedSeconds,
+          turnCount: userTurns,
+          keepsakeLine,
+          callMode,
+          endedAt: Date.now(),
+        };
+        await DB.saveMessage({
+          charId: finishingChar.id,
+          role: 'system',
+          type: 'system',
+          content: `通话结束 · ${finishingChar.name}｜${formatDuration(elapsedSeconds)}｜${Math.max(1, userTurns)}轮对话`,
+          metadata: { source: 'call-end-popup', callSessionId: currentSessionId, ...payload },
+        });
+        saved = true;
+        await loadCallRecords(finishingChar.id);
+        trackEvent('结束一通通话', { 模式: callMode === 'video' ? '视频' : '语音' });
+        runCallMemoryPalaceHook(finishingChar);
+      }
+    } catch (error) {
+      console.warn('[CallApp] 挂断后保存通话记录失败', error);
+      addToast('通话已经挂断，但保存记录失败；请检查存储空间。', 'error');
+    } finally {
+      // 显式挂断必须解除锁；即便记录保存失败也不得把状态永久留给2.0。
+      if (finishingChar) {
+        setAmsgActiveCall(finishingChar.id, false);
+        void (isAmsg2EnabledForChar(finishingChar)
+          ? ActiveMsgClient.putCharLimits(finishingChar) : Promise.resolve())
+          .catch(error => console.warn('[CallApp] 云端挂断状态同步失败', error));
+        markCallTurnDirty();
+      }
+      clearSuspendedCall();
+      resetCurrentCall();
+      setViewMode('history');
+      setShowHangupConfirm(false);
+      if (saved) addToast('通话记录已保存', 'success');
     }
-    clearSuspendedCall();
-    resetCurrentCall();
-    setViewMode('history');
-    setShowHangupConfirm(false);
-    addToast('通话记录已保存', 'success');
   };
   const handleHangup = () => {
     setShowHangupConfirm(true);
@@ -2788,6 +2807,9 @@ ${sentencePlan}`;
         });
         setBubbles(prev => prev.map(b => (b.id === userBubble.id ? { ...b, dbId: userDbId } : b)));
         markCallTurnDirty();
+        if (selectedChar?.awayMessage?.enabled) void syncCloudAwayTask({
+          char: selectedChar, lastUserAt: Date.now(), userProfile, groups, realtimeConfig, apiConfig, updateCharacter,
+        });
       } else if (newSnapshotRef) {
         const previousSnapshotRef = retryBubble?.cameraSnapshotRef;
         try {

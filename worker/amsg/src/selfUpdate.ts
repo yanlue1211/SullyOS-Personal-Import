@@ -25,13 +25,14 @@ import { cfTokenRejectedMessage, findCfTokenRejection } from '../../../utils/ams
 
 const CF_API = 'https://api.cloudflare.com/client/v4';
 
-/** 官方成品代码。跟代配脚本、手册附录指的是同一份。 */
+/** 个人长期部署的成品包，跟真正的 GitHub Pages 分支同步；仍允许显式覆盖来源。 */
 const BUNDLE_URL =
-  'https://raw.githubusercontent.com/Tosd0/sullyos-workers/main/amsg/worker.bundle.js';
+  'https://raw.githubusercontent.com/yanlue1211/SullyOS-Personal-Import/personal/audio-listening/worker/amsg/worker.bundle.js';
 
 /**
- * 成品包从哪儿取：默认官方那份；配了 AMSG_BUNDLE_URL 就取那儿（自己维护成品包的 fork、
+ * 成品包从哪儿取：个人版默认用实际网页发布分支；配了 AMSG_BUNDLE_URL 就取那儿（自己维护成品包的 fork、
  * 或者拿一台测试 Worker 试新代码时用）。只认 https，别的一律回落到默认。
+ * 旧 Worker 已部署的取包来源不会因前端更新而改变：首次融合必须核实并升级旧 Worker。
  */
 export function resolveBundleUrl(env: Pick<SelfUpdateEnv, 'AMSG_BUNDLE_URL'>): string {
   const configured = env.AMSG_BUNDLE_URL?.trim();

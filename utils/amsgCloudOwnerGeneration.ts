@@ -19,6 +19,11 @@ export function captureCloudOwnerGenerations(client: object, connection: Connect
   snapshots.set(client, read(connection));
 }
 
+/** 当前设备保存的云端恢复代次；缺失说明默认代次为 0。 */
+export function readCloudOwnerGeneration(connection: Connection, owner: CloudOwner): number {
+  return read(connection)[ownerKey(owner)] ?? 0;
+}
+
 export function rememberCloudOwnerGeneration(connection: Connection, owner: CloudOwner, generation: number): void {
   if (!Number.isSafeInteger(generation) || generation < 0) throw new Error('云端返回的恢复代次无效');
   localStorage.setItem(storageKey(connection), JSON.stringify({ ...read(connection), [ownerKey(owner)]: generation }));

@@ -1002,6 +1002,21 @@ describe('频率与额度（到点兜底闸）', () => {
   });
 });
 
+describe('作者 84d10385db：一次回复覆盖完整工具链', () => {
+  it('云端定时消息从到点指令算起，有工具才注入回复范围', async () => {
+    const { ctx } = makeCtx({});
+    ctx.scheduleTask = vi.fn();
+    const plan = fired(await amsgHooks.onBeforeFire(ctx));
+    expect(plan.tools?.length).toBeGreaterThan(0);
+    expect(plan.messages[0].content).toContain('这次回复的范围：从你收到这份说明开始');
+    expect(plan.messages[0].content).not.toContain('从用户最新发来的那条消息开始');
+
+    const bare = fired(await amsgHooks.onBeforeFire(makeCtx({}).ctx));
+    expect(bare.tools ?? []).toHaveLength(0);
+    expect(bare.messages[0].content).not.toContain('这次回复的范围');
+  });
+});
+
 // ─── 通用 MCP：到点把工具说明块和 tools 声明一起带上 ───
 //
 // 提示词块和 tools 数组同源同拍（都来自那一行 tool_config），所以这几条一起钉：
@@ -3686,6 +3701,24 @@ describe('worker 配置接线', () => {
     expect(cfg.serializeBy({})).toBeNull();
   });
 
+  it('B方案空闲检查只给一次付费生成机会；自主预约保留作者原本重试策略', () => {
+    const cfg = buildWorkerConfig({
+      AMSG_MASTER_KEY: 'k'.repeat(64),
+      VAPID_EMAIL: 'mailto:a@b.c',
+      VAPID_PUBLIC_KEY: 'pub',
+      VAPID_PRIVATE_KEY: 'priv',
+      DB: {},
+    } as any);
+    const retry = cfg.maxGenerationRetries;
+    expect(retry({ metadata: { charId: 'char-a', amsgAwayMessage: true } })).toBe(0);
+    expect(retry({ metadata: { charId: 'char-a', amsgAwayMessage: true, amsgInstantChat: false } })).toBe(0);
+    expect(retry({ metadata: { charId: 'char-a', amsgInstantChat: true } })).toBe(0);
+    expect(retry({ metadata: { charId: 'char-a', amsgSelfScheduled: true } })).toBeUndefined();
+    expect(retry({ metadata: { charId: 'char-a' } })).toBeUndefined();
+    expect(cfg.leaseHeartbeatMs).toBe(1000);
+    expect(cfg.onFireSettled).toBe(amsgFireSettled);
+  });
+
   // 回归守卫：后台任务原先跟聊天挤在同一个 charId 组里。一次门牌整理最长占住这个角色
   // 120 秒，而它恰恰是在一轮对话刚结束时起跑的——用户下一句话的即时对话任务被排在它
   // 后面，人就干等着「正在输入…」。
@@ -4186,6 +4219,63 @@ describe('onBeforeFire — 即时对话分支', () => {
     expect(appended.content).toContain('现在是');
     // 回归守卫：走模板渲染的话这里会出现主动消息那套措辞，用户刚说的话反而没人答
     expect(result.messages.map((m) => m.content).join('\n')).not.toContain('本次任务');
+  });
+
+  it('作者 909807a828：实时状态之前插入排程时效块，最后一眼仍是原聊天钢印', async () => {
+    const original = [
+      { role: 'system', content: '固定人设' },
+      { role: 'user', content: '用户刚才发了一条消息' },
+      { role: 'system', content: '【实时状态】此刻的生活' },
+      { role: 'system', content: '【回到你自己】保持自然对话' },
+    ];
+    const { ctx } = instantCtx({
+      charRows: [
+        { key: AMSG_FIRE_PACK_KEY, value: instantPack({
+          chat: { messages: original, builtAt: PACK_BUILT_AT, timelyInsertAt: 2 },
+        }) },
+        { key: AMSG_TOOL_PACK_KEY, value: toolPackValue },
+      ],
+    });
+    const result = fired(await amsgHooks.onBeforeFire(ctx));
+    expect(result.messages).toHaveLength(original.length + 1);
+    expect(result.messages[0]).toEqual(original[0]);
+    expect(result.messages[1]).toEqual(original[1]);
+    expect(result.messages[2].content).toContain('现在是');
+    expect(result.messages[3]).toEqual(original[2]);
+    expect(result.messages[4]).toEqual(original[3]);
+  });
+
+  it('没有注入位置或位置越界时沿用原先的末尾追加，兼容旧缓存', async () => {
+    const legacy = instantCtx();
+    const legacyMessages = fired(await amsgHooks.onBeforeFire(legacy.ctx)).messages;
+    expect(legacyMessages.at(-1)?.content).toContain('现在是');
+    const invalid = instantCtx({
+      charRows: [
+        { key: AMSG_FIRE_PACK_KEY, value: instantPack({
+          chat: { messages: CHAT_MESSAGES, builtAt: PACK_BUILT_AT, timelyInsertAt: 9000 },
+        }) },
+        { key: AMSG_TOOL_PACK_KEY, value: toolPackValue },
+      ],
+    });
+    const messages = fired(await amsgHooks.onBeforeFire(invalid.ctx)).messages;
+    expect(messages.at(-1)?.content).toContain('现在是');
+  });
+
+  it('云端即时聊天带工具，从用户最新消息算起，排程范围只注入一次', async () => {
+    const { ctx } = makeCtx({
+      charRows: [
+        { key: AMSG_FIRE_PACK_KEY, value: instantPack() },
+        { key: AMSG_TOOL_PACK_KEY, value: toolPackValue },
+      ],
+      globalRows: [{ key: AMSG_TOOL_CONFIG_KEY, value: mcpToolConfigValue({ mcpUseNativeTools: true }) }],
+      metadata: { amsgInstantChat: true, amsgTaskInstruction: undefined },
+    });
+    (ctx as any).scheduleTask = vi.fn();
+    const plan = fired(await amsgHooks.onBeforeFire(ctx));
+    const prompt = plan.messages.map((message) => message.content).join('\n');
+    expect(prompt).toContain('这次回复的范围：从用户最新发来的那条消息开始');
+    expect(prompt).not.toContain('你之前安排的主动消息到点了');
+    expect(prompt.match(/这次回复的范围/g)).toHaveLength(1);
   });
 
   // 本地有常驻自主联系说明，云端以前只教「主动消息发完再接着说」。

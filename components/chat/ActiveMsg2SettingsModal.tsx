@@ -126,6 +126,12 @@ const ActiveMsg2SettingsModal: React.FC<ActiveMsg2SettingsModalProps> = ({
   const [userMessage, setUserMessage] = useState('');
   const [promptHint, setPromptHint] = useState('');
   const [maxTokens, setMaxTokens] = useState(String(saved?.maxTokens ?? ''));
+  const [secondaryEnabled, setSecondaryEnabled] = useState(saved?.useSecondaryApi === true);
+  const [secondaryUrl, setSecondaryUrl] = useState(saved?.secondaryApi?.baseUrl || '');
+  const [secondaryKey, setSecondaryKey] = useState(saved?.secondaryApi?.apiKey || '');
+  const [secondaryModel, setSecondaryModel] = useState(saved?.secondaryApi?.model || '');
+  const [secondaryApiType, setSecondaryApiType] = useState<'openai' | 'anthropic'>(saved?.secondaryApi?.apiType || 'openai');
+  const [savingSecondary, setSavingSecondary] = useState(false);
   // 「主动频率」那一页开没开（它自带保存按钮，见 ActiveMsg2PacingModal）。
   const [pacingOpen, setPacingOpen] = useState(false);
   const [globalReady, setGlobalReady] = useState(false);
@@ -180,6 +186,57 @@ const ActiveMsg2SettingsModal: React.FC<ActiveMsg2SettingsModalProps> = ({
       setExpirePolicy('expire');
     }
   }, [isOpen, char.id, char.activeMsg2Config, editingTaskUuid]);
+
+  // 独立 API 表单不跟随远端任务异步刷新重置，防止用户填到一半被清空。
+  useEffect(() => {
+    if (!isOpen) return;
+    const cfg = char.activeMsg2Config;
+    setSecondaryEnabled(cfg?.useSecondaryApi === true);
+    setSecondaryUrl(cfg?.secondaryApi?.baseUrl || '');
+    setSecondaryKey(cfg?.secondaryApi?.apiKey || '');
+    setSecondaryModel(cfg?.secondaryApi?.model || '');
+    setSecondaryApiType(cfg?.secondaryApi?.apiType || 'openai');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, char.id]);
+
+  const handleSaveSecondaryApi = async () => {
+    if (savingSecondary) return;
+    if (secondaryEnabled && (!secondaryUrl.trim() || !secondaryKey.trim() || !secondaryModel.trim())) {
+      addToast('独立 API 开启时必须填写地址、密钥和模型，避免误用主聊天 API。', 'error');
+      return;
+    }
+    const next = {
+      ...(char.activeMsg2Config ?? { enabled: true }),
+      useSecondaryApi: secondaryEnabled,
+      secondaryApi: {
+        baseUrl: secondaryUrl.trim(), apiKey: secondaryKey.trim(), model: secondaryModel.trim(),
+        apiType: secondaryApiType,
+      },
+    };
+    onSave(prev => ({ ...(prev ?? { enabled: true }), useSecondaryApi: next.useSecondaryApi, secondaryApi: next.secondaryApi }));
+    setSavingSecondary(true);
+    try {
+      // 立刻刷新在云端排着的任务（包括前端尚未认领的自动空闲链条），不是只更新新任务。
+      const remote = await ActiveMsgClient.listAllTasks();
+      const remoteCharTasks = remote
+        .filter((t: any) => t.charId === char.id && t.status === 'pending'
+          && (t.messageType === 'auto' || t.messageType === 'prompted')
+          && t.messageSubtype !== 'instant-chat')
+        .map((t: any) => ({ taskUuid: t.uuid, mode: t.messageType })) as ActiveMsg2TaskRecord[];
+      const locallyKnown = (char.activeMsg2Config?.tasks ?? []).filter(t => t.mode !== 'fixed');
+      const byUuid = new Map([...locallyKnown, ...remoteCharTasks].map(t => [t.taskUuid, t]));
+      const refresh = await ActiveMsgClient.refreshCharPendingAiTaskCredentials({
+        char, config: next, apiConfig, tasks: [...byUuid.values()], remoteTasks: remote,
+      });
+      if (refresh.failed) addToast(`独立 API 已保存，但有 ${refresh.failed} 条云端任务的凭据刷新失败，请重试。`, 'error');
+      else addToast(secondaryEnabled ? '主动消息2.0独立 API 已保存，待发任务也已刷新。' : '主动消息2.0已改回角色聊天 API。', 'success');
+    } catch (error) {
+      console.warn('[ActiveMsg2Settings] 独立 API 云端刷新失败', error);
+      addToast('独立 API 已在本地保存，云端待发任务的凭据刷新失败；请重试，暂勿依赖旧排程。', 'error');
+    } finally {
+      setSavingSecondary(false);
+    }
+  };
 
   // 打开面板时的 push 状态检查 + 远端对账（只随 isOpen / 角色变化跑，不随编辑对象重复请求）。
   useEffect(() => {
@@ -663,6 +720,40 @@ const ActiveMsg2SettingsModal: React.FC<ActiveMsg2SettingsModalProps> = ({
             <span className={`absolute top-0.5 left-0.5 w-6 h-6 bg-white rounded-full shadow transition-all duration-200 ${globalInstantChatOn && instantChatOn ? 'translate-x-5' : 'translate-x-0'}`} />
           </button>
         </div>
+
+        {/* 定时任务专属 API 不改变正常聊天/工具执行后的下一轮；独立保存，避免触发新增任务。 */}
+        {enabled && (
+          <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3">
+            <label className="flex items-center justify-between gap-2">
+              <span className="font-bold text-slate-700">主动消息2.0独立 API</span>
+              <input type="checkbox" checked={secondaryEnabled} onChange={e => setSecondaryEnabled(e.target.checked)} />
+            </label>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              仅用于定时消息到点生成与离开后自动提醒。正常聊天、聊天里调用预约工具及工具执行后的后续回复仍用原聊天模型。
+              独立 API 不完整时会阻止生成，不偷偷回退到昂贵主模型。
+            </p>
+            {secondaryEnabled && (
+              <div className="space-y-2">
+                <select aria-label="独立 API 类型" value={secondaryApiType}
+                  onChange={e => setSecondaryApiType(e.target.value as 'openai' | 'anthropic')}
+                  className="w-full rounded-xl p-2 border border-slate-200 bg-white">
+                  <option value="openai">OpenAI兼容接口</option>
+                  <option value="anthropic">Anthropic原生接口</option>
+                </select>
+                <input aria-label="主动消息独立 API 地址" placeholder="API URL（例如 https://api.example.com/v1）" value={secondaryUrl}
+                  onChange={e => setSecondaryUrl(e.target.value)} className="w-full rounded-xl p-2 border border-slate-200" />
+                <input aria-label="主动消息独立 API Key" type="password" autoComplete="off" placeholder="API Key" value={secondaryKey}
+                  onChange={e => setSecondaryKey(e.target.value)} className="w-full rounded-xl p-2 border border-slate-200" />
+                <input aria-label="主动消息独立模型" placeholder="模型名称" value={secondaryModel}
+                  onChange={e => setSecondaryModel(e.target.value)} className="w-full rounded-xl p-2 border border-slate-200" />
+              </div>
+            )}
+            <button type="button" disabled={savingSecondary} onClick={() => void handleSaveSecondaryApi()}
+              className="w-full rounded-xl bg-slate-100 text-slate-700 font-bold py-2 disabled:opacity-50">
+              {savingSecondary ? '同步云端凭据中…' : '保存独立API设置'}
+            </button>
+          </div>
+        )}
 
         {/* 「主动频率」：几条上限集中在自己那一页改、自己那一页存，这里只放一行摘要。
             今天主动找了几次摆在摘要下面——上限是不是在起作用，用户一眼能看到。 */}

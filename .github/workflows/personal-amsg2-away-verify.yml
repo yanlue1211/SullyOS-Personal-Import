@@ -1,0 +1,63 @@
+name: Personal amsg2 away integration verify
+on:
+  pull_request:
+    paths:
+      - 'apps/DateApp.tsx'
+      - 'apps/CallApp.tsx'
+      - 'apps/Chat.tsx'
+      - 'components/chat/**'
+      - 'context/OSContext.tsx'
+      - 'hooks/useChatAI.ts'
+      - 'utils/amsg**'
+      - 'utils/away**'
+      - 'types.ts'
+      - 'worker/amsg/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/personal-amsg2-away-verify.yml'
+  push:
+    branches:
+      - personal/amsg2-integrate-audio-20261108
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Quiet hours, online/offline lock and original away tests
+        run: pnpm exec vitest run utils/awayMessageQuietHours.test.ts utils/amsgInteractionGuard.test.ts utils/awayMessageCore.test.ts utils/amsgLlmCredentials.test.ts utils/activeMsgClient.test.ts utils/awayMessageLocalTick.test.ts utils/awayMessagePrompt.test.ts utils/amsgTaskKinds.test.ts utils/awayMessageModes.test.ts
+      - name: Check upstream voice tags and cloud self-scheduling regression
+        run: pnpm exec vitest run utils/voiceTagNormalize.test.ts worker/amsg/src/audit-20261018.test.ts worker/amsg/src/index.test.ts utils/toolCallCompat.test.ts utils/replyScope.test.ts utils/cfProvision.test.ts utils/amsgOwnerReconcile.test.ts utils/amsgStateSync.test.ts
+      - name: Verify personal gallery, media, memory context and Moon Nest regression
+        run: pnpm exec vitest run utils/photoChoice.test.ts utils/chatImageSize.test.ts utils/personalChatMedia.test.ts utils/personalRecordingCleanup.test.ts utils/personalInnerVoice.test.ts utils/chatRequestPayload.test.ts utils/contextVolatileSplit.test.ts utils/worldbookScope.test.ts utils/chatPrompts.test.ts utils/yueqiRecording.test.ts utils/storyTheaterReply.test.ts utils/characterApi.test.ts
+      # Match all production Pages test gates before merging into the real deployment branch.
+      - name: Verify personal chat and call media
+        run: pnpm vitest run utils/chatRequestPayload.test.ts utils/chatPrompts.test.ts utils/contextVolatileSplit.test.ts utils/worldbookScope.test.ts utils/globalWorldbookUI.test.tsx utils/worldbookPersistence.test.ts utils/contextWorldbook.test.ts utils/collaborationMakers.test.ts utils/anthropicApi.test.ts utils/personalChatMedia.test.ts utils/backgroundApiEditor.test.tsx utils/personalChatMediaComposer.test.ts utils/personalRecordingCleanup.test.ts utils/personalCallMedia.test.ts utils/personalAudioProtocol.test.ts utils/personalRecordingTranscript.test.ts utils/personalMediaMenu.test.ts utils/personalRecordingEdit.test.ts utils/personalInnerVoice.test.ts utils/personalInnerVoiceUI.test.ts utils/personalScheduleOnce.test.ts utils/personalScheduleGeneration.test.ts utils/scheduleInjection.test.ts utils/incrementalCallSpeech.test.ts utils/callReplyFormat.test.ts utils/personalIncomingCalls.test.ts utils/personalIncomingCallsUI.test.tsx utils/personalHandsFree.test.ts utils/personalCallCapture.test.ts utils/personalCallReadiness.test.ts utils/personalCallAutoRecording.test.tsx utils/yueqiRecording.test.ts utils/personalHandsFreeUI.test.tsx utils/storyTheaterReply.test.ts utils/storyTheater.test.ts
+
+      - name: Verify photo choices and proactive inactivity
+        run: pnpm vitest run utils/photoChoice.test.ts utils/chatImageSize.test.ts utils/proactiveIdle.test.ts utils/proactiveChat.test.ts worker/amsg/src/classifier.test.ts worker/amsg/src/agentic.test.ts
+
+      - name: Verify Gemini native transport and API configuration
+        run: pnpm vitest run utils/geminiApi.test.ts utils/characterApiPanel.test.ts utils/characterApi.test.ts utils/apiPresetSwitch.test.ts utils/amsgLlmCredentials.test.ts utils/amsgInstantChat.test.ts
+
+      - name: Verify worker source and safe rollout policy
+        run: pnpm exec vitest run utils/amsgAutoUpdateTrigger.test.ts worker/amsg/src/selfUpdate.test.ts worker/amsg/src/autoUpdate.test.ts
+      - name: Build worker and frontend
+        run: pnpm run build
+      - name: Verify committed Worker bundle matches source
+        run: git diff --exit-code -- worker/amsg/worker.bundle.js
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Exercise real Worker SDK HTTP SQLite and simulated model/push pipeline
+        run: node scripts/amsg2-e2e-harness.mjs

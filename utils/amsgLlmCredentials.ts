@@ -1,4 +1,4 @@
-import { resolveDialogueApi } from './characterApi';
+import { resolveScheduledMessageApi } from './characterApi';
 import { isAnthropicEndpoint, isGeminiEndpoint, normalizeLlmBaseUrl, type LlmApiType } from './llmEndpoint';
 /**
  * 主动消息 2.0 的「LLM 凭据引用」（credRefs）：本地这一侧的命名、取值与变更侦测。
@@ -115,7 +115,7 @@ export const buildCharChatCredRow = (
   config: ActiveMsg2CharacterConfig | undefined,
   apiConfig: Pick<APIConfig, 'baseUrl' | 'apiKey' | 'model'>,
 ): LlmCredentialRow | null => {
-  const value = toCredentialValue(resolveDialogueApi(apiConfig as APIConfig, char, (apiConfig as APIConfig).proactiveApi?.baseUrl ? (apiConfig as APIConfig).proactiveApi : undefined));
+  const value = toCredentialValue(resolveScheduledMessageApi(apiConfig as APIConfig, char, config));
   return value ? { credId: charCredId(char.id, 'chat'), value } : null;
 };
 

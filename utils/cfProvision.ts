@@ -94,6 +94,8 @@ export interface ProvisionInput {
   databaseName?: string;
   /** 复用已有密钥（重装时传，避免换掉 Master Key 让旧任务解不开）。 */
   secrets?: Partial<AmsgSecrets>;
+  /** 仅在用户已明确确认清除同名旧数据库后才可为 true，默认阻止覆盖。 */
+  resetExistingDatabase?: boolean;
   onProgress?: (p: ProvisionProgress) => void;
 }
 
@@ -111,6 +113,7 @@ export type ProvisionFailureCode =
   | 'SCRIPT_EXISTS'
   | 'UPLOAD_FAILED'
   | 'CF_ERROR'
+  | 'DATABASE_KEY_MISSING'
   | 'NETWORK';
 
 export interface ProvisionFailure {
@@ -550,6 +553,99 @@ async function ensureDatabase(
   return { ok: true, id: uuid, reused: false };
 }
 
+/** 原作者 34ff63a2a5：库里可能存在被旧 Master Key 加密的记录。 */
+const ENCRYPTED_DATA_TABLES = [
+  'client_state', 'scheduled_messages', 'push_subscriptions',
+  'llm_credentials', 'message_outbox', 'cloud_resource_metadata',
+] as const;
+/** 非加密但由主动消息自己创建的诊断表，也可以在显式清库时一并清理。 */
+const AMSG_OWNED_TABLES: readonly string[] = [...ENCRYPTED_DATA_TABLES, 'worker_diagnostics'];
+
+async function queryD1<Row>(
+  token: string, accountId: string, databaseId: string, sql: string,
+): Promise<{ ok: true; rows: Row[] } | { ok: false; error: string }> {
+  const res = await cfApi<CfItemEnvelope<Array<{ results?: Row[] }>>>(
+    token,
+    `/accounts/${accountId}/d1/database/${databaseId}/query`,
+    { method: 'POST', body: JSON.stringify({ sql }), contentType: 'application/json' },
+  );
+  if (!res.ok) return { ok: false, error: res.error || '查询数据库失败。' };
+  const rows = res.body?.result?.[0]?.results;
+  // API 返回意外结构也不能当成「空库」：宁可中止，不要换新钥匙覆盖旧数据。
+  if (!Array.isArray(rows)) return { ok: false, error: '数据库返回了异常的查询结果，无法确认是否有旧数据。' };
+  return { ok: true, rows };
+}
+
+/**
+ * 同名旧库在本机没有原 Master Key 时，必须先探查是否有旧数据。
+ * 默认只检查、不删除。reset 必须是用户在 UI 明确二次确认之后才可传入。
+ * 同时保护非 AMSG 表，避免误清共享库里第三方的数据。
+ */
+export async function guardReusedDatabase(input: {
+  token: string;
+  accountId: string;
+  databaseId: string;
+  databaseName: string;
+  hasExistingMasterKey: boolean;
+  reset?: boolean;
+}): Promise<{ ok: true; cleared: boolean } | ProvisionFailure> {
+  if (input.hasExistingMasterKey) return { ok: true, cleared: false };
+  const { token, accountId, databaseId, databaseName } = input;
+  const listed = await queryD1<{ name?: string }>(
+    token, accountId, databaseId, "SELECT name FROM sqlite_master WHERE type = 'table'",
+  );
+  if (!listed.ok) return {
+    ok: false, code: 'CF_ERROR',
+    message: `无法安全检查数据库 ${databaseName}（${listed.error}）。请确认 Token 拥有 D1 Edit 权限。`,
+  };
+  const userTables = listed.rows
+    .map(row => row.name || '')
+    .filter(name => /^[A-Za-z0-9_]+$/.test(name)
+      && !/^(sqlite_|_cf_|d1_migrations$)/.test(name));
+  const encryptedTables = userTables.filter(name =>
+    ENCRYPTED_DATA_TABLES.some(known => known === name));
+  if (encryptedTables.length === 0) {
+    const unexpected = userTables.filter(name => !AMSG_OWNED_TABLES.includes(name));
+    if (unexpected.length) return {
+      ok: false, code: 'CF_ERROR',
+      message: '这个同名数据库里存在不属于主动消息系统的表，已阻止复用或清空，请使用新的数据库名称。',
+    };
+    return { ok: true, cleared: false };
+  }
+  const probe = await queryD1<{ has_data?: number }>(
+    token, accountId, databaseId,
+    `SELECT ${encryptedTables.map(name => `EXISTS(SELECT 1 FROM "${name}")`).join(' OR ')} AS has_data`,
+  );
+  if (!probe.ok || probe.rows.length !== 1 || typeof probe.rows[0]?.has_data !== 'number') {
+    return { ok: false, code: 'CF_ERROR',
+      message: `无法确认数据库 ${databaseName} 是否有旧数据，部署已中止：${probe.ok ? '结果结构异常' : probe.error}` };
+  }
+  if (!probe.rows[0].has_data) return { ok: true, cleared: false };
+  if (!input.reset) return {
+    ok: false, code: 'DATABASE_KEY_MISSING',
+    message: `Cloudflare 账号里的同名数据库 ${databaseName} 已有旧数据，本机却没有原来的 Master Key。\n`
+      + '直接重新部署会导致旧的主动消息、角色云端状态和凭据无法解密。'
+      + '请优先使用保存着旧 Master Key 的设备重新部署，或恢复原密钥。'
+      + '如果确定放弃旧云端数据，可以在下方明确确认后清空并继续；此操作不可撤销。',
+  };
+  // 防止在共享数据库中误删除其它业务的记录；用户要重置请另建库。
+  const unknown = userTables.filter(name =>
+    !AMSG_OWNED_TABLES.includes(name));
+  if (unknown.length) return {
+    ok: false, code: 'CF_ERROR',
+    message: '数据库包含其他表，不能安全执行自动清空。请改用新的数据库名称。',
+  };
+  // 删除只作用于已知 AMSG 表，不删除表结构 / D1 内部迁移记录。
+  for (const name of userTables.filter(name => AMSG_OWNED_TABLES.includes(name))) {
+    const deleted = await queryD1(token, accountId, databaseId, `DELETE FROM "${name}"`);
+    if (!deleted.ok) return {
+      ok: false, code: 'CF_ERROR',
+      message: `清空旧数据时 ${name} 表操作失败（${deleted.error}）。请检查后再操作。`,
+    };
+  }
+  return { ok: true, cleared: true };
+}
+
 /**
  * 拿账号的 workers.dev 子域；没有就用 desiredSubdomain 注册一个。
  * 全新的 Cloudflare 账号是没有子域的，而它决定了最终的 Worker 地址，绕不过去。
@@ -852,7 +948,15 @@ export async function provisionAmsgBackend(input: ProvisionInput): Promise<Provi
   const db = await ensureDatabase(token, accountId, databaseName);
   if (!db.ok) return { ok: false, code: 'CF_ERROR', message: db.error };
   if (db.reused) {
-    warnings.push(`用的是账号里已有的同名数据库 ${databaseName}。如果之前装过一套，两边会共用同一个库。`);
+    const guarded = await guardReusedDatabase({
+      token, accountId, databaseId: db.id, databaseName,
+      hasExistingMasterKey: Boolean(input.secrets?.AMSG_MASTER_KEY?.trim()),
+      reset: input.resetExistingDatabase,
+    });
+    if (!guarded.ok) return guarded;
+    warnings.push(guarded.cleared
+      ? `已经清空数据库 ${databaseName} 中主动消息旧数据，新后端将重新开始。`
+      : `用的是账号里已有的同名数据库 ${databaseName}。如果之前装过一套，两边会共用同一个库。`);
   }
 
   report('subdomain', '确认 workers.dev 地址…');

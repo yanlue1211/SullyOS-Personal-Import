@@ -4,7 +4,7 @@ import { amsgHooks, amsgFireSettled, offloadOversizedPush, runFireRenewTool, run
 import { buildXhsSessionPayload } from './agentic';
 import { parseInstantInputRef } from './instantInput';
 import { buildToolConfig, buildToolPack, AMSG_TOOL_CONFIG_KEY, AMSG_TOOL_PACK_KEY } from '../../../utils/amsgToolPack';
-import { AMSG_FIRE_PACK_KEY, AMSG_SELF_LOG_KEY, FIRE_PACK_VERSION, createSelfLog, appendSelfLogTask, unpackStateValue } from '../../../utils/amsgFirePack';
+import { AMSG_FIRE_PACK_KEY, AMSG_SELF_LOG_KEY, FIRE_PACK_VERSION, BEFORE_SPEAK_LINES, AMSG_SILENT_MARK, createSelfLog, appendSelfLogTask, unpackStateValue } from '../../../utils/amsgFirePack';
 import { AMSG_LIMITS_KEY } from '../../../utils/amsgLimits';
 import { buildAmsg2NoticesText } from '../../../utils/amsg2TaskContext';
 import { isPendingTask } from '../../../utils/amsg2Tasks';
@@ -20,14 +20,15 @@ const makeTask = (index: number, at: number) => ({
 }) as any;
 
 async function start(over: {
-  enabled?: boolean; config?: any; pending?: any[]; selfLog?: any; sharedValue?: string;
-  builtAt?: number; limits?: Record<string, unknown>; chatMessages?: any[]; nowMs?: number; task?: any; remote?: any[];
+  enabled?: boolean; config?: any; pending?: any[]; selfLog?: any; sharedValue?: string; awaySceneLock?: 'date' | 'call';
+  builtAt?: number; limits?: Record<string, unknown>; chatMessages?: any[]; nowMs?: number; task?: any; remote?: any[]; template?: string; failNextSchedule?: boolean;
 } = {}) {
   const nowMs = over.nowMs ?? now;
   const pack = {
-    v: FIRE_PACK_VERSION, template: '角色设定 {{AMSG_TASK_INSTRUCTION}}',
+    v: FIRE_PACK_VERSION, template: over.template ?? '角色设定 {{AMSG_TASK_INSTRUCTION}}',
     lastUserMessageAt: null, tzId: 'Asia/Tokyo', userTzId: 'Asia/Tokyo', targetName: '用户',
     builtAt: over.builtAt ?? now - 60_000, pendingTasks: over.pending ?? [], scene: null,
+    awaySceneLock: over.awaySceneLock ?? null,
     selfScheduleEnabled: over.enabled ?? true,
     chat: { builtAt: now, messages: over.chatMessages ?? [{ role: 'user', content: '你好' }] },
   };
@@ -38,6 +39,7 @@ async function start(over: {
     ...(over.selfLog ? [{ key: AMSG_SELF_LOG_KEY, value: JSON.stringify(over.selfLog) }] : []),
   ];
   const scheduleTask = vi.fn<NonNullable<Parameters<typeof runFireScheduleTool>[1]>>(async (options) => {
+    if (over.failNextSchedule) throw new Error('simulated unavailable scheduler');
     if (!options.uuid) throw new Error('Expected a deterministic self-scheduled task UUID');
     return { created: true, id: 2, uuid: options.uuid, nextSendAt: options.firstSendTime };
   });
@@ -61,6 +63,167 @@ beforeEach(() => { vi.spyOn(Date, 'now').mockReturnValue(now); });
 afterEach(() => { vi.restoreAllMocks(); });
 
 describe('amsg2 audit regressions', () => {
+  it('B-mode cloud idle task schedules one future tick and quiet hours skip before LLM', async () => {
+    const task = {
+      id: 30, uuid: '33333333-3333-4333-8333-333333333333',
+      contactName: '角色', nextSendAt: new Date(now).toISOString(), recurrenceType: 'none',
+      metadata: {
+        charId, amsgClientTaskId: 'away-old', amsgAwayMessage: true, amsgAwayDelayMinutes: 120,
+        amsgTaskInstruction: '主动私聊', amsgExpirePolicy: 'force',
+      },
+    };
+    const result = await start({
+      task, limits: { awayEnabled: true, awayDelayMinutes: 120,
+        awayQuietHours: { enabled: true, startTime: '18:00', endTime: '20:00' } },
+    });
+    expect(result.plan).toEqual({ skip: true });
+    expect(result.scheduleTask).toHaveBeenCalledTimes(1);
+    const next = result.scheduleTask.mock.calls[0][0];
+    expect(next.messageSubtype).toBe('chat');
+    expect(next.metadata?.amsgAwayMessage).toBe(true);
+    expect(next.metadata?.amsgSelfScheduled).toBeUndefined();
+    expect(Date.parse(next.firstSendTime)).toBe(now + 120 * 60_000);
+  });
+
+  it('同一个 B 空闲节拍被 Worker 重试时只会请求同一个下一节拍 UUID', async () => {
+    const task = {
+      id: 44, uuid: '99999999-9999-4999-8999-999999999999',
+      contactName: '角色', nextSendAt: new Date(now).toISOString(), recurrenceType: 'none',
+      metadata: { charId, amsgClientTaskId: 'away-retry', amsgAwayMessage: true,
+        amsgAwayDelayMinutes: 120, amsgTaskInstruction: '自由分享生活', amsgExpirePolicy: 'force' },
+    };
+    const first = await start({ task, limits: { awayEnabled: true, awayDelayMinutes: 120 } });
+    const retry = await start({ task, limits: { awayEnabled: true, awayDelayMinutes: 120 } });
+    expect(first.scheduleTask).toHaveBeenCalledTimes(1);
+    expect(retry.scheduleTask).toHaveBeenCalledTimes(1);
+    const [next1] = first.scheduleTask.mock.calls[0];
+    const [next2] = retry.scheduleTask.mock.calls[0];
+    expect(next1.uuid).toBe(next2.uuid);
+    expect(next1.firstSendTime).toBe(next2.firstSendTime);
+    expect(next1.uuid).not.toBe(task.uuid);
+    expect(Date.parse(next1.firstSendTime)).toBe(now + 120 * 60_000);
+  });
+
+  it('服务停摆多节拍后恢复时，只续排未来一个节拍且不补发旧正文', async () => {
+    const task = {
+      id: 45, uuid: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      nextSendAt: new Date(now - 10 * 3600_000).toISOString(), recurrenceType: 'none',
+      metadata: { charId, amsgClientTaskId: 'away-old-lost', amsgAwayMessage: true,
+        amsgAwayDelayMinutes: 120, amsgTaskInstruction: '自由分享生活', amsgExpirePolicy: 'force' },
+    };
+    const result = await start({ task, limits: { awayEnabled: true, awayDelayMinutes: 120 } });
+    expect(result.scheduleTask).toHaveBeenCalledTimes(1);
+    const [next] = result.scheduleTask.mock.calls[0];
+    expect(Date.parse(next.firstSendTime)).toBeGreaterThan(now);
+    expect(Date.parse(next.firstSendTime)).toBeLessThanOrEqual(now + 120 * 60_000);
+    expect(result.plan).toEqual({ skip: true });
+  });
+
+  it('云端续排失败时延后原任务重试，不因 B方案零生成重试而断链或烧模型', async () => {
+    const task = {
+      id: 46, uuid: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      contactName: '角色', nextSendAt: new Date(now).toISOString(), recurrenceType: 'none',
+      metadata: { charId, amsgClientTaskId: 'away-scheduler-failure', amsgAwayMessage: true,
+        amsgAwayDelayMinutes: 120, amsgTaskInstruction: '分享生活', amsgExpirePolicy: 'force' },
+    };
+    const failing = await start({ task, failNextSchedule: true, limits: { awayEnabled: true } });
+    expect(failing.scheduleTask).toHaveBeenCalledTimes(1);
+    expect(failing.plan).toEqual({ defer: { afterMs: 5 * 60_000 } });
+    expect(failing.stash).toBeUndefined(); // 还没进入正文/模型生成阶段。
+    const recovered = await start({ task, limits: { awayEnabled: true } });
+    expect(recovered.scheduleTask).toHaveBeenCalledTimes(1);
+    expect(recovered.plan.skip).toBeUndefined();
+    expect(recovered.plan.defer).toBeUndefined();
+    expect(recovered.stash).toBeDefined();
+    expect(recovered.scheduleTask.mock.calls[0][0].uuid).toBe(
+      failing.scheduleTask.mock.calls[0][0].uuid,
+    );
+  });
+
+  it('B-mode due tick gives the original autonomous silent choice without a second model call', async () => {
+    const task = {
+      id: 43, uuid: '88888888-8888-4888-8888-888888888888',
+      contactName: '角色', nextSendAt: new Date(now).toISOString(), recurrenceType: 'none',
+      metadata: { charId, amsgClientTaskId: 'away-previous', amsgAwayMessage: true,
+        amsgAwayDelayMinutes: 120, amsgTaskInstruction: '分享生活', amsgExpirePolicy: 'force' },
+    };
+    const withDecision = await start({ task, limits: { awayEnabled: true },
+      template: [BEFORE_SPEAK_LINES.join('\n'), '{{AMSG_TASK_INSTRUCTION}}'].join('\n'),
+    });
+    expect(withDecision.plan.skip).toBeUndefined();
+    expect(withDecision.scheduleTask).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(withDecision.plan.messages)).toContain(AMSG_SILENT_MARK);
+  });
+
+  it('B-mode meeting lock skips idle message but leaves character-scheduled messages alone', async () => {
+    const task = { id: 31, uuid: '44444444-4444-4444-8444-444444444444',
+      nextSendAt: new Date(now).toISOString(), recurrenceType: 'none',
+      metadata: { charId, amsgAwayMessage: true, amsgAwayDelayMinutes: 120, amsgClientTaskId: 'away-previous',
+        amsgTaskInstruction: '私聊', amsgExpirePolicy: 'force' } };
+    const awayResult = await start({ task, awaySceneLock: 'date', limits: { awayEnabled: true } });
+    expect(awayResult.plan).toEqual({ skip: true });
+    expect(awayResult.scheduleTask).toHaveBeenCalledTimes(1);
+    const own = await start({ awaySceneLock: 'date', limits: {
+      awayQuietHours: { enabled: true, startTime: '00:00', endTime: '00:00' },
+    } });
+    expect(own.plan.skip).toBeUndefined();
+  });
+
+  it('scheduled online speech ends only the matching persisted in-person encounter after delivery', async () => {
+    const task = { id: 49, uuid: '66666666-6666-4666-8666-666666666666',
+      contactName: '角色', nextSendAt: new Date(now).toISOString(), recurrenceType: 'none',
+      metadata: { charId, amsgMode: 'auto', amsgClientTaskId: 'online-after-meeting',
+        amsgSelfScheduled: true, amsgDateExitEncounterId: 'meet-123',
+        amsgTaskInstruction: '出门后线上发消息', amsgExpirePolicy: 'expire' } };
+    const { ctx, plan, stash } = await start({ task, limits: {
+      awaySceneLock: 'date', awayDateEncounterId: 'meet-123',
+    } });
+    expect(plan.skip).toBeUndefined();
+    expect(stash.dateExitEncounterId).toBe('meet-123');
+    stash.selfLogTexts = ['出门啦'];
+    stash.dateExitHadVisibleMessage = true;
+    await amsgFireSettled({ status: 'sent', sentCount: 1, scratch: ctx.scratch,
+      writeState: ctx.writeState } as any);
+    const calls = vi.mocked(ctx.writeState).mock.calls;
+    const update = calls.flatMap(([, entries]: any[]) => entries).find((entry: any) => entry.key === AMSG_LIMITS_KEY);
+    expect(update).toBeTruthy();
+    expect(JSON.parse(update.value)).toMatchObject({ awaySceneLock: null, awayDateEncounterId: null, awayDateEndedAt: now });
+  });
+
+  it('no spoken online message or a stale encounter cannot release the meeting lock', async () => {
+    const task = { id: 50, uuid: '77777777-7777-4777-8777-777777777777',
+      contactName: '角色', nextSendAt: new Date(now).toISOString(), recurrenceType: 'none',
+      metadata: { charId, amsgMode: 'auto', amsgClientTaskId: 'online-after-meeting',
+        amsgSelfScheduled: true, amsgDateExitEncounterId: 'meet-old',
+        amsgTaskInstruction: '出门后线上发消息', amsgExpirePolicy: 'expire' } };
+    const missing = await start({ task, limits: { awaySceneLock: 'date', awayDateEncounterId: 'meet-old' } });
+    missing.stash.selfLogTexts = ['这条没发'];
+    missing.stash.dateExitHadVisibleMessage = true;
+    await amsgFireSettled({ status: 'skipped', sentCount: 0, scratch: missing.ctx.scratch,
+      writeState: missing.ctx.writeState } as any);
+    expect(vi.mocked(missing.ctx.writeState).mock.calls.flatMap(([, entries]: any[]) => entries)
+      .some((entry: any) => entry.key === AMSG_LIMITS_KEY)).toBe(false);
+
+    const old = await start({ task, limits: { awaySceneLock: 'date', awayDateEncounterId: 'meet-new' } });
+    expect(old.stash.dateExitEncounterId).toBeNull();
+    old.stash.selfLogTexts = ['出门啦'];
+    old.stash.dateExitHadVisibleMessage = true;
+    await amsgFireSettled({ status: 'sent', sentCount: 1, scratch: old.ctx.scratch,
+      writeState: old.ctx.writeState } as any);
+    expect(vi.mocked(old.ctx.writeState).mock.calls.flatMap(([, entries]: any[]) => entries)
+      .some((entry: any) => entry.key === AMSG_LIMITS_KEY)).toBe(false);
+  });
+
+  it('disabling idle messages in cloud limits stops chained tasks without generating or rearming', async () => {
+    const task = { id: 32, uuid: '55555555-5555-4555-8555-555555555555',
+      nextSendAt: new Date(now).toISOString(), recurrenceType: 'none',
+      metadata: { charId, amsgAwayMessage: true, amsgAwayDelayMinutes: 120, amsgTaskInstruction: '私聊',
+        amsgExpirePolicy: 'force' } };
+    const result = await start({ task, limits: { awayEnabled: false } });
+    expect(result.plan).toEqual({ skip: true });
+    expect(result.scheduleTask).not.toHaveBeenCalled();
+  });
+
   it('native tools OFF survives an empty MCP list and suppresses native tool declarations', async () => {
     const config = buildToolConfig(undefined, { servers: [], useNativeTools: false });
     expect(config.mcpUseNativeTools).toBe(false);
@@ -181,6 +344,25 @@ describe('amsg2 audit regressions', () => {
     expect(stash.pendingTaskCount).toBe(1);
     expect(stash.pendingTasks.map((task: any) => task.taskUuid)).toEqual([late.taskUuid]);
     expect(stash.plannedSelfSends).toBe(1);
+  });
+
+  it('self-scheduled follow-ups from instant chat stay visible and counted', async () => {
+    const { stash, scheduleTask } = await start();
+    await runFireScheduleTool(stash, scheduleTask, { send_at: '2026-10-18T12:00:00Z' }, now);
+    expect(scheduleTask.mock.calls[0][0].messageSubtype).toBe('chat');
+    const legacy = makeTask(40, now + 3_600_000);
+    const next = await start({ remote: [{
+      uuid: legacy.taskUuid, charId, clientTaskId: legacy.clientTaskId, status: 'pending',
+      nextSendAt: legacy.firstSendTime, recurrenceType: 'none', messageType: 'auto',
+      messageSubtype: 'instant-chat',
+      metadata: { charId, amsgSelfScheduled: true, amsgExpirePolicy: 'expire' },
+    }, {
+      uuid: 'instant-task', charId, status: 'pending', nextSendAt: legacy.firstSendTime,
+      messageSubtype: 'instant-chat', metadata: { charId, amsgInstantChat: true },
+    }] });
+    expect(next.stash.pendingTasks.map((task: any) => task.taskUuid)).toEqual([legacy.taskUuid]);
+    expect(next.stash.plannedSelfSends).toBe(1);
+    expect(JSON.stringify(next.plan.messages)).toContain(legacy.taskUuid.slice(0, 8));
   });
 
   it('native transport OFF retains execution permission for an explicit text scheduling call', async () => {

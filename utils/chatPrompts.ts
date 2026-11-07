@@ -44,6 +44,7 @@ import { getDailyScheduleForChar } from './dailySchedule';
 import { formatRelativeAge } from './groupChat/relativeTime';
 import { isBlobRef } from './blobRef';
 import { voiceLanguagePromptLabel } from './voiceLanguage';
+import { normalizeVoiceTags } from './sanitize';
 
 // 语音格式指导按当前 TTS 服务商二选一：用 MiniMax 才注入 MiniMax 那套（含 <#秒#> 停顿标记），
 // 用鱼声则注入鱼声版（去掉 MiniMax 专属标记，改用标点 / 省略号控制停顿）。
@@ -1189,7 +1190,8 @@ ${voiceActingGuide()}`;
                     if(options?.useVisionDescriptions || !images.length)return {role:m.role,content:text+(images.length?'\n配图描述暂不可用，请不要猜测。':'')};
                     return {role:m.role,content:[{type:'text',text},...images.map((url:string)=>({type:'image_url',image_url:{url}}))]};
                 }
-                let content: any = m.content;
+                // Normalize historical malformed voice/subtitle markup, without touching stored chat data.
+                let content: any = m.role === 'assistant' && typeof m.content === 'string' ? normalizeVoiceTags(m.content) : m.content;
                 const timeStr = timeAwarenessOn && hasReliableMessageTimestamp(m) ? `[${ChatPrompts.formatDate(m.timestamp, charTz)}]` : '';
                 const sourceTag = (() => {
                     const source = m.metadata?.source;

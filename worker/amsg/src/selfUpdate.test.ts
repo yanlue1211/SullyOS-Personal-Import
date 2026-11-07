@@ -274,9 +274,9 @@ describe('locateScript', () => {
 });
 
 describe('resolveBundleUrl', () => {
-  const official = 'https://raw.githubusercontent.com/Tosd0/sullyos-workers/main/amsg/worker.bundle.js';
+  const official = 'https://raw.githubusercontent.com/yanlue1211/SullyOS-Personal-Import/personal/audio-listening/worker/amsg/worker.bundle.js';
 
-  it('不配就是官方成品包', () => {
+  it('不配就是个人发布分支的成品包', () => {
     expect(resolveBundleUrl({})).toBe(official);
     expect(resolveBundleUrl({ AMSG_BUNDLE_URL: '   ' })).toBe(official);
   });
@@ -285,7 +285,7 @@ describe('resolveBundleUrl', () => {
     expect(resolveBundleUrl({ AMSG_BUNDLE_URL: 'https://example.com/x/worker.bundle.js' })).toBe('https://example.com/x/worker.bundle.js');
   });
 
-  it('不是 https 一律回落到官方，别把明文 http 或乱填的东西当成品包源', () => {
+  it('不是 https 一律回落到个人发布分支，别把明文 http 或乱填的东西当成品包源', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     expect(resolveBundleUrl({ AMSG_BUNDLE_URL: 'http://example.com/w.js' })).toBe(official);
     expect(resolveBundleUrl({ AMSG_BUNDLE_URL: 'not a url' })).toBe(official);

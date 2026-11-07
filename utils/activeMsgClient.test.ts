@@ -611,6 +611,23 @@ describe('ActiveMsgClient.listRemoteTasksForChar 的版本护栏', () => {
       .rejects.toThrow(/重新粘贴部署/);
   });
 
+  it('新 Worker: 密钥错误导致所有任务不可解密，不再误判成没有 charId 的旧 Worker', async () => {
+    vi.spyOn(ActiveMsgClient, 'listAllTasks').mockResolvedValue([
+      { uuid: 'undecipherable-a', status: 'pending', error: { code: 'STORED_DATA_UNDECRYPTABLE' } },
+      { uuid: 'undecipherable-b', status: 'pending', error: { code: 'STORED_DATA_UNDECRYPTABLE' } },
+    ] as any);
+    await expect(ActiveMsgClient.listRemoteTasksForChar('char-1')).resolves.toEqual([]);
+  });
+
+  it('正常任务没有 charId，混入一条解密失败任务时仍按旧 Worker 识别', async () => {
+    vi.spyOn(ActiveMsgClient, 'listAllTasks').mockResolvedValue([
+      { uuid: 'old-worker-row', status: 'pending' },
+      { uuid: 'undecipherable', error: { code: 'STORED_DATA_UNDECRYPTABLE' } },
+    ] as any);
+    await expect(ActiveMsgClient.listRemoteTasksForChar('char-1'))
+      .rejects.toThrow(/重新粘贴部署/);
+  });
+
   it('远端确实一条任务都没有 → 空数组（跟版本无关，别误伤）', async () => {
     vi.spyOn(ActiveMsgClient, 'listAllTasks').mockResolvedValue([]);
     await expect(ActiveMsgClient.listRemoteTasksForChar('char-1')).resolves.toEqual([]);
@@ -1416,6 +1433,15 @@ describe('ActiveMsgClient.registerPushSubscription（② 订阅按用户登记�
 
     await expect(ActiveMsgClient.registerPushSubscription()).rejects.toThrow('worker 拒绝了订阅');
   });
+
+  it('Worker 拒绝订阅但只返回失败信封时依然抛错', async () => {
+    vi.spyOn(ActiveMsgClient, 'ensurePushSubscription').mockResolvedValue(SUB_JSON as any);
+    reiClient.putPushSubscription.mockResolvedValue({
+      success: false,
+      error: { code: 'INVALID_PUSH_SUBSCRIPTION', message: '订阅地址不被接受' },
+    });
+    await expect(ActiveMsgClient.registerPushSubscription()).rejects.toThrow('订阅地址不被接受');
+  });
 });
 
 // 回归守卫：换一台 worker 就是换一个空的 D1，而浏览器这侧的订阅一个字都没变——
@@ -1495,7 +1521,7 @@ describe('ActiveMsgClient.refreshApiCredentialsForPendingTasks（③ 凭据变�
   });
   afterEach(() => { vi.restoreAllMocks(); });
 
-  it('只刷「开着 2.0 且 pending 的 AI 任务」，旧单独 API 也统一使用主 API', async () => {
+  it('只刷「开着 2.0 且 pending 的 AI 任务」，启用独立 API 的角色使用独立凭据', async () => {
     vi.spyOn(DB, 'getAllCharacters').mockResolvedValue([
       { id: 'char-a', activeMsg2Config: { enabled: true, tasks: [
         remoteTask('a1'),
@@ -1522,9 +1548,9 @@ describe('ActiveMsgClient.refreshApiCredentialsForPendingTasks（③ 凭据变�
       primaryModel: 'gpt-x',
     });
     expect(byUuid.get('c1')).toEqual({
-      apiUrl: 'https://api.example.com/v1/chat/completions',
-      apiKey: 'new-key',
-      primaryModel: 'gpt-x',
+      apiUrl: 'https://sec.example.com/chat/completions',
+      apiKey: 'sec-key',
+      primaryModel: 'sec-model',
     });
   });
 
@@ -1579,7 +1605,7 @@ describe('ActiveMsgClient.refreshApiCredentialsForPendingTasks（③ 凭据变�
     expect(reiClient.updateMessage).not.toHaveBeenCalled();
   });
 
-  it('残缺的旧单独 API 不影响主 API 刷新', async () => {
+  it('用户启用独立 API 但残缺时不偷偷回退主模型，其他角色仍可刷新', async () => {
     vi.spyOn(DB, 'getAllCharacters').mockResolvedValue([
       { id: 'char-broken', activeMsg2Config: {
         enabled: true,
@@ -1592,8 +1618,8 @@ describe('ActiveMsgClient.refreshApiCredentialsForPendingTasks（③ 凭据变�
 
     const result = await ActiveMsgClient.refreshApiCredentialsForPendingTasks(API);
 
-    expect(result).toEqual({ status: 'ok', updated: 2, failed: 0 });
-    expect(reiClient.updateMessage.mock.calls.map((c: any[]) => c[0])).toEqual(['x1', 'y1']);
+    expect(result).toEqual({ status: 'partial', updated: 1, failed: 1 });
+    expect(reiClient.updateMessage.mock.calls.map((c: any[]) => c[0])).toEqual(['y1']);
   });
 });
 
@@ -1604,7 +1630,7 @@ describe('ActiveMsgClient.refreshCharPendingAiTaskCredentials（③ 面板保存
     reiClient.updateMessage.mockReset().mockResolvedValue({ success: true });
   });
 
-  it('fixed 再滤一遍；忽略旧的单独 API，按主 API 刷新', async () => {
+  it('fixed 再滤一遍；启用独立 API 时使用独立凭据', async () => {
     const result = await ActiveMsgClient.refreshCharPendingAiTaskCredentials({
       char: { id: 'char-a' } as any,
       config: {
@@ -1620,9 +1646,9 @@ describe('ActiveMsgClient.refreshCharPendingAiTaskCredentials（③ 面板保存
     expect(reiClient.updateMessage).toHaveBeenCalledTimes(1);
     expect(reiClient.updateMessage.mock.calls[0][0]).toBe('t1');
     expect(reiClient.updateMessage.mock.calls[0][1]).toEqual({
-      apiUrl: 'https://api.example.com/chat/completions',
-      apiKey: 'k',
-      primaryModel: 'm',
+      apiUrl: 'https://sec.example.com/chat/completions',
+      apiKey: 'sec-key',
+      primaryModel: 'sec-model',
     });
   });
 
@@ -2046,6 +2072,28 @@ describe('formatAmsgServerError — 通用后端错误细节透传', () => {
     expect(text).toContain(expected);
     expect(text).toContain(`（${code}）`);
     expect(text).not.toContain('raw D1 error');
+  });
+
+  it('新 Worker 报明确的 STORED_DATA_UNDECRYPTABLE，不自动清库且先提示恢复旧 Master Key', () => {
+    const text = formatAmsgServerError({
+      success: false,
+      error: { code: 'STORED_DATA_UNDECRYPTABLE', message: 'Stored data could not be decrypted' },
+    }, '操作失败');
+    expect(text).toContain('Master Key');
+    expect(text).toContain('不可撤销');
+    expect(text).toContain('STORED_DATA_UNDECRYPTABLE');
+    expect(text).not.toContain('Stored data could not be decrypted');
+  });
+
+  it('旧 Worker 把 Decryption failed 包在 OperationError cause 里，也能给出同一套说明', () => {
+    const text = formatAmsgServerError({
+      error: { code: 'INTERNAL_ERROR', message: '服务器内部错误', cause: {
+        name: 'OperationError', message: 'Decryption failed. This could be due to a ciphertext authentication failure',
+      } },
+    }, '操作失败');
+    expect(text).toContain('Master Key');
+    expect(text).toContain('清空云端数据');
+    expect(text).not.toContain('ciphertext authentication failure');
   });
 
   it('客户端体积预检无 message、只有 code 与 bytes/maxBytes 时也能拼出可读报错', () => {

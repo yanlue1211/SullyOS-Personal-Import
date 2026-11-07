@@ -139,15 +139,37 @@ export interface AmsgLimitsRecord extends AmsgPacingSettings {
    * 排的），到点时 worker 读到 false 就直接跳过，一个 token 都不花。
    */
   selfScheduleEnabled: boolean;
+  /** 只用来管自动空闲提醒，角色自己排的第二天出门报备等不受影响。 */
+  awayQuietHours?: { enabled: boolean; startTime: string; endTime: string };
+  /** 自动空闲提醒开关；独立于自主排程，false 时旧的链式任务也立即停止。 */
+  awayEnabled?: boolean;
+  /** 只有自动空闲提醒读取的节拍间隔。 */
+  awayDelayMinutes?: number;
+  /** 见面/通话即时锁使用小型限制行快速同步，不等待较大的 fire_pack 上传。 */
+  awaySceneLock?: 'date' | 'call' | null;
+  /** 只允许这次见面预约的任务在成功发送后解除同一次见面。 */
+  awayDateEncounterId?: string | null;
+  /** 自动空闲节拍的最低起点（线下结束时刻），不等于用户最后一次发言。 */
+  awayDateEndedAt?: number | null;
 }
 
 export const buildAmsgLimitsRecord = (
   config: Partial<AmsgPacingSettings> | null | undefined,
   selfScheduleEnabled: boolean,
+  awayQuietHours?: { enabled: boolean; startTime: string; endTime: string },
+  away?: { enabled: boolean; delayMinutes?: number },
+  awaySceneLock?: 'date' | 'call' | null,
+  awayDateEncounterId?: string | null,
+  awayDateEndedAt?: number | null,
 ): AmsgLimitsRecord => ({
   v: 1,
   selfScheduleEnabled,
   ...pickPacingSettings(config),
+  ...(awayQuietHours ? { awayQuietHours } : {}),
+  ...(away ? { awayEnabled: away.enabled, awayDelayMinutes: away.delayMinutes } : {}),
+  ...(awaySceneLock !== undefined ? { awaySceneLock } : {}),
+  ...(awayDateEncounterId !== undefined ? { awayDateEncounterId } : {}),
+  ...(awayDateEndedAt !== undefined ? { awayDateEndedAt } : {}),
 });
 
 /** 读回来的记录；形状不对返回 null（worker 按默认值走——默认值本身就是偏严的那一侧）。 */
