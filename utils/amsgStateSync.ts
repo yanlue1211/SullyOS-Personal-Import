@@ -43,7 +43,7 @@ import {
   type LlmCredentialRow,
 } from './amsgLlmCredentials';
 import { trackEvent } from './analytics';
-import { AMSG_OWNER_CONFLICT_EVENT } from './amsgOwnerReconcile';
+import { AMSG_OWNER_CONFLICT_EVENT } from './amsgOwnerEvents';
 import { DB } from './db';
 
 /** 失败重试的退避起点，逐次翻倍（30s → 60s → 120s）。 */
