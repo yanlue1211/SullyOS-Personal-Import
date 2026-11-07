@@ -114,3 +114,11 @@
 - 截图拍摄瞬间，两个按钮仍显示「处理中…」，而版本文案仍为旧 `2026-11-07.3`，因此不能从该图单独证明部署后端已开始以 `2026-11-08.3` 运行，可能是自动重新连接与能力探测尚未刷新 UI。
 - 当前窗口无法通过公共网络直接请求 `https://sullyos-amsg.yanlue.workers.dev/config-check`（DNS/网络不可达）。下一步让用户通过浏览器**重新打开** `/config-check` 并提供真实回执，重点核查 `workerVersion=2026-11-08.3`、`ok=true`、`missing=[]`、`warnings=[]`、`instantTick=true`、`backgroundJobs=true`；之后再检查 D1 旧任务、Cron、真实 Push 与低成本离线行为。
 - 无重新创建数据库/重新生成 Master Key 操作的用户报告；但实际绑定保留与排程完整性仍需独立验收。不要将更新按钮成功提示等同于全 B 方案通过。
+
+### 5.6 真机确认 `2026-11-08.3` 已在生产 Worker 运行（2026-11-08 03:39，用户截图）
+
+- 用户在手机浏览器访问真实 `https://sullyos-amsg.yanlue.workers.dev/config-check`，JSON 自报 `workerVersion: "2026-11-08.3"`，`success:true`、`ok:true`、`missing:[]`、`warnings:[]`，**真实 Cloudflare Worker 版本升级已确认**。
+- 关键能力位：`instantChat:true`、`instantTick:true`、`backgroundJobs:true`、`anthropicMessages:true`、`geminiNative:true`、`thirdPartyPush:true`、`diagnosticReproduction:1`。
+- `selfUpdate.supported:true`、`state.lastSource:"manual"`、`state.lastOutcome:"updated"`、`state.lastError:null`，`bundleHash:"de776f94f5c9"`，`lastUpdatedAt:"2026-11-07T19:38:24.501Z"`（北京时间 2026-11-08 03:38:24）。
+- **结论**：真实生产 Worker 的升级及运行时配置/能力版本初验通过；但尚未检查旧任务数据完整性、Cron 实际心跳、Push 实际投递、离线循环、见面保护、费用与失败恢复，**不可把此结果宣称 B 方案完整验收**。
+- 当前执行环境对 `workers.dev` 域名 DNS 解析失败，无法自行直连 `/debug`；下一步先让用户在手机浏览器读只读 `/debug`，核对 storage/schema/tick 与 Cron，后续再安排低费用且有限次数的真实业务验收，不清 D1、不重置任何密钥。
