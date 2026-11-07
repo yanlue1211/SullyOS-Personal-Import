@@ -85,3 +85,5 @@
 - 截图底部的实际运行构建：`personal/audio-listening@346fa29`，`sw 1.22.0`；查 GitHub `346fa29` 的 `utils/amsgBundleVersion.ts` 确实写 `2026-11-05.3`。正式已发布源码为 `4e740fae`（内置 `2026-11-08.3`），两者相差 22 个提交。请先区分 PWA/SW 缓存 vs 旧 APK/安装包，确认用户跑上新网页再操作版本更新。
 - UI 自动更新栏显示「上次检查 2 小时前，没成功（`UNAUTHORIZED: 共享密钥对不上。`）」；该错误可能来自一次手动或前端触发的受保护更新请求，截图并不能证明服务端 Cron 自查的每次结果。**不要点「随机」重新生成共享密钥**，核对前端保存的 X-Client-Token 与 Worker 既有 `AMSG_SERVER_TOKEN` 是否一致；只修正不一致端，不更换 D1 主密钥。
 - 由于当前执行环境无法访问 `workers.dev` 地址的公开 `/config-check`（网络/DNS 限制），以上事实仅据用户真实界面截图，仍需完整 JSON 的能力位和 CF 面板绑定核对。当前没有对真实 Worker 做任何写操作或升级。
+
+- **新增重要风险（已核对 `346fa29` 源码）**：旧前端 `utils/amsgAutoUpdateTrigger.ts` 发现版本不相等就会在冷启动时直接调用 `POST /self-update`，**不区分升级/降级**；截图的旧前端期待 `2026-11-05.3`，当前后端却自报 `2026-11-07.3`。因此必须先让前端确实升级到正式版本 `4e740fae`，且核对旧 Worker 的取包来源，**之后**才处理 `AMSG_SERVER_TOKEN` 不匹配。不要先纠正 token 或点绿色「更新 Worker」按钮，以免解除安全拦截后触发旧前端覆盖当前 Worker。当前已合并前端 `utils/amsgAutoUpdateTrigger.ts` 遇到版本不一致会阻止自动覆盖，可作为基础。
