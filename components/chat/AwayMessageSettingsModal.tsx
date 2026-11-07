@@ -16,19 +16,25 @@ const formatDelay = (minutes: number) => minutes < 60 ? `${minutes} 分钟` : `$
 const AwayMessageSettingsModal: React.FC<AwayMessageSettingsModalProps> = ({ isOpen, onClose, char, onSave }) => {
     const [enabled, setEnabled] = useState(!!char.awayMessage?.enabled);
     const [delay, setDelay] = useState(resolveAwayDelayMinutes(char));
+    const [quietEnabled, setQuietEnabled] = useState(!!char.awayMessage?.quietHours?.enabled);
+    const [quietStart, setQuietStart] = useState(char.awayMessage?.quietHours?.startTime || '23:00');
+    const [quietEnd, setQuietEnd] = useState(char.awayMessage?.quietHours?.endTime || '08:00');
     const [cloud, setCloud] = useState<boolean | null>(null);
 
     useEffect(() => {
         if (!isOpen) return;
         setEnabled(!!char.awayMessage?.enabled);
         setDelay(resolveAwayDelayMinutes(char));
+        setQuietEnabled(!!char.awayMessage?.quietHours?.enabled);
+        setQuietStart(char.awayMessage?.quietHours?.startTime || '23:00');
+        setQuietEnd(char.awayMessage?.quietHours?.endTime || '08:00');
         let cancelled = false;
         void isAwayCloudRoute(char).then(v => { if (!cancelled) setCloud(v); });
         return () => { cancelled = true; };
     }, [isOpen, char]);
 
     const handleSave = () => {
-        onSave({ enabled, delayMinutes: delay });
+        onSave({ enabled, delayMinutes: delay, quietHours: { enabled: quietEnabled, startTime: quietStart, endTime: quietEnd } });
         onClose();
     };
 
@@ -78,6 +84,31 @@ const AwayMessageSettingsModal: React.FC<AwayMessageSettingsModalProps> = ({ isO
                             </div>
                         </div>
 
+
+                        <div className="border-t border-slate-100 pt-4 space-y-3">
+                            <div className="flex items-start justify-between gap-3">
+                                <div>
+                                    <div className="text-sm font-bold text-slate-700">睡眠时段禁发</div>
+                                    <div className="text-xs text-slate-400 mt-1 leading-relaxed">
+                                        只拦“超过多久没互动而自动找你”，不会影响 TA 自己预约的消息、明早行程报备或你们正在聊天时的回复。
+                                    </div>
+                                </div>
+                                <button type="button" aria-label="睡眠时段禁发" aria-pressed={quietEnabled} onClick={() => setQuietEnabled(!quietEnabled)}
+                                  className={`w-12 h-7 shrink-0 rounded-full relative transition-colors ${quietEnabled ? 'bg-violet-500' : 'bg-slate-200'}`}>
+                                  <span className={`absolute top-0.5 w-6 h-6 rounded-full bg-white shadow transition-transform ${quietEnabled ? 'translate-x-5' : 'translate-x-0.5'}`}/>
+                                </button>
+                            </div>
+                            {quietEnabled && (
+                              <div className="grid grid-cols-2 gap-3">
+                                <label className="text-xs text-slate-600">开始时间<input type="time" value={quietStart} onChange={e => setQuietStart(e.target.value)} className="block w-full mt-1 bg-slate-100 rounded-xl p-2.5"/></label>
+                                <label className="text-xs text-slate-600">结束时间<input type="time" value={quietEnd} onChange={e => setQuietEnd(e.target.value)} className="block w-full mt-1 bg-slate-100 rounded-xl p-2.5"/></label>
+                                <div className="col-span-2 text-[11px] text-slate-400">
+                                  按你手机的时间计算，允许跨午夜。禁发的自动提醒直接跳过，醒来不会补发。
+                                  {quietStart === quietEnd ? ' 时间相同表示全天禁发。' : ''}
+                                </div>
+                              </div>
+                            )}
+                        </div>
                         <p className="pt-2 border-t border-slate-100 text-[11px] text-slate-400 leading-relaxed">
                             {cloud === null ? '' : cloud
                                 ? `${char.name} 开着主动消息 2.0：到时间会直接推送给你。这一次算作「没回时找你」，受主动频率里的上限管。`
