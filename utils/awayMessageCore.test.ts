@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   AWAY_SEGMENT_MARK,
+  isCloudAwayWorkerCompatible,
   latestAwayTickMs,
   nextAwayTickMs,
   isStaleAwayTick,
@@ -109,5 +110,14 @@ describe('B-mode repeat idle ticks (no catch-up burst)', () => {
     expect(latestAwayTickMs(NOW - 5 * 120 * MIN - 15 * MIN, 120 * MIN, NOW))
       .toBe(NOW - 15 * MIN);
     expect(latestAwayTickMs(NOW - 30 * MIN, 120 * MIN, NOW)).toBeNull();
+  });
+});
+
+
+describe('cloud B-mode compatibility gate', () => {
+  it('only the exact verified Worker may accept recurring away jobs', () => {
+    expect(isCloudAwayWorkerCompatible('current')).toBe(true);
+    expect(isCloudAwayWorkerCompatible('outdated')).toBe(false);
+    expect(isCloudAwayWorkerCompatible('unknown')).toBe(false);
   });
 });

@@ -7,11 +7,13 @@ import { DB } from './db';
 import { ActiveMsgClient } from './activeMsgClient';
 import { applyScheduledTask, isAmsg2EnabledForChar } from './amsg2Tasks';
 import { isAmsg2GlobalReady } from './amsg2ToolBridge';
+import { ActiveMsgStore } from './activeMsgStore';
 import {
   decideAwayTaskAction,
   resolveAwayDelayMinutes,
   splitAwaySegments,
   latestAwayTickMs,
+  isCloudAwayWorkerCompatible,
 } from './awayMessageCore';
 import { loadCharacterContextRange } from './chatContextRange';
 import { resolveAmsgInteractionLock, isAmsgActiveCall, isAmsgActiveDate, getAmsgDateEndedAt } from './amsgInteractionGuard';
@@ -40,6 +42,31 @@ type UpdateCharacter = (
 export const isAwayCloudRoute = async (char: CharacterProfile): Promise<boolean> =>
   isAmsg2EnabledForChar(char) && await isAmsg2GlobalReady();
 
+/** Existing scheduled tasks must remain untouched on an older/unknown backend. */
+const AWAY_WORKER_PROBE_TTL_MS = 2 * 60_000;
+const awayWorkerProbeCache = new Map<string, { until: number; ready: boolean }>();
+const awayWorkerProbeRunning = new Map<string, Promise<boolean>>();
+
+export const isAwayCloudWorkerCompatible = async (): Promise<boolean> => {
+  const cfg = await ActiveMsgStore.getGlobalConfig().catch(() => null);
+  const url = cfg?.workerUrl?.trim().replace(/\\/+$/, '') || '';
+  if (!url || !cfg?.userId) return false;
+  const key = `${url}|${cfg.userId}`;
+  const cached = awayWorkerProbeCache.get(key);
+  if (cached && cached.until > Date.now()) return cached.ready;
+  const pending = awayWorkerProbeRunning.get(key);
+  if (pending) return pending;
+  const check = ActiveMsgClient.probeWorkerVersion({ timeoutMs: 3500 })
+    .then(probe => isCloudAwayWorkerCompatible(probe.state))
+    .catch(() => false)
+    .then(ready => {
+      awayWorkerProbeCache.set(key, { until: Date.now() + AWAY_WORKER_PROBE_TTL_MS, ready });
+      return ready;
+    }).finally(() => awayWorkerProbeRunning.delete(key));
+  awayWorkerProbeRunning.set(key, check);
+  return check;
+};
+
 // ─── 云端 ───
 
 const cloudInFlight = new Set<string>();
@@ -67,6 +94,8 @@ export const syncCloudAwayTask = async (deps: {
   if (!char.awayMessage?.enabled || cloudInFlight.has(char.id)) return;
   if ((cloudCooldownUntil.get(char.id) ?? 0) > Date.now()) return;
   if (!await isAwayCloudRoute(char) || !char.activeMsg2Config) return;
+  // 旧 Worker 不认识 B 模式标记，若提前排程会绕开禁发和下一次续排，必须零副作用停在这里。
+  if (!await isAwayCloudWorkerCompatible()) return;
 
   cloudInFlight.add(char.id);
   try {

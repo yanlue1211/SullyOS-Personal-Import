@@ -26,13 +26,9 @@ describe('shouldRequestStartupUpdateCheck', () => {
 });
 
 describe('pickStartupUpdateAction', () => {
-  /**
-   * 回归守卫：版本对不上就直接更新，不管它有没有自更新能力那一段——存量用户的旧 Worker
-   * 根本不报那一段，但 /self-update 它是有的。这一条就是「存量用户不用自己点一次」的全部依据。
-   */
-  it('版本对不上 → 直接更新，跟用户点按钮一样', () => {
-    expect(pickStartupUpdateAction({ state: 'outdated', autoUpdate: null })).toBe('self-update');
-    expect(pickStartupUpdateAction({ state: 'outdated', autoUpdate: { supported: false, state: null } })).toBe('self-update');
+  it('版本不符的旧 Worker 不得在冷启动时从未知来源自动覆盖', () => {
+    expect(pickStartupUpdateAction({ state: 'outdated', autoUpdate: null })).toBe('none');
+    expect(pickStartupUpdateAction({ state: 'outdated', autoUpdate: { supported: false, state: null } })).toBe('none');
   });
 
   it('版本对得上、有自更新能力 → 敲门让它按指纹自查', () => {

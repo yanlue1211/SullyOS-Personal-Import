@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import Modal from '../os/Modal';
 import { CharacterProfile } from '../../types';
 import { AWAY_DELAY_OPTIONS, resolveAwayDelayMinutes } from '../../utils/awayMessageCore';
-import { isAwayCloudRoute } from '../../utils/awayMessage';
+import { isAwayCloudRoute, isAwayCloudWorkerCompatible } from '../../utils/awayMessage';
 
 interface AwayMessageSettingsModalProps {
     isOpen: boolean;
@@ -20,6 +20,7 @@ const AwayMessageSettingsModal: React.FC<AwayMessageSettingsModalProps> = ({ isO
     const [quietStart, setQuietStart] = useState(char.awayMessage?.quietHours?.startTime || '23:00');
     const [quietEnd, setQuietEnd] = useState(char.awayMessage?.quietHours?.endTime || '08:00');
     const [cloud, setCloud] = useState<boolean | null>(null);
+    const [workerCompatible, setWorkerCompatible] = useState<boolean | null>(null);
 
     useEffect(() => {
         if (!isOpen) return;
@@ -29,7 +30,16 @@ const AwayMessageSettingsModal: React.FC<AwayMessageSettingsModalProps> = ({ isO
         setQuietStart(char.awayMessage?.quietHours?.startTime || '23:00');
         setQuietEnd(char.awayMessage?.quietHours?.endTime || '08:00');
         let cancelled = false;
-        void isAwayCloudRoute(char).then(v => { if (!cancelled) setCloud(v); });
+        setCloud(null);
+        setWorkerCompatible(null);
+        void isAwayCloudRoute(char).then(async v => {
+            if (cancelled) return;
+            setCloud(v);
+            if (v) {
+                const ready = await isAwayCloudWorkerCompatible();
+                if (!cancelled) setWorkerCompatible(ready);
+            }
+        });
         return () => { cancelled = true; };
     }, [isOpen, char]);
 
@@ -110,8 +120,11 @@ const AwayMessageSettingsModal: React.FC<AwayMessageSettingsModalProps> = ({ isO
                             )}
                         </div>
                         <p className="pt-2 border-t border-slate-100 text-[11px] text-slate-400 leading-relaxed">
-                            {cloud === null ? '' : cloud
-                                ? `${char.name} 开着主动消息 2.0：到时间会直接推送给你。这一次算作「没回时找你」，受主动频率里的上限管。`
+                            {cloud === null ? '正在确认 Worker…' : cloud
+                                ? workerCompatible === null ? '正在核对云端 Worker 版本…'
+                                    : workerCompatible
+                                        ? `${char.name} 开着主动消息 2.0：到时间会直接推送给你。这一次算作「没回时找你」，受主动频率里的上限管。`
+                                        : '云端 Worker 版本未匹配或无法验证：已保护旧任务，暂停创建新的循环空闲提醒。先检查主动消息2.0的 Worker 更新状态。'
                                 : `没有云端2.0时，打开 SullyOS 只检查最新一个有效时间点，不会一次补发多条；通过检查才会调用API。`}
                         </p>
                     </>

@@ -6,7 +6,8 @@
  * 「前端已经会了、后端还不会」。前端刚换了构建，正是最该催后端一下的时候。
  *
  * 怎么催，看那台 Worker 是哪一版（`GET /config-check` 的 workerVersion）：
- *   - 版本对不上 → 直接打 `POST /self-update`，跟用户在设置页点「更新 Worker」一模一样。
+ *   - 版本对不上 → 暂不自动覆盖旧 Worker。旧版 Worker 可能仍从官方而不是个人仓库取包，
+ *     盲目自动更新会把我们新的 B 方案覆盖掉；需先核对来源并安全升级。
  *     这条路老 bundle 也有，所以存量用户的 Worker 不用谁来点，冷启动一次就换上新代码；
  *     新代码自带 cron 自查，之后就不用这里管了。
  *   - 版本对得上、而且它有自更新能力 → 敲一下 `POST /self-update/check`，让它按内容指纹自己
@@ -69,14 +70,16 @@ const writeStartupUpdateCheckMarker = (marker: StartupUpdateCheckMarker): void =
 export const pickStartupUpdateAction = (
   probe: Pick<AmsgWorkerVersionProbe, 'state' | 'autoUpdate'>,
 ): 'self-update' | 'check' | 'none' => {
-  if (probe.state === 'outdated') return 'self-update';
+  // Personal 2.0 bundles cannot safely be fetched through an unknown legacy Worker update source.
+  // Leave existing backend untouched until its source is explicitly verified and the personal bundle deployed.
+  if (probe.state === 'outdated') return 'none';
   if (probe.state === 'current' && probe.autoUpdate?.supported) return 'check';
   return 'none';
 };
 
 /**
  * 冷启动那一下调一次。返回值只为单测与日志：
- *   - 'updated' / 'update-failed'：版本对不上，直接更新了一次（成没成看返回值）；
+ *   - 'updated' / 'update-failed'：兼容旧调用保留的返回值；当前自动策略不再无条件覆盖版本不符的 Worker。
  *   - 'requested'：版本对得上，敲了门让它按指纹自查（worker 收没收下看它自己）；
  *   - 'skipped'：探不到版本、或版本对得上但它没自更新能力，什么都没做；
  *   - 'throttled'：构建没换、也没到时候；

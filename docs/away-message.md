@@ -37,3 +37,8 @@
 - `apps/DateApp.tsx`、`apps/CallApp.tsx`：线下与通话状态接缝。
 
 不修改记忆提取、记忆召回、权重、Lite、多用户空间。正式启用前必须测试 Cloudflare 真机后台、凌晨禁发、六点半自主预约、错误重试与重复任务。
+
+## 安全发布边界
+- 新前端检测不到同版 Worker 时，**不创建 B 模式云端循环任务**，也不转用昂贵的主 API 生成假离线消息；旧任务保留。
+- 个人版前端不会在版本不符时盲目调用旧 Worker 的自动覆盖接口，因为旧 Worker 可能仍从非个人仓库下载代码。必须确认 Cloudflare `AMSG_BUNDLE_URL` 来源，使用个人版真实 Worker bundle 安全升级。
+- 新个人 Worker 的默认自更新来源对应 `personal/audio-listening`，原有 `AMSG_BUNDLE_URL` 显式配置仍优先生效。首次切换前应检查来源、密钥及 D1 绑定，不允许自动清空旧任务。
