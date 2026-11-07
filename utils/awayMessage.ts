@@ -49,7 +49,7 @@ const awayWorkerProbeRunning = new Map<string, Promise<boolean>>();
 
 export const isAwayCloudWorkerCompatible = async (): Promise<boolean> => {
   const cfg = await ActiveMsgStore.getGlobalConfig().catch(() => null);
-  const url = cfg?.workerUrl?.trim().replace(/\\/+$/, '') || '';
+  const url = cfg?.workerUrl?.trim().replace(/\/+$/, '') || '';
   if (!url || !cfg?.userId) return false;
   const key = `${url}|${cfg.userId}`;
   const cached = awayWorkerProbeCache.get(key);

@@ -19,7 +19,7 @@ on:
     branches:
       - personal/amsg2-integrate-audio-20261108
 permissions:
-  contents: read
+  contents: write
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -49,8 +49,21 @@ jobs:
       - name: Verify Gemini native transport and API configuration
         run: pnpm vitest run utils/geminiApi.test.ts utils/characterApiPanel.test.ts utils/characterApi.test.ts utils/apiPresetSwitch.test.ts utils/amsgLlmCredentials.test.ts utils/amsgInstantChat.test.ts
 
+      - name: Verify worker source and safe rollout policy
+        run: pnpm exec vitest run utils/amsgAutoUpdateTrigger.test.ts worker/amsg/src/selfUpdate.test.ts worker/amsg/src/autoUpdate.test.ts
       - name: Build worker and frontend
         run: pnpm run build
+      # TEMPORARY: only the integration branch may commit the reproducibly built Worker.
+      - name: Sync personal Worker bundle from current integration source
+        if: github.event_name == 'push' && github.ref == 'refs/heads/personal/amsg2-integrate-audio-20261108'
+        run: |
+          if ! git diff --quiet -- worker/amsg/worker.bundle.js; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add worker/amsg/worker.bundle.js
+            git commit -m 'build(amsg2): update personal Worker rollout bundle'
+            git push origin HEAD:personal/amsg2-integrate-audio-20261108
+          fi
       - name: Verify committed Worker bundle matches source
         run: git diff --exit-code -- worker/amsg/worker.bundle.js
       - uses: actions/setup-node@v4
