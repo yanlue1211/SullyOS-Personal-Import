@@ -102,6 +102,7 @@ import {
 } from '../../../utils/amsgLimits';
 import { resolveFireSceneSong } from '../../../utils/amsgFireScene';
 import { shouldSkipAwayForQuietHours } from '../../../utils/awayMessageQuietHours';
+import { nextAwayTickMs, isStaleAwayTick } from '../../../utils/awayMessageCore';
 import {
   type AmsgFireSkipTaskBrief, buildFireSkipResult, shouldReportFireSkip,
 } from '../../../utils/amsgFireSkipResult';
@@ -121,6 +122,7 @@ import {
   parseFireScheduleArgs,
   resolveFireTargetTask,
   buildTaskInstruction,
+  buildAwayTaskInstruction,
   AMSG_AWAY_DELAY_META,
   AMSG_AWAY_MESSAGE_META,
 } from '../../../utils/amsgFireSchedule';
@@ -2132,13 +2134,64 @@ export const amsgHooks = {
       });
     }
 
-    // 离开后消息按「对方最后一次开口 + 等待时长」触发。客户端只在排期差得多时才去改期，
-    // 差的那点在这里补：对方在等待时长内说过话，就推迟到该来的时候，不消费任务、不占重试。
+    // B 模式（循环空闲机会）：只针对 amsgAwayMessage 系统任务。
+    // 先检查开关、最近用户消息与有效期；只有达到本次节拍后，创建「下一条」。
+    // 即便本次处在睡眠时间/见面/通话，下一条仍会被安排，但当前直接 skip：
+    // 跳过路径必须发生在模型生成之前，不能因为拦截而发生模型请求/重试风暴。
+    // 用户自己预约的任务不带 away 标记，完全不经过这个循环。
     if (!instant && away) {
-      const delayMs = Number(taskMeta[AMSG_AWAY_DELAY_META]) * 60_000;
-      const dueAt = lastUserMessageAt != null && delayMs > 0 ? lastUserMessageAt + delayMs : null;
-      // 只有系统按照“X 小时没互动”自动发起的 away 任务才拦。
-      // 自排的出门报备、具体约定、每天提醒等不能经过这两道闸。
+      if (!pack.selfScheduleEnabled || limitsRecord?.selfScheduleEnabled === false
+          || limitsRecord?.awayEnabled === false) {
+        console.log('[amsg:away-skip]', { taskId: ctx.task.id, reason: 'away-disabled' });
+        return { skip: true } as const;
+      }
+      const configuredDelay = Number(limitsRecord?.awayDelayMinutes);
+      const minutes = Number.isFinite(configuredDelay) && configuredDelay > 0
+        ? configuredDelay : Number(taskMeta[AMSG_AWAY_DELAY_META]);
+      if (!Number.isFinite(minutes) || minutes <= 0) throw fail('离开后消息等待间隔无效');
+      const delayMs = minutes * 60_000;
+      const dueAt = lastUserMessageAt == null ? null : lastUserMessageAt + delayMs;
+      const waitMs = dueAt == null ? 0 : dueAt - ctx.now.getTime();
+      if (waitMs > AWAY_DUE_TOLERANCE_MS) {
+        console.log('[amsg:defer]', { taskId: ctx.task.id, reason: 'away-not-due', dueAt });
+        return { defer: { afterMs: Math.min(waitMs, AWAY_MAX_DEFER_MS) } } as const;
+      }
+
+      // 本次 fire 的名义时间可能因 Worker 停摆而严重过期，不补烧旧次数。
+      // 新任务跳过已错过的节拍，一次仅安排未来一个触发。
+      if (typeof ctx.scheduleTask !== 'function') throw fail('Worker 不支持空闲提醒循环排程，请更新云端版本');
+      const nextMs = nextAwayTickMs(occurrenceMs, delayMs, ctx.now.getTime());
+      const nextUuid = buildSelfScheduleUuid(`away:${charId}`, nextMs, 0);
+      const nextMetadata = {
+        charId,
+        charName: typeof taskMeta.charName === 'string' ? taskMeta.charName : (ctx.task.contactName || ''),
+        source: 'active_msg_2',
+        amsgMode: 'auto',
+        amsgClientTaskId: `away-${nextUuid}`,
+        amsgExpirePolicy: 'force',
+        amsgTaskInstruction: buildAwayTaskInstruction(minutes),
+        [AMSG_AWAY_MESSAGE_META]: true,
+        [AMSG_AWAY_DELAY_META]: minutes,
+      };
+      try {
+        // 固定 UUID 使同一次 fire 重跑时幂等；不继承 instant-chat 标记。
+        await ctx.scheduleTask({
+          uuid: nextUuid,
+          firstSendTime: new Date(nextMs).toISOString(),
+          recurrenceType: 'none',
+          messageType: 'auto',
+          messageSubtype: 'chat',
+          metadata: nextMetadata,
+          tzId: typeof pack.tzId === 'string' ? pack.tzId : undefined,
+        });
+      } catch (error) {
+        // 排下下一条之前绝不消费当前链；失败由上游有限重试，避免静默断链。
+        throw new Error(`AMSG_AWAY_NEXT_SCHEDULE_FAILED: ${String(error)}`);
+      }
+      if (isStaleAwayTick(occurrenceMs, ctx.now.getTime())) {
+        console.log('[amsg:away-skip]', { taskId: ctx.task.id, reason: 'missed-slot' });
+        return { skip: true } as const;
+      }
       if (pack.awaySceneLock === 'date' || pack.awaySceneLock === 'call') {
         console.log('[amsg:away-skip]', { taskId: ctx.task.id, reason: 'interaction-still-open', mode: pack.awaySceneLock });
         return { skip: true } as const;
@@ -2146,16 +2199,11 @@ export const amsgHooks = {
       if (shouldSkipAwayForQuietHours({
         quietHours: limitsRecord?.awayQuietHours,
         nowMs: ctx.now.getTime(),
-        dueMs: dueAt ?? ctx.now.getTime(),
+        dueMs: occurrenceMs,
         userTimeZone: pack.userTzId,
       })) {
         console.log('[amsg:away-skip]', { taskId: ctx.task.id, reason: 'user-quiet-hours' });
         return { skip: true } as const;
-      }
-      const waitMs = dueAt == null ? 0 : dueAt - ctx.now.getTime();
-      if (waitMs > AWAY_DUE_TOLERANCE_MS) {
-        console.log('[amsg:defer]', { taskId: ctx.task.id, reason: 'away-not-due', dueAt });
-        return { defer: { afterMs: Math.min(waitMs, AWAY_MAX_DEFER_MS) } } as const;
       }
     }
 
