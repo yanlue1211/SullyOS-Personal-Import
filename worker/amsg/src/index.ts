@@ -48,7 +48,7 @@ import { AMSG_BUNDLE_VERSION } from '../../../utils/amsgBundleVersion';
 // 往里加任何浏览器依赖都会连累这个 bundle）。这里只产出事实，红绿灯和文案归前端。
 import type { AmsgPushGoneFailure } from '../../../utils/amsgDiagnostics';
 import type { UserProfile } from '../../../types';
-import { AMSG_JOB_NAMESPACE, AMSG_JOB_TTL_DAYS } from '../../../utils/amsgTaskKinds';
+import { AMSG_JOB_NAMESPACE, AMSG_JOB_TTL_DAYS, classifyTaskRow } from '../../../utils/amsgTaskKinds';
 import {
   FIRE_KIND_HANDLERS,
   getKindFireStash,
@@ -2389,9 +2389,7 @@ export const amsgHooks = {
         for (const row of page.tasks) {
           const meta = row.metadata ?? {};
           if ((row.charId ?? meta.charId) !== charId || row.status !== 'pending' || !row.uuid || !row.nextSendAt
-            || meta.amsgInstantChat === true || meta.amsgKind
-            // Legacy follow-ups inherited instant-chat subtype; keep self-scheduled ones visible.
-            || (row.messageSubtype === 'instant-chat' && meta.amsgSelfScheduled !== true)) continue;
+            || classifyTaskRow(row) !== 'scheduled') continue;
           const old = known.get(row.uuid);
           live.push({
             ...old,
