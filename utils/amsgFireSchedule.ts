@@ -276,15 +276,15 @@ export const buildTaskInstruction = (mode: ActiveMsg2Mode, promptHint?: string):
 
 // ─── 离开后消息 ───
 // 每个角色维持一条云端待触发任务：对方开口后重新计时，到点后Worker安排下一节拍；到点前对方
-// 又说过话就由 worker 原地推迟（见 worker onBeforeFire）。到点必发，不给角色选择不说。
+// 又说过话就由 worker 原地推迟（见 worker onBeforeFire）。到点仅给一次自主判断机会，可选择静默。
 
 /** 任务 metadata 上的标记与等待时长（分钟）。worker 认这两个键。 */
 export const AMSG_AWAY_MESSAGE_META = 'amsgAwayMessage';
 export const AMSG_AWAY_DELAY_META = 'amsgAwayDelayMinutes';
 
 export const buildAwayTaskInstruction = (delayMinutes: number): string => [
-  `对方已经超过 ${delayMinutes} 分钟没跟你说话了，这次是你主动去找对方。`,
-  '这是一次主动找对方的机会。结合你们最后聊到哪儿、对方离开了多久、你自己这会儿在做什么，自然地发一到三句私聊。',
+  `对方已经超过 ${delayMinutes} 分钟没跟你说话了，现在是你可以主动线上联系对方的一次机会。`,
+  '先结合你们最后聊到哪儿、对方离开了多久、你自己这会儿在做什么，判断此刻有没有自然联系的理由；没有就按自主静默规则不发。决定联系才发一到三句私聊。',
   '可以惦记对方去哪了、分享你刚经历的事，或者接上没聊完的话；不要像系统提醒，也不要提「多少分钟」这种计时。',
 ].join('\n');
 
