@@ -3090,7 +3090,12 @@ export interface CharacterProfile {
    * 离开后消息：对方多久没说话，角色就来找对方（见 docs/away-message.md）。
    * 开着主动消息 2.0 的角色走云端推送，其余在下次打开页面时本地补上。
    */
-  awayMessage?: { enabled: boolean; delayMinutes?: number };
+  awayMessage?: {
+    enabled: boolean;
+    delayMinutes?: number;
+    /** 仅对“离开后消息”生效，绝不拦自主排程、约定提醒或即时回复。 */
+    quietHours?: { enabled: boolean; startTime: string; endTime: string };
+  };
   activeBuffs?: CharacterBuff[];
   buffInjection?: string;   // 注入到systemPrompt的叙事型情绪底色描述
   emotionConfig?: {
