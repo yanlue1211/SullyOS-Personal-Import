@@ -14,14 +14,54 @@ export interface AmsgInteractionMessage {
  */
 const ACTIVE_CALL_KEY = 'sully_amsg2_call_active_v1';
 const ACTIVE_DATE_KEY = 'sully_amsg2_date_active_v1';
-export function setAmsgActiveDate(charId: string, active: boolean): void {
+const ACTIVE_DATE_ENCOUNTER_KEY = 'sully_amsg2_date_encounter_v1';
+const ACTIVE_DATE_ENDED_AT_KEY = 'sully_amsg2_date_ended_at_v1';
+
+/** 见面会话的身份戳；旧任务不能在新一次见面中把锁解掉。 */
+export function getAmsgActiveDateEncounterId(charId: string): string | null {
+  try {
+    if (!isAmsgActiveDate(charId)) return null;
+    const value = (JSON.parse(localStorage.getItem(ACTIVE_DATE_ENCOUNTER_KEY) || '{}') as Record<string, unknown>)[charId];
+    return typeof value === 'string' && value ? value : null;
+  } catch { return null; }
+}
+
+/** 最近一次明确结束见面的时刻，供空闲节拍以此为最低起点；不伪造用户发言。 */
+export function getAmsgDateEndedAt(charId: string): number | null {
+  try {
+    const value = (JSON.parse(localStorage.getItem(ACTIVE_DATE_ENDED_AT_KEY) || '{}') as Record<string, unknown>)[charId];
+    return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
+  } catch { return null; }
+}
+
+export function setAmsgActiveDate(charId: string, active: boolean, encounterId?: string, endedAt = Date.now()): void {
   if (!charId) return;
   try {
     const old = JSON.parse(localStorage.getItem(ACTIVE_DATE_KEY) || '{}') as Record<string, boolean>;
-    if (active) old[charId] = true;
-    else delete old[charId];
+    const encounters = JSON.parse(localStorage.getItem(ACTIVE_DATE_ENCOUNTER_KEY) || '{}') as Record<string, string>;
+    const ended = JSON.parse(localStorage.getItem(ACTIVE_DATE_ENDED_AT_KEY) || '{}') as Record<string, number>;
+    if (active) {
+      old[charId] = true;
+      if (encounterId) encounters[charId] = encounterId;
+      else delete encounters[charId];
+      delete ended[charId];
+    } else {
+      delete old[charId];
+      delete encounters[charId];
+      ended[charId] = Number.isFinite(endedAt) && endedAt > 0 ? endedAt : Date.now();
+    }
     localStorage.setItem(ACTIVE_DATE_KEY, JSON.stringify(old));
+    localStorage.setItem(ACTIVE_DATE_ENCOUNTER_KEY, JSON.stringify(encounters));
+    localStorage.setItem(ACTIVE_DATE_ENDED_AT_KEY, JSON.stringify(ended));
   } catch { /* best effort */ }
+}
+
+/** 只允许那次见面预约的、已经真正发出的线上消息结束同一次见面。 */
+export function endAmsgDateFromScheduledMessage(charId: string, encounterId: string, sentAt: number): boolean {
+  if (!charId || !encounterId || !isAmsgActiveDate(charId)) return false;
+  if (getAmsgActiveDateEncounterId(charId) !== encounterId) return false;
+  setAmsgActiveDate(charId, false, undefined, sentAt);
+  return true;
 }
 export function isAmsgActiveDate(charId: string): boolean {
   try { return JSON.parse(localStorage.getItem(ACTIVE_DATE_KEY) || '{}')[charId] === true; }
