@@ -22,6 +22,11 @@ import { CharacterGroupFilterBar, filterCharactersByGroup, GROUP_FILTER_ALL } fr
 import { trimHistoryThrough } from '../utils/dateSessionHistory';
 import { trackEvent } from '../utils/analytics';
 import { markAmsgStateDirty } from '../utils/amsgStateSync';
+import { setAmsgActiveDate } from '../utils/amsgInteractionGuard';
+import { isAmsg2EnabledForChar } from '../utils/amsg2Tasks';
+import { isAmsg2GlobalReady, createAmsg2ToolSession, executeAmsg2ToolWithOutcome } from '../utils/amsg2ToolBridge';
+import { extractFireScheduleTextCalls, buildSendAtExample } from '../utils/amsgFireSchedule';
+import { resolveCharTimeZone } from '../utils/timezone';
 import StoryTheater from '../components/date/story/StoryTheater';
 import { dateLaunch } from '../utils/dateLaunch';
 import { getLocalDateKey } from '../utils/localDate';
@@ -286,6 +291,8 @@ const DateApp: React.FC = () => {
 
             // 2. 切换模式并刷新数据
             if (encounterIdRef.current !== enteringEncounterId) return;
+            setAmsgActiveDate(char.id, true);
+            markDateTurnDirty(char);
             setMode('session');
             trackEvent('走过去开始见面会话');
         } finally {
@@ -433,8 +440,43 @@ const DateApp: React.FC = () => {
             variant: 'send',
             useVisionDescriptions: apiConfig.visionApi?.enabled === true,
         });
+        // 线下会话也可让角色自行预约未来的 2.0 主动联系，和离开后自动消息分开。
+        const canScheduleInPerson = isAmsg2EnabledForChar(char) && await isAmsg2GlobalReady();
+        if (canScheduleInPerson) {
+            const tzId = resolveCharTimeZone(char) || Intl.DateTimeFormat().resolvedOptions().timeZone;
+            messages.splice(1, 0, {
+                role: 'system',
+                content: [
+                    '【线下会话的未来主动联系工具】',
+                    '你此刻仍然和对方在同一线下场景，只有确实需要未来单独联系时才排程。',
+                    '例如你明天 06:30 有行程、到时想发条消息给对方报备，可以现在预约。',
+                    '排程不意味着对方已离开，也不能在当前线下对话里突然转为线上私聊。',
+                    '排程时，在正常线下回复之外独占一行输出 schedule_active_message({"send_at":"YYYY-MM-DDTHH:mm:ss","mode":"auto","prompt_hint":"到时想说什么","expire_policy":"expire"})。',
+                    'send_at 用你所在时区的墙钟时间，不带时区后缀，必须晚于当前时间至少一分钟。',
+                    '明天此刻的时间示例：' + buildSendAtExample(Date.now(), { tzId }),
+                    '遵守用户已有的频率、重复、到点必发权限，不可自行越过。',
+                    '一轮最多预约两条。没有自然理由就不要预约；工具调用不属于剧情台词、旁白。',
+                ].join('\n'),
+            });
+        }
         const rawContent = await callLLM(messages, resolveDialogueApi(apiConfig, char).temperature ?? 0.85);
-        const parsed = parseSARModuleReply(rawContent, sarModulePlan);
+        const scheduleCalls = canScheduleInPerson ? extractFireScheduleTextCalls(rawContent).slice(0, 2) : [];
+        let cleanDateContent = rawContent;
+        for (const call of scheduleCalls) cleanDateContent = cleanDateContent.replace(call.matched, '').trim();
+        if (scheduleCalls.length && userProfile) {
+            const toolSession = createAmsg2ToolSession({
+                char, userProfile, groups, realtimeConfig, apiConfig,
+                updateCharacter: (id, updates) => updateCharacter(id, updates),
+            });
+            for (const call of scheduleCalls) {
+                const { outcome } = await executeAmsg2ToolWithOutcome('schedule_active_message', call.args, toolSession);
+                addToast(outcome.status === 'done'
+                  ? '已预约未来主动消息'
+                  : '线下主动消息预约失败，可在主动消息 2.0 面板检查',
+                  outcome.status === 'done' ? 'success' : 'error');
+            }
+        }
+        const parsed = parseSARModuleReply(cleanDateContent, sarModulePlan);
         const sarModuleEvents = createSARModuleEventMeta(sarModulePlan);
         const userSurface = sarModulePlan.user?.phase === 'active' && parsed.userSurface
             ? createSARModuleSurfaceMeta(sarModulePlan.user, parsed.userSurface)
@@ -1043,7 +1085,7 @@ const DateApp: React.FC = () => {
                     <button onClick={() => startPeek(char, 'invite')} className="text-left rounded-2xl border border-neutral-700 px-6 py-5 hover:bg-neutral-900">
                         <span className="block text-lg">让他靠近</span><span className="block text-xs text-neutral-400 mt-2">由他自然地来到你面前</span>
                     </button>
-                    <button onClick={() => { setPeekStatus(''); setMode('session'); }} className="text-left rounded-2xl border border-neutral-700 px-6 py-5 hover:bg-neutral-900">
+                    <button onClick={() => { if (char) { setAmsgActiveDate(char.id, true); markDateTurnDirty(char); } setPeekStatus(''); setMode('session'); }} className="text-left rounded-2xl border border-neutral-700 px-6 py-5 hover:bg-neutral-900">
                         <span className="block text-lg">直接见面</span><span className="block text-xs text-neutral-400 mt-2">不生成开场白，直接开始互动</span>
                     </button>
                 </div>
