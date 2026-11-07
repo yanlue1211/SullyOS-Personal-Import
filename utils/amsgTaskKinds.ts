@@ -43,6 +43,34 @@ export const readTaskKind = (metadata: Record<string, unknown> | null | undefine
  */
 export const AMSG_BACKGROUND_JOB_SUBTYPE = 'job';
 
+/** 作者 8a4d6c99fb：统一分类云端任务行，避免把即时聊天或后台任务当排程。 */
+export const AMSG_INSTANT_CHAT_SUBTYPE = 'instant-chat';
+export const AMSG_INSTANT_CHAT_FLAG = 'amsgInstantChat';
+export const isInstantChatTask = (metadata: Record<string, unknown> | undefined | null): boolean =>
+  !!metadata && metadata[AMSG_INSTANT_CHAT_FLAG] === true;
+
+export type AmsgTaskRowClass = 'instant-chat' | 'background-job' | 'scheduled';
+
+/**
+ * 有 metadata 以任务身份标记为准；列表投影没有 metadata 时退回 subtype。
+ * 旧版即时对话中自排的定时任务有时继承 'instant-chat' subtype，
+ * 但带着 amsgSelfScheduled，仍应允许在任务清单中管理。
+ */
+export const classifyTaskRow = (row: {
+  messageSubtype?: string | null;
+  metadata?: Record<string, unknown> | null;
+}): AmsgTaskRowClass => {
+  const { metadata } = row;
+  if (metadata) {
+    if (isInstantChatTask(metadata)) return 'instant-chat';
+    if (readTaskKind(metadata)) return 'background-job';
+    if (metadata.amsgSelfScheduled === true) return 'scheduled';
+  }
+  if (row.messageSubtype === AMSG_INSTANT_CHAT_SUBTYPE) return 'instant-chat';
+  if (row.messageSubtype === AMSG_BACKGROUND_JOB_SUBTYPE) return 'background-job';
+  return 'scheduled';
+};
+
 // ─── 一次性输入的云端抽屉 ─────────────────────────────
 
 /**
