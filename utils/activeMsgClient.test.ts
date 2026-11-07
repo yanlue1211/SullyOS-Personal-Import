@@ -1486,7 +1486,7 @@ describe('ActiveMsgClient.refreshApiCredentialsForPendingTasks（③ 凭据变�
   });
   afterEach(() => { vi.restoreAllMocks(); });
 
-  it('只刷「开着 2.0 且 pending 的 AI 任务」，旧单独 API 也统一使用主 API', async () => {
+  it('只刷「开着 2.0 且 pending 的 AI 任务」，启用独立 API 的角色使用独立凭据', async () => {
     vi.spyOn(DB, 'getAllCharacters').mockResolvedValue([
       { id: 'char-a', activeMsg2Config: { enabled: true, tasks: [
         remoteTask('a1'),
@@ -1513,9 +1513,9 @@ describe('ActiveMsgClient.refreshApiCredentialsForPendingTasks（③ 凭据变�
       primaryModel: 'gpt-x',
     });
     expect(byUuid.get('c1')).toEqual({
-      apiUrl: 'https://api.example.com/v1/chat/completions',
-      apiKey: 'new-key',
-      primaryModel: 'gpt-x',
+      apiUrl: 'https://sec.example.com/chat/completions',
+      apiKey: 'sec-key',
+      primaryModel: 'sec-model',
     });
   });
 
@@ -1570,7 +1570,7 @@ describe('ActiveMsgClient.refreshApiCredentialsForPendingTasks（③ 凭据变�
     expect(reiClient.updateMessage).not.toHaveBeenCalled();
   });
 
-  it('残缺的旧单独 API 不影响主 API 刷新', async () => {
+  it('用户启用独立 API 但残缺时不偷偷回退主模型，其他角色仍可刷新', async () => {
     vi.spyOn(DB, 'getAllCharacters').mockResolvedValue([
       { id: 'char-broken', activeMsg2Config: {
         enabled: true,
@@ -1583,8 +1583,8 @@ describe('ActiveMsgClient.refreshApiCredentialsForPendingTasks（③ 凭据变�
 
     const result = await ActiveMsgClient.refreshApiCredentialsForPendingTasks(API);
 
-    expect(result).toEqual({ status: 'ok', updated: 2, failed: 0 });
-    expect(reiClient.updateMessage.mock.calls.map((c: any[]) => c[0])).toEqual(['x1', 'y1']);
+    expect(result).toEqual({ status: 'partial', updated: 1, failed: 1 });
+    expect(reiClient.updateMessage.mock.calls.map((c: any[]) => c[0])).toEqual(['y1']);
   });
 });
 
@@ -1595,7 +1595,7 @@ describe('ActiveMsgClient.refreshCharPendingAiTaskCredentials（③ 面板保存
     reiClient.updateMessage.mockReset().mockResolvedValue({ success: true });
   });
 
-  it('fixed 再滤一遍；忽略旧的单独 API，按主 API 刷新', async () => {
+  it('fixed 再滤一遍；启用独立 API 时使用独立凭据', async () => {
     const result = await ActiveMsgClient.refreshCharPendingAiTaskCredentials({
       char: { id: 'char-a' } as any,
       config: {
@@ -1611,9 +1611,9 @@ describe('ActiveMsgClient.refreshCharPendingAiTaskCredentials（③ 面板保存
     expect(reiClient.updateMessage).toHaveBeenCalledTimes(1);
     expect(reiClient.updateMessage.mock.calls[0][0]).toBe('t1');
     expect(reiClient.updateMessage.mock.calls[0][1]).toEqual({
-      apiUrl: 'https://api.example.com/chat/completions',
-      apiKey: 'k',
-      primaryModel: 'm',
+      apiUrl: 'https://sec.example.com/chat/completions',
+      apiKey: 'sec-key',
+      primaryModel: 'sec-model',
     });
   });
 
