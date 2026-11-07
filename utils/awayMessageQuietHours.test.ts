@@ -29,7 +29,7 @@ describe('离开后消息禁发时段', () => {
   });
 
   it('按用户时区，不按角色时区或 Worker UTC 计算', () => {
-    const at = Date.parse('2026-11-07T15:30:00Z'); // 东京 11/08 00:30
+    const at = Date.parse('2026-11-07T18:30:00Z'); // 东京 11/08 03:30，洛杉矶 11/07 10:30
     expect(isAwayQuietTime(q, at, 'Asia/Tokyo')).toBe(true);
     expect(isAwayQuietTime(q, at, 'America/Los_Angeles')).toBe(false);
   });
