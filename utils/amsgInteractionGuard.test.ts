@@ -10,7 +10,7 @@ describe('2.0 云端交互锁', () => {
       {role:'user', metadata:{source:'chat'}},
       {role:'user', metadata:{source:'date'}},
       {role:'assistant', metadata:{source:'date'}},
-    ], false)).toBe('date');
+    ], false, true)).toBe('date');
   });
   it('哪怕最后一条正常聊天来自较早，未挂断电话仍禁止主动私聊', () => {
     expect(resolveAmsgInteractionLock([{role:'user'}], true)).toBe('call');
@@ -20,6 +20,11 @@ describe('2.0 云端交互锁', () => {
       {role:'user',metadata:{source:'call'}},
       {role:'system',metadata:{source:'call-end-popup'}},
     ], false)).toBe(null);
+  });
+  it('线下见面显式退出后不因历史最后一条仍为 date 而永久锁住', () => {
+    expect(resolveAmsgInteractionLock([
+      {role: 'assistant', metadata: {source: 'date'}},
+    ], false, false)).toBe(null);
   });
   it('用户改回线上对话后解除线下锁', () => {
     expect(resolveAmsgInteractionLock([
@@ -31,6 +36,6 @@ describe('2.0 云端交互锁', () => {
     expect(resolveAmsgInteractionLock([
       {role:'user',metadata:{source:'date'}},
       {role:'user',metadata:{hidden:true,proactiveHint:true}},
-    ], false)).toBe('date');
+    ], false, true)).toBe('date');
   });
 });
