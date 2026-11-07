@@ -139,15 +139,19 @@ export interface AmsgLimitsRecord extends AmsgPacingSettings {
    * 排的），到点时 worker 读到 false 就直接跳过，一个 token 都不花。
    */
   selfScheduleEnabled: boolean;
+  /** 只用来管自动空闲提醒，角色自己排的第二天出门报备等不受影响。 */
+  awayQuietHours?: { enabled: boolean; startTime: string; endTime: string };
 }
 
 export const buildAmsgLimitsRecord = (
   config: Partial<AmsgPacingSettings> | null | undefined,
   selfScheduleEnabled: boolean,
+  awayQuietHours?: { enabled: boolean; startTime: string; endTime: string },
 ): AmsgLimitsRecord => ({
   v: 1,
   selfScheduleEnabled,
   ...pickPacingSettings(config),
+  ...(awayQuietHours ? { awayQuietHours } : {}),
 });
 
 /** 读回来的记录；形状不对返回 null（worker 按默认值走——默认值本身就是偏严的那一侧）。 */
