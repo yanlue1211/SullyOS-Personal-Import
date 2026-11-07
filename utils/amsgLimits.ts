@@ -141,17 +141,23 @@ export interface AmsgLimitsRecord extends AmsgPacingSettings {
   selfScheduleEnabled: boolean;
   /** 只用来管自动空闲提醒，角色自己排的第二天出门报备等不受影响。 */
   awayQuietHours?: { enabled: boolean; startTime: string; endTime: string };
+  /** 自动空闲提醒开关；独立于自主排程，false 时旧的链式任务也立即停止。 */
+  awayEnabled?: boolean;
+  /** 只有自动空闲提醒读取的节拍间隔。 */
+  awayDelayMinutes?: number;
 }
 
 export const buildAmsgLimitsRecord = (
   config: Partial<AmsgPacingSettings> | null | undefined,
   selfScheduleEnabled: boolean,
   awayQuietHours?: { enabled: boolean; startTime: string; endTime: string },
+  away?: { enabled: boolean; delayMinutes?: number },
 ): AmsgLimitsRecord => ({
   v: 1,
   selfScheduleEnabled,
   ...pickPacingSettings(config),
   ...(awayQuietHours ? { awayQuietHours } : {}),
+  ...(away ? { awayEnabled: away.enabled, awayDelayMinutes: away.delayMinutes } : {}),
 });
 
 /** 读回来的记录；形状不对返回 null（worker 按默认值走——默认值本身就是偏严的那一侧）。 */
