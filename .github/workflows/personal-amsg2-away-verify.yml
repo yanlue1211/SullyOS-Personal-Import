@@ -17,7 +17,7 @@ on:
       - '.github/workflows/personal-amsg2-away-verify.yml'
   push:
     branches:
-      - personal/amsg2-away-guard-upstream-20261107
+      - personal/amsg2-integrate-audio-20261108
 permissions:
   contents: read
 jobs:
