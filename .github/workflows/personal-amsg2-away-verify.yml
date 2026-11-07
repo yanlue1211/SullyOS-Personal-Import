@@ -1,0 +1,39 @@
+name: Personal amsg2 away integration verify
+on:
+  pull_request:
+    paths:
+      - 'apps/DateApp.tsx'
+      - 'apps/CallApp.tsx'
+      - 'apps/Chat.tsx'
+      - 'components/chat/**'
+      - 'context/OSContext.tsx'
+      - 'hooks/useChatAI.ts'
+      - 'utils/amsg**'
+      - 'utils/away**'
+      - 'types.ts'
+      - 'worker/amsg/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/personal-amsg2-away-verify.yml'
+  push:
+    branches:
+      - personal/amsg2-away-guard-upstream-20261107
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Quiet hours, online/offline lock and original away tests
+        run: pnpm exec vitest run utils/awayMessageQuietHours.test.ts utils/amsgInteractionGuard.test.ts utils/awayMessageCore.test.ts
+      - name: Build worker and frontend
+        run: pnpm run build
