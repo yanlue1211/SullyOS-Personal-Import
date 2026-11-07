@@ -84,6 +84,40 @@ describe('amsg2 audit regressions', () => {
     expect(Date.parse(next.firstSendTime)).toBe(now + 120 * 60_000);
   });
 
+  it('同一个 B 空闲节拍被 Worker 重试时只会请求同一个下一节拍 UUID', async () => {
+    const task = {
+      id: 44, uuid: '99999999-9999-4999-8999-999999999999',
+      contactName: '角色', nextSendAt: new Date(now).toISOString(), recurrenceType: 'none',
+      metadata: { charId, amsgClientTaskId: 'away-retry', amsgAwayMessage: true,
+        amsgAwayDelayMinutes: 120, amsgTaskInstruction: '自由分享生活', amsgExpirePolicy: 'force' },
+    };
+    const first = await start({ task, limits: { awayEnabled: true, awayDelayMinutes: 120 } });
+    const retry = await start({ task, limits: { awayEnabled: true, awayDelayMinutes: 120 } });
+    expect(first.scheduleTask).toHaveBeenCalledTimes(1);
+    expect(retry.scheduleTask).toHaveBeenCalledTimes(1);
+    const [next1] = first.scheduleTask.mock.calls[0];
+    const [next2] = retry.scheduleTask.mock.calls[0];
+    expect(next1.uuid).toBe(next2.uuid);
+    expect(next1.firstSendTime).toBe(next2.firstSendTime);
+    expect(next1.uuid).not.toBe(task.uuid);
+    expect(Date.parse(next1.firstSendTime)).toBe(now + 120 * 60_000);
+  });
+
+  it('服务停摆多节拍后恢复时，只续排未来一个节拍且不补发旧正文', async () => {
+    const task = {
+      id: 45, uuid: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      nextSendAt: new Date(now - 10 * 3600_000).toISOString(), recurrenceType: 'none',
+      metadata: { charId, amsgClientTaskId: 'away-old-lost', amsgAwayMessage: true,
+        amsgAwayDelayMinutes: 120, amsgTaskInstruction: '自由分享生活', amsgExpirePolicy: 'force' },
+    };
+    const result = await start({ task, limits: { awayEnabled: true, awayDelayMinutes: 120 } });
+    expect(result.scheduleTask).toHaveBeenCalledTimes(1);
+    const [next] = result.scheduleTask.mock.calls[0];
+    expect(Date.parse(next.firstSendTime)).toBeGreaterThan(now);
+    expect(Date.parse(next.firstSendTime)).toBeLessThanOrEqual(now + 120 * 60_000);
+    expect(result.plan).toEqual({ skip: true });
+  });
+
   it('B-mode due tick gives the original autonomous silent choice without a second model call', async () => {
     const task = {
       id: 43, uuid: '88888888-8888-4888-8888-888888888888',
