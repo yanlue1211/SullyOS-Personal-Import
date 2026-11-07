@@ -1,5 +1,5 @@
 import { buildChatOutputStylePrompt, readChatTranslationConfig } from './chatOutputStylePrompt';
-import { resolveDialogueApi } from './characterApi';
+import { resolveScheduledMessageApi } from './characterApi';
 import { isAnthropicEndpoint } from './llmEndpoint';
 import { ackStoppedReplyReceipts, stoppedReplyStateEntries } from './amsgStoppedReplyClient';
 import { loadCharacterContextMessages } from './chatContextRange';
@@ -578,7 +578,7 @@ const initializeClient = (config: ActiveMsg2GlobalConfig) => {
 };
 
 const resolveApiConfig = (char: CharacterProfile, _config: ActiveMsg2CharacterConfig, apiConfig: APIConfig) => {
-  const source = resolveDialogueApi(apiConfig, char);
+  const source = resolveScheduledMessageApi(apiConfig, char, _config);
 
   if (!source.baseUrl || !source.apiKey || !source.model) {
     throw new Error('主动消息 2.0 缺少可用的 API URL / Key / Model。');
@@ -2637,7 +2637,7 @@ export const ActiveMsgClient = {
       : await buildFirePack(char, userProfile, groups, realtimeConfig);
     // 任务身份：客户端自造 clientTaskId——远端 uuid 要创建成功后才有，而 metadata
     // 必须在创建时就带上归属键；push 原样透传，送达归属全靠它。
-    const clientTaskId = crypto.randomUUID();
+    const clientTaskId = task.away ? `away-${crypto.randomUUID()}` : crypto.randomUUID();
 
     const remoteAvatarUrl = toRemoteAvatarUrl(char.avatar);
     const payload: Record<string, any> = {
