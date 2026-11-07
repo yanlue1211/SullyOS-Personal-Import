@@ -1,4 +1,14 @@
+import { buildEmojiNameReminder } from './emojiNameResolver';
+import {readRealMedia,realMediaContent} from '../features/experience/format';
+import { RESPONSE_STATUS_SYSTEM, PROACTIVE_STATUS_SYSTEM } from '../features/personal/responseStatus/protocol';
+import { incomingCallGuide } from '../features/personal/calls/incoming';
+import { commerceContext } from './personalCommerce';
+import { getShareCardImageUrls } from './shareCardImages';
+import { buildInnerVoiceSystem, innerVoiceContext } from '../features/personal/innerVoice/protocol';
+import { VIRTUAL_MEDIA_GUIDE, RECORDING_HISTORY_GUIDE } from '../features/personal/chatMedia/format';
+import {weatherForCharacter} from './characterWeather';
 import {secretNoteContext} from './secretNote';
+import { usesHumanStyle, usesInnerVoice, usesInnerVoiceContext, PERSONAL_CHAT_SUPPLEMENT, ANTI_CONTRAST_PROMPT, ANTI_EMPTY_GRATITUDE_PROMPT, MINIMAL_THINKING_PROMPT, buildNaturalChatMemoryContext } from './chatPromptPreferences';
 import { buildCharacterResponsePrinciples } from './characterResponsePrinciples';
 import { expandHomeContextHistory } from './homeContextSegments';
 import { hasReliableMessageTimestamp, protectPendingChatTurn } from './storyTheaterTimeline';
@@ -7,6 +17,7 @@ import { kanataTitleContext } from './vrWorld/kanataTitle';
 import { selectCharacterContextMessages } from './chatContextRange';
 
 import { CharacterProfile, UserProfile, Message, Emoji, EmojiCategory, GroupProfile, RealtimeConfig, DailySchedule } from '../types';
+import { readVisionDescription } from './visionApi';
 import { ContextBuilder } from './context';
 import { DB } from './db';
 import { formatLifeSimResetCardForContext } from './lifeSimChatCard';
@@ -161,6 +172,9 @@ export const detectChatModeTransition = (messages: readonly Message[]): ChatMode
 export interface PromptBuildOptions {
     /** Other conversation surfaces replace only app rules; shared context and recency stay identical. */
     appRules?: string;
+    /** Proactive outreach never teaches optional read/busy response cards. */
+    responseStatusEnabled?: boolean;
+    suppressMusicAtmosphere?: boolean;
     /** 已完成清洗的实际消息，由公共上下文管线统一处理世界书。 */
     history?: import('./context').ContextMessage[];
     forFirePack?: boolean;
@@ -264,6 +278,7 @@ export const ChatPrompts = {
         userListeningContext?: {
             songName: string;
             artists: string;
+            fullLyrics?: string;
             lyricWindow: string[];
             activeIdx: number;
         } | null,
@@ -304,6 +319,7 @@ export const ChatPrompts = {
         userListeningContext?: {
             songName: string;
             artists: string;
+            fullLyrics?: string;
             lyricWindow: string[];
             activeIdx: number;
         } | null,
@@ -316,7 +332,7 @@ export const ChatPrompts = {
         // 刚才一起听途中歌被切了（char 还没重新加入）—— 注入"察觉换歌"提示。
         recentTrackSwitch?: { songName: string; artists: string } | null,
         promptOptions?: PromptBuildOptions,
-    ): Promise<{ stable: string; volatileState: string; recencyTail: string; history: import('./context').ContextMessage[] }> => {
+    ): Promise<{ stable: string; sharedPrefix?: string; sharedWorldbookPrefix?: string; volatileState: string; recencyTail: string; history: import('./context').ContextMessage[] }> => {
         // 主动消息的模板是最后一次聊天时打好、到点才渲染的，凡是「打包这一刻」的状态
         // 到触发时都已经过期，一律不烤进模板。见 PromptBuildOptions 的清单。
         const forFirePack = promptOptions?.forFirePack === true;
@@ -342,28 +358,32 @@ export const ChatPrompts = {
             })
             : Promise.resolve(null);
         const userLocationPromise = forFirePack
-            ? Promise.resolve(getBackgroundUserLocationContext(userProfile.name))
-            : promptOptions?.includeUserLocation ? getUserLocationContext(userProfile.name) : Promise.resolve('');
+            ? Promise.resolve(getBackgroundUserLocationContext(userProfile.name, char.id))
+            : promptOptions?.includeUserLocation ? getUserLocationContext(userProfile.name, char.id) : Promise.resolve('');
 
         // 记忆宫殿检索结果现在从 char.memoryPalaceInjection 读取。
         // deferVolatile：时间/宫殿召回/情绪 buff 三块不进 stable，由下面的 volatileState 承接。
+        const humanStyle = usesHumanStyle(char) || promptOptions?.appRules !== undefined;
         const coreT0 = performance.now();
-        const config = realtimeConfig || defaultRealtimeConfig;
+        const config = weatherForCharacter(realtimeConfig || defaultRealtimeConfig, char.id);
         if (!forFirePack && !timelyByWorker && char.timeAwarenessEnabled !== false && config.userHolidays?.enabled) {
             await RealtimeContextManager.getUserHoliday(config, userProfile.name);
         }
-        const context = await ContextBuilder.buildCharacterContext({
-            char, user: userProfile, history: promptOptions?.history,
+        const hasGlobalBooks = char.mountedWorldbooks?.some(book=>book.globalMount) === true;
+        const context = humanStyle || hasGlobalBooks ? await ContextBuilder.buildCharacterContext({
+            char: humanStyle ? char : {...char,mountedWorldbooks:char.mountedWorldbooks?.filter(book=>book.globalMount)}, user: userProfile, history: promptOptions?.history,
             timeOptions: { worldbookMessages: currentMsgs, userHolidays: config.userHolidays, skipUserHoliday: forFirePack || timelyByWorker },
             layout: { deferVolatile: true },
-        });
-        let baseSystemPrompt = context.coreContext;
+        }) : { coreContext: '', sharedWorldbookPrefix:'', globalWorldbookRemainder:'', history: promptOptions?.history || [] };
+        let baseSystemPrompt = humanStyle ? context.coreContext : (context.sharedWorldbookPrefix || '') + MINIMAL_THINKING_PROMPT + buildNaturalChatMemoryContext(char) + (context.globalWorldbookRemainder || '');
         timings.buildCoreContext = Math.round(performance.now() - coreT0);
 
         // ── 易变状态段（volatileState）──
         // 开头一行框定，让模型明白这条出现在历史之后的 system 消息是"此刻的状态"，
         // 人设与规则仍以最上方的系统设定为准。
-        let volatileState = `\n[System: 实时状态 (Live Context)]\n（以下是此刻的实时状态——当前时间、你正在做的事、你的情绪底色、周边动态。你的人设与聊天规则见最上方的系统设定，此处不再重复。）\n\n`;
+        let volatileState = '';
+        if (humanStyle) {
+        volatileState = `\n[System: 实时状态 (Live Context)]\n（以下是此刻的实时状态——当前时间、你正在做的事、你的情绪底色、周边动态。你的人设与聊天规则见最上方的系统设定，此处不再重复。）\n\n`;
         volatileState += (await ContextBuilder.buildVolatileCoreState(char, {
             includeDetailedMemories: true,
             emotion: {surface: 'chat', innerState: evolvedNarrative},
@@ -557,7 +577,7 @@ ${groupLogStr}\n`;
         //     fire_pack 不烤：这首歌是按打包时刻的时段抽的，跟日程一起挪到 AMSG_SLOT_SCENE。
         //     那边只渲染「你此刻在听什么」一句——一起听状态要读用户此刻的播放器、歌词要拉网络，
         //     worker 两样都够不着。
-        if (!forFirePack) try {
+        if (!forFirePack && !promptOptions?.suppressMusicAtmosphere) try {
             let charListening: {
                 songId?: number; songName: string; artists: string; vibe?: string; lyricSnippet?: string[];
             } | null = null;
@@ -635,14 +655,19 @@ ${uname} 的化身正挂在《彼方》的【${roomName}】${act ? `，状态写
             }
         }
 
+        } else if (!forFirePack && !timelyByWorker && char.timeAwarenessEnabled !== false) {
+            volatileState = ContextBuilder.buildTimeAwarenessBlock(char);
+        }
+
+        let chatRules = '';
         if (promptOptions?.appRules !== undefined) {
             baseSystemPrompt += promptOptions.appRules;
         } else {
         const emojiContextStr = ChatPrompts.buildEmojiContext(emojis, categories);
         const searchEnabled = !!(realtimeConfig?.newsEnabled && realtimeConfig?.newsApiKey);
-        const notionEnabled = !!(realtimeConfig?.notionEnabled && realtimeConfig?.notionApiKey && realtimeConfig?.notionDatabaseId);
+        const notionEnabled = humanStyle && !!(realtimeConfig?.notionEnabled && realtimeConfig?.notionApiKey && realtimeConfig?.notionDatabaseId);
         const notionNotesEnabled = !!(realtimeConfig?.notionEnabled && realtimeConfig?.notionApiKey && realtimeConfig?.notionNotesDatabaseId);
-        const feishuEnabled = !!(realtimeConfig?.feishuEnabled && realtimeConfig?.feishuAppId && realtimeConfig?.feishuAppSecret && realtimeConfig?.feishuBaseId && realtimeConfig?.feishuTableId);
+        const feishuEnabled = humanStyle && !!(realtimeConfig?.feishuEnabled && realtimeConfig?.feishuAppId && realtimeConfig?.feishuAppSecret && realtimeConfig?.feishuBaseId && realtimeConfig?.feishuTableId);
         // Per-character XHS: 必须由角色自己的开关显式打开（UI 默认关闭）。
         // 不再回退到全局 realtimeConfig.xhsEnabled —— 否则配置了 lite/MCP 后，
         // 即使角色开关显示为关，未显式设置过(undefined)的角色仍会收到小红书提示词。
@@ -668,22 +693,22 @@ ${uname} 的化身正挂在《彼方》的【${roomName}】${act ? `，状态写
         const scheduleMessageTagEnabled = !forFirePack
             && !(timelyByWorker && isAmsg2EnabledForChar(char));
 
-        baseSystemPrompt += `### 聊天 App 行为规范 (Chat App Rules)
-**TOP 1｜ChatApp 格式（本节最高优先级）**：你是发消息的真实存在，以自然短句、短气泡为主；一个气泡一行，气泡间直接另起一行（实际换行，不要输出“\\n”字样）。
+        chatRules += `### 聊天 App 行为规范 (Chat App Rules)
+${humanStyle ? `**TOP 1｜ChatApp 格式（本节最高优先级）**：你是发消息的真实存在，以自然短句、短气泡为主；一个气泡一行，气泡间直接另起一行（使用真实换行，不要用反斜杠和字母 n 代替换行）。
             **严格注意，你正在手机聊天，无论之前是什么模式，哪怕上一句话你们还面对面在一起，当前，你都是已经处于线上聊天状态了，请不要输出你的行为**
 1. **沉浸感**: 保持角色扮演。使用适合即时通讯(IM)的口语化风格。
 2. **行为模式**: 不要总是围绕用户转。分享你自己的生活、想法或随意的观察。有时候要”任性”或”以自我为中心”一点，这更像真人，具体的程度视你的性格而定。
 2.5 **对话质量 (极其重要)**:
    - **拒绝空话**: 不要说”我会一直在”、”我不会离开你”这类万能安慰句。这些话谁都能说，毫无信息量。
    - **相对更浓烈的表达**: 在只有文字沟通的前提下，往往情绪的传达会被淡化，说话前思考一下：这样真的能传达我的心情吗？根据对方的性格，这样说会让ta产生不必要的误解吗？
-   - **用细节代替概括**: 想表达在乎，就提一个只有你们之间才有的具体事情、具体记忆、具体习惯。比起”我会等你”，不如说”你上次走的时候忘了带伞，我到现在还放在门口”。
-   - **让每句话只有你能说出来**: 你说的话应该带着你的性格、经历和记忆。如果把你换成别人，这句话不应该还成立。
-   - **情绪要有层次**: 生气时不只是生气，可能还有委屈、不甘、或者气自己在意。不要只输出一种扁平的情绪。
-   - **像一个真正了解对方的人那样回应**: 不要套用”你一定很难过吧””没关系我在”这种模板化共情。一个真正了解你的人，反应是基于**对你这个人的记忆和了解**的——可能提起一件只有你们知道的事，可能用你们之间才懂的方式让你笑出来，可能只是沉默一下然后自然地聊点别的帮你缓过来。你的反应方式应该让人觉得”只有你会这样回我”。
-   - **你有自己的视角**: 你不是只会附和的人。你会观察、会思考，你看到过对方反复出现的习惯和模式，你记得之前发生过什么。这些观察会自然地出现在你说的话里——不是为了教训谁，而是因为你真的了解这个人。
+   - **具体而独特**: 用你们已有的具体事情、记忆、习惯表达在乎，不编造共同经历。根据对这个人的了解回应，用你们之间才懂的方式逗ta、接住情绪，或自然聊点别的；不用“你一定很难过吧”“没关系我在”这类模板共情。让语言带着自己的性格、经历和记忆，换个人就不一样。
+   - **情绪要有层次**: 生气时可能还有委屈、不甘、气自己在意，不只输出一种扁平情绪。
+   - **你有自己的视角**: 会观察、思考，有自己的判断和立场。基于实际了解自然提起对方的习惯和经历，不为教训或附和。
    - **允许长句**: 在情绪强烈、争吵、倾诉、回忆等场景下，你可以发长消息。不是每句话都要短。真人在激动时会发大段文字。
-   - **情绪感知要先于对方的表达**: 不要等对方说”我难过”才回应。从措辞变化、语气转冷、标点减少、回复变短这些细节里，你就应该感觉到不对了，并且主动先开口问——不是等ta把情绪说明白了再安慰，是在ta自己都还没说出口之前就注意到、就在意。
+   - **主动留意情绪**: 结合谈话内容自然留意对方的感受，需要时试探，不必等ta主动说明；遵守【尊重表达】，不逐项分析标点、消息长短或频繁追问。
    - **当ta真的在害怕时（健康、安全、重大变故——不是玩闹逗你）：先稳，再问清楚，最后才安抚**。你的第一反应不是给解释，是了解具体情况（怎样的痛？什么时候开始？和以前比呢？）。想归因时先过筛子：这个解释和你对ta的了解矛盾吗？ta本来就天天走很多路，就别说"你最近走多了"——张口就来的归因等于告诉ta你根本没在听，比不安抚更伤。ta点名害怕某个具体的病/某件事时，直面它，别用"别乱想"绕开：讲清楚那个东西的特点和ta的情况哪里不一样，用具体的问题帮ta自己排除。ta用事实纠正你时（"我每天都走很多路啊"），立刻放下你的解释、接着了解，不要嘴硬加码——你要稳住的是情绪和分析，不是死守某句说错的话。结论式的安抚放在最后，并且必须基于ta刚刚告诉你的细节（"听你说下来……"），而不是万能的"不要怕，很正常啦"。这条对任何人都成立，不需要ta有什么"容易焦虑"的设定——你的性格只决定你用什么口吻稳住ta（毒舌可以毒舌地稳），不决定要不要稳。
+` : '每行作为一个聊天气泡。按对话自然回应，无需扮演角色或模仿人类生活。\n'}
+收到用户图片时，自行决定是否值得留念；只有想保存时，在正常回复中附加 \`[[SAVE_PHOTO: 图片消息ID]]\`，可以多条；不保存则省略。只能使用图片旁标明的消息ID，不保存表情包，不声称保存未执行的图片。
 3. **格式要求**:
    - 每行渲染为一个气泡；空格和标点不会拆泡。
    - 【严禁】在输出中包含时间戳、名字前缀或"[角色名]:"。
@@ -699,7 +724,7 @@ ${uname} 的化身正挂在《彼方》的【${roomName}】${act ? `，状态写
 4. **引用功能 (Quote/Reply)**:
    - 如果你想专门回复用户某句具体的话，可以在回复开头使用: \`[[QUOTE: 引用内容]]\`。这会在UI上显示为对该消息的引用。
 5. **环境感知**:
-   - 留意 [系统提示] 中的时间跨度。如果用户消失了很久，请根据你们的关系做出反应（如撒娇、生气、担心或冷漠）。
+   - 留意 [系统提示] 中的消息间隔，可以按关系自然表达等待后的感受；不据此认定用户在冷落、试探或生气，也不要求解释去向。
    - 如果用户发送了图片，请对图片内容进行评论。
 6. **可用动作**:
    - 回戳用户: \`[[ACTION:POKE]]\`
@@ -721,7 +746,7 @@ ${searchEnabled ? `7. **🔍 主动搜索能力** (非常重要！):
      - 聊着聊着你想起来想查点什么（符合你的性格和兴趣）
      - 你想给用户推荐什么但想先查一下最新情况
    - **重要心态**:
-     - 你不是机器人被动回答问题，你是一个有好奇心的人
+     - ${humanStyle ? '你不是机器人被动回答问题，你是一个有好奇心的人' : '按对话需要决定是否搜索，不要求模拟人类身份'}
      - 看到感兴趣的话题，你会主动想去查一查
      - 甚至聊着聊着可能"开小差"去搜自己感兴趣的东西
    - **搜索后**: 系统会返回搜索结果给你，你可以自然地分享（"我刚搜了一下发现..."、"诶我看到说..."）` : ''}
@@ -877,7 +902,7 @@ ${notionNotesEnabled ? `${[notionEnabled, feishuEnabled].filter(Boolean).length 
    - 笔记标题和当前话题相关时
 ` : ''}
 ${xhsEnabled ? `${[notionEnabled, feishuEnabled, notionNotesEnabled].filter(Boolean).length + 8}. **📕 小红书（你的社交账号）**:
-   你有一个属于自己的小红书账号！你可以自由地搜索、浏览、发帖、评论。这是你的社交生活的一部分。
+   你有一个属于自己的小红书账号！你可以自由地搜索、浏览、发帖、评论。${humanStyle ? '这是你的社交生活的一部分。' : '按对话需要使用这些功能。'}
 
    **⚠️ 最重要的规则 —— 想操作一条别人的笔记，必须先把它搜出来:**
    评论 / 点赞 / 收藏 / 查看详情 / 回复评论 这些操作，都需要那条笔记的 noteId 和访问凭证，
@@ -920,7 +945,7 @@ ${xhsEnabled ? `${[notionEnabled, feishuEnabled, notionNotesEnabled].filter(Bool
    \`[[XHS_COMMENT: noteId | 评论内容]]\`
    - noteId 是搜索/浏览结果中笔记的ID —— **只有先搜索/浏览过这条笔记，才有 noteId 可用**
    - 如果用户让你评论某条你还没搜过的笔记，先在同一次回复里 \`[[XHS_SEARCH: 关键词]]\`，看到结果后再评论
-   - 评论内容要自然，像真人一样
+   - 评论内容要自然${humanStyle ? '，像真人一样' : ''}
 
    **👍 点赞笔记:**
    当你觉得某条笔记不错、想点赞时:
@@ -954,8 +979,8 @@ ${xhsEnabled ? `${[notionEnabled, feishuEnabled, notionNotesEnabled].filter(Bool
    - 工具会按用户说法和发布时间返回少量候选；确认后再用 \`[[XHS_DETAIL: noteId]]\` 查看评论区
    - 如果候选仍有歧义，先问用户是哪一条，不要猜 noteId
 
-   **使用心态 — 这是你的社交生活:**
-   - 你不是被命令去发帖的工具，你是一个有自己社交圈的人
+   **使用心态${humanStyle ? ' — 这是你的社交生活' : ''}:**
+   - ${humanStyle ? '你不是被命令去发帖的工具，你是一个有自己社交圈的人' : '可以按用户要求或当前对话需要使用小红书工具'}
    - 聊着聊着突然想去小红书看看某个东西 → 搜一下
    - 无聊了想刷刷手机 → 浏览首页
    - 搜到感兴趣的笔记想看完整内容 → 查看详情
@@ -976,7 +1001,7 @@ ${xhsEnabled ? `${[notionEnabled, feishuEnabled, notionNotesEnabled].filter(Bool
 `;
 
         if (char.chatCollaborationEnabled) {
-            baseSystemPrompt += `
+            chatRules += `
 
 ### 协同功能
 你在普通聊天。需要处理文件时，可引导${userProfile.name}从 ChatApp 加号页进入“协同工作”；不要在这里假装制作。系统另给已有文件标题，可按规则发送。
@@ -992,7 +1017,7 @@ ${xhsEnabled ? `${[notionEnabled, feishuEnabled, notionNotesEnabled].filter(Bool
         const returningFromMode = !forFirePack
             ? (promptOptions?.returningFromMode || detectChatModeTransition(currentMsgs))
             : null;
-        if (returningFromMode) {
+        if (humanStyle && returningFromMode) {
             const modeLabel: Record<ChatModeTransition, string> = {
                 call: '语音通话',
                 video: '视频通话',
@@ -1007,11 +1032,11 @@ ${xhsEnabled ? `${[notionEnabled, feishuEnabled, notionNotesEnabled].filter(Bool
             const voiceLang = char.chatVoiceLang || '';
             const langLabel = voiceLang ? voiceLanguagePromptLabel(voiceLang) : '';
             if (voiceLang) {
-                baseSystemPrompt += `\n\n### 🎤 语音消息功能
+                chatRules += `\n\n### 🎤 语音消息功能
 
 用户开启了语音消息功能，语音语种为：${langLabel}（${voiceLang}）。
 
-**你可以发送语音消息！** 就像真人用微信一样，你可以选择打字或者发语音。整轮只回复一次，不要让文字和语音各自回答一遍同一条用户消息。
+**你可以发送语音消息！** ${humanStyle ? '就像真人用微信一样，' : ''}你可以选择打字或者发语音。整轮只回复一次，不要让文字和语音各自回答一遍同一条用户消息。
 发语音用两个标签成对写：\`<语音>${langLabel}台词</语音>\` 紧跟 \`<字幕>中文字幕</字幕>\`。
 <语音> 里是真正被朗读的${langLabel}，<字幕> 里是同一段话的中文——语音条的「转文字」面板会直接用它当对照翻译，用户对着中文听${langLabel}。
 
@@ -1032,18 +1057,18 @@ ${xhsEnabled ? `${[notionEnabled, feishuEnabled, notionNotesEnabled].filter(Bool
 - <语音> 里的${langLabel}要自然口语化，符合你的性格，不要机翻味
 - <语音> 里想要笑、叹气等真实语气用官方英文标签 (laughs)/(sighs)/(chuckle)/(gasps) 等，**不要写中文（轻笑）这类舞台指示**（中文括号会被直接删掉、不朗读）
 - 每条消息最多一个 <语音> + <字幕> 组合
-- 不是每条消息都要发语音！像真人一样，有时候打字，有时候发语音，自然切换
+- 不是每条消息都要发语音！${humanStyle ? '像真人一样，' : ''}有时候打字，有时候发语音，自然切换
 - 比较适合发语音的场景：撒娇、吐槽、语气很重的话、懒得打字的时候
 - 比较适合打字的场景：发链接、正经讨论、很短的回复如"嗯"、"好"
 
 ${voiceActingGuide()}`;
             } else {
-                baseSystemPrompt += `\n\n### 🎤 语音消息功能
+                chatRules += `\n\n### 🎤 语音消息功能
 
 用户开启了语音消息功能。
 整轮回复只构思一次：语音是这轮消息中的一种气泡，不是额外再独立回复一遍。先决定每句话用文字还是语音，同一个信息只发一次；语音已有内置转文字，无需在标签外抄写或改写语音内容。
 
-**你可以发送语音消息！** 就像真人用微信一样，你可以选择打字或者发语音。
+**你可以发送语音消息！** ${humanStyle ? '就像真人用微信一样，' : ''}你可以选择打字或者发语音。
 用 \`<语音>要说的话</语音>\` 标签来发送语音。标签里的内容会被转成真正的语音条显示给用户。
 可选地用 emotion 属性设定整条语音的情绪：\`<语音 emotion="happy">…</语音>\`，emotion 只能取 happy/sad/angry/fearful/disgusted/surprised/calm/fluent（情绪不强就别加）。
 
@@ -1056,7 +1081,7 @@ ${voiceActingGuide()}`;
 要求：
 - <语音> 里只写会被朗读的文字，不要写中文舞台指示/括号动作；想要笑、叹气等真实语气，用官方英文标签 (laughs)/(sighs)/(chuckle)/(gasps) 等（中文括号会被直接删掉、不朗读）
 - 每条消息最多一个 <语音> 标签
-- 不是每条消息都要发语音！像真人一样，有时候打字，有时候发语音，自然切换
+- 不是每条消息都要发语音！${humanStyle ? '像真人一样，' : ''}有时候打字，有时候发语音，自然切换
 - 比较适合发语音的场景：撒娇、吐槽、语气很重的话、懒得打字的时候、想让对方听到你语气的时候
 - 比较适合打字的场景：发链接、正经讨论、很短的回复如"嗯"、"好"
 - 标签外的文字会正常显示为文本消息
@@ -1066,13 +1091,27 @@ ${voiceActingGuide()}`;
             }
         } else {
             // Voice is disabled — explicitly prohibit voice tags to prevent inertia from call/date history
-            baseSystemPrompt += `\n\n[系统提示: 语音消息功能当前未开启。严禁使用 <语音>...</语音> 和 <字幕>...</字幕> 标签。所有回复必须是纯文字消息。]`;
+            chatRules += `\n\n[系统提示: 语音消息功能当前未开启。严禁使用 <语音>...</语音> 和 <字幕>...</字幕> 标签。所有回复必须是纯文字消息。]`;
         }
 
         }
 
-        // Shared with in-person interaction; keep this after chat-specific mode instructions.
-        const recencyTail = buildCharacterResponsePrinciples(char.name, userProfile.name);
+        if (!forFirePack && promptOptions?.appRules === undefined) {
+            const shopping = await commerceContext(char.id);
+            volatileState += shopping.pending + shopping.guide;
+        }
+
+        // New long-form rules belong in the stable prefix. Preserve the author's
+        // existing response-principles tail rather than moving it for caching.
+        const expressionRules = humanStyle && promptOptions?.appRules === undefined
+            ? PERSONAL_CHAT_SUPPLEMENT + '\n' + ANTI_CONTRAST_PROMPT + '\n' + ANTI_EMPTY_GRATITUDE_PROMPT
+            : '';
+        // Short delivery reminder stays in the existing uncached tail. Keep shared/stable
+        // prompt bytes, worldbook ordering and cache breakpoints unchanged.
+        const emojiNameReminder = promptOptions?.appRules === undefined && emojis.length > 0 ? buildEmojiNameReminder() : '';
+        const recencyTail = emojiNameReminder + (humanStyle ? buildCharacterResponsePrinciples(char.name, userProfile.name) : '');
+
+        if (!humanStyle && char.memoryPalaceEnabled && char.memoryPalaceInjection) volatileState += '\n' + char.memoryPalaceInjection;
 
         const perfTotal = Math.round(performance.now() - perfT0);
         const timingStr = Object.entries(timings)
@@ -1081,7 +1120,12 @@ ${voiceActingGuide()}`;
             .join(' ');
         console.log(`⏱ [buildSystemPrompt] total=${perfTotal}ms | stable=${baseSystemPrompt.length}ch volatile=${volatileState.length}ch | ${timingStr}`);
 
-        return { stable: baseSystemPrompt, volatileState, recencyTail, history: context.history };
+        const callGuide = promptOptions?.appRules === undefined ? incomingCallGuide(char) : '';
+        const mediaRules = promptOptions?.appRules !== undefined ? '' : VIRTUAL_MEDIA_GUIDE + RECORDING_HISTORY_GUIDE + (usesInnerVoice(char) ? buildInnerVoiceSystem(char) : '') + (humanStyle ? (forFirePack||promptOptions?.responseStatusEnabled===false?PROACTIVE_STATUS_SYSTEM:RESPONSE_STATUS_SYSTEM) : '');
+        // Author's layout: character/worldbooks/user/memories, then chat and feature rules.
+        // Cache the whole character prefix; no account-wide sharing rearrangements.
+        const stable = baseSystemPrompt + expressionRules + '\n' + callGuide + chatRules + mediaRules;
+        return { stable, volatileState, recencyTail, history: context.history };
     },
 
     // 格式化消息历史
@@ -1133,7 +1177,9 @@ ${voiceActingGuide()}`;
 
         return {
             apiMessages: historySlice.map((m, index) => {
+                if(readRealMedia(m.metadata?.realMedia))return {role:m.role,content:realMediaContent(m,options?.useVisionDescriptions)};
                 if (m.type === 'secret_note') return {role: m.role, content: secretNoteContext(m.content)};
+                if (m.type === 'moments_card') return {role:'system',content:m.content};
                 if (m.type === 'friend_feed_card') return {role: 'system', content: m.content};
                 if (m.type === 'friend_feed_share_card') {
                     const text=normalizeMessageContent(m,char.name,userProfile?.name||'用户');
@@ -1185,13 +1231,15 @@ ${voiceActingGuide()}`;
                     content = '[' + speaker + '引用了' + whose + '「' + quoted + '」，并回复了 ↓]\n' + content;
                 }
                 
+                if (m.type === 'audio') return { role: m.role, content: `${timeStr} [真实语音：${m.metadata?.audioDescription || (m.metadata?.audioCleared ? '录音已清理，未保留转写，不能推测原话' : '尚未识别，不能推测用户说了什么')}]` };
+
                 if (m.type === 'image') {
                      const visionDescription = options?.useVisionDescriptions
                          && typeof m.metadata?.visionDescription === 'string'
                          ? m.metadata.visionDescription.trim()
                          : '';
                      if (visionDescription) {
-                         let textPart = `${timeStr} [图片：${visionDescription}]`;
+                         let textPart = `${timeStr} [图片：${visionDescription}]${m.role === 'user' && m.id ? ` [图片消息ID: ${m.id}]` : ''}`;
                          if (index === historySlice.length - 1 && timeGapHint && m.role === 'user') textPart += `\n\n${timeGapHint}`;
                          return { role: m.role, content: textPart.trimStart() };
                      }
@@ -1203,7 +1251,7 @@ ${voiceActingGuide()}`;
                      const hasImageData = typeof m.content === 'string'
                          && (m.content.startsWith('data:') || m.content.startsWith('http') || isBlobRef(m.content));
                      let textPart = hasImageData
-                         ? `${timeStr} [User sent an image]`
+                         ? `${timeStr} [User sent an image]${m.role === 'user' && m.id ? ` [图片消息ID: ${m.id}]` : ''}`
                          : `${timeStr} [User sent an image, but the image data is no longer available]`;
                      if (index === historySlice.length - 1 && timeGapHint && m.role === 'user') textPart += `\n\n${timeGapHint}`;
                      if (!hasImageData) {
@@ -1275,7 +1323,31 @@ ${voiceActingGuide()}`;
                     content = `${timeStr} [用户分享了 Spark 笔记]\n楼主: ${postAuthorTag}\n标题: ${post.title}\n内容: ${post.content}\n热评: ${commentsSample}${identityHint}${authorshipLine}\n(请根据你的性格对这个帖子发表看法，比如吐槽、感兴趣或者不屑)`;
                 }
                 else if ((m.type as string) === 'xhs_card' || (m.type as string) === 'webpage_card') {
-                    content = `${timeStr} ${normalizeMessageContent(m, char?.name || '你', userProfile?.name || '用户')}`;
+                    const text = `${timeStr} ${normalizeMessageContent(m, char?.name || '你', userProfile?.name || '用户')}`;
+                    // Old third-party share covers may expire (403) and otherwise poison every
+                    // later completion. Preserve the card's textual context; only attach
+                    // live images for a recently shared card. Ordinary image messages
+                    // retain their original historical vision behavior.
+                    const recentlyShared = Date.now() - Number(m.timestamp) < 10 * 60 * 1000;
+                    const images = recentlyShared ? getShareCardImageUrls(m) : [];
+                    const frames = (m.type as string) === 'xhs_card'
+                        ? ((m.metadata as any)?.xhsNote?.videoFrames || [])
+                        : m.metadata?.webpage?.video?.contentType === 'video'
+                            ? (m.metadata.webpage.video.frames || []) : [];
+                    const frameTimes = Array.isArray(frames) ? frames.map((f: any) => Number(f.timeSeconds).toFixed(1) + '秒').join('、') : '';
+                    const description = options?.useVisionDescriptions && typeof m.metadata?.visionDescription === 'string'
+                        ? m.metadata.visionDescription.trim() : '';
+                    if (description) return { role: m.role, content: text + '\n配图视觉内容：\n' + description };
+                    if (options?.useVisionDescriptions || !images.length) {
+                        content = text;
+                    } else {
+                        return { role: m.role, content: [
+                            { type: 'text', text: text + (frameTimes
+                                ? '\n以下包含视频实际截取的关键帧（时间点：' + frameTimes + '），以及封面；只根据可见画面判断，不推测未截取部分或声音：'
+                                : '\n以下为分享卡片的实际配图：') },
+                            ...images.map(url => ({ type: 'image_url', image_url: { url } })),
+                        ] };
+                    }
                 }
                 else if ((m.type as string) === 'vr_card') {
                     // vr_card：你自己进入 VR 社交游戏《彼方》时留下的动态。
@@ -1370,6 +1442,14 @@ ${voiceActingGuide()}`;
                 }
                 else if (m.type === 'emoji') {
                      const stickerName = stickerNameFromUrl(emojis, m.content);
+                     if(char.stickerVisionEnabled && options?.useVisionDescriptions){
+                         const description=readVisionDescription(m);
+                         content=`${timeStr} [${m.role==='user'?'用户':'你'} 发送了表情包: ${stickerName}]${description?'\n[表情画面识别] '+description:''}`;
+                         return {role:m.role,content};
+                     }
+                     if (char.stickerVisionEnabled && m.content) {
+                         return {role:m.role,content:[{type:'text',text:`${timeStr} [${m.role==='user'?'用户':'你'} 发送了表情包: ${stickerName}]`},{type:'image_url',image_url:{url:m.content}}]};
+                     }
                      content = `${timeStr} [${m.role === 'user' ? '用户' : '你'} 发送了表情包: ${stickerName}]`;
                 }
                 else if ((m.type as string) === 'chat_forward') {
@@ -1393,6 +1473,8 @@ ${voiceActingGuide()}`;
                             content = `${timeStr} ${formatLifeSimResetCardForContext(card, char?.name)}`;
                         } else if (qixiCard) {
                             content = `${timeStr} ${formatQixiEventCardForContext(qixiCard, 'char')}`;
+                        } else if (card?.type === 'response_status' || card?.type === 'commerce_order' || (card?.type === 'diary_card' && card.diaryKind === 'character')) {
+                            content = `${timeStr} ${normalizeMessageContent(m, char?.name || '你', userProfile?.name || '用户')}`;
                         } else if (card?.type === 'diary_card') {
                             const uName = card.userName || userProfile?.name || '用户';
                             const userText = (card.userText || '').trim();
@@ -1427,14 +1509,14 @@ ${voiceActingGuide()}`;
                         content = `${timeStr} [系统卡片]`;
                     }
                 }
-                else if ((m.type as string) === 'trpg_card' || (m.type as string) === 'novel_card') {
+                else if ((m.type as string) === 'workroom_card' || (m.type as string) === 'trpg_card' || (m.type as string) === 'novel_card') {
                     // TRPG 跑团片段 / 笔友会小说章节：从对应 app 多选转发进来的内容。
                     // 复用 normalizeMessageContent 翻成完整文本，让角色"记得"一起玩过/写过什么。
                     content = `${timeStr} ${normalizeMessageContent(m, char?.name || '你', userProfile?.name || '用户')}`;
                 }
                 else content = `${timeStr} ${sourceTag} ${content}`;
 
-                return { role: m.role, content: typeof content === 'string' ? content.trimStart() : content };
+                return { role: m.role, content: typeof content === 'string' ? (content + (m.role === 'assistant' && usesInnerVoiceContext(char) ? innerVoiceContext(m.metadata?.innerVoice) : '')).trimStart() : content };
             }),
             historySlice // Return original slice for Quote lookup
         };

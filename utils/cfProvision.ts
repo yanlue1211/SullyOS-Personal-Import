@@ -23,7 +23,8 @@ export const AMSG_D1_NAME = 'sullyos-amsg';
 const MAIN_MODULE = 'worker.bundle.js';
 
 const BUNDLE_BASE = 'https://raw.githubusercontent.com/Tosd0/sullyos-workers/main/amsg';
-const BUNDLE_URL = `${BUNDLE_BASE}/${MAIN_MODULE}`;
+// 随当前站点构建发布，避免手机下载 raw.githubusercontent.com 失败。
+const BUNDLE_URL = `${import.meta.env.BASE_URL || '/'}amsg-worker.bundle.js`;
 const WRANGLER_URL = `${BUNDLE_BASE}/wrangler.toml`;
 
 /**

@@ -2900,7 +2900,7 @@ describe('自排后续任务', () => {
   it('单次 fire 排满就打回，不再调远端', async () => {
     const stash = makeStash();
     for (let i = 0; i < MAX_FIRE_SCHEDULES; i += 1) {
-      await runFireScheduleTool(stash, okSchedule, { send_at: new Date(NOW_MS + (90 + i) * 60_000).toISOString() }, NOW_MS);
+      await runFireScheduleTool(stash, okSchedule, { send_at: new Date(NOW_MS + (90 + i * 3) * 60_000).toISOString() }, NOW_MS);
     }
     okSchedule.mockClear();
     const out = await runFireScheduleTool(stash, okSchedule, { send_at: sendAt }, NOW_MS);
@@ -3563,6 +3563,23 @@ describe('stale 跳过留痕（onStaleSkip）', () => {
     expect(written!.skip.reason).toBe('stale');
     expect(written!.skip.occurrenceMs).toBe(Date.parse(occurrence));
     expect(written!.skip.staleAction).toBe('expired');
+  });
+
+  it('诊断任务过期跳过时留一条 fire-settled，不写主动消息的 last_skip', async () => {
+    const writeState = makeWriteState();
+    const runId = '11111111-1111-4111-8111-111111111111';
+    await amsgStaleSkip(
+      { id: 103, uuid: runId },
+      {
+        reason: 'stale', action: 'expired',
+        metadata: { charId: 'amsg-diagnostic', amsgKind: 'diagnostic', amsgDiagnosticRunId: runId },
+        occurrenceMs: Date.now(), skippedCount: 1, nextSendAt: null, writeState,
+      },
+    );
+    expect(lastSkipOf(writeState)).toBeNull();
+    const call = writeState.mock.calls.find(([namespace]) => namespace === 'amsg:diagnostic');
+    expect(call, '应该写过诊断记录').toBeTruthy();
+    expect(JSON.parse(String(call![1][0].value))).toMatchObject({ runId, event: 'fire-settled', status: 'skipped', reason: 'stale' });
   });
 
   it('过期没补发的那次也回一条「这次没发」的结果', async () => {
