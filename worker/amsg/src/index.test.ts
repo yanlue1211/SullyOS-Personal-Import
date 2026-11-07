@@ -1002,6 +1002,21 @@ describe('频率与额度（到点兜底闸）', () => {
   });
 });
 
+describe('作者 84d10385db：一次回复覆盖完整工具链', () => {
+  it('云端定时消息从到点指令算起，有工具才注入回复范围', async () => {
+    const { ctx } = makeCtx({});
+    ctx.scheduleTask = vi.fn();
+    const plan = fired(await amsgHooks.onBeforeFire(ctx));
+    expect(plan.tools?.length).toBeGreaterThan(0);
+    expect(plan.messages[0].content).toContain('这次回复的范围：从你收到这份说明开始');
+    expect(plan.messages[0].content).not.toContain('从用户最新发来的那条消息开始');
+
+    const bare = fired(await amsgHooks.onBeforeFire(makeCtx({}).ctx));
+    expect(bare.tools ?? []).toHaveLength(0);
+    expect(bare.messages[0].content).not.toContain('这次回复的范围');
+  });
+});
+
 // ─── 通用 MCP：到点把工具说明块和 tools 声明一起带上 ───
 //
 // 提示词块和 tools 数组同源同拍（都来自那一行 tool_config），所以这几条一起钉：
@@ -4209,6 +4224,23 @@ describe('onBeforeFire — 即时对话分支', () => {
     });
     const messages = fired(await amsgHooks.onBeforeFire(invalid.ctx)).messages;
     expect(messages.at(-1)?.content).toContain('现在是');
+  });
+
+  it('云端即时聊天带工具，从用户最新消息算起，排程范围只注入一次', async () => {
+    const { ctx } = makeCtx({
+      charRows: [
+        { key: AMSG_FIRE_PACK_KEY, value: instantPack() },
+        { key: AMSG_TOOL_PACK_KEY, value: toolPackValue },
+      ],
+      globalRows: [{ key: AMSG_TOOL_CONFIG_KEY, value: mcpToolConfigValue({ mcpUseNativeTools: true }) }],
+      metadata: { amsgInstantChat: true, amsgTaskInstruction: undefined },
+    });
+    (ctx as any).scheduleTask = vi.fn();
+    const plan = fired(await amsgHooks.onBeforeFire(ctx));
+    const prompt = plan.messages.map((message) => message.content).join('\n');
+    expect(prompt).toContain('这次回复的范围：从用户最新发来的那条消息开始');
+    expect(prompt).not.toContain('你之前安排的主动消息到点了');
+    expect(prompt.match(/这次回复的范围/g)).toHaveLength(1);
   });
 
   // 本地有常驻自主联系说明，云端以前只教「主动消息发完再接着说」。
