@@ -1,5 +1,5 @@
 import { resolveScheduledMessageApi } from './characterApi';
-import { isAnthropicEndpoint, normalizeLlmBaseUrl, type LlmApiType } from './llmEndpoint';
+import { isAnthropicEndpoint, isGeminiEndpoint, normalizeLlmBaseUrl, type LlmApiType } from './llmEndpoint';
 /**
  * 主动消息 2.0 的「LLM 凭据引用」（credRefs）：本地这一侧的命名、取值与变更侦测。
  *
@@ -56,7 +56,7 @@ export const supportsLlmCredentials = (features: string[] | null | undefined): b
  */
 export const normalizeChatApiUrl = (baseUrl: string, apiType?: LlmApiType): string => {
   const normalized = normalizeLlmBaseUrl(baseUrl, apiType);
-  return isAnthropicEndpoint(normalized) ? normalized : `${normalized}/chat/completions`;
+  return isAnthropicEndpoint(normalized) || isGeminiEndpoint(normalized) ? normalized : `${normalized}/chat/completions`;
 };
 
 /**
@@ -109,13 +109,13 @@ export const toCredentialValue = (
   return isUsableCredentialValue(value) ? value : null;
 };
 
-/** 定时主动消息跟随角色默认对话 API，未设置时跟随全局；旧主动消息副 API 字段不参与取值。 */
+/** 定时主动消息优先使用独立 API，未设置则跟随角色默认对话 API。 */
 export const buildCharChatCredRow = (
   char: Pick<CharacterProfile, 'id' | 'dialogueApi'>,
   config: ActiveMsg2CharacterConfig | undefined,
   apiConfig: Pick<APIConfig, 'baseUrl' | 'apiKey' | 'model'>,
 ): LlmCredentialRow | null => {
-  const value = toCredentialValue(resolveScheduledMessageApi(apiConfig, char, config));
+  const value = toCredentialValue(resolveScheduledMessageApi(apiConfig as APIConfig, char, config));
   return value ? { credId: charCredId(char.id, 'chat'), value } : null;
 };
 
