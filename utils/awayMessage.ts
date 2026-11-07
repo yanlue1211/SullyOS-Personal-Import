@@ -17,6 +17,7 @@ import {
   planAwaySlots,
   resolveAwayDelayMinutes,
   splitAwaySegments,
+  latestAwayTickMs,
 } from './awayMessageCore';
 import { loadCharacterContextRange } from './chatContextRange';
 import { resolveAmsgInteractionLock, isAmsgActiveCall, isAmsgActiveDate } from './amsgInteractionGuard';
@@ -191,42 +192,35 @@ const formatCharClock = (ms: number, tz: string | undefined): string =>
     timeZone: tz, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false,
   });
 
-const buildLocalHint = (char: CharacterProfile, userName: string, lastUserAt: number, slots: number[]): string => {
-  const n = slots.length;
-  const showClock = char.timeAwarenessEnabled !== false;
+const buildLocalHint = (char: CharacterProfile, userName: string, lastUserAt: number): string => {
   const tz = resolveCharTimeZone(char);
-  const when = showClock
-    ? `${userName}最后一次跟你说话是在 ${formatCharClock(lastUserAt, tz)}，之后一直没再找你。这段时间里你主动给${userName}发过 ${n} 次消息，分别在 ${slots.map(t => formatCharClock(t, tz)).join('、')}（你那边的时间）。`
-    : `${userName}已经有好一阵子没跟你说话了。这段时间里你主动给${userName}发过 ${n} 次消息。`;
-  return `[系统提示（非${userName}发言）: ${when}`
-    + `请把这 ${n} 次分别写出来：按时间先后，每次一到三句，像真人随手发的私聊，后面几次可以带着前面没等到回复的心情。`
-    + (n > 1 ? `两次之间单独一行写 ${AWAY_SEGMENT_MARK} 隔开。` : '')
-    + '不要写时间、序号或旁白，只写你发出去的消息本身。]';
+  const time = char.timeAwarenessEnabled !== false
+    ? `最后一次交谈是 ${formatCharClock(lastUserAt, tz)}。` : '';
+  return `[系统提示（非${userName}发言）: ${userName}这段时间没再开口。${time}这是一次新的主动发消息机会，可以自然分享你的近况、接续之前的话题或问候。无需解释定时机制；一到三句话即可。]`;
 };
 
 const generateLocalAwayMessages = async (char: CharacterProfile, deps: LocalAwayDeps): Promise<void> => {
   const delayMs = resolveAwayDelayMinutes(char) * 60_000;
   const now = Date.now();
   const recent = await DB.getRecentMessagesByCharId(char.id, 50, true);
-  const lastUserAt = findAwayGapStart(recent, delayMs, now);
-  if (lastUserAt == null) return;
-  // 线下/通话仍在继续时，不能假定用户离开而生成线上私聊。
+  // B 方案：消息历史里即便已经有上一条 away，也不能停止未来节拍。
+  // 一次上线只处理最新有效节拍，漏掉的所有旧节拍不补发。
+  const lastUser = [...recent].reverse().find(m => m.role === 'user' && !m.metadata?.proactiveHint);
+  if (!lastUser) return;
+  const lastUserAt = lastUser.timestamp;
+  const tick = latestAwayTickMs(lastUserAt, delayMs, now);
+  if (tick == null) return;
+  const lastAwaySentAt = [...recent].reverse().find(m => m.metadata?.awayMessage)?.timestamp ?? 0;
+  if (lastAwaySentAt >= tick) return;
   if (resolveAmsgInteractionLock(recent, isAmsgActiveCall(char.id), isAmsgActiveDate(char.id))) return;
-  // 没配置 Worker 的本地补发遵守相同的自动空闲消息禁发规则。
-  // 禁发的时间段不追补，避免睡醒后一口气补昨夜的消息。
   const quiet = char.awayMessage?.quietHours;
   const userTzId = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  if (shouldSkipAwayForQuietHours({ quietHours: quiet, dueMs: lastUserAt + delayMs, nowMs: now, userTimeZone: userTzId })) return;
+  if (shouldSkipAwayForQuietHours({ quietHours: quiet, dueMs: tick, nowMs: now, userTimeZone: userTzId })) return;
   const userProfile = deps.getUserProfile();
   const api = resolveDialogueApi(deps.getApiConfig(), char);
   if (!userProfile || !api.baseUrl) return;
-
-  // 时刻不早于最后一条消息：显示顺序看 id，时间戳倒挂会让气泡上的钟跳回去。
-  const lastMsgAt = recent.at(-1)?.timestamp ?? lastUserAt;
-  const slots = planAwaySlots(lastUserAt, delayMs, now)
-    .filter(t => !shouldSkipAwayForQuietHours({ quietHours: quiet, dueMs: t, nowMs: now, userTimeZone: userTzId }))
-    .map(t => Math.max(t, lastMsgAt + 1));
-  if (!slots.length) return;
+  // 只能写一条当前真实时间的消息：不能伪造过去几个小时多次打过招呼。
+  const slots = [now];
   const userName = userProfile.name || '对方';
 
   const range = await loadCharacterContextRange(char);
@@ -234,7 +228,7 @@ const generateLocalAwayMessages = async (char: CharacterProfile, deps: LocalAway
   // 提示只进这一次请求，不落库：它不是谁说过的话。
   const hint = {
     id: -1, charId: char.id, role: 'user', type: 'text', timestamp: now,
-    content: buildLocalHint(char, userName, lastUserAt, slots),
+    content: buildLocalHint(char, userName, lastUserAt),
     metadata: { proactiveHint: true, hidden: true },
   } as Message;
   const history = [...range.messages, hint];
@@ -261,7 +255,11 @@ const generateLocalAwayMessages = async (char: CharacterProfile, deps: LocalAway
   if (!segments.length) return;
 
   // 生成期间对方回来说了话：这段离开已经结束，补的消息作废。
-  if (findAwayGapStart(await DB.getRecentMessagesByCharId(char.id, 50, true), delayMs, Date.now()) !== lastUserAt) return;
+  const refreshed = await DB.getRecentMessagesByCharId(char.id, 50, true);
+  const latestUser = [...refreshed].reverse().find(m => m.role === 'user' && !m.metadata?.proactiveHint);
+  if (latestUser?.timestamp !== lastUserAt || deps.isBusyWith(char.id)
+      || resolveAmsgInteractionLock(refreshed, isAmsgActiveCall(char.id), isAmsgActiveDate(char.id))
+      || [...refreshed].reverse().some(m => m.metadata?.awayMessage && m.timestamp >= tick)) return;
 
   const notifyProgress = () => window.dispatchEvent(new CustomEvent('active-msg-progress'));
   for (let i = 0; i < segments.length; i++) {
