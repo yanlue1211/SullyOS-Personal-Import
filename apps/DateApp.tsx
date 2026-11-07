@@ -22,6 +22,7 @@ import { CharacterGroupFilterBar, filterCharactersByGroup, GROUP_FILTER_ALL } fr
 import { trimHistoryThrough } from '../utils/dateSessionHistory';
 import { trackEvent } from '../utils/analytics';
 import { markAmsgStateDirty } from '../utils/amsgStateSync';
+import { setAmsgActiveDate } from '../utils/amsgInteractionGuard';
 import StoryTheater from '../components/date/story/StoryTheater';
 import { dateLaunch } from '../utils/dateLaunch';
 import { getLocalDateKey } from '../utils/localDate';
@@ -286,6 +287,8 @@ const DateApp: React.FC = () => {
 
             // 2. 切换模式并刷新数据
             if (encounterIdRef.current !== enteringEncounterId) return;
+            setAmsgActiveDate(char.id, true);
+            markDateTurnDirty(char);
             setMode('session');
             trackEvent('走过去开始见面会话');
         } finally {
