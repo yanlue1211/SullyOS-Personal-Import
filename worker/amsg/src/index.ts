@@ -2211,8 +2211,14 @@ export const amsgHooks = {
           tzId: typeof pack.tzId === 'string' ? pack.tzId : undefined,
         });
       } catch (error) {
-        // 排下下一条之前绝不消费当前链；失败由上游有限重试，避免静默断链。
-        throw new Error(`AMSG_AWAY_NEXT_SCHEDULE_FAILED: ${String(error)}`);
+        // B方案这次生成最多只尝试一次（省模型额度）。
+        // 下条节拍预约失败不应被当成一次「生成失败」终结整条循环：
+        // 保留当前 pending 行，五分钟后从 onBeforeFire 再试排程。defer 不进 LLM。
+        // 不把异常原文记到日志，避免意外泄露上游私有参数/凭据。
+        console.warn('[amsg:away-rearm] 续排下一节拍失败，已延后重试（零模型调用）', {
+          taskId: ctx.task.id, name: error instanceof Error ? error.name : 'unknown',
+        });
+        return { defer: { afterMs: 5 * 60_000 } } as const;
       }
       if (isStaleAwayTick(occurrenceMs, ctx.now.getTime())) {
         console.log('[amsg:away-skip]', { taskId: ctx.task.id, reason: 'missed-slot' });
