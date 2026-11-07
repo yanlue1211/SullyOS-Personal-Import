@@ -201,6 +201,7 @@ export const buildAmsg2ChatScheduleBrief = (targetName?: string): string => {
     `- ${target}接下来顾不上手机时——睡觉、上课、上班、打游戏、洗澡、出门，或任何你了解的原因——你可以在途中想到ta，也可以估着ta回来时再联系。`,
     `- 内容不必总围着${target}转。结合刚才的聊天氛围、你自己的日程和正在经历的事、刚看到的细节和突然冒出的后续念头；分享自己的生活，往往比机械问候更像你。`,
     '- 「到点叫你」「等你忙完跟你说」「回头告诉你结果」这类话一说出口，就当场排成真任务，不要只在正文里答应；没排成，就别把承诺说死。',
+    `- 所有自主预约的主动消息都是未来真正发给${target}的线上聊天消息，不是提醒清单、当面台词或日程备忘。能当面说的事当面说；只有打算到那个时间主动在线上联系ta时才排。`,
     `- 只问自己：那个时刻的你会真的想联系${target}吗？会就排；只是随口一想、到时候未必真有话说的，就算了。也别为了显得贴心硬排。`,
     `- 时间贴着${target}的生活估；一局游戏和睡到天亮不是一个时长，有时差就按ta那边的钟算。`,
     `- ${target}明确说别打扰时就安静等；已经排着相近的一条，也别重复排。`,
@@ -237,7 +238,7 @@ export const buildFireScheduleBlock = (
       ? [buildAmsg2ChatScheduleBrief(opts.targetName)]
       : [
         '这条消息发完，如果还有话要在之后某个时间点说（把没说完的接上去、或者去做的事做完了回来告诉他），',
-        '可以现在就把那一条排好——不需要用户在线，到点会自动发出去，而且那时你会知道自己这次说了什么。',
+        '可以现在就把那一条排好——这是一条未来真正要线上发出的聊天消息，不是待办或当面提醒；到点你会结合最新上下文自主决定要不要说。',
       ]),
     howTo,
     // 角色在 prompt 里只看得到自己那边的钟，很容易把「晚上聊两句」排到对方的凌晨三点。
@@ -272,6 +273,20 @@ export const buildTaskInstruction = (mode: ActiveMsg2Mode, promptHint?: string):
     promptHint?.trim() ? `可选灵感补充：${promptHint.trim()}` : '可选灵感补充：无',
   ].join('\n');
 };
+
+// ─── 离开后消息 ───
+// 每个角色维持一条云端待触发任务：对方开口后重新计时，到点后Worker安排下一节拍；到点前对方
+// 又说过话就由 worker 原地推迟（见 worker onBeforeFire）。到点仅给一次自主判断机会，可选择静默。
+
+/** 任务 metadata 上的标记与等待时长（分钟）。worker 认这两个键。 */
+export const AMSG_AWAY_MESSAGE_META = 'amsgAwayMessage';
+export const AMSG_AWAY_DELAY_META = 'amsgAwayDelayMinutes';
+
+export const buildAwayTaskInstruction = (delayMinutes: number): string => [
+  `对方已经超过 ${delayMinutes} 分钟没跟你说话了，现在是你可以主动线上联系对方的一次机会。`,
+  '先结合你们最后聊到哪儿、对方离开了多久、你自己这会儿在做什么，判断此刻有没有自然联系的理由；没有就按自主静默规则不发。决定联系才发一到三句私聊。',
+  '可以惦记对方去哪了、分享你刚经历的事，或者接上没聊完的话；不要像系统提醒，也不要提「多少分钟」这种计时。',
+].join('\n');
 
 // ─── send_at 的时间参照系 ───
 //

@@ -1,3 +1,5 @@
+import { anthropicContinuation } from './anthropicApi';
+
 type ToolCallLike = {
     id?: unknown;
     type?: unknown;
@@ -66,5 +68,17 @@ export function buildToolResultMessage(toolCall: ToolCallLike, content: string):
         name,
         tool_call_id: toolCallId,
         content,
+    };
+}
+
+/**
+ * 作者 ae2042789c：工具循环里 assistant 的签名思考与 OpenAI 兼容 reasoning_content
+ * 都需要和 tool_calls 一起回传。缺失思考内容时不新增字段，不暴露给普通聊天记录。
+ */
+export function toolTurnContinuation(message: any): Record<string, any> {
+    const reasoning = message?.reasoning_content;
+    return {
+        ...anthropicContinuation(message),
+        ...(typeof reasoning === 'string' && reasoning ? { reasoning_content: reasoning } : {}),
     };
 }

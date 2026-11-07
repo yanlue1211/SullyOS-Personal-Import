@@ -545,7 +545,9 @@ try {
     ]);
     check('putClientState(fire_pack ~256KB + tool_pack + tool_config) 成功', true);
 
-    const fireAt = new Date(now + 1000);
+    // 分块大状态上传会消耗不固定时间。排程必须以「上传完成后的真实时钟」为准，
+    // 否则慢一点的 CI 会把 +1s 任务送成过去时间，误报 INVALID_TIMESTAMP。
+    const fireAt = new Date(Date.now() + 1000);
     const { payload, clientTaskId } = aiTaskPayload({
       charId: 'char-full', charName: '小满', mode: 'auto',
       firstSendTime: fireAt.toISOString(), recurrenceType: 'daily', expirePolicy: 'expire',

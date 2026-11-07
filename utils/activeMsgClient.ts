@@ -1,8 +1,6 @@
-import { usesHumanStyle, usesInnerVoice, INNER_VOICE_FORMAT_REMINDER, CHAT_EXPRESSION_TAIL_REMINDER } from './chatPromptPreferences';
 import { buildChatOutputStylePrompt, readChatTranslationConfig } from './chatOutputStylePrompt';
-import { buildReproductionTask, DIAGNOSTIC_NAMESPACE, diagnosticRunId, type DiagnosticEvent } from './amsgReproduction';
-import { resolveDialogueApi } from './characterApi';
-import { isAnthropicEndpoint, isGeminiEndpoint } from './llmEndpoint';
+import { resolveScheduledMessageApi } from './characterApi';
+import { isAnthropicEndpoint } from './llmEndpoint';
 import { ackStoppedReplyReceipts, stoppedReplyStateEntries } from './amsgStoppedReplyClient';
 import { loadCharacterContextMessages } from './chatContextRange';
 import { ReiClient, classifyClientStateWrite } from '@rei-standard/amsg-client';
@@ -24,10 +22,10 @@ import {
   UserProfile,
 } from '../types';
 import { getLastRealUserMessageAt } from './amsg2ExpireGuard';
+import { resolveAmsgInteractionLock, isAmsgActiveCall, isAmsgActiveDate, getAmsgActiveDateEncounterId, getAmsgDateEndedAt } from './amsgInteractionGuard';
 import { AMSG_BUNDLE_VERSION } from './amsgBundleVersion';
-import { describeD1LimitCode } from './amsgD1Limits';
-import { explainCfTokenRejection, parseAmsgSelfUpdateState, type AmsgSelfUpdateReport } from './amsgSelfUpdateState';
-import { buildTaskInstruction, resolveSendAtMs } from './amsgFireSchedule';
+import { parseAmsgSelfUpdateState, type AmsgSelfUpdateReport } from './amsgSelfUpdateState';
+import { AMSG_AWAY_DELAY_META, AMSG_AWAY_MESSAGE_META, buildAwayTaskInstruction, buildTaskInstruction, resolveSendAtMs } from './amsgFireSchedule';
 import {
   getPendingTasks, isAmsg2EnabledForChar,
   parseRemoteTaskLastError, RemoteTaskLastError, type RemoteTaskProjection,
@@ -98,6 +96,7 @@ import {
 } from './amsgFirePack';
 import {
   AMSG_BACKGROUND_JOB_SUBTYPE,
+  classifyTaskRow,
   AMSG_JOB_ID_KEY,
   AMSG_JOB_NAMESPACE,
   AMSG_TASK_KIND_KEY,
@@ -136,13 +135,6 @@ import {
   type SubscribeFailureKind,
 } from './pushSubscribeShared';
 import { isUnifiedPushPlatform } from './unifiedPushPlugin';
-import {
-  buildThirdPartyClickUrl,
-  buildThirdPartyPushEndpoint,
-  getThirdPartyPushProviderMeta,
-  validateThirdPartyPushConfig,
-  type ThirdPartyPushProvider,
-} from './amsgThirdPartyPush';
 
 export const NATIVE_PUSH_TOKEN_STORAGE_KEY = 'amsg2_fcm_token_v1';
 const nativePushBuildEnabled = () => import.meta.env.VITE_AMSG_NATIVE_PUSH === 'true';
@@ -157,11 +149,9 @@ export interface ActiveMsg2PushStatus {
   hasSubscription: boolean;
   vapidConfigured: boolean;
   detail?: string;
-  transport?: 'web-push' | 'unified-push' | 'third-party';
+  transport?: 'web-push' | 'unified-push';
   distributor?: string | null;
   needsDistributor?: boolean;
-  thirdPartyProvider?: ThirdPartyPushProvider;
-  localEndpoint?: string | null;
 }
 
 /** worker 上登记的那份订阅（一个用户一行）。读不到时调用方拿 null。 */
@@ -589,7 +579,7 @@ const initializeClient = (config: ActiveMsg2GlobalConfig) => {
 };
 
 const resolveApiConfig = (char: CharacterProfile, _config: ActiveMsg2CharacterConfig, apiConfig: APIConfig) => {
-  const source = resolveDialogueApi(apiConfig, char, apiConfig.proactiveApi?.baseUrl ? apiConfig.proactiveApi : undefined);
+  const source = resolveScheduledMessageApi(apiConfig, char, _config);
 
   if (!source.baseUrl || !source.apiKey || !source.model) {
     throw new Error('主动消息 2.0 缺少可用的 API URL / Key / Model。');
@@ -635,17 +625,15 @@ export const isLlmCredentialsReady = async (): Promise<boolean> => {
 };
 
 export const requireAnthropicWorker = async (urls: string[]): Promise<void> => {
-  const needsGemini = urls.some(isGeminiEndpoint), needsAnthropic = urls.some(isAnthropicEndpoint);
-  if (!needsGemini && !needsAnthropic) return;
-  const ready = (c: ActiveMsg2GlobalConfig) => (!needsAnthropic || (c.anthropicMessagesSupported === true && c.anthropicMessagesWorkerUrl === c.workerUrl)) && (!needsGemini || (c.geminiNativeSupported === true && c.geminiNativeWorkerUrl === c.workerUrl));
+  if (!urls.some(isAnthropicEndpoint)) return;
   let config = await ActiveMsgStore.getGlobalConfig();
-  if (ready(config)) return;
+  if (config.anthropicMessagesSupported === true && config.anthropicMessagesWorkerUrl === config.workerUrl) return;
   // An automatic deployment can finish after the startup probe. Recheck the
   // current Worker instead of making users reconnect to clear a stale negative.
   await ActiveMsgClient.probeInstantChatSupportDetailed({ timeoutMs: 5000 });
   config = await ActiveMsgStore.getGlobalConfig();
-  if (!ready(config)) {
-    throw new Error(`主动消息 2.0 的 ${needsGemini ? 'Gemini 原生' : 'Anthropic'} 支持尚未就绪，已自动检查。请稍后重试；若持续失败，请检查网络或 Worker 自动更新设置。`);
+  if (config.anthropicMessagesSupported !== true || config.anthropicMessagesWorkerUrl !== config.workerUrl) {
+    throw new Error('主动消息 2.0 的 Anthropic 支持尚未就绪，已自动检查。请稍后重试；若持续失败，请检查网络或 Worker 自动更新设置。');
   }
 };
 
@@ -683,7 +671,12 @@ const putLlmCredentialRows = async (
   for (const batch of chunkCredRows(pending)) {
     const response = await client.putLlmCredentials(batch.map(row => stampCloudWrite(client, row)));
     if (!response?.success) {
-      throw new Error(formatAmsgServerError(response, '登记 LLM 凭据失败。'));
+      // 保留服务端的结构化原因，允许同步层按角色拆分「已停用」批次；
+      // 其他错误原样抛出，不会误将鉴权/网络故障当成角色停用。
+      const cause = response?.error?.cause as { code?: unknown } | undefined;
+      const code = typeof cause?.code === 'string'
+        ? cause.code : response?.error?.code;
+      throw Object.assign(new Error(formatAmsgServerError(response, '登记 LLM 凭据失败。')), { code });
     }
     // 逐批记账：后面那批失败时，前面已经落地的不必再传一遍。
     rememberCredRows(batch);
@@ -714,7 +707,7 @@ const formatHistoryLine =(role: string, content: any, char: CharacterProfile, us
 };
 
 const buildTimeGapHint = async (charId: string) => {
-  const recentMessages = await DB.getRecentMessagesByCharId(charId, 200);
+  const recentMessages = await DB.getRecentMessagesByCharId(charId, 200, true);
   return {
     // 时间差在渲染时刻才算（formatTimeSinceUser），这里只取原始时间戳——
     // 满血链路会把它放进 fire_pack，worker 到点用「fire 时刻」重算，不吃排程时的陈旧值。
@@ -781,7 +774,7 @@ export const buildFirePack = async (
     const { buildRoomPlatesInjection } = await import('./memoryPalace/roomPlates');
     char.roomPlatesInjection = await buildRoomPlatesInjection(char.id, userProfile.name);
   }
-  const [{ lastUserMessageAt }, recentMessages, library, schedule] = await Promise.all([
+  const [{ lastUserMessageAt, recentMessages: activityMessages }, recentMessages, library, schedule] = await Promise.all([
     buildTimeGapHint(char.id),
     templateStub ? Promise.resolve([]) : loadCharacterContextMessages(char),
     // 表情库只喂系统提示词/近史渲染：占位模板路径整库都不用读（表情记录带图片数据，
@@ -860,7 +853,6 @@ export const buildFirePack = async (
     { forFirePack: true },
   );
   const outputStyle = buildChatOutputStylePrompt({
-    humanStyleEnabled: char.humanStyleEnabled,
     charName: char.name,
     userName: userProfile.name,
     translationConfig: readChatTranslationConfig(char.id),
@@ -885,15 +877,8 @@ export const buildFirePack = async (
     ? `- 你的记忆库里存着这些月份的经历：${recallableMonths.join('、')}。想聊起其中某段时，先输出 [[RECALL: 年-月]] 把细节取回来再写，别凭印象编。`
     : null;
 
-  const template = templateStub ? AMSG2_INSTANT_STUB_TEMPLATE : !usesHumanStyle(char) ? [
-    '根据已有对话与本次任务给用户发送消息；无需扮演角色或模拟人类生活。',
-    (usesInnerVoice(char) ? INNER_VOICE_FORMAT_REMINDER + '\n' : '') + systemPrompt + outputStyle.prompt,
-    '【最近对话】', recentTranscript + AMSG_SLOT_SELF_LOG,
-    timeAware ? `【当前时间】${AMSG_SLOT_CURRENT_TIME}${AMSG_SLOT_USER_CLOCK}` : '',
-    AMSG_SLOT_TASK_LIST, AMSG_SLOT_REALTIME_WORLD,
-    '【本次任务】', AMSG_SLOT_TASK_INSTRUCTION,
-  ].join('\n') : [
-    usesHumanStyle(char) ? '你将代表下面这个角色，生成一条“主动发给用户”的私聊消息。' : '根据已有对话与本次任务，主动给用户发送消息。',
+  const template = templateStub ? AMSG2_INSTANT_STUB_TEMPLATE : [
+    '你将代表下面这个角色，生成一条“主动发给用户”的私聊消息。',
     '',
     '【重要规则】',
     '- 这不是回复用户刚刚发来的消息，而是角色主动来找用户聊天。',
@@ -906,8 +891,6 @@ export const buildFirePack = async (
     ...(recallHint ? [recallHint] : []),
     '',
     '【角色系统设定】',
-    CHAT_EXPRESSION_TAIL_REMINDER,
-    usesInnerVoice(char) ? INNER_VOICE_FORMAT_REMINDER : '',
     systemPrompt + outputStyle.prompt,
     `（注意：上面角色设定里的情绪、印象等状态是最近一次聊天时的快照。${timeAware ? '此刻的时间、你正在做什么' : '你此刻正在做什么'}，以下方「当前时刻补充」为准。）`,
     '',
@@ -941,7 +924,8 @@ export const buildFirePack = async (
     // 到点说不说由角色自己判（见 amsgFirePack 的 BEFORE_SPEAK_LINES）。
     ...BEFORE_SPEAK_LINES,
     '',
-    // Preserve the author's short final character-voice anchor.
+    // recency 末位人声锚：上面【角色系统设定】里已带「回到你自己」钢印，但被任务说明压在后面、
+    // 失了 recency。这里在最后一句把它拎回来，让主动消息也从「你这个人」长出来，而不是滑回均值腔。
     `（开口前回到你自己：这条得是 ${char.name} 会发的那一条——语气、用词、节奏都只属于你。哪怕只是随口一句，也要是你。）`,
   ].join('\n');
 
@@ -952,6 +936,7 @@ export const buildFirePack = async (
     template,
     thinkingChainEnabled: outputStyle.thinkingActive,
     lastUserMessageAt,
+    awaySceneLock: resolveAmsgInteractionLock(activityMessages, isAmsgActiveCall(char.id), isAmsgActiveDate(char.id)),
     // 角色的时间参照系（见上面的 tzId / userTzId）：前者是角色自己的钟，后者是用户那边的，
     // worker 渲染时两者各管各的一行，绝不混用。
     tzId,
@@ -1213,15 +1198,27 @@ const formatAmsgErrorDetails = (details: unknown, topLevel?: Record<string, unkn
   return parts.join('；');
 };
 
+/**
+ * 作者 4dea56d86c：旧 Worker 可能仅在 WebCrypto cause 里报 OperationError；
+ * 新 Worker 返回明确的 STORED_DATA_UNDECRYPTABLE。
+ * 遇到这种情况先恢复原 Master Key，不能误导为「直接重装」，更不能自动清库。
+ */
+const STORED_DATA_UNDECRYPTABLE_CODE = 'STORED_DATA_UNDECRYPTABLE';
+const STORED_DATA_UNDECRYPTABLE_HINT =
+  'Worker 无法用当前 Master Key 解密已有云端数据。请先尝试找回并恢复原密钥，勿直接重装或清库。'
+  + '若确实决定放弃旧云端排程与状态，可在确认后手动从设置「高级信息」清空云端数据，再点「重新连接并验证」；清空操作不可撤销。';
+
 const formatAmsgErrorCause = (cause: unknown): string => {
   if (typeof cause === 'string') return cause.trim();
   if (!cause || typeof cause !== 'object' || Array.isArray(cause)) return '';
   const c = cause as Record<string, unknown>;
   const code = typeof c.code === 'string' ? c.code.trim() : '';
-  const limitText = describeD1LimitCode(code);
-  if (limitText) return `${limitText}（${code}）`;
   const name = typeof c.name === 'string' ? c.name.trim() : '';
   const message = typeof c.message === 'string' ? c.message.trim() : '';
+  if (code === STORED_DATA_UNDECRYPTABLE_CODE
+      || (name === 'OperationError' && /decrypt/i.test(message))) {
+    return `${STORED_DATA_UNDECRYPTABLE_HINT}（${code || name}）`;
+  }
   const head = code
     ? (message.startsWith(code) ? '' : code)
     : (name && name !== 'Error' ? name : '');
@@ -1234,6 +1231,9 @@ export const formatAmsgErrorObject = (errorObj: unknown): string => {
   const err = errorObj as Record<string, unknown>;
   const message = typeof err.message === 'string' ? err.message.trim() : '';
   const code = typeof err.code === 'string' ? err.code.trim() : '';
+  if (code === STORED_DATA_UNDECRYPTABLE_CODE) {
+    return `${STORED_DATA_UNDECRYPTABLE_HINT}（${code}）`;
+  }
   const detailsText = formatAmsgErrorDetails(err.details, err);
   const causeText = formatAmsgErrorCause(err.cause);
 
@@ -1590,7 +1590,9 @@ const buildLimitsEntry = (char: CharacterProfile, updatedAt: number) => ({
   namespace: amsgStateNamespace(char.id),
   owner: { type: 'character', id: char.id, label: char.name },
   key: AMSG_LIMITS_KEY,
-  value: JSON.stringify(buildAmsgLimitsRecord(char.activeMsg2Config, isAmsg2EnabledForChar(char))),
+  value: JSON.stringify(buildAmsgLimitsRecord(char.activeMsg2Config, isAmsg2EnabledForChar(char), char.awayMessage?.quietHours, char.awayMessage,
+    isAmsgActiveCall(char.id) ? 'call' : isAmsgActiveDate(char.id) ? 'date' : null,
+    getAmsgActiveDateEncounterId(char.id), getAmsgDateEndedAt(char.id))),
   updatedAt,
 });
 
@@ -1760,6 +1762,18 @@ const subscribeOrThrow = async (
   throw withFailKind(new Error(message), failure ? SUBSCRIBE_FAIL_KIND[failure.kind] : '订阅失败');
 };
 
+/**
+ * amsg-client 对部分 Worker 4xx/5xx 只返回失败信封，不会抛异常。
+ * 登记不成功就必须报错，避免误认为推送可用而丢失后续线上主动消息。
+ */
+const putPushSubscriptionOrThrow = async (
+  client: ReiClient,
+  subscription: Parameters<ReiClient['putPushSubscription']>[0],
+): Promise<void> => {
+  const response = await client.putPushSubscription(subscription);
+  if (!response?.success) throw new Error(formatAmsgServerError(response, 'Worker 没有收下推送订阅。'));
+};
+
 /** 重置的公共尾段：拿 worker 的 VAPID → 重新订阅 → 覆盖登记回 worker。 */
 const resubscribeAndRegister = async (client: ReiClient): Promise<void> => {
   const vapidPublicKey = await fetchWorkerVapidKey(client);
@@ -1767,7 +1781,7 @@ const resubscribeAndRegister = async (client: ReiClient): Promise<void> => {
   const sub = await subscribeOrThrow(registration, vapidPublicKey);
 
   try {
-    await client.putPushSubscription(sub);
+    await putPushSubscriptionOrThrow(client, sub);
   } catch (error) {
     throw normalizeActiveMsgApiError(error, '登记推送订阅');
   }
@@ -1861,7 +1875,7 @@ const rememberWorkerBundleVersion = async (body: any, checkedWorkerUrl?: string)
   try {
     const current = await ActiveMsgStore.getGlobalConfig();
     if (checkedWorkerUrl && current.workerUrl !== checkedWorkerUrl) return;
-    await ActiveMsgStore.saveGlobalConfig({ workerBundleVersion: deployed, geminiNativeSupported: body?.data?.geminiNative === true, geminiNativeWorkerUrl: checkedWorkerUrl || current.workerUrl, anthropicMessagesSupported: body?.data?.anthropicMessages === true, anthropicMessagesWorkerUrl: checkedWorkerUrl || current.workerUrl });
+    await ActiveMsgStore.saveGlobalConfig({ workerBundleVersion: deployed, anthropicMessagesSupported: body?.data?.anthropicMessages === true, anthropicMessagesWorkerUrl: checkedWorkerUrl || current.workerUrl });
   } catch (error) {
     console.warn('[AmsgInstantChat] Worker 的 bundle 版本没存下来（下次探测再补）', error);
   }
@@ -1950,53 +1964,13 @@ const OUTBOX_MAX_PAGES = 20;
 const OUTBOX_ACK_BATCH_SIZE = 200;
 
 export const ActiveMsgClient = {
-  /** 独立测试配置只存在加密任务里；不重建订阅、不覆盖任何角色凭据。 */
-  async scheduleReproduction(runId: string, api: { baseUrl: string; apiKey: string; model: string; temperature?: number }, delaySeconds: number): Promise<{ uuid: string; dueAt: number }> {
-    const config = await ensureWorkerReady();
-    const probe = await fetchWithAuth('config-check', config, { method: 'GET', signal: AbortSignal.timeout(8000) }, '复现能力检查');
-    if (probe?.data?.diagnosticReproduction !== 1) throw new Error('请先在设置中更新主动消息 Worker，再开始复现。');
-    const client = await initializeClient(config);
-    const dueAt = Date.now() + Math.max(60, Math.min(300, delaySeconds)) * 1000;
-    const payload = buildReproductionTask(runId, { ...api, baseUrl: normalizeChatApiUrl(api.baseUrl.trim()) }, dueAt);
-    const encrypted = await encryptPayload(client, payload);
-    let response;
-    try {
-      response = await fetchWithAuth('schedule-message', config, {
-        method: 'POST', signal: AbortSignal.timeout(15000),
-        headers: { 'Content-Type': 'application/json', 'X-Payload-Encrypted': 'true', 'X-Encryption-Version': '1' },
-        body: JSON.stringify(encrypted),
-      }, '创建复现任务');
-    } catch (error) {
-      // 保留同一 UUID 供用户查询／取消，绝不自动另建一次付费调用。
-      if (error && typeof error === 'object') Object.assign(error, { diagnosticMayBeCreated: true, dueAt });
-      throw error;
-    }
-    if (!response?.success) throw new Error(formatAmsgServerError(response, '复现任务创建失败'));
-    return { uuid: response.data?.uuid || runId, dueAt };
-  },
-
-  async readReproductionEvents(runId: string): Promise<DiagnosticEvent[]> {
-    const client = await initializeClient(await ensureWorkerReady());
-    const response = await client.getClientState(DIAGNOSTIC_NAMESPACE);
-    if (!response?.success) throw new Error(formatAmsgServerError(response, '云端诊断记录未取得'));
-    const events: DiagnosticEvent[] = [];
-    for (const row of response.data?.entries ?? []) {
-      if (!row.key?.startsWith(`${runId}:`)) continue;
-      try {
-        const event = JSON.parse(row.value);
-        if (diagnosticRunId({ amsgDiagnosticRunId: event.runId }) === runId) events.push(event);
-      } catch { /* 单条损坏不丢整份报告 */ }
-    }
-    return events;
-  },
   async registerNativePushToken(token: string): Promise<void> {
     if (!nativePushBuildEnabled()) throw new Error('当前构建未开启 Capacitor 原生推送');
     const value = token.trim();
     if (!value) throw new Error('FCM registration token 为空');
     const config = await ensureWorkerReady();
-    if (config.pushMode === 'third-party') return;
     const client = await initializeClient(config);
-    await client.putPushSubscription({ endpoint: `fcm:${value}` });
+    await putPushSubscriptionOrThrow(client, { endpoint: `fcm:${value}` });
   },
 
   async getGlobalConfig() {
@@ -2026,31 +2000,6 @@ export const ActiveMsgClient = {
   async getPushStatus(): Promise<ActiveMsg2PushStatus> {
     const config = await ensureGlobalReady();
     const workerConfigured = Boolean(config.workerUrl.trim());
-    if (config.pushMode === 'third-party') {
-      const validation = validateThirdPartyPushConfig(config.thirdPartyPush);
-      const providerMeta = getThirdPartyPushProviderMeta(config.thirdPartyPush?.provider);
-      const localEndpoint = validation.ok && validation.normalized
-        ? buildThirdPartyPushEndpoint({
-          provider: validation.normalized.provider,
-          token: validation.normalized.token,
-          serverUrl: validation.normalized.serverOrigin,
-        })
-        : null;
-      return {
-        supported: true,
-        permission: validation.ok ? 'granted' : 'default',
-        hasSubscription: validation.ok,
-        vapidConfigured: workerConfigured,
-        transport: 'third-party',
-        thirdPartyProvider: providerMeta.id,
-        localEndpoint,
-        detail: !validation.ok
-          ? validation.error
-          : !workerConfigured
-            ? '请先填写 Worker 地址。'
-            : `第三方推送：${providerMeta.shortLabel}`,
-      };
-    }
     if (isUnifiedPushPlatform()) {
       try {
         const { getUnifiedPushStatus } = await import('./unifiedPushPlugin');
@@ -2064,7 +2013,6 @@ export const ActiveMsgClient = {
           transport: 'unified-push',
           distributor: status.distributor,
           needsDistributor,
-          localEndpoint: status.subscription?.endpoint || null,
           detail: needsDistributor
             ? '尚未检测到 UnifiedPush 服务。请先安装并打开 ntfy 的无 Firebase 版本。'
             : status.lastError
@@ -2110,31 +2058,10 @@ export const ActiveMsgClient = {
       vapidConfigured: workerConfigured,
       detail: !workerConfigured ? '请先填写 Worker 地址。' : undefined,
       transport: 'web-push',
-      localEndpoint: subscription?.endpoint || null,
     };
   },
 
   async ensurePushSubscription() {
-    const globalConfig = await ensureGlobalReady();
-    if (globalConfig.pushMode === 'third-party') {
-      const validation = validateThirdPartyPushConfig(globalConfig.thirdPartyPush);
-      if (!validation.ok || !validation.normalized) {
-        throw withFailKind(new Error(validation.error || '请先配置第三方推送 App 的 Token。'), '配置缺失');
-      }
-      const endpoint = buildThirdPartyPushEndpoint({
-        provider: validation.normalized.provider,
-        token: validation.normalized.token,
-        serverUrl: validation.normalized.serverOrigin,
-      });
-      const clickUrl = typeof window !== 'undefined' && window.location
-        ? buildThirdPartyClickUrl(`${window.location.origin}${window.location.pathname}`)
-        : undefined;
-      return {
-        endpoint,
-        ...(clickUrl ? { clickUrl } : {}),
-      };
-    }
-
     if (isUnifiedPushPlatform()) {
       const config = await ensureWorkerReady();
       const client = createClient(config);
@@ -2192,28 +2119,10 @@ export const ActiveMsgClient = {
     const client = await initializeClient(config);
     const subscription = await this.ensurePushSubscription();
     try {
-      await client.putPushSubscription(subscription);
+      await putPushSubscriptionOrThrow(client, subscription);
     } catch (error) {
       throw normalizeActiveMsgApiError(error, '登记推送订阅');
     }
-  },
-
-  async sendTestPush(): Promise<{ sent: boolean }> {
-    const config = await ensureWorkerReady();
-    const signal = typeof AbortSignal?.timeout === 'function' ? AbortSignal.timeout(15000) : undefined;
-    const { status, body } = await fetchWithAuthRaw(
-      'test-push',
-      config,
-      { method: 'POST', signal },
-      '发送测试通知',
-    );
-    if (status === 404 && body?.error?.code !== 'SUBSCRIPTION_NOT_FOUND') {
-      throw new Error('当前 Worker 版本还不支持一键测试推送，请先在上方点击「更新 Worker」或复制最新 Worker 代码部署。');
-    }
-    if (!body?.success) {
-      throw new Error(formatAmsgServerError(body, `测试通知发送失败 (HTTP ${status})`));
-    }
-    return { sent: true };
   },
 
   /**
@@ -2267,17 +2176,16 @@ export const ActiveMsgClient = {
    * 按钮要治的病，不能自己再犯一遍。
    */
   async resetPushSubscription(): Promise<void> {
-    const globalConfig = await ensureGlobalReady();
-    if (globalConfig.pushMode === 'third-party' || isUnifiedPushPlatform()) {
+    if (isUnifiedPushPlatform()) {
       const config = await ensureWorkerReady();
       const client = await initializeClient(config);
       try {
         await client.deletePushSubscription();
       } catch (error) {
-        console.warn('[ActiveMsg] 重置推送订阅：删除 Worker 旧订阅失败，继续覆盖', error);
+        console.warn('[ActiveMsg] UnifiedPush 重置：删除 Worker 旧订阅失败，继续覆盖', error);
       }
       const subscription = await this.ensurePushSubscription();
-      await client.putPushSubscription(subscription);
+      await putPushSubscriptionOrThrow(client, subscription);
       return;
     }
 
@@ -2309,8 +2217,7 @@ export const ActiveMsgClient = {
    * 的 D1 里、跟 SW 无关，不用像 proactive-push 那样重新推排程回去。
    */
   async deepResetPushSubscription(): Promise<void> {
-    const globalConfig = await ensureGlobalReady();
-    if (globalConfig.pushMode === 'third-party' || isUnifiedPushPlatform()) {
+    if (isUnifiedPushPlatform()) {
       await this.resetPushSubscription();
       return;
     }
@@ -2361,18 +2268,6 @@ export const ActiveMsgClient = {
    * 返回值只为单测断言：'registered' 补了 / 'skipped' 条件不满足 / 'failed' 补失败了。
    */
   async reconcilePushSubscription(): Promise<'registered' | 'skipped' | 'failed'> {
-    const globalConfig = await ensureGlobalReady();
-    if (globalConfig.pushMode === 'third-party') {
-      if (!validateThirdPartyPushConfig(globalConfig.thirdPartyPush).ok) return 'skipped';
-      try {
-        await this.registerPushSubscription();
-        return 'registered';
-      } catch (error) {
-        console.warn('[ActiveMsg] 连接后补登记第三方推送订阅失败', error);
-        return 'failed';
-      }
-    }
-
     if (isUnifiedPushPlatform()) {
       try {
         const { readUnifiedPushSubscription } = await import('./unifiedPushPlugin');
@@ -2380,7 +2275,7 @@ export const ActiveMsgClient = {
         if (!subscription?.endpoint || !subscription.keys?.p256dh || !subscription.keys?.auth) return 'skipped';
         const config = await ensureWorkerReady();
         const client = await initializeClient(config);
-        await client.putPushSubscription({ endpoint: subscription.endpoint, keys: subscription.keys });
+        await putPushSubscriptionOrThrow(client, { endpoint: subscription.endpoint, keys: subscription.keys });
         return 'registered';
       } catch (error) {
         console.warn('[ActiveMsg] 连接后补登记 UnifiedPush 订阅失败', error);
@@ -2448,7 +2343,6 @@ export const ActiveMsgClient = {
     const {
       instantChatSupported: _staleSupported,
       workerBundleVersion: _staleBundleVersion,
-      geminiNativeSupported: _staleGeminiSupported, geminiNativeWorkerUrl: _staleGeminiUrl,
       anthropicMessagesSupported: _staleAnthropicSupported,
       anthropicMessagesWorkerUrl: _staleAnthropicWorkerUrl,
       ...handshakeConfig
@@ -2458,7 +2352,7 @@ export const ActiveMsgClient = {
     // 排在保存之后：上面那句写的是握手前的配置快照，探测结论放它前面会被原样盖回去。
     await this.probeWorkerFeatures();
     await this.reconcilePushSubscription();
-    const nativeToken = config.pushMode === 'third-party' ? '' : readNativePushToken();
+    const nativeToken = readNativePushToken();
     if (nativeToken) await this.registerNativePushToken(nativeToken);
     // warnings 是「连上了，但有一块功能是哑的」——比如 VAPID 没配齐，任务能建、到点
     // 却一条都推不出去。连接本身算成功，交给调用方提示，别拦住流程。
@@ -2510,7 +2404,9 @@ export const ActiveMsgClient = {
    */
   async listRemoteTasksForChar(charId: string): Promise<RemoteTaskProjection[]> {
     const tasks = await this.listAllTasks();
-    if (tasks.length > 0 && tasks.every((t) => t?.charId == null)) {
+    // 新 Worker 3.2+ 解不开的任务本来就没 charId；不能据此误判成老 Worker。
+    const readable = tasks.filter((t) => !t?.error);
+    if (readable.length > 0 && readable.every((t) => t?.charId == null)) {
       throw new Error('worker 版本过旧：任务列表没有 charId 投影，无法按角色对账，请在设置里重新粘贴部署。');
     }
     return tasks
@@ -2709,7 +2605,7 @@ export const ActiveMsgClient = {
     let targets: string[];
     try {
       targets = (await this.listRemoteTasksForChar(charId))
-        .filter((task) => task.messageSubtype !== AMSG_INSTANT_CHAT_SUBTYPE)
+        .filter((task) => classifyTaskRow(task) === 'scheduled')
         .map((task) => task.uuid);
     } catch {
       targets = localTaskUuids;
@@ -2736,6 +2632,10 @@ export const ActiveMsgClient = {
       expirePolicy?: ActiveMsg2ExpirePolicy;
       /** 角色自己排的（工具桥传 true）。带上 metadata 标记，连发上限的到点兜底闸只拦它。 */
       selfScheduled?: boolean;
+      /** 仅线下会话预约：实际发送线上消息后结束这次见面，不能作用于新见面。 */
+      dateExitEncounterId?: string;
+      /** 离开后消息（见 docs/away-message.md）：不占任务名额，指令换成「对方离开了这么久」那份。 */
+      away?: { delayMinutes: number };
     };
     /** 编辑/续期时传旧任务 uuid：先取消它再新建（不传 = 纯新建）。 */
     replaceTaskUuid?: string;
@@ -2750,7 +2650,7 @@ export const ActiveMsgClient = {
     const client = await initializeClient(globalConfig);
     assertWriteCurrent();
     // 任务体不带订阅，worker 到点读用户级那一份——所以建任务前先把它登记上去。
-    const nativeToken = globalConfig.pushMode === 'third-party' ? '' : readNativePushToken();
+    const nativeToken = readNativePushToken();
     if (nativeToken) await this.registerNativePushToken(nativeToken);
     else await this.registerPushSubscription();
 
@@ -2759,7 +2659,8 @@ export const ActiveMsgClient = {
     const maxActiveTasks = resolveAmsgLimits(config).maxActiveTasks;
     const pendingOthers = getPendingTasks(config, Date.now())
       .filter((t) => t.taskUuid !== replaceTaskUuid);
-    if (pendingOthers.length >= maxActiveTasks) {
+    // 离开后消息是用户开的系统任务，不跟角色抢名额；名额满时它也不能建不出来。
+    if (!task.away && pendingOthers.length >= maxActiveTasks) {
       throw new Error(`该角色已经排好了 ${maxActiveTasks} 次主动消息，到上限了（上限在「主动频率」里调），请先取消或合并已有的。`);
     }
 
@@ -2777,7 +2678,7 @@ export const ActiveMsgClient = {
       : await buildFirePack(char, userProfile, groups, realtimeConfig);
     // 任务身份：客户端自造 clientTaskId——远端 uuid 要创建成功后才有，而 metadata
     // 必须在创建时就带上归属键；push 原样透传，送达归属全靠它。
-    const clientTaskId = crypto.randomUUID();
+    const clientTaskId = task.away ? `away-${crypto.randomUUID()}` : crypto.randomUUID();
 
     const remoteAvatarUrl = toRemoteAvatarUrl(char.avatar);
     const payload: Record<string, any> = {
@@ -2793,8 +2694,7 @@ export const ActiveMsgClient = {
       tzId,
       metadata: {
         charId: char.id,
-        humanStyleEnabled: char.humanStyleEnabled,
-    charName: char.name,
+        charName: char.name,
         source: 'active_msg_2',
         // worker 满血链路的 onLLMOutput 拿不到任务顶层的 messageType，靠 metadata 透传
         // 还原 push.messageType（老任务没这字段时 worker 回退 'auto'，收侧只展示不路由）。
@@ -2808,6 +2708,8 @@ export const ActiveMsgClient = {
         amsgExpirePolicy: resolveExpirePolicy(task.mode, task.expirePolicy),
         // 自排标记：到点兜底闸只拦带它的任务（用户面板排的不带、不受连发上限管）。
         ...(task.selfScheduled ? { amsgSelfScheduled: true } : {}),
+        ...(task.selfScheduled && task.dateExitEncounterId ? { amsgDateExitEncounterId: task.dateExitEncounterId } : {}),
+        ...(task.away ? { [AMSG_AWAY_MESSAGE_META]: true, [AMSG_AWAY_DELAY_META]: task.away.delayMinutes } : {}),
       },
     };
 
@@ -2824,7 +2726,9 @@ export const ActiveMsgClient = {
       const activeApi = resolveApiConfig(char, config, apiConfig);
       await requireAnthropicWorker([normalizeChatApiUrl(activeApi.baseUrl, activeApi.apiType)]);
       // 「本次任务」指令随任务 metadata 走，worker 到点拿它填 fire_pack 的指令槽。
-      payload.metadata.amsgTaskInstruction = buildTaskInstruction(task.mode, task.promptHint);
+      payload.metadata.amsgTaskInstruction = task.away
+        ? buildAwayTaskInstruction(task.away.delayMinutes)
+        : buildTaskInstruction(task.mode, task.promptHint);
       // 服务端要求「completePrompt 或 messages」二选一，且 messages 必须非空、
       // content 必须非空字符串，所以这里给一条占位。到点真正发给 LLM 的 messages 由
       // worker 的 onBeforeFire 返回值覆盖（库用 { ...payload, messages } 调 LLM），
@@ -3134,6 +3038,8 @@ export const ActiveMsgClient = {
     char: CharacterProfile;
     /** 本地生成会 POST 给 /chat/completions 的那串 fullMessages，原样带上去。 */
     chatMessages: Array<{ role: string; content: unknown }>;
+    /** Worker 时效信息的注入位置；缺失时兼容旧版末尾追加。 */
+    timelyInsertAt?: number;
     /**
      * 这一轮该用的聊天凭据——**必须是本地生成那一轮会用的同一份**（effectiveApi）。
      */
@@ -3190,7 +3096,12 @@ export const ActiveMsgClient = {
       ...(await buildFirePack(char, userProfile, groups, realtimeConfig, undefined, { templateStub })),
       // 先还原图片令牌再算体积预算——反过来会让一份「看着没超」的包在云端胀成几 MB，
       // 而 worker 那边根本解不开令牌（见 resolveChatMessagesForUpload）。
-      chat: { messages: toFirePackChatMessages(await resolveChatMessagesForUpload(chatMessages)), builtAt: now },
+      chat: {
+        messages: toFirePackChatMessages(await resolveChatMessagesForUpload(chatMessages)),
+        builtAt: now,
+        ...(params.timelyInsertAt !== undefined && params.timelyInsertAt >= 0
+          ? { timelyInsertAt: params.timelyInsertAt } : {}),
+      },
     };
 
     const clientTaskId = crypto.randomUUID();
@@ -3280,8 +3191,7 @@ export const ActiveMsgClient = {
         : {}),
       metadata: {
         charId: char.id,
-        humanStyleEnabled: char.humanStyleEnabled,
-    charName: char.name,
+        charName: char.name,
         source: 'active_msg_2',
         // push 的 messageType 取自这里（收侧按 'instant' 分轨）。
         amsgMode: 'instant',
@@ -3802,7 +3712,7 @@ export const ActiveMsgClient = {
     return {
       ok: false,
       supported: true,
-      message: explainCfTokenRejection(formatAmsgServerError(body, `更新没成功（HTTP ${status}）。`)),
+      message: formatAmsgServerError(body, `更新没成功（HTTP ${status}）。`),
       code: typeof body?.error?.code === 'string' ? body.error.code : undefined,
     };
   },
@@ -3871,7 +3781,7 @@ export const ActiveMsgClient = {
     }
     return {
       ok: false,
-      message: explainCfTokenRejection(formatAmsgServerError(body, `${enabled ? '恢复' : '暂停'}没成功（HTTP ${status}）。`)),
+      message: formatAmsgServerError(body, `${enabled ? '恢复' : '暂停'}没成功（HTTP ${status}）。`),
       code: typeof body?.error?.code === 'string' ? body.error.code : undefined,
     };
   },
@@ -4001,7 +3911,8 @@ export const ActiveMsgClient = {
       for (const remote of remoteTasks) {
         if (remote.charId !== char.id || remote.status !== 'pending') continue;
         if (remote.messageType !== 'auto' && remote.messageType !== 'prompted') continue;
-        if (remote.messageSubtype === AMSG_INSTANT_CHAT_SUBTYPE) {
+        const rowClass = classifyTaskRow(remote);
+        if (rowClass === 'instant-chat') {
           // 上游自排会继承父任务的 subtype。只看标签会漏掉从即时对话排出的子任务；
           // 读 metadata 确认是自排任务，不能改用户正在等待的那一轮即时回复。
           try {
@@ -4017,12 +3928,12 @@ export const ActiveMsgClient = {
             }
             const client = await initializeClient(globalConfig);
             const metadata = (await decryptPayload(client, response.data))?.task?.metadata;
-            if (metadata?.amsgInstantChat || metadata?.amsgSelfScheduled !== true) continue;
+            if (classifyTaskRow({ ...remote, metadata }) !== 'scheduled') continue;
           } catch {
             failed += 1;
             continue;
           }
-        } else if (remote.messageSubtype && remote.messageSubtype !== 'chat') continue;
+        } else if (rowClass !== 'scheduled') continue;
         tasksByUuid.set(remote.uuid, { taskUuid: remote.uuid, mode: remote.messageType } as ActiveMsg2TaskRecord);
       }
       const tasks = [...tasksByUuid.values()];

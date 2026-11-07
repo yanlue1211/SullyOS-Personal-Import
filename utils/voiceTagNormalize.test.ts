@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { normalizeVoiceTags, sanitizeIntoSegments, sanitizeForBubble } from './sanitize';
 import { ChatParser } from './chatParser';
+import { ChatPrompts } from './chatPrompts';
+import { parseVoiceOutput } from './minimaxTts';
 import { collectVoiceBatchSubtitle, isPoisonedVoiceSubtitle } from './voiceSubtitle';
 
 // 语音标签自愈：模型把 <语音> 写歪的各种真实形态都要能修回规范，
@@ -78,6 +80,29 @@ describe('normalizeVoiceTags', () => {
   it('全角字幕标签 → 规范化', () => {
     expect(normalizeVoiceTags('<语音>hi</语音>＜字幕＞你好＜/字幕＞'))
       .toBe('<语音>hi</语音><字幕>你好</字幕>');
+  });
+});
+
+describe('nested subtitle voice regression', () => {
+  it('moves subtitle after the voice tag, including old malformed replies', () => {
+    expect(normalizeVoiceTags('<语音 emotion="happy">Hey?<字幕>喂？</字幕></语音>'))
+      .toBe('<语音 emotion="happy">Hey?</语音>\n<字幕>喂？</字幕>');
+    expect(normalizeVoiceTags('<语音>Hey<字幕>喂</字幕>'))
+      .toBe('<语音>Hey</语音><字幕>喂</字幕>');
+  });
+  it('keeps speech and subtitles separate for TTS', () => {
+    const result = parseVoiceOutput('<语音>Hey?<字幕>喂？</字幕></语音>');
+    expect(result.speech).toBe('Hey?');
+    expect(result.subtitle).toBe('喂？');
+  });
+  it('repairs assistant history before sending it as model context', () => {
+    const char = { id: 'c1', name: '阿一' } as any;
+    const { apiMessages } = ChatPrompts.buildMessageHistory([
+      { id: 1, charId: 'c1', role: 'user', type: 'text', content: '在吗', timestamp: 1 },
+      { id: 2, charId: 'c1', role: 'assistant', type: 'text', content: '<语音>Hey<字幕>喂</字幕></语音>', timestamp: 2 },
+    ] as any, 20, char, { name: '小明' } as any, []);
+    expect(String(apiMessages.find(m => m.role === 'assistant')?.content))
+      .toContain('<语音>Hey</语音>\n<字幕>喂</字幕>');
   });
 });
 

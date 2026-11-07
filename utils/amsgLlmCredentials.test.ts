@@ -103,30 +103,74 @@ describe('凭据行取值', () => {
     });
   });
 
-  it('旧备份带单独 API 时，定时消息仍使用主 API', () => {
+  it('旧备份明确启用了独立API时恢复其用途，保持与前台排程同口径', () => {
     const row = buildCharChatCredRow(
       CHAR, { enabled: true, useSecondaryApi: true, secondaryApi: SECONDARY } as any, API,
     );
     expect(row?.value).toEqual({
-      apiUrl: 'https://api.example.dev/v1/chat/completions', apiKey: 'sk-global', primaryModel: 'gpt-global',
+      apiUrl: 'https://alt.example.dev/v1/chat/completions', apiKey: 'sk-alt', primaryModel: 'gpt-alt',
     });
   });
 
-  it('定时消息那行：开关开着但单独 API 没填地址 → 回落全局（口径同排程时的 resolveApiConfig）', () => {
-    const row = buildCharChatCredRow(
-      CHAR, { enabled: true, useSecondaryApi: true, secondaryApi: { baseUrl: '', apiKey: '', model: '' } } as any, API,
-    );
-    expect(row?.value.primaryModel).toBe('gpt-global');
+  it('独立 API 已启用但地址缺失时安全阻断，不悄悄回退全局模型', () => {
+    expect(() => buildCharChatCredRow(CHAR, {
+      enabled: true, useSecondaryApi: true, secondaryApi: { baseUrl: '', apiKey: '', model: '' },
+    } as any, API)).toThrow('未配置完整');
   });
 
-  it('全局主动消息 API 覆盖定时主动消息，不影响即时对话', () => {
-    const row = buildCharChatCredRow(CHAR, { enabled: true } as any, {...API, proactiveApi: SECONDARY});
+  it('定时消息打开独立 API 后使用副 API，切回关闭则使用角色原本的私聊 API', () => {
+    const withPrivate = { ...CHAR, dialogueApi: { baseUrl: 'https://char.dev/v1', apiKey: 'sk-char', model: 'char-model' } };
+    const privateRow = buildCharChatCredRow(withPrivate, {
+      enabled: true, useSecondaryApi: true, secondaryApi: SECONDARY,
+    } as any, API);
+    expect(privateRow?.value.primaryModel).toBe('gpt-alt');
+    expect(privateRow?.value.apiUrl).toBe('https://alt.example.dev/v1/chat/completions');
+    expect(buildCharChatCredRow(withPrivate, { enabled: true, useSecondaryApi: false, secondaryApi: SECONDARY } as any, API)?.value.primaryModel)
+      .toBe('char-model');
+  });
+
+  it('独立 API 打开但缺密钥时阻止偷偷回退到昂贵主聊天模型', () => {
+    expect(() => buildCharChatCredRow(CHAR, {
+      enabled: true, useSecondaryApi: true, secondaryApi: { baseUrl: 'https://alt.example.dev/v1', apiKey: '', model: 'cheap' },
+    } as any, API)).toThrow('未配置完整');
+  });
+
+  it('独立 API 每个角色单独解析，不会拿 A 的密钥去给 B 发送定时消息', () => {
+    const a = buildCharChatCredRow({ id: 'A', dialogueApi: { baseUrl: 'https://role-a.dev/v1', apiKey: 'role-a', model: 'role-a' } }, {
+      enabled: true, useSecondaryApi: true,
+      secondaryApi: { baseUrl: 'https://cheap-a.dev/v1', apiKey: 'cheap-a', model: 'cheap-a' },
+    } as any, API);
+    const b = buildCharChatCredRow({ id: 'B', dialogueApi: { baseUrl: 'https://role-b.dev/v1', apiKey: 'role-b', model: 'role-b' } }, {
+      enabled: true, useSecondaryApi: false,
+    } as any, API);
+    expect(a).toEqual({ credId: 'char:A/chat', value: {
+      apiUrl: 'https://cheap-a.dev/v1/chat/completions', apiKey: 'cheap-a', primaryModel: 'cheap-a',
+    } });
+    expect(b).toEqual({ credId: 'char:B/chat', value: {
+      apiUrl: 'https://role-b.dev/v1/chat/completions', apiKey: 'role-b', primaryModel: 'role-b',
+    } });
+  });
+
+  it('独立 API 使用 Anthropic 原生时绝不能错拼 /chat/completions', () => {
+    const row = buildCharChatCredRow(CHAR, { enabled: true, useSecondaryApi: true, secondaryApi: {
+      baseUrl: 'https://api.anthropic.com/v1', apiKey: 'anthropic-key', model: 'claude-example', apiType: 'anthropic',
+    } } as any, API);
     expect(row?.value).toEqual({
-      apiUrl: 'https://alt.example.dev/v1/chat/completions',
-      apiKey: 'sk-alt',
-      primaryModel: 'gpt-alt',
+      apiUrl: 'https://api.anthropic.com/v1/messages', apiKey: 'anthropic-key', primaryModel: 'claude-example',
     });
-    expect(buildCharInstantCredRow('char-1', API)?.value.primaryModel).toBe('gpt-global');
+  });
+
+  it('独立 API 失败必须停止，不能修复性借用角色 API 的模型或密钥', () => {
+    const charWithOwnApi = { ...CHAR, dialogueApi: { baseUrl: 'https://expensive.dev/v1', apiKey: 'expensive-key', model: 'expensive' } };
+    for (const invalid of [
+      { baseUrl: 'https://cheap.dev/v1', apiKey: '', model: 'cheap' },
+      { baseUrl: '', apiKey: 'cheap-key', model: 'cheap' },
+      { baseUrl: 'https://cheap.dev/v1', apiKey: 'cheap-key', model: '' },
+    ]) {
+      expect(() => buildCharChatCredRow(charWithOwnApi, {
+        enabled: true, useSecondaryApi: true, secondaryApi: invalid,
+      } as any, API)).toThrow('已阻止回退');
+    }
   });
 
   it('即时对话那行：原样收下当轮终值（claude 系开思考时的 -thinking 后缀不能被抹掉）', () => {

@@ -49,6 +49,7 @@ import {
   startAmsgChatPresence,
   stopAmsgChatPresence,
   syncAmsgLlmCredentials,
+  putCredentialRowsSkippingRetired,
   syncAmsgToolConfig,
 } from './amsgStateSync';
 import {
@@ -925,6 +926,40 @@ describe('LLM 凭据行的后台重传', () => {
 
     resumePendingAmsgStateSync({ characters: [], userProfile: {} as any, groups: [], apiConfig: API });
     await vi.advanceTimersByTimeAsync(0);
+    expect(ActiveMsgClient.putLlmCredentials).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('作者 df40214ae6：云端角色停用时隔离凭据批次', () => {
+  const row = (charId: string, purpose: string) => ({
+    credId: `char:${charId}/${purpose}`,
+    value: { apiUrl: 'https://api.example.test/v1/chat/completions', apiKey: 'key', primaryModel: 'test' },
+  });
+  const retiredError = Object.assign(new Error('Cloud owner retired'), { code: 'CLOUD_OWNER_RETIRED' });
+
+  it('一名角色停用时其它角色仍独立上传；不对角色数据执行删除', async () => {
+    const rows = [row('retired-char', 'chat'), row('retired-char', 'emotion'), row('healthy-char', 'chat')];
+    vi.mocked(ActiveMsgClient.putLlmCredentials)
+      .mockRejectedValueOnce(retiredError)
+      .mockRejectedValueOnce(retiredError)
+      .mockResolvedValueOnce(1);
+    expect(await putCredentialRowsSkippingRetired(rows)).toEqual(['retired-char']);
+    expect(ActiveMsgClient.putLlmCredentials).toHaveBeenCalledTimes(3);
+    expect(ActiveMsgClient.putLlmCredentials).toHaveBeenNthCalledWith(2, rows.slice(0, 2));
+    expect(ActiveMsgClient.putLlmCredentials).toHaveBeenNthCalledWith(3, rows.slice(2));
+    expect(ActiveMsgClient.deleteLlmCredentials).not.toHaveBeenCalled();
+  });
+
+  it('普通网络/鉴权错误不能误判停用，不会开启危险的逐角色重复请求', async () => {
+    vi.mocked(ActiveMsgClient.putLlmCredentials).mockRejectedValueOnce(new Error('network offline'));
+    await expect(putCredentialRowsSkippingRetired([row('a', 'chat'), row('b', 'chat')]))
+      .rejects.toThrow('network offline');
+    expect(ActiveMsgClient.putLlmCredentials).toHaveBeenCalledTimes(1);
+  });
+
+  it('没有冲突则依旧只发一批，空批不产生 API 请求', async () => {
+    expect(await putCredentialRowsSkippingRetired([])).toEqual([]);
+    expect(await putCredentialRowsSkippingRetired([row('a', 'chat'), row('b', 'chat')])).toEqual([]);
     expect(ActiveMsgClient.putLlmCredentials).toHaveBeenCalledTimes(1);
   });
 });

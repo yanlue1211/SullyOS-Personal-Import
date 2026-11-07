@@ -139,15 +139,37 @@ export interface AmsgLimitsRecord extends AmsgPacingSettings {
    * 排的），到点时 worker 读到 false 就直接跳过，一个 token 都不花。
    */
   selfScheduleEnabled: boolean;
+  /** 只用来管自动空闲提醒，角色自己排的第二天出门报备等不受影响。 */
+  awayQuietHours?: { enabled: boolean; startTime: string; endTime: string };
+  /** 自动空闲提醒开关；独立于自主排程，false 时旧的链式任务也立即停止。 */
+  awayEnabled?: boolean;
+  /** 只有自动空闲提醒读取的节拍间隔。 */
+  awayDelayMinutes?: number;
+  /** 见面/通话即时锁使用小型限制行快速同步，不等待较大的 fire_pack 上传。 */
+  awaySceneLock?: 'date' | 'call' | null;
+  /** 只允许这次见面预约的任务在成功发送后解除同一次见面。 */
+  awayDateEncounterId?: string | null;
+  /** 自动空闲节拍的最低起点（线下结束时刻），不等于用户最后一次发言。 */
+  awayDateEndedAt?: number | null;
 }
 
 export const buildAmsgLimitsRecord = (
   config: Partial<AmsgPacingSettings> | null | undefined,
   selfScheduleEnabled: boolean,
+  awayQuietHours?: { enabled: boolean; startTime: string; endTime: string },
+  away?: { enabled: boolean; delayMinutes?: number },
+  awaySceneLock?: 'date' | 'call' | null,
+  awayDateEncounterId?: string | null,
+  awayDateEndedAt?: number | null,
 ): AmsgLimitsRecord => ({
   v: 1,
   selfScheduleEnabled,
   ...pickPacingSettings(config),
+  ...(awayQuietHours ? { awayQuietHours } : {}),
+  ...(away ? { awayEnabled: away.enabled, awayDelayMinutes: away.delayMinutes } : {}),
+  ...(awaySceneLock !== undefined ? { awaySceneLock } : {}),
+  ...(awayDateEncounterId !== undefined ? { awayDateEncounterId } : {}),
+  ...(awayDateEndedAt !== undefined ? { awayDateEndedAt } : {}),
 });
 
 /** 读回来的记录；形状不对返回 null（worker 按默认值走——默认值本身就是偏严的那一侧）。 */
@@ -297,13 +319,6 @@ export const describeMinutes = (minutes: number): string => {
 
 // ─── 角色排程时的规矩 ───
 
-/**
- * 角色自排的硬间隔，不随用户设置放开：跟已排的任务、上一次主动消息相差 2 分钟以内（含 2 分钟）
- * 一律打回。send_at 精确到分，「不到 3 分钟」就是「2 分钟以内」。
- * 用户把间隔设成 0 是「不介意连着找我」，不是「同一时刻排好几条」。
- */
-export const SELF_SCHEDULE_HARD_GAP_MS = 3 * 60_000;
-
 export type SelfScheduleRecurrence = 'none' | 'daily' | 'weekly';
 export type SelfScheduleExpirePolicy = 'expire' | 'force';
 
@@ -343,19 +358,16 @@ export const checkSelfScheduleRules = (input: SelfScheduleRuleInput): SelfSchedu
       message: '用户没有让你排每天/每周重复的消息，这次只能排一次性的（去掉 recurrence 再排）。',
     };
   }
-  const userGapApplies = limits.minSendGapMs >= SELF_SCHEDULE_HARD_GAP_MS;
-  const gapMs = Math.max(limits.minSendGapMs, SELF_SCHEDULE_HARD_GAP_MS);
-  const conflict = findGapConflict(input.sendAtMs, gapMs, input.busy);
+  const conflict = findGapConflict(input.sendAtMs, limits.minSendGapMs, input.busy);
   if (conflict !== null) {
-    const earliest = earliestSlotAfter(Math.max(input.earliestMs, input.sendAtMs), gapMs, input.busy);
+    const gapMinutes = Math.round(limits.minSendGapMs / 60_000);
+    const earliest = earliestSlotAfter(
+      Math.max(input.earliestMs, input.sendAtMs), limits.minSendGapMs, input.busy);
     return {
       ok: false,
       reason: 'min_gap',
-      message: userGapApplies
-        ? `离 ${input.formatTime(conflict)} 那次太近了：用户定了两次主动消息之间至少隔 ${describeMinutes(Math.round(limits.minSendGapMs / 60_000))}。`
-          + `要排的话最早 ${input.formatTime(earliest)}；没那么要紧的话，这次就别排了。`
-        : `${input.formatTime(conflict)} 前后已经有一次主动消息了，同一时刻不能再排一条。`
-          + '如果是同一件事，它已经排着，不用再排；要换时间或内容，改原来那条（renew / cancel）。',
+      message: `离 ${input.formatTime(conflict)} 那次太近了：用户定了两次主动消息之间至少隔 ${describeMinutes(gapMinutes)}。`
+        + `要排的话最早 ${input.formatTime(earliest)}；没那么要紧的话，这次就别排了。`,
     };
   }
   return {

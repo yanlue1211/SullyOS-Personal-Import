@@ -43,6 +43,7 @@ import {
   type LlmCredentialRow,
 } from './amsgLlmCredentials';
 import { trackEvent } from './analytics';
+import { AMSG_OWNER_CONFLICT_EVENT } from './amsgOwnerEvents';
 import { DB } from './db';
 
 /** 失败重试的退避起点，逐次翻倍（30s → 60s → 120s）。 */
@@ -177,7 +178,8 @@ export const markAmsgStateDirty = (
   reason: AmsgDirtyReason = 'refresh',
 ) => {
   const config = snapshot.char.activeMsg2Config;
-  if (!config?.enabled || !hasActiveAiTask(config)) {
+  // Worker 可在用户离线时续接 away 子任务，本地清单暂时为空不代表云端没有任务。
+  if (!config?.enabled || (!hasActiveAiTask(config) && !snapshot.char.awayMessage?.enabled)) {
     if (reason === 'invalidate') void invalidateCharCloudState(snapshot.char.id);
     return;
   }
@@ -608,6 +610,39 @@ export const buildCredentialRowsToResync = async (
   return rows;
 };
 
+/**
+ * 同步作者 df40214ae6 中低风险的凭据批量隔离能力。
+ * 任何非 CLOUD_OWNER_RETIRED 错误仍整批抛出，绝不把 API 错误或网络故障错判为
+ * 「用户应删除角色」。发生 owner 拒绝时，仅把本批按 char 分开重试；
+ * 不清理用户数据，不自行恢复、停用或删除任何角色。
+ */
+export const putCredentialRowsSkippingRetired = async (rows: LlmCredentialRow[]): Promise<string[]> => {
+  if (rows.length === 0) return [];
+  const isRetired = (error: unknown): boolean =>
+    (error as { code?: unknown } | null)?.code === 'CLOUD_OWNER_RETIRED';
+  try {
+    await ActiveMsgClient.putLlmCredentials(rows);
+    return [];
+  } catch (error) {
+    if (!isRetired(error)) throw error;
+  }
+  const groups = new Map<string, LlmCredentialRow[]>();
+  for (const row of rows) {
+    const owner = parseCharCredId(row.credId)?.charId ?? row.credId;
+    groups.set(owner, [...(groups.get(owner) ?? []), row]);
+  }
+  const conflicts: string[] = [];
+  for (const [charId, group] of groups) {
+    try {
+      await ActiveMsgClient.putLlmCredentials(group);
+    } catch (error) {
+      if (!isRetired(error)) throw error;
+      conflicts.push(charId);
+    }
+  }
+  return conflicts;
+};
+
 const runLlmCredentialSync = async (reason: string): Promise<void> => {
   if (!hasPendingCredSync || credSyncing) return;
   credSyncing = true;
@@ -623,8 +658,19 @@ const runLlmCredentialSync = async (reason: string): Promise<void> => {
       return;
     }
     if (await isLlmCredentialsReady()) {
-      const rows = await buildCredentialRowsToResync(snapshot);
-      if (pickChangedCredRows(rows).length > 0) await ActiveMsgClient.putLlmCredentials(rows);
+      const characters = await DB.getAllCharacters();
+      const rows = await buildCredentialRowsToResync(snapshot, characters);
+      const conflicts = pickChangedCredRows(rows).length > 0
+        ? await putCredentialRowsSkippingRetired(rows) : [];
+      if (conflicts.length > 0) {
+        const names = conflicts.map((id) =>
+          `${characters.find((char) => char.id === id)?.name ?? '未知角色'}（${id}）`).join('、');
+        // 其他角色的新凭据已单独传上去；冲突角色的本地记录/云端登记不碰。
+        // 保留同步欠账供用户之后手动处理，避免误报本次所有角色已同步。
+        console.warn(`${HEADER} 云端角色登记冲突，仅这些角色的 API 凭据未同步：${names}。其余角色已尝试独立上传，未执行任何删除或恢复。`);
+        if (typeof window !== 'undefined') window.dispatchEvent(new Event(AMSG_OWNER_CONFLICT_EVENT));
+        throw new Error(`云端角色登记冲突：${names}。请确认云端角色状态再重试；本地角色数据未修改。`);
+      }
     }
     // 老 Worker 的内联任务也要迁移；新 Worker 的引用任务只更新引用，不塞内联字段。
     const refresh = await ActiveMsgClient.refreshApiCredentialsForPendingTasks(snapshot);

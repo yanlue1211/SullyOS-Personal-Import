@@ -1,12 +1,7 @@
-import {extractResponseStatus,proactiveResponseText,isProactiveStatusDelivery} from '../features/personal/responseStatus/protocol';
-import { diagnosticRunId } from './amsgReproduction';
-import { recordDiagnosticInbox } from './amsgReproductionStore';
 import { createReplyRun, isReplyStopped, withReplyCancellation, type ReplyRun } from './chatReplyCancellation';
 import { loadCharacterContextMessages } from './chatContextRange';
 import { ActiveMsg2InboxMessage, ActiveMsg2TaskRecord, APIConfig, RealtimeConfig, UserProfile } from '../types';
 import { DB } from './db';
-import { consumeIncomingCallInvites } from '../features/personal/calls/incoming';
-import { extractInnerVoice } from '../features/personal/innerVoice/protocol';
 import { ChatPrompts } from './chatPrompts';
 import { ActiveMsgStore } from './activeMsgStore';
 import { ActiveMsgClient, type AmsgOutboxEntry, type RemoteTaskStatus } from './activeMsgClient';
@@ -37,6 +32,7 @@ import {
 import { dispatchAmsgResult } from './amsgResults';
 import { requestStartupUpdateCheck } from './amsgAutoUpdateTrigger';
 import { flushAmsgState } from './amsgStateSync';
+import { endAmsgDateFromScheduledMessage } from './amsgInteractionGuard';
 import { describeInstantChatFailure, pruneStaleTasks, type RemoteTaskLastError } from './amsg2Tasks';
 // 线协议常量的唯一出处是 shared（amsg-sw 只是 re-export 同一份）。
 import { MULTIPART_FAILURE_REASON } from '@rei-standard/amsg-shared';
@@ -661,7 +657,6 @@ const processInboxMessageWithPostProcessing = async (
   ));
 
   await replyStep(async () => applyAssistantPostProcessing(message.body || '', {
-    isProactive: isProactiveStatusDelivery(message),
     replyRun,
     char,
     userProfile,
@@ -766,6 +761,15 @@ const processInboxMessageWithPostProcessing = async (
     // 交给后处理逐气泡对齐写进 metadata.sarModuleSurface——和本地路径同一处消费。
     sarModuleSurface,
   }));
+
+  // 只有真正落库的线上主动消息才能结束对应线下见面；旧任务不能结束新见面。
+  const endedEncounterId = (message.metadata as any)?.amsgDateEndedEncounterId;
+  if (typeof endedEncounterId === 'string' && endedEncounterId
+      && endAmsgDateFromScheduledMessage(message.charId, endedEncounterId, message.sentAt || Date.now())) {
+    // Worker 自己已清云端锁，这里清本机持久化状态，避免下次上传旧锁将其覆盖。
+    try { await ActiveMsgClient.putCharLimits(char); }
+    catch (error) { log.warn('见面已结束，本地清锁成功但云端限制状态同步失败', { charId: message.charId, error }); }
+  }
 
   if(isLastChunk(message) && message.taskUuid) {
     const {settleFriendFeedCloudTask}=await import('./friendFeedEmotion');
@@ -1575,15 +1579,6 @@ const flushInboxToChatImpl = async (trigger: FlushTrigger, charId?: string): Pro
   // 降级回原来的 "原文一次性 saveMessage" 防止消息丢失。dispatchEvent 始终 fire 一次,
   // 保证 toast / 未读 / 通知语义不变。
   for (const message of pendingMessages) {
-    // 包括重启后的补收与重复推送：任何诊断消息都不能进入角色业务。
-    if (diagnosticRunId(message.metadata)) {
-      try { await recordDiagnosticInbox(message, trigger); }
-      catch {
-        retainedInboxMessageIds.add(message.messageId);
-        try { await ActiveMsgStore.saveInboxMessage(message); } catch { /* 云端账不销，下次补收 */ }
-      }
-      continue;
-    }
     if (isReplyStopped(message.taskUuid)) {
       if (message.taskUuid && (message.metadata as any)?.amsgUsage) {
         settleInstantChatApiLog(message.taskUuid, message.metadata);
@@ -1747,21 +1742,15 @@ const flushInboxToChatImpl = async (trigger: FlushTrigger, charId?: string): Pro
       }
 
       if (!routed) {
-        // 2.0 fallback: even when the rich post-processing pipeline fails, never
-        // persist the raw inner-voice protocol as a public chat bubble.
-        const recoveredVoice = extractInnerVoice(await replyStep(() => consumeIncomingCallInvites(isProactiveStatusDelivery(message)?proactiveResponseText(message.body||''):(message.body||''),message.charId,persistTimestamp)));
-        const recoveredStatus=extractResponseStatus(recoveredVoice.text);
-        const heartEnabled = (await replyStep(() => DB.getCharacter(message.charId)))?.innerVoiceEnabled !== false;
         try {
-          if(recoveredVoice.text.trim())await replyStep(async () => (replyRun?.saveMessage ?? DB.saveMessage)({
+          await replyStep(async () => (replyRun?.saveMessage ?? DB.saveMessage)({
             charId: message.charId,
             role: 'assistant',
-            type: recoveredStatus?'score_card':'text',
-            content: recoveredStatus?JSON.stringify(recoveredStatus):recoveredVoice.text,
+            type: 'text',
+            content: message.body,
             timestamp: persistTimestamp,
             metadata: {
               source: 'active_msg_2',
-              ...(recoveredStatus?{responseStatus:recoveredStatus}:heartEnabled && recoveredVoice.innerVoice ? { innerVoice: recoveredVoice.innerVoice } : {}),
               activeMsg2: {
                 messageId: message.messageId,
                 taskId: message.taskId,
