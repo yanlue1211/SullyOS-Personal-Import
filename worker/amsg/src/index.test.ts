@@ -4171,6 +4171,46 @@ describe('onBeforeFire — 即时对话分支', () => {
     expect(result.messages.map((m) => m.content).join('\n')).not.toContain('本次任务');
   });
 
+  it('作者 909807a828：实时状态之前插入排程时效块，最后一眼仍是原聊天钢印', async () => {
+    const original = [
+      { role: 'system', content: '固定人设' },
+      { role: 'user', content: '用户刚才发了一条消息' },
+      { role: 'system', content: '【实时状态】此刻的生活' },
+      { role: 'system', content: '【回到你自己】保持自然对话' },
+    ];
+    const { ctx } = instantCtx({
+      charRows: [
+        { key: AMSG_FIRE_PACK_KEY, value: instantPack({
+          chat: { messages: original, builtAt: PACK_BUILT_AT, timelyInsertAt: 2 },
+        }) },
+        { key: AMSG_TOOL_PACK_KEY, value: toolPackValue },
+      ],
+    });
+    const result = fired(await amsgHooks.onBeforeFire(ctx));
+    expect(result.messages).toHaveLength(original.length + 1);
+    expect(result.messages[0]).toEqual(original[0]);
+    expect(result.messages[1]).toEqual(original[1]);
+    expect(result.messages[2].content).toContain('现在是');
+    expect(result.messages[3]).toEqual(original[2]);
+    expect(result.messages[4]).toEqual(original[3]);
+  });
+
+  it('没有注入位置或位置越界时沿用原先的末尾追加，兼容旧缓存', async () => {
+    const legacy = instantCtx();
+    const legacyMessages = fired(await amsgHooks.onBeforeFire(legacy.ctx)).messages;
+    expect(legacyMessages.at(-1)?.content).toContain('现在是');
+    const invalid = instantCtx({
+      charRows: [
+        { key: AMSG_FIRE_PACK_KEY, value: instantPack({
+          chat: { messages: CHAT_MESSAGES, builtAt: PACK_BUILT_AT, timelyInsertAt: 9000 },
+        }) },
+        { key: AMSG_TOOL_PACK_KEY, value: toolPackValue },
+      ],
+    });
+    const messages = fired(await amsgHooks.onBeforeFire(invalid.ctx)).messages;
+    expect(messages.at(-1)?.content).toContain('现在是');
+  });
+
   // 本地有常驻自主联系说明，云端以前只教「主动消息发完再接着说」。
   // 空清单也得教：否则用户不明确要求时，角色连第一条都想不起来排。
   it.each([true, false])('空清单仍教自主联系与兑现承诺（原生工具=%s）', async (native) => {
