@@ -41,6 +41,7 @@ export type AmsgPacingSettings = Pick<
   | 'maxActiveTasks'
   | 'allowSelfRecurring'
   | 'allowSelfForce'
+  | 'quietHours'
 >;
 
 /** 所有上限字段名，拷贝 / 挑字段时用这一份，别在各处手抄。 */
@@ -52,6 +53,7 @@ export const AMSG_PACING_FIELDS = [
   'maxActiveTasks',
   'allowSelfRecurring',
   'allowSelfForce',
+  'quietHours',
 ] as const satisfies ReadonlyArray<keyof AmsgPacingSettings>;
 
 export const pickPacingSettings = (
