@@ -56,6 +56,16 @@ export function setAmsgActiveDate(charId: string, active: boolean, encounterId?:
   } catch { /* best effort */ }
 }
 
+/**
+ * 正常线上用户消息成功落库后，才视为主动离开线下；不能在打开页面、开始输入时触发。
+ * 不干预通话锁，也不伪造用户发言。返回 true 时调用方需马上同步云端 limits。
+ */
+export function endAmsgDateFromOnlineUserMessage(charId: string, sentAt: number): boolean {
+  if (!charId || !isAmsgActiveDate(charId)) return false;
+  setAmsgActiveDate(charId, false, undefined, sentAt);
+  return true;
+}
+
 /** 只允许那次见面预约的、已经真正发出的线上消息结束同一次见面。 */
 export function endAmsgDateFromScheduledMessage(charId: string, encounterId: string, sentAt: number): boolean {
   if (!charId || !encounterId || !isAmsgActiveDate(charId)) return false;
