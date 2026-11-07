@@ -101,6 +101,7 @@ import {
   sendsOnDay,
 } from '../../../utils/amsgLimits';
 import { resolveFireSceneSong } from '../../../utils/amsgFireScene';
+import { shouldSkipAwayForQuietHours } from '../../../utils/awayMessageQuietHours';
 import {
   type AmsgFireSkipTaskBrief, buildFireSkipResult, shouldReportFireSkip,
 } from '../../../utils/amsgFireSkipResult';
@@ -2133,6 +2134,21 @@ export const amsgHooks = {
     if (!instant && away) {
       const delayMs = Number(taskMeta[AMSG_AWAY_DELAY_META]) * 60_000;
       const dueAt = lastUserMessageAt != null && delayMs > 0 ? lastUserMessageAt + delayMs : null;
+      // 只有系统按照“X 小时没互动”自动发起的 away 任务才拦。
+      // 自排的出门报备、具体约定、每天提醒等不能经过这两道闸。
+      if (pack.awaySceneLock === 'date' || pack.awaySceneLock === 'call') {
+        console.log('[amsg:away-skip]', { taskId: ctx.task.id, reason: 'interaction-still-open', mode: pack.awaySceneLock });
+        return { skip: true } as const;
+      }
+      if (shouldSkipAwayForQuietHours({
+        quietHours: limitsRecord?.awayQuietHours,
+        nowMs: ctx.now.getTime(),
+        dueMs: dueAt ?? ctx.now.getTime(),
+        userTimeZone: pack.userTzId,
+      })) {
+        console.log('[amsg:away-skip]', { taskId: ctx.task.id, reason: 'user-quiet-hours' });
+        return { skip: true } as const;
+      }
       const waitMs = dueAt == null ? 0 : dueAt - ctx.now.getTime();
       if (waitMs > AWAY_DUE_TOLERANCE_MS) {
         console.log('[amsg:defer]', { taskId: ctx.task.id, reason: 'away-not-due', dueAt });
