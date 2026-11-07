@@ -1193,6 +1193,16 @@ const formatAmsgErrorDetails = (details: unknown, topLevel?: Record<string, unkn
   return parts.join('；');
 };
 
+/**
+ * 作者 4dea56d86c：旧 Worker 可能仅在 WebCrypto cause 里报 OperationError；
+ * 新 Worker 返回明确的 STORED_DATA_UNDECRYPTABLE。
+ * 遇到这种情况先恢复原 Master Key，不能误导为「直接重装」，更不能自动清库。
+ */
+const STORED_DATA_UNDECRYPTABLE_CODE = 'STORED_DATA_UNDECRYPTABLE';
+const STORED_DATA_UNDECRYPTABLE_HINT =
+  'Worker 无法用当前 Master Key 解密已有云端数据。请先尝试找回并恢复原密钥，勿直接重装或清库。'
+  + '若确实决定放弃旧云端排程与状态，可在确认后手动从设置「高级信息」清空云端数据，再点「重新连接并验证」；清空操作不可撤销。';
+
 const formatAmsgErrorCause = (cause: unknown): string => {
   if (typeof cause === 'string') return cause.trim();
   if (!cause || typeof cause !== 'object' || Array.isArray(cause)) return '';
@@ -1200,6 +1210,10 @@ const formatAmsgErrorCause = (cause: unknown): string => {
   const code = typeof c.code === 'string' ? c.code.trim() : '';
   const name = typeof c.name === 'string' ? c.name.trim() : '';
   const message = typeof c.message === 'string' ? c.message.trim() : '';
+  if (code === STORED_DATA_UNDECRYPTABLE_CODE
+      || (name === 'OperationError' && /decrypt/i.test(message))) {
+    return `${STORED_DATA_UNDECRYPTABLE_HINT}（${code || name}）`;
+  }
   const head = code
     ? (message.startsWith(code) ? '' : code)
     : (name && name !== 'Error' ? name : '');
@@ -1212,6 +1226,9 @@ export const formatAmsgErrorObject = (errorObj: unknown): string => {
   const err = errorObj as Record<string, unknown>;
   const message = typeof err.message === 'string' ? err.message.trim() : '';
   const code = typeof err.code === 'string' ? err.code.trim() : '';
+  if (code === STORED_DATA_UNDECRYPTABLE_CODE) {
+    return `${STORED_DATA_UNDECRYPTABLE_HINT}（${code}）`;
+  }
   const detailsText = formatAmsgErrorDetails(err.details, err);
   const causeText = formatAmsgErrorCause(err.cause);
 
@@ -2382,7 +2399,9 @@ export const ActiveMsgClient = {
    */
   async listRemoteTasksForChar(charId: string): Promise<RemoteTaskProjection[]> {
     const tasks = await this.listAllTasks();
-    if (tasks.length > 0 && tasks.every((t) => t?.charId == null)) {
+    // 新 Worker 3.2+ 解不开的任务本来就没 charId；不能据此误判成老 Worker。
+    const readable = tasks.filter((t) => !t?.error);
+    if (readable.length > 0 && readable.every((t) => t?.charId == null)) {
       throw new Error('worker 版本过旧：任务列表没有 charId 投影，无法按角色对账，请在设置里重新粘贴部署。');
     }
     return tasks
