@@ -177,7 +177,8 @@ export const markAmsgStateDirty = (
   reason: AmsgDirtyReason = 'refresh',
 ) => {
   const config = snapshot.char.activeMsg2Config;
-  if (!config?.enabled || !hasActiveAiTask(config)) {
+  // Worker 可在用户离线时续接 away 子任务，本地清单暂时为空不代表云端没有任务。
+  if (!config?.enabled || (!hasActiveAiTask(config) && !snapshot.char.awayMessage?.enabled)) {
     if (reason === 'invalidate') void invalidateCharCloudState(snapshot.char.id);
     return;
   }
