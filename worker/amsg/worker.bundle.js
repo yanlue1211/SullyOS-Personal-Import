@@ -11927,7 +11927,7 @@ function createSingleUserCloudflareWorker(buildConfig, options = {}) {
 }
 
 // utils/amsgBundleVersion.ts
-var AMSG_BUNDLE_VERSION = "2026-11-08.1";
+var AMSG_BUNDLE_VERSION = "2026-11-08.2";
 
 // worker/amsg/src/skipDiagnostics.ts
 var BODY_ERROR_MAX_CHARS = 200;
@@ -19483,7 +19483,11 @@ var amsgHooks = {
           tzId: typeof pack.tzId === "string" ? pack.tzId : void 0
         });
       } catch (error) {
-        throw new Error(`AMSG_AWAY_NEXT_SCHEDULE_FAILED: ${String(error)}`);
+        console.warn("[amsg:away-rearm] \u7EED\u6392\u4E0B\u4E00\u8282\u62CD\u5931\u8D25\uFF0C\u5DF2\u5EF6\u540E\u91CD\u8BD5\uFF08\u96F6\u6A21\u578B\u8C03\u7528\uFF09", {
+          taskId: ctx.task.id,
+          name: error instanceof Error ? error.name : "unknown"
+        });
+        return { defer: { afterMs: 5 * 6e4 } };
       }
       if (isStaleAwayTick(occurrenceMs, ctx.now.getTime())) {
         console.log("[amsg:away-skip]", { taskId: ctx.task.id, reason: "missed-slot" });
