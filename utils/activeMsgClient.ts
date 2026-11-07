@@ -2581,7 +2581,7 @@ export const ActiveMsgClient = {
     let targets: string[];
     try {
       targets = (await this.listRemoteTasksForChar(charId))
-        .filter((task) => classifyTaskRow(task) !== 'instant-chat')
+        .filter((task) => classifyTaskRow(task) === 'scheduled')
         .map((task) => task.uuid);
     } catch {
       targets = localTaskUuids;
