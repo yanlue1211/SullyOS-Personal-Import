@@ -486,6 +486,13 @@ describe('one-click deployment: never replace the old Master Key silently', () =
         expect(result).toMatchObject({ ok: false, code: 'CF_ERROR' });
         expect(sqls.filter(x => x.startsWith('DELETE'))).toHaveLength(0);
     });
+    it('没有加密表但是同名库被别的业务占用时，不碰任何已有表', async () => {
+        const sqls = fakeD1(['unrelated_private_data'], true);
+        expect(await guardReusedDatabase({ ...base, hasExistingMasterKey: false }))
+            .toMatchObject({ ok: false, code: 'CF_ERROR' });
+        expect(sqls.some(x => x.startsWith('DELETE'))).toBe(false);
+    });
+
     it('Cloudflare 回了异常结构，禁止误把未知状态判断为空库', async () => {
         const sqls = fakeD1(['client_state'], true, true);
         expect(await guardReusedDatabase({ ...base, hasExistingMasterKey: false }))
