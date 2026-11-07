@@ -160,6 +160,7 @@ import {
   type McpSessionState,
 } from '../../../utils/mcpFireCore';
 import { dispatchAgenticTool, type AgenticToolChar, type AgenticToolCtx } from '../../../utils/agenticTools';
+import { buildReplyScopeRule } from '../../../utils/replyScope';
 import {
   buildDuplicateToolMessage,
   buildToolResultMessage,
@@ -2579,6 +2580,12 @@ export const amsgHooks = {
         ? [buildFireCancelTool(), buildFireRenewTool({ nowMs: ctx.now.getTime(), tz })]
         : []),
     ];
+    // 工具调用与结果都是这一次回复中的步骤，云端定时消息和即时用户聊天触发点不同。
+    // 此块并入动态提示而不是角色固定缓存层；没有工具时不额外注入。
+    const replyScopeBlock = fireTools.length > 0 || mcpBlock || scheduleBlock
+      ? `\n${buildReplyScopeRule(instant ? 'user' : 'scheduled')}\n`
+      : '';
+
     // 非 MCP 的声明名单独留一份给 onLLMOutput 认领 native 调用用（见 FireStash.fireToolNames）。
     stash.fireToolNames = new Set(fireTools
       .map((t) => t?.function?.name)
@@ -2612,7 +2619,7 @@ export const amsgHooks = {
         blocks: [
           realtimeWorldBlock,
           renderSelfLogBlock(selfLog, ctx.now.getTime(), tz, maxUnansweredSends),
-          taskListBlock, mcpBlock, scheduleBlock,
+          taskListBlock, mcpBlock, scheduleBlock, replyScopeBlock,
         ],
       });
       // content 原样透传：图片仍然是结构化分段，绝不能 String() 变成 [object Object]。
@@ -2689,7 +2696,7 @@ export const amsgHooks = {
       // B方案每一节拍只是一次发言机会，沿用作者原生【开口之前】自主静默判断。
       // 到点的自动续排、禁发零LLM均已在 onBeforeFire 完成；这里绝不额外调用模型。
       mustSpeak: false,
-    }), userHoliday) + mcpBlock + scheduleBlock;
+    }), userHoliday) + mcpBlock + scheduleBlock + replyScopeBlock;
     return {
       messages: [{ role: 'user' as const, content: prompt }],
       ...common,
