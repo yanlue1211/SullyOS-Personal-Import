@@ -21,7 +21,7 @@ const makeTask = (index: number, at: number) => ({
 
 async function start(over: {
   enabled?: boolean; config?: any; pending?: any[]; selfLog?: any; sharedValue?: string; awaySceneLock?: 'date' | 'call';
-  builtAt?: number; limits?: Record<string, unknown>; chatMessages?: any[]; nowMs?: number; task?: any; remote?: any[]; template?: string;
+  builtAt?: number; limits?: Record<string, unknown>; chatMessages?: any[]; nowMs?: number; task?: any; remote?: any[]; template?: string; failNextSchedule?: boolean;
 } = {}) {
   const nowMs = over.nowMs ?? now;
   const pack = {
@@ -39,6 +39,7 @@ async function start(over: {
     ...(over.selfLog ? [{ key: AMSG_SELF_LOG_KEY, value: JSON.stringify(over.selfLog) }] : []),
   ];
   const scheduleTask = vi.fn<NonNullable<Parameters<typeof runFireScheduleTool>[1]>>(async (options) => {
+    if (over.failNextSchedule) throw new Error('simulated unavailable scheduler');
     if (!options.uuid) throw new Error('Expected a deterministic self-scheduled task UUID');
     return { created: true, id: 2, uuid: options.uuid, nextSendAt: options.firstSendTime };
   });
@@ -116,6 +117,27 @@ describe('amsg2 audit regressions', () => {
     expect(Date.parse(next.firstSendTime)).toBeGreaterThan(now);
     expect(Date.parse(next.firstSendTime)).toBeLessThanOrEqual(now + 120 * 60_000);
     expect(result.plan).toEqual({ skip: true });
+  });
+
+  it('云端续排失败时延后原任务重试，不因 B方案零生成重试而断链或烧模型', async () => {
+    const task = {
+      id: 46, uuid: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      contactName: '角色', nextSendAt: new Date(now).toISOString(), recurrenceType: 'none',
+      metadata: { charId, amsgClientTaskId: 'away-scheduler-failure', amsgAwayMessage: true,
+        amsgAwayDelayMinutes: 120, amsgTaskInstruction: '分享生活', amsgExpirePolicy: 'force' },
+    };
+    const failing = await start({ task, failNextSchedule: true, limits: { awayEnabled: true } });
+    expect(failing.scheduleTask).toHaveBeenCalledTimes(1);
+    expect(failing.plan).toEqual({ defer: { afterMs: 5 * 60_000 } });
+    expect(failing.stash).toBeUndefined(); // 还没进入正文/模型生成阶段。
+    const recovered = await start({ task, limits: { awayEnabled: true } });
+    expect(recovered.scheduleTask).toHaveBeenCalledTimes(1);
+    expect(recovered.plan.skip).toBeUndefined();
+    expect(recovered.plan.defer).toBeUndefined();
+    expect(recovered.stash).toBeDefined();
+    expect(recovered.scheduleTask.mock.calls[0][0].uuid).toBe(
+      failing.scheduleTask.mock.calls[0][0].uuid,
+    );
   });
 
   it('B-mode due tick gives the original autonomous silent choice without a second model call', async () => {
