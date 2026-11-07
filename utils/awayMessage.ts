@@ -76,9 +76,39 @@ export const syncCloudAwayTask = async (deps: {
     const now = Date.now();
     const targetMs = Math.max(deps.lastUserAt + delayMinutes * 60_000, now + 60_000);
     const sendAt = new Date(targetMs).toISOString();
-    const record = (char.activeMsg2Config.tasks ?? []).filter(t => t.away).at(-1);
-    const action = decideAwayTaskAction(record ? awaySendAtMs(record) : null, targetMs, now);
-    if (action === 'keep') return;
+    // B 模式下 Worker 每次 fire 会创建下一节拍，客户端本地列表不一定认领过它。
+    // 新用户开口时必须先和远端对账：否则老链在云端继续，我们又凭旧的本地清单
+    // 创建一条新链，两个链交错触发会倍增模型调用次数。
+    const localAway = (char.activeMsg2Config.tasks ?? []).filter(t => t.away);
+    const remote = await ActiveMsgClient.listRemoteTasksForChar(char.id);
+    const remoteAway = remote.filter(t => t.status === 'pending'
+      && (t.clientTaskId?.startsWith('away-') || localAway.some(old => old.taskUuid === t.uuid)));
+    // 多出来的链（旧版竞争或恢复残留）尽力取消；只保留最早的那条继续改期。
+    const ordered = remoteAway.sort((a, b) =>
+      Date.parse(a.nextSendAt || '') - Date.parse(b.nextSendAt || ''));
+    const keep = ordered[0];
+    for (const extra of ordered.slice(1)) {
+      await ActiveMsgClient.cancelTask(extra.uuid);
+    }
+    const record = keep
+      ? { taskUuid: keep.uuid, nextSendAt: keep.nextSendAt || sendAt, firstSendTime: keep.nextSendAt || sendAt,
+          clientTaskId: keep.clientTaskId || `away-${keep.uuid}`, mode: 'auto' as const, away: true }
+      : undefined;
+    const action = decideAwayTaskAction(record ? awaySendAtMs(record as ActiveMsg2TaskRecord) : null, targetMs, now);
+    if (action === 'keep') {
+      // 面板里也要看见 Worker 在离线时生成的下一节拍，不要永远显示旧的 UUID。
+      if (record && !localAway.some(old => old.taskUuid === record.taskUuid)) {
+        deps.updateCharacter(char.id, prev => prev.activeMsg2Config ? {
+          activeMsg2Config: {
+            ...prev.activeMsg2Config,
+            tasks: applyScheduledTask((prev.activeMsg2Config.tasks ?? []).filter(t => !t.away), {
+              ...record, recurrenceType: 'none', expirePolicy: 'force', source: 'user', status: 'scheduled', createdAt: now,
+            } as ActiveMsg2TaskRecord, {}, now),
+          },
+        } : {});
+      }
+      return;
+    }
 
     if (action === 'renew' && record) {
       const { updated, failed } = await ActiveMsgClient.updatePendingTasksRemote([record.taskUuid], { nextSendAt: sendAt });
@@ -86,13 +116,16 @@ export const syncCloudAwayTask = async (deps: {
         deps.updateCharacter(char.id, prev => prev.activeMsg2Config ? {
           activeMsg2Config: {
             ...prev.activeMsg2Config,
-            tasks: (prev.activeMsg2Config.tasks ?? []).map(t => t.taskUuid === record.taskUuid ? { ...t, nextSendAt: sendAt } : t),
+            tasks: applyScheduledTask((prev.activeMsg2Config.tasks ?? []).filter(t => !t.away), {
+              ...record, nextSendAt: sendAt, firstSendTime: sendAt,
+              recurrenceType: 'none', expirePolicy: 'force', source: 'user', status: 'scheduled', createdAt: now,
+            } as ActiveMsg2TaskRecord, {}, now),
           },
         } : {});
         return;
       }
       if (failed.length) throw new Error('离开后消息改期失败');
-      // 远端已经没有这条了（发过了或被取消）：往下新建。
+      // 到点已消费、远端任务已经不在：下面只补建一条新链。
     }
 
     const result = await ActiveMsgClient.scheduleCharacterTask({
