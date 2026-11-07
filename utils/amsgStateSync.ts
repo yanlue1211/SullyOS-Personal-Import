@@ -43,6 +43,7 @@ import {
   type LlmCredentialRow,
 } from './amsgLlmCredentials';
 import { trackEvent } from './analytics';
+import { AMSG_OWNER_CONFLICT_EVENT } from './amsgOwnerReconcile';
 import { DB } from './db';
 
 /** 失败重试的退避起点，逐次翻倍（30s → 60s → 120s）。 */
@@ -667,6 +668,7 @@ const runLlmCredentialSync = async (reason: string): Promise<void> => {
         // 其他角色的新凭据已单独传上去；冲突角色的本地记录/云端登记不碰。
         // 保留同步欠账供用户之后手动处理，避免误报本次所有角色已同步。
         console.warn(`${HEADER} 云端角色登记冲突，仅这些角色的 API 凭据未同步：${names}。其余角色已尝试独立上传，未执行任何删除或恢复。`);
+        if (typeof window !== 'undefined') window.dispatchEvent(new Event(AMSG_OWNER_CONFLICT_EVENT));
         throw new Error(`云端角色登记冲突：${names}。请确认云端角色状态再重试；本地角色数据未修改。`);
       }
     }
