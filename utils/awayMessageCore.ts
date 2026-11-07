@@ -53,6 +53,26 @@ export const planAwaySlots = (lastUserAt: number, delayMs: number, nowMs: number
   return Array.from({ length: count }, (_, i) => Math.round(start + ((end - start) * i) / count));
 };
 
+/**
+ * B 模式：只认固定节拍（最后一条真实用户消息 + N * 等待间隔）。
+ * Worker 晚到时跳过已经错过的节拍，不补发、不排出过去的任务。
+ */
+export const nextAwayTickMs = (occurrenceMs: number, intervalMs: number, nowMs: number): number => {
+  if (!Number.isFinite(occurrenceMs) || !Number.isFinite(nowMs)
+      || !Number.isFinite(intervalMs) || intervalMs <= 0) throw new Error('Invalid away tick');
+  return occurrenceMs + (Math.floor(Math.max(0, nowMs - occurrenceMs) / intervalMs) + 1) * intervalMs;
+};
+
+/** 过期的离开提醒绝不补发；正常 cron 有分钟级偏差，给 10 分钟宽限。 */
+export const isStaleAwayTick = (occurrenceMs: number, nowMs: number): boolean =>
+  nowMs - occurrenceMs > 10 * 60_000;
+
+/** 本地补发也只发当前最新一个节拍，不伪造睡眠期间的多条聊天记录。 */
+export const latestAwayTickMs = (lastUserAt: number, intervalMs: number, nowMs: number): number | null => {
+  if (intervalMs <= 0 || nowMs < lastUserAt + intervalMs) return null;
+  return lastUserAt + Math.floor((nowMs - lastUserAt) / intervalMs) * intervalMs;
+};
+
 /** 按 AWAY_SEGMENT_MARK 切开模型输出：去掉空段，多出来的并进最后一段。 */
 export const splitAwaySegments = (raw: string, maxSegments: number): string[] => {
   const parts = raw.split(AWAY_SEGMENT_MARK).map(s => s.trim()).filter(Boolean);
