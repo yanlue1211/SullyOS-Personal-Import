@@ -145,6 +145,8 @@ export interface AmsgLimitsRecord extends AmsgPacingSettings {
   awayEnabled?: boolean;
   /** 只有自动空闲提醒读取的节拍间隔。 */
   awayDelayMinutes?: number;
+  /** 见面/通话即时锁使用小型限制行快速同步，不等待较大的 fire_pack 上传。 */
+  awaySceneLock?: 'date' | 'call' | null;
 }
 
 export const buildAmsgLimitsRecord = (
@@ -152,12 +154,14 @@ export const buildAmsgLimitsRecord = (
   selfScheduleEnabled: boolean,
   awayQuietHours?: { enabled: boolean; startTime: string; endTime: string },
   away?: { enabled: boolean; delayMinutes?: number },
+  awaySceneLock?: 'date' | 'call' | null,
 ): AmsgLimitsRecord => ({
   v: 1,
   selfScheduleEnabled,
   ...pickPacingSettings(config),
   ...(awayQuietHours ? { awayQuietHours } : {}),
   ...(away ? { awayEnabled: away.enabled, awayDelayMinutes: away.delayMinutes } : {}),
+  ...(awaySceneLock !== undefined ? { awaySceneLock } : {}),
 });
 
 /** 读回来的记录；形状不对返回 null（worker 按默认值走——默认值本身就是偏严的那一侧）。 */
