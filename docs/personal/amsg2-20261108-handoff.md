@@ -101,3 +101,9 @@
 - 用户通过 Cloudflare Dashboard → `sullyos-amsg` → Production → Runtime variables and secrets 添加公开 Text 变量 `AMSG_BUNDLE_URL`，目标为个人发布分支的 `worker/amsg/worker.bundle.js`；截图变量表新增了一行 `Variable`、并显示 `wrangler.jsonc / wrangler.toml` 的 `AMSG_BUNDLE_URL` 配置提示。截图不显示完整值，需在真实升级前复核来源字串。
 - Cloudflare 提示 `Update your Wrangler configuration with these changes to keep deployments in sync`，这是配置同步提醒，非 Worker 更新失败。不应照提示随意更换构建配置或把任何 Secret 明文写入公开仓库。后续通过 Git/Wrangler 重部署须确保该变量仍保留（个人仓库 `worker/amsg/wrangler.toml` 有 `keep_vars = true`，但实际部署来源待核）。
 - 这一轮操作只证明生产变量已添加，不证明 Worker bundle 已由 `2026-11-07.3` 升至 `2026-11-08.3`。下一步重新读取只读 `/config-check`，再核对 `CF_SCRIPT_NAME`/旧授权共享密钥及原有绑定。自动更新的 Cron 检查可能独立于前端共享密钥，不能把历史 `UNAUTHORIZED` 当作每轮 Cron 错误。
+
+### 5.4 手机已通过「重新连接并验证」（2026-11-08 03:36，用户截图）
+
+- 当前最新正式网页 `personal/audio-listening@4e740fa` 的主动消息设置弹出绿色成功提示「已连接成功，主动消息 2.0 可以用了」，说明 Worker 已通过 `POST /init-tenant`、用户密钥握手和前端的能力探测等连接流程。
+- `utils/activeMsgClient.ts` 的 `fetchWithAuthRaw` 在 `config.serverToken` 非空时发送 `X-Client-Token`；因此此次成功是当前普通请求鉴权可用的强证据。之前 `selfUpdate.lastError = UNAUTHORIZED` 可能为旧历史状态，不应直接重置 `AMSG_SERVER_TOKEN`。
+- **连接成功不能替代实际 `POST /self-update` 的鉴权/权限验证**，更不能代表 Worker 已升级到 `2026-11-08.3`。在用户已添加正确的生产 `AMSG_BUNDLE_URL` 且完整值核对无误前提下，可从最新前端触发一次原位升级；应保留原有 D1、Master Key、Push、Cron 和 DO，失败立即停止重试并查看错误，成功后再以真实 `GET /config-check` 确认版本及能力位。不能把此连接成功误报为 B 方案验收。
