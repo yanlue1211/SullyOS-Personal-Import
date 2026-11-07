@@ -119,6 +119,23 @@ describe('凭据行取值', () => {
     expect(row?.value.primaryModel).toBe('gpt-global');
   });
 
+  it('定时消息打开独立 API 后使用副 API，切回关闭则使用角色原本的私聊 API', () => {
+    const withPrivate = { ...CHAR, dialogueApi: { baseUrl: 'https://char.dev/v1', apiKey: 'sk-char', model: 'char-model' } };
+    const privateRow = buildCharChatCredRow(withPrivate, {
+      enabled: true, useSecondaryApi: true, secondaryApi: SECONDARY,
+    } as any, API);
+    expect(privateRow?.value.primaryModel).toBe('gpt-alt');
+    expect(privateRow?.value.apiUrl).toBe('https://alt.example.dev/v1/chat/completions');
+    expect(buildCharChatCredRow(withPrivate, { enabled: true, useSecondaryApi: false, secondaryApi: SECONDARY } as any, API)?.value.primaryModel)
+      .toBe('char-model');
+  });
+
+  it('独立 API 打开但缺密钥时阻止偷偷回退到昂贵主聊天模型', () => {
+    expect(() => buildCharChatCredRow(CHAR, {
+      enabled: true, useSecondaryApi: true, secondaryApi: { baseUrl: 'https://alt.example.dev/v1', apiKey: '', model: 'cheap' },
+    } as any, API)).toThrow('未配置完整');
+  });
+
   it('即时对话那行：原样收下当轮终值（claude 系开思考时的 -thinking 后缀不能被抹掉）', () => {
     const row = buildCharInstantCredRow('char-1', {
       baseUrl: 'https://api.example.dev/v1', apiKey: 'sk-global', model: 'claude-sonnet-4-thinking',
