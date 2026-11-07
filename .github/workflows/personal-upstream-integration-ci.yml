@@ -33,6 +33,7 @@ jobs:
           utils/collaborationRouting.test.ts
           utils/chibiImageExport.test.ts
           utils/backupMissingAssets.test.ts
+          utils/storageOptimize.test.ts
           utils/analyticsSnapshot.test.ts
           utils/homePhotoLibrary.test.ts
           utils/homePhotoMode.test.ts
