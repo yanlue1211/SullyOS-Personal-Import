@@ -23,6 +23,7 @@ import { ChatPrompts } from './chatPrompts';
 import { buildChatRequestPayload } from './chatRequestPayload';
 import { applyAssistantPostProcessing } from './applyAssistantPostProcessing';
 import { resolveScheduledMessageApi } from './characterApi';
+import { normalizeChatApiUrl } from './amsgLlmCredentials';
 import { extractContent, safeFetchJson } from './safeApi';
 import { resolveCharTimeZone } from './timezone';
 import { loadMusicPlaybackSnapshot } from '../context/MusicContext';
@@ -285,8 +286,9 @@ const generateLocalAwayMessages = async (char: CharacterProfile, deps: LocalAway
   });
 
   const baseUrl = api.baseUrl.replace(/\/+$/, '');
+  const chatEndpoint = normalizeChatApiUrl(baseUrl, api.apiType);
   const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${api.apiKey || 'sk-none'}` };
-  const data = await safeFetchJson(`${baseUrl}/chat/completions`, {
+  const data = await safeFetchJson(chatEndpoint, {
     method: 'POST', headers,
     body: JSON.stringify({ model: api.model, messages: payload.fullMessages, temperature: api.temperature ?? 0.85, stream: false }),
   }, 2, 0, { appName: '消息', charId: char.id, charName: char.name, purpose: '离开后消息' });
