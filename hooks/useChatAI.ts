@@ -54,6 +54,7 @@ import { INSTANT_TOTAL_TIMEOUT_MS } from '../worker/amsg/src/instantChat';
 import { appendInstantTraceEntry } from '../utils/instantTraceLog';
 import { AMSG2_TOOL_NAMES, buildAmsg2Tools, createAmsg2ToolSession, executeAmsg2ToolWithOutcome, isAmsg2GlobalReady, type Amsg2ToolOutcome } from '../utils/amsg2ToolBridge';
 import { AMSG2_EMPTY_REPLY_PROMPT, AMSG2_WRAP_UP_PROMPT, createAmsg2StallTracker, extractToolRoundLeadIn, mergeToolRoundLeadIns } from '../utils/amsg2ToolLoop';
+import { buildReplyScopeRule } from '../utils/replyScope';
 import { buildLimitsBrief, resolveAmsgLimits } from '../utils/amsgLimits';
 import { shouldSendThinkingParams } from '../utils/thinkingGate';
 import { isAnthropicEndpoint } from '../utils/llmEndpoint';
@@ -1264,6 +1265,17 @@ export const useChatAI = ({
                 return insertAmsg2TaskContextBlock(messages, block, payload.volatileTailIndex);
             };
 
+            // 本地有工具时，一次回复贯穿多次 LLM / 工具请求。插进原生易变尾段
+            // 之前，稳定缓存层不变；云端 instant 分支由 Worker 在到点时注入，
+            // 因为上云 chatMessages 是 fullMessages，不使用这里的 baseReqBody。
+            if (baseReqBody.tools?.length || mcpToolResolve) {
+                baseReqBody.messages = insertAmsg2TaskContextBlock(
+                    baseReqBody.messages,
+                    { role: 'system', content: buildReplyScopeRule('user') },
+                    payload.volatileTailIndex,
+                );
+            }
+
             // ─── 即时对话（主动消息 2.0 云端生成）分支 ───
             // 这一轮的上下文 + 任务一个 POST 上云，云端跑完走推送回来（收件箱同一条管线入库），
             // 客户端发完那一刻就自由了。
@@ -1896,7 +1908,7 @@ export const useChatAI = ({
                             content: wrapUpKind === 'amsg2-stalled'
                                 || (wrapUpKind === 'hard-limit' && !mcpToolResolve && !payload.flags.luckinChatActive)
                                 ? AMSG2_WRAP_UP_PROMPT
-                                : `[系统消息：工具阶段${stalled ? '连续两轮没有产生新结果' : '已到本轮安全上限'}。请停止调用工具，基于已经拿到的结果直接用角色语气回复；如目标仍未完成，请如实说明卡在哪一步。不要输出工具名、参数或这条系统消息。]`,
+                                : `[系统消息：工具阶段${stalled ? '连续两轮没有产生新结果' : '已到这次回复的安全上限'}。请停止调用工具，基于已经拿到的结果直接用角色语气回复；如目标仍未完成，请如实说明卡在哪一步。不要输出工具名、参数或这条系统消息。]`,
                         });
                     }
                     const followBody = { ...baseReqBody, messages: followMessages };
@@ -2014,7 +2026,7 @@ export const useChatAI = ({
                     if (reachedHardLimit) {
                         textLoopMessages.push({
                             role: 'user',
-                            content: '[系统消息：工具阶段已到本轮安全上限。停止调用工具，基于已有结果直接回复；如目标未完成就如实说明。不要输出工具调用格式或提及本消息。]',
+                            content: '[系统消息：工具阶段已到这次回复的安全上限。停止调用工具，基于已有结果直接回复；如目标未完成就如实说明。不要输出工具调用格式或提及本消息。]',
                         });
                     }
                     setSearchStatus('正在整理 MCP 工具结果...');
