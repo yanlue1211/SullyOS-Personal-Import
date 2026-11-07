@@ -75,6 +75,9 @@ const ActiveMsg2PacingModal: React.FC<ActiveMsg2PacingModalProps> = ({
   const [maxTasks, setMaxTasks] = useState<SelectValue>('');
   const [allowRecurring, setAllowRecurring] = useState(false);
   const [allowForce, setAllowForce] = useState(false);
+  const [quietEnabled, setQuietEnabled] = useState(false);
+  const [quietStart, setQuietStart] = useState('23:00');
+  const [quietEnd, setQuietEnd] = useState('08:00');
   const [saving, setSaving] = useState(false);
 
   // 每次打开都从保存值重新填：上次没保存就关掉的改动不该留着。只认「打开」这一下：
@@ -91,6 +94,9 @@ const ActiveMsg2PacingModal: React.FC<ActiveMsg2PacingModalProps> = ({
     setMaxTasks(toSelect(initial.maxActiveTasks));
     setAllowRecurring(resolved.allowSelfRecurring);
     setAllowForce(resolved.allowSelfForce);
+    setQuietEnabled(initial.quietHours?.enabled === true);
+    setQuietStart(initial.quietHours?.startTime || '23:00');
+    setQuietEnd(initial.quietHours?.endTime || '08:00');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
@@ -108,6 +114,7 @@ const ActiveMsg2PacingModal: React.FC<ActiveMsg2PacingModalProps> = ({
         maxActiveTasks: fromSelect(maxTasks),
         allowSelfRecurring: allowRecurring,
         allowSelfForce: allowForce,
+        quietHours: { enabled: quietEnabled, startTime: quietStart, endTime: quietEnd },
       });
       if (closed) onClose();
     } finally {
@@ -137,6 +144,29 @@ const ActiveMsg2PacingModal: React.FC<ActiveMsg2PacingModalProps> = ({
         </p>
 
         <div className="space-y-4">
+          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block pl-1">不打扰时间</label>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 pl-1">
+              <div className="font-bold text-slate-700">开启睡眠时段禁发</div>
+              <div className="text-xs text-slate-400 mt-1 leading-relaxed">
+                TA 在这个时间段不会给你发 2.0 云端主动消息；即使完全关闭后台也生效。禁发的那次直接跳过，不会在醒来后补发。正常聊天回复不受影响。
+              </div>
+            </div>
+            <Toggle on={quietEnabled} onClick={() => setQuietEnabled(!quietEnabled)} />
+          </div>
+          {quietEnabled && (
+            <div className="grid grid-cols-2 gap-3 pl-1">
+              <Field label="从几点开始" hint="按你手机所在时区">
+                <input type="time" step={60} value={quietStart} onChange={e => setQuietStart(e.target.value)} className={selectClass} />
+              </Field>
+              <Field label="到几点结束" hint="支持跨越午夜">
+                <input type="time" step={60} value={quietEnd} onChange={e => setQuietEnd(e.target.value)} className={selectClass} />
+              </Field>
+            </div>
+          )}
+          {quietEnabled && quietStart === quietEnd && (
+            <p className="text-xs text-amber-600 pl-1">开始和结束相同：全天禁止 2.0 云端主动消息。</p>
+          )}
           <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block pl-1">多久找你一次</label>
 
           <Field
