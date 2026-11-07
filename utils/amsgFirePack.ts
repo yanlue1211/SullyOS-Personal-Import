@@ -963,7 +963,7 @@ export const FIRE_PACK_VERSION = 7;
  * 成「待触发」，还可能被「取消全部」顺手掐掉）。写读两侧靠这一个常量绑死：它是
  * GET /messages 明文投影里唯一可查的即时对话标记，producer 改个说法 filter 就瞎了。
  */
-export const AMSG_INSTANT_CHAT_SUBTYPE = 'instant-chat';
+export { AMSG_INSTANT_CHAT_SUBTYPE } from './amsgTaskKinds';
 
 /**
  * 解析失败时给人看的一句原因。
