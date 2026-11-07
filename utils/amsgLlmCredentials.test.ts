@@ -135,6 +135,44 @@ describe('凭据行取值', () => {
     } as any, API)).toThrow('未配置完整');
   });
 
+  it('独立 API 每个角色单独解析，不会拿 A 的密钥去给 B 发送定时消息', () => {
+    const a = buildCharChatCredRow({ id: 'A', dialogueApi: { baseUrl: 'https://role-a.dev/v1', apiKey: 'role-a', model: 'role-a' } }, {
+      enabled: true, useSecondaryApi: true,
+      secondaryApi: { baseUrl: 'https://cheap-a.dev/v1', apiKey: 'cheap-a', model: 'cheap-a' },
+    } as any, API);
+    const b = buildCharChatCredRow({ id: 'B', dialogueApi: { baseUrl: 'https://role-b.dev/v1', apiKey: 'role-b', model: 'role-b' } }, {
+      enabled: true, useSecondaryApi: false,
+    } as any, API);
+    expect(a).toEqual({ credId: 'char:A/chat', value: {
+      apiUrl: 'https://cheap-a.dev/v1/chat/completions', apiKey: 'cheap-a', primaryModel: 'cheap-a',
+    } });
+    expect(b).toEqual({ credId: 'char:B/chat', value: {
+      apiUrl: 'https://role-b.dev/v1/chat/completions', apiKey: 'role-b', primaryModel: 'role-b',
+    } });
+  });
+
+  it('独立 API 使用 Anthropic 原生时绝不能错拼 /chat/completions', () => {
+    const row = buildCharChatCredRow(CHAR, { enabled: true, useSecondaryApi: true, secondaryApi: {
+      baseUrl: 'https://api.anthropic.com/v1', apiKey: 'anthropic-key', model: 'claude-example', apiType: 'anthropic',
+    } } as any, API);
+    expect(row?.value).toEqual({
+      apiUrl: 'https://api.anthropic.com/v1/messages', apiKey: 'anthropic-key', primaryModel: 'claude-example',
+    });
+  });
+
+  it('独立 API 失败必须停止，不能修复性借用角色 API 的模型或密钥', () => {
+    const charWithOwnApi = { ...CHAR, dialogueApi: { baseUrl: 'https://expensive.dev/v1', apiKey: 'expensive-key', model: 'expensive' } };
+    for (const invalid of [
+      { baseUrl: 'https://cheap.dev/v1', apiKey: '', model: 'cheap' },
+      { baseUrl: '', apiKey: 'cheap-key', model: 'cheap' },
+      { baseUrl: 'https://cheap.dev/v1', apiKey: 'cheap-key', model: '' },
+    ]) {
+      expect(() => buildCharChatCredRow(charWithOwnApi, {
+        enabled: true, useSecondaryApi: true, secondaryApi: invalid,
+      } as any, API)).toThrow('已阻止回退');
+    }
+  });
+
   it('即时对话那行：原样收下当轮终值（claude 系开思考时的 -thinking 后缀不能被抹掉）', () => {
     const row = buildCharInstantCredRow('char-1', {
       baseUrl: 'https://api.example.dev/v1', apiKey: 'sk-global', model: 'claude-sonnet-4-thinking',
