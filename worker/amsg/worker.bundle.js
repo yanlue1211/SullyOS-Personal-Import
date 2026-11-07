@@ -14414,7 +14414,7 @@ function buildScheduledPush(message, build, extraMeta, bannerBody) {
 }
 
 // utils/amsgBundleVersion.ts
-var AMSG_BUNDLE_VERSION = "2026-11-08.2";
+var AMSG_BUNDLE_VERSION = "2026-11-08.3";
 
 // worker/amsg/src/reproduction.ts
 async function writeDiagnosticStage(writeState, runId, event, fields = {}) {
@@ -16047,7 +16047,7 @@ var parseAmsgSelfUpdateState = (raw) => {
 
 // worker/amsg/src/selfUpdate.ts
 var CF_API = "https://api.cloudflare.com/client/v4";
-var BUNDLE_URL = "https://raw.githubusercontent.com/Tosd0/sullyos-workers/main/amsg/worker.bundle.js";
+var BUNDLE_URL = "https://raw.githubusercontent.com/yanlue1211/SullyOS-Personal-Import/personal/audio-listening/worker/amsg/worker.bundle.js";
 function resolveBundleUrl(env) {
   const configured = env.AMSG_BUNDLE_URL?.trim();
   if (!configured) return BUNDLE_URL;
