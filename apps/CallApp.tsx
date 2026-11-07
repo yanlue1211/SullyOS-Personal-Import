@@ -1748,40 +1748,52 @@ const CallApp: React.FC = () => {
     beginSelectedCall(setupCameraMode);
   };
   const finishCall = async () => {
-    if (selectedChar?.id) {
-      const userTurns = bubbles.filter(b => b.role === 'user').length;
-      const keepsakeLine = summarizeKeepsakeLine(bubbles, selectedChar.name);
-      const payload = {
-        characterId: selectedChar.id,
-        characterName: selectedChar.name,
-        characterAvatar: selectedChar.avatar,
-        durationSec: elapsedSeconds,
-        turnCount: userTurns,
-        keepsakeLine,
-        callMode,
-        endedAt: Date.now(),
-      };
-      await DB.saveMessage({
-        charId: selectedChar.id,
-        role: 'system',
-        type: 'system',
-        content: `通话结束 · ${selectedChar.name}｜${formatDuration(elapsedSeconds)}｜${Math.max(1, userTurns)}轮对话`,
-        metadata: { source: 'call-end-popup', callSessionId: currentSessionId, ...payload },
-      });
-      await loadCallRecords(selectedChar.id);
-      trackEvent('结束一通通话', { 模式: callMode === 'video' ? '视频' : '语音' });
-      setAmsgActiveCall(selectedChar.id, false);
-      void (isAmsg2EnabledForChar(selectedChar) ? ActiveMsgClient.putCharLimits(selectedChar) : Promise.resolve()).catch(error => console.warn('[CallApp] 云端挂断状态同步失败', error));
-      // 挂断这一下最要紧：用户多半接着就把 App 关了，得把这最后一条也打脏——
-      // 打脏即传，微任务内就会冲刷上传。
-      markCallTurnDirty();
-      runCallMemoryPalaceHook(selectedChar);
+    const finishingChar = selectedChar;
+    let saved = !finishingChar;
+    try {
+      if (finishingChar) {
+        const userTurns = bubbles.filter(b => b.role === 'user').length;
+        const keepsakeLine = summarizeKeepsakeLine(bubbles, finishingChar.name);
+        const payload = {
+          characterId: finishingChar.id,
+          characterName: finishingChar.name,
+          characterAvatar: finishingChar.avatar,
+          durationSec: elapsedSeconds,
+          turnCount: userTurns,
+          keepsakeLine,
+          callMode,
+          endedAt: Date.now(),
+        };
+        await DB.saveMessage({
+          charId: finishingChar.id,
+          role: 'system',
+          type: 'system',
+          content: `通话结束 · ${finishingChar.name}｜${formatDuration(elapsedSeconds)}｜${Math.max(1, userTurns)}轮对话`,
+          metadata: { source: 'call-end-popup', callSessionId: currentSessionId, ...payload },
+        });
+        saved = true;
+        await loadCallRecords(finishingChar.id);
+        trackEvent('结束一通通话', { 模式: callMode === 'video' ? '视频' : '语音' });
+        runCallMemoryPalaceHook(finishingChar);
+      }
+    } catch (error) {
+      console.warn('[CallApp] 挂断后保存通话记录失败', error);
+      addToast('通话已经挂断，但保存记录失败；请检查存储空间。', 'error');
+    } finally {
+      // 显式挂断必须解除锁；即便记录保存失败也不得把状态永久留给2.0。
+      if (finishingChar) {
+        setAmsgActiveCall(finishingChar.id, false);
+        void (isAmsg2EnabledForChar(finishingChar)
+          ? ActiveMsgClient.putCharLimits(finishingChar) : Promise.resolve())
+          .catch(error => console.warn('[CallApp] 云端挂断状态同步失败', error));
+        markCallTurnDirty();
+      }
+      clearSuspendedCall();
+      resetCurrentCall();
+      setViewMode('history');
+      setShowHangupConfirm(false);
+      if (saved) addToast('通话记录已保存', 'success');
     }
-    clearSuspendedCall();
-    resetCurrentCall();
-    setViewMode('history');
-    setShowHangupConfirm(false);
-    addToast('通话记录已保存', 'success');
   };
   const handleHangup = () => {
     setShowHangupConfirm(true);
