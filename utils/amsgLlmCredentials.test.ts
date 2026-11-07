@@ -103,20 +103,19 @@ describe('凭据行取值', () => {
     });
   });
 
-  it('旧备份带单独 API 时，定时消息仍使用主 API', () => {
+  it('旧备份明确启用了独立API时恢复其用途，保持与前台排程同口径', () => {
     const row = buildCharChatCredRow(
       CHAR, { enabled: true, useSecondaryApi: true, secondaryApi: SECONDARY } as any, API,
     );
     expect(row?.value).toEqual({
-      apiUrl: 'https://api.example.dev/v1/chat/completions', apiKey: 'sk-global', primaryModel: 'gpt-global',
+      apiUrl: 'https://alt.example.dev/v1/chat/completions', apiKey: 'sk-alt', primaryModel: 'gpt-alt',
     });
   });
 
-  it('定时消息那行：开关开着但单独 API 没填地址 → 回落全局（口径同排程时的 resolveApiConfig）', () => {
-    const row = buildCharChatCredRow(
-      CHAR, { enabled: true, useSecondaryApi: true, secondaryApi: { baseUrl: '', apiKey: '', model: '' } } as any, API,
-    );
-    expect(row?.value.primaryModel).toBe('gpt-global');
+  it('独立 API 已启用但地址缺失时安全阻断，不悄悄回退全局模型', () => {
+    expect(() => buildCharChatCredRow(CHAR, {
+      enabled: true, useSecondaryApi: true, secondaryApi: { baseUrl: '', apiKey: '', model: '' },
+    } as any, API)).toThrow('未配置完整');
   });
 
   it('定时消息打开独立 API 后使用副 API，切回关闭则使用角色原本的私聊 API', () => {
