@@ -3246,10 +3246,13 @@ export const buildWorkerConfig = (env: Env) => {
     // 是否接入 MCP 返回 5 / 12；即时对话再把总超时抬到 INSTANT_TOTAL_TIMEOUT_MS。
     hooks: amsgHooks,
     leaseHeartbeatMs: 1000,
-    // 用户主动触发的即时对话：生成失败本轮就结束，由用户决定是否重发。
-    // 策略由上游在 onBeforeFire 前解析，读取上下文失败也覆盖；整批入箱后仍可补推原文。
+    // 即时聊天：这次生成失败就交还用户决定是否重试。
+    // B方案空闲节拍：这次仅给一次生成机会，前置 onBeforeFire 已用固定 UUID
+    // 排好下一节拍。若本次生成失败，不重复烧模型请求；下一节拍仍照常到来。
+    // 其他用户/角色明确预约的任务不改变作者原生重试规则。
+    // 上游在 onBeforeFire 前解析生成重试策略；这项不修改租约心跳及推送出箱重投。
     maxGenerationRetries: (task: { metadata?: Record<string, unknown> | null }) =>
-      isInstantChatTask(task.metadata) ? 0 : undefined,
+      isInstantChatTask(task.metadata) || task.metadata?.[AMSG_AWAY_MESSAGE_META] === true ? 0 : undefined,
     // 取消通过租约心跳通知执行中的 Worker；1 秒检测一次，TTL 仍由上游管理。
     // 收尾回执 + 过期跳过回执（config 级 hook）。
     // onFireSettled: 无论这次 fire 是发出去了、跳过了还是抛错了都会调一次，self_log
