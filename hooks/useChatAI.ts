@@ -27,7 +27,7 @@ import { LUCKIN_PROPOSE_TOOL, autoFixProposalCodesByName as autoFixLuckinProposa
 import { callLuckinTool } from '../utils/luckinMcpClient';
 import { callMcpTool, getMcpUseNativeTools, hasWorkerUnreachableMcpServer } from '../utils/mcpClient';
 import { buildMcpOpenAITools, buildMcpRejectedToolsFallbackBody, buildMcpTextFallbackBody, extractTextFakedMcpCalls, formatMcpToolResult, MCP_CHAT_MAX_STALLED_ROUNDS, MCP_CHAT_MAX_TOOL_LOOPS, sanitizeMcpLeadInText, shouldRetryMcpWithoutTools, stripTextFakedMcpCalls, type FakedMcpCall } from '../utils/mcpToolBridge';
-import { buildToolResultMessage, normalizeToolCallsForCompat } from '../utils/toolCallCompat';
+import { buildToolResultMessage, normalizeToolCallsForCompat, toolTurnContinuation } from '../utils/toolCallCompat';
 import { toolCallFingerprint } from '../utils/agenticToolFeedback';
 import { buildChatRequestPayload } from '../utils/chatRequestPayload';
 import { acquireChatReply, isChatReplyActive, subscribeChatReplies } from '../utils/chatReplyLock';
@@ -57,7 +57,7 @@ import { AMSG2_EMPTY_REPLY_PROMPT, AMSG2_WRAP_UP_PROMPT, createAmsg2StallTracker
 import { buildLimitsBrief, resolveAmsgLimits } from '../utils/amsgLimits';
 import { shouldSendThinkingParams } from '../utils/thinkingGate';
 import { isAnthropicEndpoint } from '../utils/llmEndpoint';
-import { anthropicContinuation } from '../utils/anthropicApi';
+
 import { buildClaudeProxyCompatibilityBody, shouldRetryClaudeProxyCompatibility } from '../utils/claudeProxyCompat';
 import { routeMiniAppToolCall } from '../utils/miniAppToolRoute';
 import { applyEmotionEvalRaw, extractAssistantText } from '../utils/emotionApply';
@@ -1523,7 +1523,7 @@ export const useChatAI = ({
                         // 空 content + tool_calls 在 Gemini 兼容层会被判 INVALID_ARGUMENT, 给个占位
                         content: data.choices[0].message.content || '(调用工具中)',
                         tool_calls: toolCalls,
-                        ...anthropicContinuation(data.choices[0].message),
+                        ...toolTurnContinuation(data.choices[0].message),
                     } as any);
                     for (const tc of toolCalls) {
                         const fname: string = tc.function?.name || '';
@@ -1636,7 +1636,7 @@ export const useChatAI = ({
                         // 空 content + tool_calls 在 Gemini 兼容层会被判 INVALID_ARGUMENT, 给个占位
                         content: data.choices[0].message.content || '(调用工具中)',
                         tool_calls: toolCalls,
-                        ...anthropicContinuation(data.choices[0].message),
+                        ...toolTurnContinuation(data.choices[0].message),
                     } as any);
                     for (const tc of toolCalls) {
                         const fname: string = tc.function?.name || '';
@@ -1761,7 +1761,7 @@ export const useChatAI = ({
                         // 空 content + tool_calls 在 Gemini 兼容层会被判 INVALID_ARGUMENT, 给个占位
                         content: data.choices[0].message.content || '(调用工具中)',
                         tool_calls: toolCalls,
-                        ...anthropicContinuation(data.choices[0].message),
+                        ...toolTurnContinuation(data.choices[0].message),
                     } as any);
                     let mcpCallsThisRound = 0;
                     let mcpProgressThisRound = false;
