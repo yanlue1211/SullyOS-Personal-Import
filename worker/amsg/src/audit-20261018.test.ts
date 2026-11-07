@@ -4,7 +4,7 @@ import { amsgHooks, amsgFireSettled, offloadOversizedPush, runFireRenewTool, run
 import { buildXhsSessionPayload } from './agentic';
 import { parseInstantInputRef } from './instantInput';
 import { buildToolConfig, buildToolPack, AMSG_TOOL_CONFIG_KEY, AMSG_TOOL_PACK_KEY } from '../../../utils/amsgToolPack';
-import { AMSG_FIRE_PACK_KEY, AMSG_SELF_LOG_KEY, FIRE_PACK_VERSION, createSelfLog, appendSelfLogTask, unpackStateValue } from '../../../utils/amsgFirePack';
+import { AMSG_FIRE_PACK_KEY, AMSG_SELF_LOG_KEY, FIRE_PACK_VERSION, BEFORE_SPEAK_LINES, AMSG_SILENT_MARK, createSelfLog, appendSelfLogTask, unpackStateValue } from '../../../utils/amsgFirePack';
 import { AMSG_LIMITS_KEY } from '../../../utils/amsgLimits';
 import { buildAmsg2NoticesText } from '../../../utils/amsg2TaskContext';
 import { isPendingTask } from '../../../utils/amsg2Tasks';
@@ -21,11 +21,11 @@ const makeTask = (index: number, at: number) => ({
 
 async function start(over: {
   enabled?: boolean; config?: any; pending?: any[]; selfLog?: any; sharedValue?: string; awaySceneLock?: 'date' | 'call';
-  builtAt?: number; limits?: Record<string, unknown>; chatMessages?: any[]; nowMs?: number; task?: any; remote?: any[];
+  builtAt?: number; limits?: Record<string, unknown>; chatMessages?: any[]; nowMs?: number; task?: any; remote?: any[]; template?: string;
 } = {}) {
   const nowMs = over.nowMs ?? now;
   const pack = {
-    v: FIRE_PACK_VERSION, template: '角色设定 {{AMSG_TASK_INSTRUCTION}}',
+    v: FIRE_PACK_VERSION, template: over.template ?? '角色设定 {{AMSG_TASK_INSTRUCTION}}',
     lastUserMessageAt: null, tzId: 'Asia/Tokyo', userTzId: 'Asia/Tokyo', targetName: '用户',
     builtAt: over.builtAt ?? now - 60_000, pendingTasks: over.pending ?? [], scene: null,
     awaySceneLock: over.awaySceneLock ?? null,
@@ -82,6 +82,21 @@ describe('amsg2 audit regressions', () => {
     expect(next.metadata?.amsgAwayMessage).toBe(true);
     expect(next.metadata?.amsgSelfScheduled).toBeUndefined();
     expect(Date.parse(next.firstSendTime)).toBe(now + 120 * 60_000);
+  });
+
+  it('B-mode due tick gives the original autonomous silent choice without a second model call', async () => {
+    const task = {
+      id: 43, uuid: '88888888-8888-4888-8888-888888888888',
+      contactName: '角色', nextSendAt: new Date(now).toISOString(), recurrenceType: 'none',
+      metadata: { charId, amsgClientTaskId: 'away-previous', amsgAwayMessage: true,
+        amsgAwayDelayMinutes: 120, amsgTaskInstruction: '分享生活', amsgExpirePolicy: 'force' },
+    };
+    const withDecision = await start({ task, limits: { awayEnabled: true },
+      template: [BEFORE_SPEAK_LINES.join('\\n'), '{{AMSG_TASK_INSTRUCTION}}'].join('\\n'),
+    });
+    expect(withDecision.plan.skip).toBeUndefined();
+    expect(withDecision.scheduleTask).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(withDecision.plan.messages)).toContain(AMSG_SILENT_MARK);
   });
 
   it('B-mode meeting lock skips idle message but leaves character-scheduled messages alone', async () => {
