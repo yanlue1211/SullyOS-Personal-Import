@@ -19,6 +19,8 @@ import {
   splitAwaySegments,
 } from './awayMessageCore';
 import { loadCharacterContextRange } from './chatContextRange';
+import { resolveAmsgInteractionLock, isAmsgActiveCall, isAmsgActiveDate } from './amsgInteractionGuard';
+import { shouldSkipAwayForQuietHours } from './awayMessageQuietHours';
 import { ChatPrompts } from './chatPrompts';
 import { buildChatRequestPayload } from './chatRequestPayload';
 import { applyAssistantPostProcessing } from './applyAssistantPostProcessing';
@@ -208,13 +210,23 @@ const generateLocalAwayMessages = async (char: CharacterProfile, deps: LocalAway
   const recent = await DB.getRecentMessagesByCharId(char.id, 50, true);
   const lastUserAt = findAwayGapStart(recent, delayMs, now);
   if (lastUserAt == null) return;
+  // 线下/通话仍在继续时，不能假定用户离开而生成线上私聊。
+  if (resolveAmsgInteractionLock(recent, isAmsgActiveCall(char.id), isAmsgActiveDate(char.id))) return;
+  // 没配置 Worker 的本地补发遵守相同的自动空闲消息禁发规则。
+  // 禁发的时间段不追补，避免睡醒后一口气补昨夜的消息。
+  const quiet = char.awayMessage?.quietHours;
+  const userTzId = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  if (shouldSkipAwayForQuietHours({ quietHours: quiet, dueMs: lastUserAt + delayMs, nowMs: now, userTimeZone: userTzId })) return;
   const userProfile = deps.getUserProfile();
   const api = resolveDialogueApi(deps.getApiConfig(), char);
   if (!userProfile || !api.baseUrl) return;
 
   // 时刻不早于最后一条消息：显示顺序看 id，时间戳倒挂会让气泡上的钟跳回去。
   const lastMsgAt = recent.at(-1)?.timestamp ?? lastUserAt;
-  const slots = planAwaySlots(lastUserAt, delayMs, now).map(t => Math.max(t, lastMsgAt + 1));
+  const slots = planAwaySlots(lastUserAt, delayMs, now)
+    .filter(t => !shouldSkipAwayForQuietHours({ quietHours: quiet, dueMs: t, nowMs: now, userTimeZone: userTzId }))
+    .map(t => Math.max(t, lastMsgAt + 1));
+  if (!slots.length) return;
   const userName = userProfile.name || '对方';
 
   const range = await loadCharacterContextRange(char);
