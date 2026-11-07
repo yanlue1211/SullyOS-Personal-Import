@@ -22,6 +22,7 @@ import {
   UserProfile,
 } from '../types';
 import { getLastRealUserMessageAt } from './amsg2ExpireGuard';
+import { resolveAmsgInteractionLock, isAmsgActiveCall, isAmsgActiveDate } from './amsgInteractionGuard';
 import { AMSG_BUNDLE_VERSION } from './amsgBundleVersion';
 import { parseAmsgSelfUpdateState, type AmsgSelfUpdateReport } from './amsgSelfUpdateState';
 import { AMSG_AWAY_DELAY_META, AMSG_AWAY_MESSAGE_META, buildAwayTaskInstruction, buildTaskInstruction, resolveSendAtMs } from './amsgFireSchedule';
@@ -700,7 +701,7 @@ const formatHistoryLine =(role: string, content: any, char: CharacterProfile, us
 };
 
 const buildTimeGapHint = async (charId: string) => {
-  const recentMessages = await DB.getRecentMessagesByCharId(charId, 200);
+  const recentMessages = await DB.getRecentMessagesByCharId(charId, 200, true);
   return {
     // 时间差在渲染时刻才算（formatTimeSinceUser），这里只取原始时间戳——
     // 满血链路会把它放进 fire_pack，worker 到点用「fire 时刻」重算，不吃排程时的陈旧值。
@@ -767,7 +768,7 @@ export const buildFirePack = async (
     const { buildRoomPlatesInjection } = await import('./memoryPalace/roomPlates');
     char.roomPlatesInjection = await buildRoomPlatesInjection(char.id, userProfile.name);
   }
-  const [{ lastUserMessageAt }, recentMessages, library, schedule] = await Promise.all([
+  const [{ lastUserMessageAt, recentMessages: activityMessages }, recentMessages, library, schedule] = await Promise.all([
     buildTimeGapHint(char.id),
     templateStub ? Promise.resolve([]) : loadCharacterContextMessages(char),
     // 表情库只喂系统提示词/近史渲染：占位模板路径整库都不用读（表情记录带图片数据，
@@ -929,6 +930,7 @@ export const buildFirePack = async (
     template,
     thinkingChainEnabled: outputStyle.thinkingActive,
     lastUserMessageAt,
+    awaySceneLock: resolveAmsgInteractionLock(activityMessages, isAmsgActiveCall(char.id), isAmsgActiveDate(char.id)),
     // 角色的时间参照系（见上面的 tzId / userTzId）：前者是角色自己的钟，后者是用户那边的，
     // worker 渲染时两者各管各的一行，绝不混用。
     tzId,
