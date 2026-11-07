@@ -87,3 +87,11 @@
 - 由于当前执行环境无法访问 `workers.dev` 地址的公开 `/config-check`（网络/DNS 限制），以上事实仅据用户真实界面截图，仍需完整 JSON 的能力位和 CF 面板绑定核对。当前没有对真实 Worker 做任何写操作或升级。
 
 - **新增重要风险（已核对 `346fa29` 源码）**：旧前端 `utils/amsgAutoUpdateTrigger.ts` 发现版本不相等就会在冷启动时直接调用 `POST /self-update`，**不区分升级/降级**；截图的旧前端期待 `2026-11-05.3`，当前后端却自报 `2026-11-07.3`。因此必须先让前端确实升级到正式版本 `4e740fae`，且核对旧 Worker 的取包来源，**之后**才处理 `AMSG_SERVER_TOKEN` 不匹配。不要先纠正 token 或点绿色「更新 Worker」按钮，以免解除安全拦截后触发旧前端覆盖当前 Worker。当前已合并前端 `utils/amsgAutoUpdateTrigger.ts` 遇到版本不一致会阻止自动覆盖，可作为基础。
+
+### 5.2 用户刷新后及真实公开接口回执（2026-11-08 03:23，截图）
+
+- 用户已刷新到 `personal/audio-listening@4e740fa`（对应正式源码 `4e740fae`），构建时间显示 2026-11-08 02:59:03 UTC+8；旧版前端危险提示已消失，新的设置页正确显示「更新 Worker 到 `2026-11-08.3`」。
+- 用户通过浏览器打开真实 `https://sullyos-amsg.yanlue.workers.dev/config-check`，截到 JSON：`success:true`，`data.ok:true`，`missing:[]`，`warnings:[]`；`instantChat:true`、`instantTick:true`、`backgroundJobs:true`、`anthropicMessages:true`、`geminiNative:true`、`thirdPartyPush:true`；`workerVersion:"2026-11-07.3"`；`selfUpdate.supported:true`。
+- 自更新状态 `lastSource:"manual"`、`lastOutcome:"failed"`、`lastError:{code:"UNAUTHORIZED",message:"共享密钥对不上。"}`。**这是一条历史失败状态，不代表已测试刷新后当前配置，也不能据此认定 Cron 自检请求失败。**
+- 对照历史代码：旧前端提交 `346fa29` 的 `worker/amsg/src/selfUpdate.ts` 默认 `BUNDLE_URL` 明确指向 `https://raw.githubusercontent.com/Tosd0/sullyos-workers/main/amsg/worker.bundle.js`；当前个人源码才改为 `yanlue1211/SullyOS-Personal-Import/personal/audio-listening/worker/amsg/worker.bundle.js`。**旧 Worker 未必就是这个源，但如果没有显式 `AMSG_BUNDLE_URL`，可能拉取作者包，因此仍不可直接点更新。**
+- 下一步 Cloudflare 只读核实：`sullyos-amsg` → Settings → Variables and Secrets 中是否存在 `AMSG_BUNDLE_URL`（若存在核对值，只分享非敏感来源地址），并核对 `AMSG_SERVER_TOKEN` 是否已有；千万不要展示任何密钥的实际值，不要点随机/清库/全新部署。确定实际更新源、安全处理共享密钥差异后再执行已有 Worker 的原位升级并逐项检查。
