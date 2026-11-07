@@ -604,9 +604,10 @@ export async function guardReusedDatabase(input: {
   const encryptedTables = userTables.filter(name =>
     ENCRYPTED_DATA_TABLES.some(known => known === name));
   if (encryptedTables.length === 0) {
-    if (input.reset && userTables.length) return {
+    const unexpected = userTables.filter(name => !AMSG_OWNED_TABLES.includes(name));
+    if (unexpected.length) return {
       ok: false, code: 'CF_ERROR',
-      message: '数据库含有不属于主动消息系统的表，已阻止清空。请改用新的数据库名称。',
+      message: '这个同名数据库里存在不属于主动消息系统的表，已阻止复用或清空，请使用新的数据库名称。',
     };
     return { ok: true, cleared: false };
   }
