@@ -43,6 +43,7 @@ import { buildMalformedImageDiagnostics, extractImagesInPlace, deepCloneForExpor
 import { isBlobRef, getBlobForRef, restoreBlobRef, migrateDataUrlToRef, migrateAppearancePresetBlobRefs, migrateChatThemeBlobRefs, resolveBlobRefsDeep, resolveRefToDataUrl, BLOBREF_PREFIX, deleteBlobRefIfUnreferenced } from '../utils/blobRef';
 import { resolveBlobRefsInRequestBody } from '../utils/apiBlobRefs';
 import { collectBlobRefs, writeBlobsToZip, readBlobsIndex, restoreBlobsFromZip } from '../utils/backupBlobs';
+import { recordMissingBackupAsset, writeMissingBackupAssets, type BackupMissingAsset } from '../utils/backupMissingAssets';
 import { initPwaIcon, clearPwaIcon } from '../utils/appIcon';
 import { LEGACY_DEFAULT_WALLPAPER, isLegacyDefaultWallpaper, shouldPreserveLegacyDefaultWallpaper } from '../utils/wallpaperCompat';
 import { migrateSharkpanAssets } from '../utils/sharkpanAssetMigration';
@@ -500,7 +501,7 @@ interface OSContextType {
   listCloudBackups: () => Promise<CloudBackupFile[]>;
 
   // System
-  exportSystem: (mode: 'text_only' | 'media_only' | 'full', options?: { includeBackendConnection?: boolean }) => Promise<Blob>;
+  exportSystem: (mode: 'text_only' | 'media_only' | 'full', options?: { includeBackendConnection?: boolean; onMissingAssets?: (items: BackupMissingAsset[]) => void }) => Promise<Blob>;
   importSystem: (fileOrJson: File | string, options?: ImportSystemOptions) => Promise<void>; // Accept File or String
   resetSystem: (options?: { force?: boolean }) => Promise<ResetSystemResult>;
   sysOperation: { status: 'idle' | 'processing', message: string, progress: number }; // Progress state
@@ -4155,7 +4156,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   // --- MODIFIED EXPORT SYSTEM WITH SEPARATED ASSETS ZIP ---
   const exportSystem = async (
       mode: 'text_only' | 'media_only' | 'full',
-      exportOptions: { includeBackendConnection?: boolean } = {},
+      exportOptions: { includeBackendConnection?: boolean; onMissingAssets?: (items: BackupMissingAsset[]) => void } = {},
   ): Promise<Blob> => {
       try {
           setSysOperation({ status: 'processing', message: '正在初始化打包引擎...', progress: 0 });
@@ -4178,6 +4179,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           // 从落包文本收集 = 没有「哪些 store 要处理」的名单可漏，嵌套 JSON 字符串里的
           // 令牌（如 assets 表的 appearance_preset_*）也逐字可见。text_only 令牌已剥空，不收。
           const referencedBlobTokens = new Set<string>();
+          const missingAssetRecords = new Map<string, BackupMissingAsset>();
           const collectSerialized = mode === 'text_only'
               ? undefined
               : (s: string) => collectBlobRefs(s, referencedBlobTokens);
@@ -4870,9 +4872,15 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                   { onYield: () => new Promise<void>(r => setTimeout(r, 0)) },
               );
               if (missing.length > 0) {
+                  for (const ref of missing) recordMissingBackupAsset(missingAssetRecords, ref);
                   console.warn(`备份时 ${missing.length} 个图片令牌已无对应数据，已跳过:`, missing);
               }
           }
+
+          // Keep dangling references in the exported JSON, but tell the user exactly which original files are missing.
+          // Do not rewrite the original DB or treat an incomplete media backup as a fully restorable archive.
+          const missingAssets = [...missingAssetRecords.values()];
+          writeMissingBackupAssets(zip as unknown as ZipFileWriter, missingAssets);
 
           if (malformedImageCount > 0) {
               zip.file(
@@ -4904,6 +4912,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           );
 
           setSysOperation({ status: 'idle', message: '', progress: 100 });
+          exportOptions.onMissingAssets?.(missingAssets);
           // 备份成功 → 推进「该备份啦」提醒的计时（本地导出 / 云备份都走这里，一处覆盖两条路径）
           markBackupDone();
           if (malformedImageCount > 0) {
