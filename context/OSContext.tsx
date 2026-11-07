@@ -2390,6 +2390,14 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
               return;
           }
 
+          // 1.0 暂时留作回退，但同角色打开新版 B 模式时不得双路烧模型费用。
+          // 只跳过本次 1.0 触发，不停掉旧调度；关闭 B 模式后旧配置仍可恢复。
+          if (char.awayMessage?.enabled === true) {
+              drainQueuedProactive();
+              console.log(`🔕 [Proactive/Global] Skipped for ${char.name}: B-mode idle reminder has precedence`);
+              return;
+          }
+
           // 用户正在 DateApp 里和这个角色见面 —— 人就在对方眼前，再发一条
           // 线上主动消息既出戏又显得对见面毫不知情。本轮静默跳过；
           // lastFire 已在调度层记录，下个周期会重新评估。
