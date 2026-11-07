@@ -2,22 +2,22 @@
  * 离开后消息 B 方案：用户没有重新开口时，每经过 X 分钟给 Char 一次机会。
  * 云端由 Worker 幂等排下下一条；跳过时不调 LLM、不追补；本地仅处理当前有效节拍。
  */
-import type { APIConfig, ActiveMsg2TaskRecord, CharacterProfile, GroupProfile, Message, RealtimeConfig, UserProfile } from '../types';
+import type { APIConfig, ActiveMsg2TaskRecord, CharacterProfile, GroupProfile, RealtimeConfig, UserProfile } from '../types';
 import { DB } from './db';
 import { ActiveMsgClient } from './activeMsgClient';
 import { applyScheduledTask, isAmsg2EnabledForChar } from './amsg2Tasks';
 import { isAmsg2GlobalReady } from './amsg2ToolBridge';
 import {
-  AWAY_SEGMENT_MARK,
   decideAwayTaskAction,
-  findAwayGapStart,
-  planAwaySlots,
   resolveAwayDelayMinutes,
   splitAwaySegments,
   latestAwayTickMs,
 } from './awayMessageCore';
 import { loadCharacterContextRange } from './chatContextRange';
-import { resolveAmsgInteractionLock, isAmsgActiveCall, isAmsgActiveDate } from './amsgInteractionGuard';
+import { resolveAmsgInteractionLock, isAmsgActiveCall, isAmsgActiveDate, getAmsgDateEndedAt } from './amsgInteractionGuard';
+import { wasLocalAwayTickChecked, markLocalAwayTickChecked } from './awayMessageLocalTick';
+import { buildLocalAwayHint } from './awayMessagePrompt';
+import { AMSG_SILENT_MARK } from './amsgFirePack';
 import { shouldSkipAwayForQuietHours } from './awayMessageQuietHours';
 import { ChatPrompts } from './chatPrompts';
 import { buildChatRequestPayload } from './chatRequestPayload';
@@ -25,7 +25,6 @@ import { applyAssistantPostProcessing } from './applyAssistantPostProcessing';
 import { resolveScheduledMessageApi } from './characterApi';
 import { normalizeChatApiUrl } from './amsgLlmCredentials';
 import { extractContent, safeFetchJson } from './safeApi';
-import { resolveCharTimeZone } from './timezone';
 import { loadMusicPlaybackSnapshot } from '../context/MusicContext';
 
 /** 失败后这么久内不再试，免得每次切回前台都白调一次。 */
@@ -227,18 +226,6 @@ export const runLocalAwayMessages = async (deps: LocalAwayDeps): Promise<void> =
   }
 };
 
-const formatCharClock = (ms: number, tz: string | undefined): string =>
-  new Date(ms).toLocaleString('zh-CN', {
-    timeZone: tz, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false,
-  });
-
-const buildLocalHint = (char: CharacterProfile, userName: string, lastUserAt: number): string => {
-  const tz = resolveCharTimeZone(char);
-  const time = char.timeAwarenessEnabled !== false
-    ? `最后一次交谈是 ${formatCharClock(lastUserAt, tz)}。` : '';
-  return `[系统提示（非${userName}发言）: ${userName}这段时间没再开口。${time}这是一次新的主动发消息机会，可以自然分享你的近况、接续之前的话题或问候。无需解释定时机制；一到三句话即可。]`;
-};
-
 const generateLocalAwayMessages = async (char: CharacterProfile, deps: LocalAwayDeps): Promise<void> => {
   const delayMs = resolveAwayDelayMinutes(char) * 60_000;
   const now = Date.now();
@@ -248,8 +235,12 @@ const generateLocalAwayMessages = async (char: CharacterProfile, deps: LocalAway
   const lastUser = [...recent].reverse().find(m => m.role === 'user' && !m.metadata?.proactiveHint);
   if (!lastUser) return;
   const lastUserAt = lastUser.timestamp;
-  const tick = latestAwayTickMs(lastUserAt, delayMs, now);
+  // 线下期间不能算作「用户失联」；从本次见面结束时间重新计时。
+  // lastUserAt 仍为真实发言时间，不伪造用户新消息。
+  const awayAnchor = Math.max(lastUserAt, getAmsgDateEndedAt(char.id) ?? 0);
+  const tick = latestAwayTickMs(awayAnchor, delayMs, now);
   if (tick == null) return;
+  if (wasLocalAwayTickChecked(char.id, awayAnchor, tick)) return;
   const lastAwaySentAt = [...recent].reverse().find(m => m.metadata?.awayMessage)?.timestamp ?? 0;
   if (lastAwaySentAt >= tick) return;
   if (resolveAmsgInteractionLock(recent, isAmsgActiveCall(char.id), isAmsgActiveDate(char.id))) return;
@@ -265,24 +256,23 @@ const generateLocalAwayMessages = async (char: CharacterProfile, deps: LocalAway
 
   const range = await loadCharacterContextRange(char);
   const { emojis, categories } = ChatPrompts.filterVisibleEmojis(await DB.getEmojis(), await DB.getEmojiCategories(), char.id);
-  // 提示只进这一次请求，不落库：它不是谁说过的话。
-  const hint = {
-    id: -1, charId: char.id, role: 'user', type: 'text', timestamp: now,
-    content: buildLocalHint(char, userName, lastUserAt),
-    metadata: { proactiveHint: true, hidden: true },
-  } as Message;
-  const history = [...range.messages, hint];
   const groups = deps.getGroups();
   const realtimeConfig = deps.getRealtimeConfig();
   const payload = await buildChatRequestPayload({
     char, userProfile, groups, emojis, categories,
-    historyMsgs: history,
-    contextLimit: history.length,
+    historyMsgs: range.messages,
+    contextLimit: Math.max(1, range.messages.length),
     recallEntryPoint: 'proactive_chat',
     realtimeConfig,
     musicSnapshot: loadMusicPlaybackSnapshot(),
     htmlMode: { enabled: !!(char as any).htmlModeEnabled, customPrompt: (char as any).htmlModeCustomPrompt },
     visionApiConfig: deps.getApiConfig().visionApi,
+  });
+
+  // 作者 52fadd8b29：在记忆水位/窗口筛选后向这一轮请求注入提示，
+  // 不用 id=-1 假历史消息（会被水位线筛掉，也会挤占一条正常对话）。
+  payload.fullMessages.splice(payload.volatileTailIndex >= 0 ? payload.volatileTailIndex : payload.fullMessages.length, 0, {
+    role: 'user', content: buildLocalAwayHint(char, userName, lastUserAt, recent, now),
   });
 
   const baseUrl = api.baseUrl.replace(/\/+$/, '');
@@ -292,8 +282,11 @@ const generateLocalAwayMessages = async (char: CharacterProfile, deps: LocalAway
     method: 'POST', headers,
     body: JSON.stringify({ model: api.model, messages: payload.fullMessages, temperature: api.temperature ?? 0.85, stream: false }),
   }, 2, 0, { appName: '消息', charId: char.id, charName: char.name, purpose: '离开后消息' });
-  const segments = splitAwaySegments(extractContent(data), slots.length);
-  if (!segments.length) return;
+  const generatedText = extractContent(data).trim();
+  const decidedSilent = generatedText === AMSG_SILENT_MARK;
+  const segments = decidedSilent ? [] : splitAwaySegments(generatedText, slots.length);
+  // 空正文 / 解析失败不是角色主动选择静默，不能把它记成已处理节拍。
+  if (!decidedSilent && !segments.length) throw new Error('本地离开后消息没有生成有效正文');
 
   // 生成期间对方回来说了话：这段离开已经结束，补的消息作废。
   const refreshed = await DB.getRecentMessagesByCharId(char.id, 50, true);
@@ -301,6 +294,13 @@ const generateLocalAwayMessages = async (char: CharacterProfile, deps: LocalAway
   if (latestUser?.timestamp !== lastUserAt || deps.isBusyWith(char.id)
       || resolveAmsgInteractionLock(refreshed, isAmsgActiveCall(char.id), isAmsgActiveDate(char.id))
       || [...refreshed].reverse().some(m => m.metadata?.awayMessage && m.timestamp >= tick)) return;
+
+  // 明确选择静默也消费这一节拍，防止用户多次切回前台重复烧 API。
+  // 下一节拍仍可重新判断；用户新消息/结束见面改变 anchor 也能重新开始。
+  if (decidedSilent) {
+    markLocalAwayTickChecked(char.id, awayAnchor, tick);
+    return;
+  }
 
   const notifyProgress = () => window.dispatchEvent(new CustomEvent('active-msg-progress'));
   for (let i = 0; i < segments.length; i++) {
@@ -324,6 +324,7 @@ const generateLocalAwayMessages = async (char: CharacterProfile, deps: LocalAway
       messageTimestamp: slots[i],
     });
   }
+  markLocalAwayTickChecked(char.id, awayAnchor, tick);
   const preview = segments.join(' ').replace(/\s+/g, ' ').trim().slice(0, 120);
   // 未读、提示和系统通知沿用主动消息送达那一套。
   window.dispatchEvent(new CustomEvent('active-msg-received', {
