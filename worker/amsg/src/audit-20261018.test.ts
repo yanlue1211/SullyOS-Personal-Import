@@ -92,7 +92,7 @@ describe('amsg2 audit regressions', () => {
         amsgAwayDelayMinutes: 120, amsgTaskInstruction: '分享生活', amsgExpirePolicy: 'force' },
     };
     const withDecision = await start({ task, limits: { awayEnabled: true },
-      template: [BEFORE_SPEAK_LINES.join('\\n'), '{{AMSG_TASK_INSTRUCTION}}'].join('\\n'),
+      template: [BEFORE_SPEAK_LINES.join('\n'), '{{AMSG_TASK_INSTRUCTION}}'].join('\n'),
     });
     expect(withDecision.plan.skip).toBeUndefined();
     expect(withDecision.scheduleTask).toHaveBeenCalledTimes(1);
