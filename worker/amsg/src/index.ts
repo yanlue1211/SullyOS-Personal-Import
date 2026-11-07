@@ -2615,16 +2615,17 @@ export const amsgHooks = {
           taskListBlock, mcpBlock, scheduleBlock,
         ],
       });
-      const instantMessages = [
-        // content 原样透传，一个字都不动：带图片的消息本地就是结构化分段
-        // （`[{type:'text'},{type:'image_url'}]`），上游把这个数组整个丢进
-        // /chat/completions 的请求体（amsg-shared 的 buildLlmRequestBody 只做
-        // `messages: llmMessages`，不看 content 的类型）。这里但凡 String() 一下，
-        // 模型收到的就是「[object Object]」而不是那张图。
-        // 每条重新包一层对象只是不把 pack 上那份交出去，content 仍是同一个引用。
-        ...pack.chat!.messages.map((m) => ({ role: m.role, content: m.content })),
-        ...(timelyBlock ? [{ role: 'system' as const, content: timelyBlock }] : []),
-      ];
+      // content 原样透传：图片仍然是结构化分段，绝不能 String() 变成 [object Object]。
+      // 排程、时钟等时效块放在本地标记的易变尾段之前，最后仍由原生「回到你自己」收束。
+      // 旧 fire_pack 没传下标时兼容旧版的末尾追加。
+      const instantMessages = pack.chat!.messages.map((m) => ({ role: m.role, content: m.content }));
+      const requestedInsertAt = pack.chat!.timelyInsertAt;
+      const timelyInsertAt = Number.isInteger(requestedInsertAt)
+        && requestedInsertAt! >= 1 && requestedInsertAt! <= instantMessages.length
+        ? requestedInsertAt! : instantMessages.length;
+      if (timelyBlock) {
+        instantMessages.splice(timelyInsertAt, 0, { role: 'system' as const, content: timelyBlock });
+      }
       if (userHoliday) {
         const profileMessage = instantMessages.find(m => m.role === 'system' && typeof m.content === 'string' && m.content.includes('### 互动对象 (User)\n'));
         if (profileMessage) profileMessage.content = insertUserHolidayInProfile(profileMessage.content as string, userHoliday);
