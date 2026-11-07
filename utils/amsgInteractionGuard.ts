@@ -61,7 +61,7 @@ export function resolveAmsgInteractionLock(
     const src = m.metadata?.source;
     if (src === 'call-end-popup') return null;
     if (m.role !== 'user' && m.role !== 'assistant') continue;
-    if (src === 'date' || src === 'meeting' || src === 'story' || src === 'companionship') return 'date';
+    if (src === 'date' || src === 'meeting' || src === 'story' || src === 'companionship') return dateStillActive ? 'date' : null;
     if (src === 'call') return 'call';
     // 正常私聊的下一条真实消息代表已切回线上。
     return null;
