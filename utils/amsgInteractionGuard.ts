@@ -13,6 +13,20 @@ export interface AmsgInteractionMessage {
  * 存的是布尔状态，不存任何通话正文/密钥。
  */
 const ACTIVE_CALL_KEY = 'sully_amsg2_call_active_v1';
+const ACTIVE_DATE_KEY = 'sully_amsg2_date_active_v1';
+export function setAmsgActiveDate(charId: string, active: boolean): void {
+  if (!charId) return;
+  try {
+    const old = JSON.parse(localStorage.getItem(ACTIVE_DATE_KEY) || '{}') as Record<string, boolean>;
+    if (active) old[charId] = true;
+    else delete old[charId];
+    localStorage.setItem(ACTIVE_DATE_KEY, JSON.stringify(old));
+  } catch { /* best effort */ }
+}
+export function isAmsgActiveDate(charId: string): boolean {
+  try { return JSON.parse(localStorage.getItem(ACTIVE_DATE_KEY) || '{}')[charId] === true; }
+  catch { return false; }
+}
 export function setAmsgActiveCall(charId: string, active: boolean): void {
   if (!charId) return;
   try {
@@ -38,6 +52,7 @@ export function isAmsgActiveCall(charId: string): boolean {
 export function resolveAmsgInteractionLock(
   messages: readonly AmsgInteractionMessage[],
   callStillActive: boolean,
+  dateStillActive = false,
 ): AmsgInteractionLock {
   if (callStillActive) return 'call';
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -51,5 +66,5 @@ export function resolveAmsgInteractionLock(
     // 正常私聊的下一条真实消息代表已切回线上。
     return null;
   }
-  return null;
+  return dateStillActive ? 'date' : null;
 }
