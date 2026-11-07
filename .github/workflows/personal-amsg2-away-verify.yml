@@ -39,3 +39,9 @@ jobs:
         run: pnpm exec vitest run utils/voiceTagNormalize.test.ts worker/amsg/src/audit-20261018.test.ts
       - name: Build worker and frontend
         run: pnpm run build
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Exercise real Worker SDK HTTP SQLite and simulated model/push pipeline
+        run: node scripts/amsg2-e2e-harness.mjs
