@@ -23,6 +23,7 @@ import { trimHistoryThrough } from '../utils/dateSessionHistory';
 import { trackEvent } from '../utils/analytics';
 import { markAmsgStateDirty } from '../utils/amsgStateSync';
 import { setAmsgActiveDate } from '../utils/amsgInteractionGuard';
+import { ActiveMsgClient } from '../utils/activeMsgClient';
 import { isAmsg2EnabledForChar } from '../utils/amsg2Tasks';
 import { isAmsg2GlobalReady, createAmsg2ToolSession, executeAmsg2ToolWithOutcome } from '../utils/amsg2ToolBridge';
 import { extractFireScheduleTextCalls, buildSendAtExample } from '../utils/amsgFireSchedule';
@@ -292,6 +293,8 @@ const DateApp: React.FC = () => {
             // 2. 切换模式并刷新数据
             if (encounterIdRef.current !== enteringEncounterId) return;
             setAmsgActiveDate(char.id, true);
+            // 小型云端锁先发，防止临近空闲提醒到点时大包还没上传。
+            void ActiveMsgClient.putCharLimits(char).catch(error => console.warn('[DateApp] 同步云端见面锁失败', error));
             markDateTurnDirty(char);
             setMode('session');
             trackEvent('走过去开始见面会话');
@@ -684,7 +687,7 @@ const DateApp: React.FC = () => {
 
     const onExitSession = () => {
         // 明确结束线下见面：不同于锁屏/切后台，退出必须解除持久化线下锁。
-        if (char) { setAmsgActiveDate(char.id, false); markDateTurnDirty(char); }
+        if (char) { setAmsgActiveDate(char.id, false); void ActiveMsgClient.putCharLimits(char).catch(error => console.warn('[DateApp] 结束见面锁同步失败', error)); markDateTurnDirty(char); }
         clearDateResumeAttempt();
         encounterIdRef.current = '';
         // 来自聊天：退出见面回聊天
@@ -1087,7 +1090,7 @@ const DateApp: React.FC = () => {
                     <button onClick={() => startPeek(char, 'invite')} className="text-left rounded-2xl border border-neutral-700 px-6 py-5 hover:bg-neutral-900">
                         <span className="block text-lg">让他靠近</span><span className="block text-xs text-neutral-400 mt-2">由他自然地来到你面前</span>
                     </button>
-                    <button onClick={() => { if (char) { setAmsgActiveDate(char.id, true); markDateTurnDirty(char); } setPeekStatus(''); setMode('session'); }} className="text-left rounded-2xl border border-neutral-700 px-6 py-5 hover:bg-neutral-900">
+                    <button onClick={() => { if (char) { setAmsgActiveDate(char.id, true); void ActiveMsgClient.putCharLimits(char).catch(error => console.warn('[DateApp] 见面锁同步失败', error)); markDateTurnDirty(char); } setPeekStatus(''); setMode('session'); }} className="text-left rounded-2xl border border-neutral-700 px-6 py-5 hover:bg-neutral-900">
                         <span className="block text-lg">直接见面</span><span className="block text-xs text-neutral-400 mt-2">不生成开场白，直接开始互动</span>
                     </button>
                 </div>
