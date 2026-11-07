@@ -17,6 +17,7 @@ import { loadCharacterContextRange } from './chatContextRange';
 import { resolveAmsgInteractionLock, isAmsgActiveCall, isAmsgActiveDate, getAmsgDateEndedAt } from './amsgInteractionGuard';
 import { wasLocalAwayTickChecked, markLocalAwayTickChecked } from './awayMessageLocalTick';
 import { buildLocalAwayHint } from './awayMessagePrompt';
+import { generateNativeLocalAwayMessages } from './awayMessageNative';
 import { AMSG_SILENT_MARK } from './amsgFirePack';
 import { shouldSkipAwayForQuietHours } from './awayMessageQuietHours';
 import { ChatPrompts } from './chatPrompts';
@@ -215,7 +216,11 @@ export const runLocalAwayMessages = async (deps: LocalAwayDeps): Promise<void> =
       if ((localCooldownUntil.get(char.id) ?? 0) > Date.now() || deps.isBusyWith(char.id)) continue;
       try {
         if (await isAwayCloudRoute(char)) continue;
-        await generateLocalAwayMessages(char, deps);
+        // 作者原版：2.0 没开启的角色仍可使用「离开后消息」，
+        // 打开页面时一次最多补三段、这次离开只补一次。
+        // B 方案循环节拍只属于明确开启 2.0 的角色（Worker 不可用时走本地 B 兜底）。
+        if (isAmsg2EnabledForChar(char)) await generateLocalAwayMessages(char, deps);
+        else await generateNativeLocalAwayMessages(char, deps);
       } catch (error) {
         console.warn(`[AwayMessage] ${char.name} 的离开后消息生成失败`, error);
         localCooldownUntil.set(char.id, Date.now() + FAILURE_COOLDOWN_MS);
