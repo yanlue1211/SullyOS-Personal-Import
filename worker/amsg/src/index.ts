@@ -407,6 +407,8 @@ interface FireStash {
   actionResultCommitted?: boolean;
   /** 线下预约：仅这一场见面成功发出线上正文，才允许解除锁。 */
   dateExitEncounterId?: string | null;
+  /** 避免模型只执行工具/保存卡片但不发聊天正文时错误结束见面。 */
+  dateExitHadVisibleMessage?: boolean;
   readState?: FireCtx['readState'];
   firePack?: AmsgFirePack;
   writeState?: WriteState;
@@ -1121,7 +1123,7 @@ export const amsgFireSettled = async (
 
   // 云端必须自行结束本场见面：手机关机时不会有人替它清空锁。只在正文已推送或
   // 已可靠写入 outbox 后生效，模型决定不说/失败不生效；重读限制行防旧预约关闭新见面。
-  if (!stash.instant && delivered && stash.dateExitEncounterId && stash.readState) {
+  if (!stash.instant && delivered && stash.dateExitHadVisibleMessage && stash.dateExitEncounterId && stash.readState) {
     try {
       const currentRows = await stash.readState(amsgStateNamespace(stash.charId), { key: AMSG_LIMITS_KEY });
       const current = parseAmsgLimitsRecord(currentRows.find((row) => row.key === AMSG_LIMITS_KEY)?.value);
@@ -2940,6 +2942,7 @@ export const amsgHooks = {
       // scratch 上，等 onAfterSend 按真正送出去的段数落盘。
       stash.selfLogTexts = decision.pushPayloads.map(
         (p) => (typeof p.message === 'string' ? p.message : ''));
+      stash.dateExitHadVisibleMessage = stash.selfLogTexts.some((message) => message.trim().length > 0);
 
       // 角色这次给自己排的任务，随最后一条 push 带回客户端认领——不然它们只活在 D1 里，
       // 面板看不到、用户也没法取消。任务本身照常触发，客户端上线补进清单即可。
@@ -2955,7 +2958,7 @@ export const amsgHooks = {
 
       // 仅发出去的那条线上预约允许结束原来的线下会话；没有正文则不会生成此回执。
       // 客户端按 encounterId 校验，旧排程不能解掉一场新的见面。
-      if (stash.dateExitEncounterId && payloads.length > 0) {
+      if (stash.dateExitEncounterId && stash.dateExitHadVisibleMessage && payloads.length > 0) {
         payloads = attachMetaAt(payloads, 0, { amsgDateEndedEncounterId: stash.dateExitEncounterId });
       }
 
