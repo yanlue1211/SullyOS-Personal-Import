@@ -1,3 +1,4 @@
+import type { WorkroomBackup } from './features/workroom/schema';
 
 export enum AppID {
   Launcher = 'launcher',
@@ -7,16 +8,22 @@ export enum AppID {
   GroupChat = 'group_chat', 
   Gallery = 'gallery',
   Music = 'music',
+  SongArchive = 'song_archive',
+  Workroom = 'workroom',
+  Yueqi = 'yueqi',
   Browser = 'browser',
   ThemeMaker = 'thememaker', // Legacy shortcut ID; opens the embedded bubble maker, not an installed App.
   Appearance = 'appearance',
   Date = 'date',
   User = 'user',
   Journal = 'journal',
+  Taobao = 'taobao',
+  Meituan = 'meituan',
   Schedule = 'schedule',
   Room = 'room',
   CheckPhone = 'check_phone',
   FriendFeed = 'friend_feed',
+  Moments = 'moments',
   Social = 'social',
   Study = 'study',
   FAQ = 'faq',
@@ -88,6 +95,8 @@ export interface ScheduleCardAppearance {
   accentColor?: string;
   /** 仅允许 .sully-schedule-* 作用域的进阶美化。 */
   customCss?: string;
+  /** 非原版配色时，桌面小组件仍用毛玻璃透出壁纸、沿用桌面字色，只保留配色里的强调色。 */
+  desktopGlass?: boolean;
 }
 
 export type JournalAppearancePresetId =
@@ -139,6 +148,8 @@ export interface OSTheme {
   launcherWidgets?: Record<string, string>; // slots: 'tl' | 'tr' | 'wide' | 'dsq' (legacy 'bl' / 'br' are banned)
   /** 默认桌面长按编辑后的 App / Dock / 第二页风车组件顺序。 */
   launcherAppOrder?: string[];
+  /** Positional desktop slots, including explicit empty cells. */
+  launcherAppSlots?: string[];
   launcherDockOrder?: string[];
   launcherPinwheelOrder?: Array<'music' | 'appsA' | 'appsB' | 'image'>;
   /** 默认桌面组件可见性；旧存档未设置时保持显示。随主题备份。 */
@@ -279,14 +290,28 @@ export interface VisionApiConfig {
 /** A complete dialogue endpoint, separate from TTS/vision configuration. */
 export type DialogueApiConfig = Pick<APIConfig, 'baseUrl' | 'apiKey' | 'model' | 'stream' | 'temperature' | 'maxTokens' | 'apiType'>;
 
+export type AudioApiSongQuality = 'standard' | 'exhigh' | 'lossless';
+export interface AudioApiConfig {
+  enabled: boolean;
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  songQuality?: AudioApiSongQuality;
+}
+
 export interface APIConfig {
-  apiType?: 'openai' | 'anthropic';
+  apiType?: 'openai' | 'anthropic' | 'gemini';
   /** 私聊单次生成上限；未设置沿用 8000，不改变历史范围。 */
   maxTokens?: number;
   baseUrl: string;
   apiKey: string;
   // 可选识图中转：给不支持 image_url 的主模型补视觉能力。
   visionApi?: VisionApiConfig;
+  audioApi?: AudioApiConfig;
+  /** 朋友圈独立 API；未配置则仍走角色默认对话 API。 */
+  momentsApi?: DialogueApiConfig;
+  /** 全角色共用的主动消息 1.0 / 2.0 生成 API；不影响即时对话。 */
+  proactiveApi?: DialogueApiConfig;
   minimaxApiKey?: string;
   minimaxGroupId?: string;
   // 'domestic' → https://api.minimaxi.com (国内站)
@@ -340,6 +365,8 @@ export interface ActiveMsg2GlobalConfig {
   /** Confirmed by /config-check, scoped to the Worker URL that was checked. */
   anthropicMessagesSupported?: boolean;
   anthropicMessagesWorkerUrl?: string;
+  geminiNativeSupported?: boolean;
+  geminiNativeWorkerUrl?: string;
   userId: string;
   /** 单用户 Cloudflare Worker 地址，例如 https://amsg.your-worker.dev */
   workerUrl: string;
@@ -353,6 +380,18 @@ export interface ActiveMsg2GlobalConfig {
   masterKey?: string;
   /** 上次「连接」（在 worker 端建表）成功的时间 */
   initializedAt?: number;
+  /**
+   * 推送投递方式：
+   * - 'web-push'（缺省）：浏览器/PWA 原生 Web Push（或 APK 原生通道）
+   * - 'third-party'：通过第三方推送 App（WxPusher / Bark / MeoW）转发，绕过老 iOS 无 Web Push 限制与 Google FCM 连通性问题
+   */
+  pushMode?: 'web-push' | 'third-party';
+  /** 第三方推送 App 配置（属于个人连接信息，随 BACKEND_CONNECTION_KEYS 在不含后端连接的备份中剥离） */
+  thirdPartyPush?: {
+    provider: 'wxpusher' | 'bark' | 'meow';
+    token: string;
+    serverUrl?: string;
+  };
   /**
    * 即时对话：聊天的每一轮都交给云端跑（POST /instant-chat），回复走推送回来。
    * 只在设置页那一处开关（开关本身还有连接 / 通知权限 / worker 能力三道门），
@@ -460,6 +499,8 @@ export interface ActiveMsg2CharacterConfig {
   tasks?: ActiveMsg2TaskRecord[];
   /** ↓ 角色级共享设置（所有任务共用）。 */
   maxTokens?: number;
+  /** 独立的主动消息 API；未配置则沿用角色/全局主聊天 API。即时对话不受影响。 */
+  independentApi?: DialogueApiConfig;
   /**
    * 「我没回的时候，TA 最多连续主动发几条」。0 = 不限；没设 = 默认值
    * （amsgLimits.DEFAULT_MAX_UNANSWERED_SENDS）。管的是角色自己排的后续
@@ -564,7 +605,8 @@ export interface RealtimeConfig {
   // 天气配置
   weatherEnabled: boolean;
   weatherApiKey: string;  // OpenWeatherMap API Key（可选；留空走免 key 的 Open-Meteo）
-  weatherCity: string;    // 城市名（如 "北京"、"Beijing"）
+  weatherCities?: Record<string, string>; // Per-character override; missing/blank inherits weatherCity.
+    weatherCity: string;    // 城市名（如 "北京"、"Beijing"）
 
   // 新闻配置
   newsEnabled: boolean;
@@ -1140,6 +1182,8 @@ export interface WorldbookEntryConfig {
 }
 
 export interface MountedWorldbook extends WorldbookEntryConfig {
+    globalMount?: boolean;
+    personalMount?: boolean;
     id: string;
     title: string;
     content: string;
@@ -1147,6 +1191,8 @@ export interface MountedWorldbook extends WorldbookEntryConfig {
 }
 
 export interface Worldbook extends WorldbookEntryConfig {
+    scope?: 'global' | 'personal';
+    globalEnabled?: boolean;
     id: string;
     title: string;
     content: string; 
@@ -2076,6 +2122,7 @@ export type MusicProvider = 'minimax-free' | 'minimax-paid' | 'ace-step';
 // Audio blob lives in the IndexedDB assets store keyed by `assetKey`,
 // so the sheet itself stays small and JSON-serializable for sync/export.
 export interface SongAudio {
+    lyricRevisionId?: string;
     assetKey: string;          // DB.getAssetRaw / saveAssetRaw key
     mimeType: string;          // e.g. "audio/mpeg", "audio/wav"
     durationSec?: number;
@@ -2088,6 +2135,11 @@ export interface SongAudio {
 }
 
 export interface SongSheet {
+    lyricProposal?: import('./features/songwriting/model').LyricProposal;
+    lyricRevisions?: import('./features/songwriting/model').LyricRevision[];
+    completionCardId?: number;
+    completedLyricFingerprint?: string;
+    audioVersions?: SongAudio[];
     id: string;
     title: string;
     subtitle?: string;
@@ -2517,6 +2569,13 @@ export interface BankFullState {
 
 /** 角色本地歌单里的轻量歌曲快照 — 字段与 MusicContext 的 Song 对齐（无运行时 url） */
 export interface CharPlaylistSong {
+    local?: boolean;
+    localAssetKey?: string;
+    remoteAudioUrl?: string;
+    localMimeType?: string;
+    localLyrics?: string;
+    lyricLineTimings?: number[];
+    lyricTimingMode?: 'plain' | 'synced';
     id: number;
     name: string;
     artists: string;
@@ -2735,6 +2794,8 @@ export interface MemoryPalaceWaterlineConfig {
 }
 
 export interface CharacterProfile {
+  /** Controls new workroom chat abilities; historical events remain readable. */
+  workroomLinkEnabled?: boolean;
   /** Local default for this character's dialogue; absent means follow Settings. Never shared in cards. */
   dialogueApi?: DialogueApiConfig;
   id: string;
@@ -2916,6 +2977,7 @@ export interface CharacterProfile {
   writerPersonaGeneratedAt?: number;
 
   mountedWorldbooks?: MountedWorldbook[];
+  disabledGlobalWorldbookIds?: string[];
 
   /** 角色对用户的私密印象；其中的性格、MBTI 和喜好属于用户，不是角色本人。 */
   impression?: UserImpression;
@@ -3101,6 +3163,7 @@ export interface CharacterProfile {
   };
   activeBuffs?: CharacterBuff[];
   buffInjection?: string;   // 注入到systemPrompt的叙事型情绪底色描述
+  emotionIndependent?: boolean;
   emotionConfig?: {
     enabled: boolean;
     api?: {
@@ -3145,6 +3208,7 @@ export interface CharacterProfile {
   // 音乐人格 — 角色自己的网易云式歌单 / 品味 / 正在听
   // 在音乐 App 里以"拜访"形式访问
   musicProfile?: CharMusicProfile;
+  listenSongConfig?: { enabled?: boolean; sources?: string[] };
 
   /**
    * 日程风格：
@@ -3168,6 +3232,7 @@ export interface CharacterProfile {
    * - htmlModeCustomPrompt：用户自定义内容，**追加**在内置提示词之后（不会覆盖内置内容）。
    * - 上下文 / 归档 总结读到的 html_card 消息内容是已剥离 HTML 的纯文字摘要，避免 token 浪费。
    */
+  stickerVisionEnabled?: boolean;
   htmlModeEnabled?: boolean;
   htmlModeCustomPrompt?: string;
   /** 可选：在日常 ChatApp 注入任务优先的协同工作规则。提示词较长，默认关闭。 */
@@ -3180,6 +3245,20 @@ export interface CharacterProfile {
   chatSound?: { src: string; volume?: number };
   /** 提示音是否「绑定」到白框：true=提示音随白框 CSS 一起分享（写进指令注释）；false/undefined=独立存于 chatSound、白框分享码保持轻量。 */
   chatSoundBound?: boolean;
+
+  /** 普通聊天拟人提示；缺省开启。关闭不删除人设、世界书和历史。 */
+  humanStyleEnabled?: boolean;
+  /** 主动来电需逐角色明确授权；缺省关闭。 */
+  allowIncomingVoiceCalls?: boolean;
+  allowIncomingVideoCalls?: boolean;
+  /** 新回复心声；缺省开启，旧记录保留。 */
+  innerVoiceEnabled?: boolean;
+  /** Historical hearts in chat context; missing preserves prior behavior. */
+  innerVoiceContextEnabled?: boolean;
+  /** Hearts in future memory extraction; does not rewrite existing memories. */
+  innerVoiceMemoryEnabled?: boolean;
+  /** Additional heart content instructions; protocol stays fixed. */
+  innerVoiceCustomPrompt?: string;
 
   /**
    * 思考过程展示（per-character / 会话级）。
@@ -3283,7 +3362,8 @@ export interface GroupProfile {
     /** 提示音是否绑定进白框 CSS（跟着白框分享码走） */
     chatSoundBound?: boolean;
     /** HTML 模块模式：开启后角色可输出 [html] 卡片 */
-    htmlModeEnabled?: boolean;
+    stickerVisionEnabled?: boolean;
+  htmlModeEnabled?: boolean;
     /** HTML 模式自定义提示词（追加在内置提示词之后） */
     htmlModeCustomPrompt?: string;
 }
@@ -3395,6 +3475,7 @@ export interface DiaryPage {
 }
 
 export interface DiaryEntry {
+    kind?: 'exchange' | 'character';
     id: string;
     charId: string;
     date: string;
@@ -3912,7 +3993,7 @@ export interface GameSession {
     lastPlayedAt: number;
 }
 
-export type MessageType = 'friend_feed_share_card' | 'friend_feed_card' | 'secret_note' | 'text' | 'image' | 'emoji' | 'voice' | 'collaboration_file' | 'interaction' | 'transfer' | 'system' | 'social_card' | 'chat_forward' | 'xhs_card' | 'score_card' | 'music_card' | 'mcd_card' | 'luckin_card' | 'html_card' | 'news_card' | 'vr_card' | 'trpg_card' | 'novel_card' | 'world_card' | 'sim_card' | 'phone_card' | 'webpage_card' | 'theater_card' | 'room_card' | 'life_card' | 'group_topic_card';
+export type MessageType = 'moments_card' | 'workroom_card' | 'audio' | 'friend_feed_share_card' | 'friend_feed_card' | 'secret_note' | 'text' | 'image' | 'emoji' | 'voice' | 'collaboration_file' | 'interaction' | 'transfer' | 'system' | 'social_card' | 'chat_forward' | 'xhs_card' | 'score_card' | 'music_card' | 'mcd_card' | 'luckin_card' | 'html_card' | 'news_card' | 'vr_card' | 'trpg_card' | 'novel_card' | 'world_card' | 'sim_card' | 'phone_card' | 'webpage_card' | 'theater_card' | 'room_card' | 'life_card' | 'group_topic_card';
 
 export interface Message {
     id: number;
@@ -3943,7 +4024,8 @@ export interface Emoji {
     categoryId?: string; 
 }
 
-export interface FullBackupData {
+export interface FullBackupData extends Partial<WorkroomBackup> {
+    momentsRecords?: import('./features/moments/schema').Row[];
     /** 好友圈正文；文字备份单列，完整备份随 assets 保存。 */
     friendFeed?: import('./utils/friendFeed').FriendFeedState;
     /** Media-only patches never replace feed text or settings. */
@@ -3983,6 +4065,8 @@ export interface FullBackupData {
     emojiCategories?: EmojiCategory[]; 
     savedJournalStickers?: {name: string, url: string}[]; 
     assets?: { id: string, data: string }[];
+    /** 个人扩展「音迹」歌曲客观分析；全角色共享，随完整备份携带。 */
+    songSoundArchive?: { id: string; data: string }[];
     galleryImages?: GalleryImage[];
     userProfile?: UserProfile;
     diaries?: DiaryEntry[];

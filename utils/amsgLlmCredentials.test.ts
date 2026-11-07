@@ -173,6 +173,16 @@ describe('凭据行取值', () => {
     }
   });
 
+  it('全局主动消息 API 覆盖定时主动消息，不影响即时对话', () => {
+    const row = buildCharChatCredRow(CHAR, { enabled: true } as any, {...API, proactiveApi: SECONDARY});
+    expect(row?.value).toEqual({
+      apiUrl: 'https://alt.example.dev/v1/chat/completions',
+      apiKey: 'sk-alt',
+      primaryModel: 'gpt-alt',
+    });
+    expect(buildCharInstantCredRow('char-1', API)?.value.primaryModel).toBe('gpt-global');
+  });
+
   it('即时对话那行：原样收下当轮终值（claude 系开思考时的 -thinking 后缀不能被抹掉）', () => {
     const row = buildCharInstantCredRow('char-1', {
       baseUrl: 'https://api.example.dev/v1', apiKey: 'sk-global', model: 'claude-sonnet-4-thinking',
