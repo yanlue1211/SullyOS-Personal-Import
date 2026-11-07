@@ -122,3 +122,17 @@
 - `selfUpdate.supported:true`、`state.lastSource:"manual"`、`state.lastOutcome:"updated"`、`state.lastError:null`，`bundleHash:"de776f94f5c9"`，`lastUpdatedAt:"2026-11-07T19:38:24.501Z"`（北京时间 2026-11-08 03:38:24）。
 - **结论**：真实生产 Worker 的升级及运行时配置/能力版本初验通过；但尚未检查旧任务数据完整性、Cron 实际心跳、Push 实际投递、离线循环、见面保护、费用与失败恢复，**不可把此结果宣称 B 方案完整验收**。
 - 当前执行环境对 `workers.dev` 域名 DNS 解析失败，无法自行直连 `/debug`；下一步先让用户在手机浏览器读只读 `/debug`，核对 storage/schema/tick 与 Cron，后续再安排低费用且有限次数的真实业务验收，不清 D1、不重置任何密钥。
+
+### 5.7 生产 `GET /debug` 只读体检通过（2026-11-08 03:41，用户真机截图）
+
+用户浏览器访问 `https://sullyos-amsg.yanlue.workers.dev/debug` 获得 `success:true`，时间 `2026-11-07T19:41:38.033Z`：
+
+- `config.ok:true`，`missing:[]`，`warnings:[]`。
+- `storage.reachable:true`、`schemaReady:true`、`schemaError:null`、`missingTables:[]`、`missingColumns:[]`。
+- 数据库 schema 为 `current:"3.2.0-lease-token"`、`required:"3.2.0-lease-token"`、`ok:true`、`missing:[]`；所以**当前 D1 表结构与新版 Worker 兼容**，不需要手动 SQL 或重建库。
+- `storage.pushSubscriptionRegistered:true`，`pushDelivery.gone:null`。证明数据库登记着一条订阅且未发现最近的失效回执；**不能证明本手机推送 endpoint 与云端相同或 Push 实际抵达**。
+- `storage.pendingTasks:0`、`overdueTasks:0`、`tick:"idle"`；这不是 Cron 已验证正常的证据。源码 `judgeTick` 在 `pendingTasks=0` 时直接报告 `idle`，所以**尚无待发任务可验证定时投递**；不代表旧数据丢失，零待发也不证明历史任务数量保留。
+- `server:null` 源于 `readServerVersion` 无法读取上游 `/capabilities` 的回执，不影响 `config`、D1 schema 与 Worker 的能力位已通过的事实。
+- `stuckTasks/retryingTasks/overdueVerdict:null` 因无过期任务，**不能把 null 算异常也不能宣称失败恢复已验收**。
+- 下一步优先低费用真机端到端实验：用现有角色的主动消息 2.0 面板新建一个「固定」+「一次」的几分钟后到点消息（源码 `components/chat/ActiveMsg2SettingsModal.tsx` 的 `mode=fixed` 无 LLM 生成），等待时关网页/锁屏，核验通知与回到聊天后的入库；先查后台任务 Cron 是否显示启用。测试后核对新增的任务被消费、不会重复，再做 B 方案空闲循环与独立 API 的受限真实模型测试。
+- 生产 Worker 版本升级与 D1 兼容性体检可判**通过**；完整 B 方案行为、Cron 实际执行、Push 送达、费用和恢复仍为**待验证**。不要以 `tick:"idle"` 冒充 Cron 成功。
