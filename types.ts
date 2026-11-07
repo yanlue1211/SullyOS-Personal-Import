@@ -447,6 +447,9 @@ export interface ActiveMsg2TaskRecord {
 
 export interface ActiveMsg2CharacterConfig {
   enabled: boolean;
+  /** 仅定时/自动主动消息使用的独立生成 API；即时对话和正常聊天不使用。 */
+  useSecondaryApi?: boolean;
+  secondaryApi?: DialogueApiConfig;
   /**
    * 即时对话按角色单独关。undefined = 跟随全局（全局即时对话开着就默认开）；
    * false = 这个角色的聊天回到本地前台生成。与 enabled（排程开关）互相独立：
