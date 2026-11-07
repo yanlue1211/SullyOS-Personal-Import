@@ -1,6 +1,7 @@
 import { resolveDialogueApi } from '../utils/characterApi';
 import { setAmsgActiveCall } from '../utils/amsgInteractionGuard';
 import { ActiveMsgClient } from '../utils/activeMsgClient';
+import { syncCloudAwayTask } from '../utils/awayMessage';
 import { isAmsg2EnabledForChar } from '../utils/amsg2Tasks';
 import { loadCharacterContextMessages } from '../utils/chatContextRange';
 import { canAnalyzeVoiceSource, isVoiceAudioPriming, primeVoiceAudio, voicePlaybackErrorMessage } from '../utils/voicePlayback';
@@ -2721,6 +2722,9 @@ ${sentencePlan}`;
         });
         setBubbles(prev => prev.map(b => (b.id === userBubble.id ? { ...b, dbId: userDbId } : b)));
         markCallTurnDirty();
+        if (selectedChar?.awayMessage?.enabled) void syncCloudAwayTask({
+          char: selectedChar, lastUserAt: Date.now(), userProfile, groups, realtimeConfig, apiConfig, updateCharacter,
+        });
       } else if (newSnapshotRef) {
         const previousSnapshotRef = retryBubble?.cameraSnapshotRef;
         try {
