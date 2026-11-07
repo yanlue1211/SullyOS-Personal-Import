@@ -473,11 +473,11 @@ describe('one-click deployment: never replace the old Master Key silently', () =
             .toEqual({ ok: true, cleared: false });
     });
     it('用户明确确认后，只清理已知 AMSG 数据表，决不碰 D1 和 SQLite 内部表', async () => {
-        const sqls = fakeD1(['scheduled_messages','client_state','sqlite_sequence','d1_migrations','_cf_KV'], true);
+        const sqls = fakeD1(['scheduled_messages','client_state','worker_diagnostics','sqlite_sequence','d1_migrations','_cf_KV'], true);
         expect(await guardReusedDatabase({ ...base, hasExistingMasterKey: false, reset: true }))
             .toEqual({ ok: true, cleared: true });
         expect(sqls.filter(x => x.startsWith('DELETE'))).toEqual([
-            'DELETE FROM "scheduled_messages"', 'DELETE FROM "client_state"',
+            'DELETE FROM "scheduled_messages"', 'DELETE FROM "client_state"', 'DELETE FROM "worker_diagnostics"',
         ]);
     });
     it('旧库含不认识的业务表时，即使确认重置也阻止误删', async () => {
