@@ -107,3 +107,10 @@
 - 当前最新正式网页 `personal/audio-listening@4e740fa` 的主动消息设置弹出绿色成功提示「已连接成功，主动消息 2.0 可以用了」，说明 Worker 已通过 `POST /init-tenant`、用户密钥握手和前端的能力探测等连接流程。
 - `utils/activeMsgClient.ts` 的 `fetchWithAuthRaw` 在 `config.serverToken` 非空时发送 `X-Client-Token`；因此此次成功是当前普通请求鉴权可用的强证据。之前 `selfUpdate.lastError = UNAUTHORIZED` 可能为旧历史状态，不应直接重置 `AMSG_SERVER_TOKEN`。
 - **连接成功不能替代实际 `POST /self-update` 的鉴权/权限验证**，更不能代表 Worker 已升级到 `2026-11-08.3`。在用户已添加正确的生产 `AMSG_BUNDLE_URL` 且完整值核对无误前提下，可从最新前端触发一次原位升级；应保留原有 D1、Master Key、Push、Cron 和 DO，失败立即停止重试并查看错误，成功后再以真实 `GET /config-check` 确认版本及能力位。不能把此连接成功误报为 B 方案验收。
+
+### 5.5 用户点击原位「更新 Worker」获得成功回执（2026-11-08 03:38，真机截图）
+
+- 最新网页 `personal/audio-listening@4e740fa` 上，用户点击「更新 Worker 到 2026-11-08.3」后出现绿色 Toast **「已经更新到最新版本。」**，这是 `POST /self-update` 已报告成功的证据。
+- 截图拍摄瞬间，两个按钮仍显示「处理中…」，而版本文案仍为旧 `2026-11-07.3`，因此不能从该图单独证明部署后端已开始以 `2026-11-08.3` 运行，可能是自动重新连接与能力探测尚未刷新 UI。
+- 当前窗口无法通过公共网络直接请求 `https://sullyos-amsg.yanlue.workers.dev/config-check`（DNS/网络不可达）。下一步让用户通过浏览器**重新打开** `/config-check` 并提供真实回执，重点核查 `workerVersion=2026-11-08.3`、`ok=true`、`missing=[]`、`warnings=[]`、`instantTick=true`、`backgroundJobs=true`；之后再检查 D1 旧任务、Cron、真实 Push 与低成本离线行为。
+- 无重新创建数据库/重新生成 Master Key 操作的用户报告；但实际绑定保留与排程完整性仍需独立验收。不要将更新按钮成功提示等同于全 B 方案通过。
