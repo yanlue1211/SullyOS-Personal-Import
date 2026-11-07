@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { resolveAmsgInteractionLock } from './amsgInteractionGuard';
+import { describe, expect, it, vi } from 'vitest';
+import { endAmsgDateFromScheduledMessage, getAmsgActiveDateEncounterId, getAmsgDateEndedAt, isAmsgActiveDate, resolveAmsgInteractionLock, setAmsgActiveDate } from './amsgInteractionGuard';
 
 describe('2.0 云端交互锁', () => {
   it('普通私聊没有锁', () => {
@@ -42,4 +42,23 @@ describe('2.0 云端交互锁', () => {
       {role:'user',metadata:{hidden:true,proactiveHint:true}},
     ], false, true)).toBe('date');
   });
+  it('只有确实发送的线上预约才结束同一场见面，旧场次不会误关新场次', () => {
+    const db = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => db.get(key) ?? null,
+      setItem: (key: string, value: string) => { db.set(key, value); },
+      removeItem: (key: string) => { db.delete(key); },
+    });
+    setAmsgActiveDate('char-a', true, 'first');
+    // 只排任务不触发结束（直到收件箱明确收到正文）。
+    expect(isAmsgActiveDate('char-a')).toBe(true);
+    setAmsgActiveDate('char-a', true, 'second');
+    expect(endAmsgDateFromScheduledMessage('char-a', 'first', 2000)).toBe(false);
+    expect(getAmsgActiveDateEncounterId('char-a')).toBe('second');
+    expect(endAmsgDateFromScheduledMessage('char-a', 'second', 4000)).toBe(true);
+    expect(isAmsgActiveDate('char-a')).toBe(false);
+    expect(getAmsgDateEndedAt('char-a')).toBe(4000);
+    expect(endAmsgDateFromScheduledMessage('char-a', 'second', 4000)).toBe(false);
+  });
+
 });
