@@ -50,7 +50,12 @@ export function resolveScheduledMessageApi(
   character: Pick<CharacterProfile, 'dialogueApi'> | null | undefined,
   config?: Pick<ActiveMsg2CharacterConfig, 'useSecondaryApi' | 'secondaryApi'> | null,
 ): APIConfig {
-  if (config?.useSecondaryApi !== true) return resolveDialogueApi(globalApi, character);
+  // Legacy personal global proactive API remains a scheduled-only default when explicitly configured.
+  // The per-character independent 2.0 API still wins and fails closed if incomplete.
+  if (config?.useSecondaryApi !== true) {
+    return resolveDialogueApi(globalApi, character,
+      globalApi.proactiveApi?.baseUrl ? globalApi.proactiveApi : undefined);
+  }
   const api = config.secondaryApi;
   if (!api?.baseUrl?.trim() || !api.apiKey?.trim() || !api.model?.trim()) {
     throw new Error('主动消息独立 API 未配置完整：需要 URL / Key / 模型；已阻止回退到主聊天模型。');
