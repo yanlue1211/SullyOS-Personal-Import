@@ -671,7 +671,12 @@ const putLlmCredentialRows = async (
   for (const batch of chunkCredRows(pending)) {
     const response = await client.putLlmCredentials(batch.map(row => stampCloudWrite(client, row)));
     if (!response?.success) {
-      throw new Error(formatAmsgServerError(response, '登记 LLM 凭据失败。'));
+      // 保留服务端的结构化原因，允许同步层按角色拆分「已停用」批次；
+      // 其他错误原样抛出，不会误将鉴权/网络故障当成角色停用。
+      const cause = response?.error?.cause as { code?: unknown } | undefined;
+      const code = typeof cause?.code === 'string'
+        ? cause.code : response?.error?.code;
+      throw Object.assign(new Error(formatAmsgServerError(response, '登记 LLM 凭据失败。')), { code });
     }
     // 逐批记账：后面那批失败时，前面已经落地的不必再传一遍。
     rememberCredRows(batch);
