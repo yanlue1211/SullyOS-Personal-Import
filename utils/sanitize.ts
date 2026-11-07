@@ -279,6 +279,16 @@ export function normalizeVoiceTags(t: string): string {
   // 4. 配对扫描: 先修语音 (闭合避让末尾字幕块), 再修字幕
   result = repairPairedTag(result, /<\/?[语語]音[^>]*>/g, tok => (/語/.test(tok) ? '語音' : '语音'), true);
   result = repairPairedTag(result, /<\/?字幕[^>]*>/g, () => '字幕', false);
+  // 旧模型会把翻译字幕嵌进语音标签，必须移到语音外，避免被 TTS 朗读、重复显示。
+  result = result.replace(/(<[语語]音[^>]*>)([\s\S]*?)(<\/[语語]音>)/g, (block, open: string, inner: string, close: string) => {
+    const subtitles: string[] = [];
+    const speech = inner.replace(/<字幕>([\s\S]*?)<\/字幕>/g, (_m, sub: string) => {
+      if (sub.trim()) subtitles.push(sub.trim());
+      return '';
+    });
+    if (!subtitles.length) return block;
+    return `${open}${speech.trim()}${close}\n<字幕>${subtitles.join('\n')}</字幕>`;
+  });
   return result;
 }
 
