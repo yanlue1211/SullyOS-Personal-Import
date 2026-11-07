@@ -82,6 +82,9 @@ describe('decideAwayTaskAction（云端版每轮发不发请求）', () => {
     expect(decideAwayTaskAction(NOW + DELAY - 5 * MIN, NOW + DELAY, NOW)).toBe('keep');
   });
 
+  it('排得比新目标晚很多 → 重新对齐，不能因为旧链太晚漏掉这一轮', () => {
+    expect(decideAwayTaskAction(NOW + DELAY * 3, NOW + DELAY, NOW)).toBe('renew');
+  });
   it('排早了 → 原地改期', () => {
     expect(decideAwayTaskAction(NOW + 30 * MIN, NOW + DELAY, NOW)).toBe('renew');
   });
