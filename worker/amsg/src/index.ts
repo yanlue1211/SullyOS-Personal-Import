@@ -333,6 +333,7 @@ type ScheduleTask = (options: {
   firstSendTime: string;
   recurrenceType?: string;
   messageType?: string;
+  messageSubtype?: string;
   metadata?: Record<string, unknown>;
   taskInput?: Record<string, unknown>;
   uuid?: string;
@@ -1564,6 +1565,8 @@ export const runFireScheduleTool = async (
       ...(stash.scheduledTaskInput ? { taskInput: stash.scheduledTaskInput } : {}),
       recurrenceType: parsed.recurrence,
       messageType: parsed.mode,
+      // Self-scheduled follow-ups must not inherit the parent instant-chat subtype.
+      messageSubtype: 'chat',
       uuid,
       // 角色自排的循环任务也按角色所在时区的墙钟推进，跟用户在面板排的同一套。
       tzId: stash.tz.tzId,
@@ -2311,7 +2314,9 @@ export const amsgHooks = {
         for (const row of page.tasks) {
           const meta = row.metadata ?? {};
           if ((row.charId ?? meta.charId) !== charId || row.status !== 'pending' || !row.uuid || !row.nextSendAt
-            || meta.amsgInstantChat === true || meta.amsgKind || row.messageSubtype === 'instant-chat') continue;
+            || meta.amsgInstantChat === true || meta.amsgKind
+            // Legacy follow-ups inherited instant-chat subtype; keep self-scheduled ones visible.
+            || (row.messageSubtype === 'instant-chat' && meta.amsgSelfScheduled !== true)) continue;
           const old = known.get(row.uuid);
           live.push({
             ...old,
