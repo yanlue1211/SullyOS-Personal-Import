@@ -98,6 +98,51 @@ describe('amsg2 audit regressions', () => {
     expect(own.plan.skip).toBeUndefined();
   });
 
+  it('scheduled online speech ends only the matching persisted in-person encounter after delivery', async () => {
+    const task = { id: 49, uuid: '66666666-6666-4666-8666-666666666666',
+      contactName: '角色', nextSendAt: new Date(now).toISOString(), recurrenceType: 'none',
+      metadata: { charId, amsgMode: 'auto', amsgClientTaskId: 'online-after-meeting',
+        amsgSelfScheduled: true, amsgDateExitEncounterId: 'meet-123',
+        amsgTaskInstruction: '出门后线上发消息', amsgExpirePolicy: 'expire' } };
+    const { ctx, plan, stash } = await start({ task, limits: {
+      awaySceneLock: 'date', awayDateEncounterId: 'meet-123',
+    } });
+    expect(plan.skip).toBeUndefined();
+    expect(stash.dateExitEncounterId).toBe('meet-123');
+    stash.selfLogTexts = ['出门啦'];
+    stash.dateExitHadVisibleMessage = true;
+    await amsgFireSettled({ status: 'sent', sentCount: 1, scratch: ctx.scratch,
+      writeState: ctx.writeState } as any);
+    const calls = vi.mocked(ctx.writeState).mock.calls;
+    const update = calls.flatMap(([, entries]: any[]) => entries).find((entry: any) => entry.key === AMSG_LIMITS_KEY);
+    expect(update).toBeTruthy();
+    expect(JSON.parse(update.value)).toMatchObject({ awaySceneLock: null, awayDateEncounterId: null, awayDateEndedAt: now });
+  });
+
+  it('no spoken online message or a stale encounter cannot release the meeting lock', async () => {
+    const task = { id: 50, uuid: '77777777-7777-4777-8777-777777777777',
+      contactName: '角色', nextSendAt: new Date(now).toISOString(), recurrenceType: 'none',
+      metadata: { charId, amsgMode: 'auto', amsgClientTaskId: 'online-after-meeting',
+        amsgSelfScheduled: true, amsgDateExitEncounterId: 'meet-old',
+        amsgTaskInstruction: '出门后线上发消息', amsgExpirePolicy: 'expire' } };
+    const missing = await start({ task, limits: { awaySceneLock: 'date', awayDateEncounterId: 'meet-old' } });
+    missing.stash.selfLogTexts = ['这条没发'];
+    missing.stash.dateExitHadVisibleMessage = true;
+    await amsgFireSettled({ status: 'skipped', sentCount: 0, scratch: missing.ctx.scratch,
+      writeState: missing.ctx.writeState } as any);
+    expect(vi.mocked(missing.ctx.writeState).mock.calls.flatMap(([, entries]: any[]) => entries)
+      .some((entry: any) => entry.key === AMSG_LIMITS_KEY)).toBe(false);
+
+    const old = await start({ task, limits: { awaySceneLock: 'date', awayDateEncounterId: 'meet-new' } });
+    expect(old.stash.dateExitEncounterId).toBeNull();
+    old.stash.selfLogTexts = ['出门啦'];
+    old.stash.dateExitHadVisibleMessage = true;
+    await amsgFireSettled({ status: 'sent', sentCount: 1, scratch: old.ctx.scratch,
+      writeState: old.ctx.writeState } as any);
+    expect(vi.mocked(old.ctx.writeState).mock.calls.flatMap(([, entries]: any[]) => entries)
+      .some((entry: any) => entry.key === AMSG_LIMITS_KEY)).toBe(false);
+  });
+
   it('disabling idle messages in cloud limits stops chained tasks without generating or rearming', async () => {
     const task = { id: 32, uuid: '55555555-5555-4555-8555-555555555555',
       nextSendAt: new Date(now).toISOString(), recurrenceType: 'none',
