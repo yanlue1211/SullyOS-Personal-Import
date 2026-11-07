@@ -95,3 +95,9 @@
 - 自更新状态 `lastSource:"manual"`、`lastOutcome:"failed"`、`lastError:{code:"UNAUTHORIZED",message:"共享密钥对不上。"}`。**这是一条历史失败状态，不代表已测试刷新后当前配置，也不能据此认定 Cron 自检请求失败。**
 - 对照历史代码：旧前端提交 `346fa29` 的 `worker/amsg/src/selfUpdate.ts` 默认 `BUNDLE_URL` 明确指向 `https://raw.githubusercontent.com/Tosd0/sullyos-workers/main/amsg/worker.bundle.js`；当前个人源码才改为 `yanlue1211/SullyOS-Personal-Import/personal/audio-listening/worker/amsg/worker.bundle.js`。**旧 Worker 未必就是这个源，但如果没有显式 `AMSG_BUNDLE_URL`，可能拉取作者包，因此仍不可直接点更新。**
 - 下一步 Cloudflare 只读核实：`sullyos-amsg` → Settings → Variables and Secrets 中是否存在 `AMSG_BUNDLE_URL`（若存在核对值，只分享非敏感来源地址），并核对 `AMSG_SERVER_TOKEN` 是否已有；千万不要展示任何密钥的实际值，不要点随机/清库/全新部署。确定实际更新源、安全处理共享密钥差异后再执行已有 Worker 的原位升级并逐项检查。
+
+### 5.3 Cloudflare 更新来源已在生产环境增加（2026-11-08 03:31，用户截图）
+
+- 用户通过 Cloudflare Dashboard → `sullyos-amsg` → Production → Runtime variables and secrets 添加公开 Text 变量 `AMSG_BUNDLE_URL`，目标为个人发布分支的 `worker/amsg/worker.bundle.js`；截图变量表新增了一行 `Variable`、并显示 `wrangler.jsonc / wrangler.toml` 的 `AMSG_BUNDLE_URL` 配置提示。截图不显示完整值，需在真实升级前复核来源字串。
+- Cloudflare 提示 `Update your Wrangler configuration with these changes to keep deployments in sync`，这是配置同步提醒，非 Worker 更新失败。不应照提示随意更换构建配置或把任何 Secret 明文写入公开仓库。后续通过 Git/Wrangler 重部署须确保该变量仍保留（个人仓库 `worker/amsg/wrangler.toml` 有 `keep_vars = true`，但实际部署来源待核）。
+- 这一轮操作只证明生产变量已添加，不证明 Worker bundle 已由 `2026-11-07.3` 升至 `2026-11-08.3`。下一步重新读取只读 `/config-check`，再核对 `CF_SCRIPT_NAME`/旧授权共享密钥及原有绑定。自动更新的 Cron 检查可能独立于前端共享密钥，不能把历史 `UNAUTHORIZED` 当作每轮 Cron 错误。
