@@ -92,6 +92,7 @@ export const decideAwayTaskAction = (
   nowMs: number,
 ): 'keep' | 'renew' | 'create' => {
   if (recordSendAtMs == null) return 'create';
-  if (recordSendAtMs > nowMs && recordSendAtMs >= targetMs - AWAY_RENEW_SLACK_MS) return 'keep';
+  // B模式中晚到整整一轮也是错误排期：应接续用户最新一次开口重新对齐。
+  if (recordSendAtMs > nowMs && Math.abs(recordSendAtMs - targetMs) <= AWAY_RENEW_SLACK_MS) return 'keep';
   return 'renew';
 };
