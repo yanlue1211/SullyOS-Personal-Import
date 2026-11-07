@@ -1101,8 +1101,8 @@ var chatContentOk = (content) => {
 var chatFieldOk = (chat) => {
   if (chat === void 0) return true;
   if (!chat || typeof chat !== "object" || Array.isArray(chat)) return false;
-  const { messages, builtAt } = chat;
-  return typeof builtAt === "number" && Array.isArray(messages) && messages.length > 0 && messages.every((m) => !!m && typeof m === "object" && typeof m.role === "string" && chatContentOk(m.content));
+  const { messages, builtAt, timelyInsertAt } = chat;
+  return typeof builtAt === "number" && (timelyInsertAt === void 0 || Number.isInteger(timelyInsertAt)) && Array.isArray(messages) && messages.length > 0 && messages.every((m) => !!m && typeof m === "object" && typeof m.role === "string" && chatContentOk(m.content));
 };
 var parseFirePack = (value) => {
   try {
@@ -11927,7 +11927,7 @@ function createSingleUserCloudflareWorker(buildConfig, options = {}) {
 }
 
 // utils/amsgBundleVersion.ts
-var AMSG_BUNDLE_VERSION = "2026-11-07.7";
+var AMSG_BUNDLE_VERSION = "2026-11-07.8";
 
 // worker/amsg/src/skipDiagnostics.ts
 var BODY_ERROR_MAX_CHARS = 200;
@@ -19758,16 +19758,12 @@ var amsgHooks = {
           scheduleBlock
         ]
       });
-      const instantMessages = [
-        // content 原样透传，一个字都不动：带图片的消息本地就是结构化分段
-        // （`[{type:'text'},{type:'image_url'}]`），上游把这个数组整个丢进
-        // /chat/completions 的请求体（amsg-shared 的 buildLlmRequestBody 只做
-        // `messages: llmMessages`，不看 content 的类型）。这里但凡 String() 一下，
-        // 模型收到的就是「[object Object]」而不是那张图。
-        // 每条重新包一层对象只是不把 pack 上那份交出去，content 仍是同一个引用。
-        ...pack.chat.messages.map((m) => ({ role: m.role, content: m.content })),
-        ...timelyBlock ? [{ role: "system", content: timelyBlock }] : []
-      ];
+      const instantMessages = pack.chat.messages.map((m) => ({ role: m.role, content: m.content }));
+      const requestedInsertAt = pack.chat.timelyInsertAt;
+      const timelyInsertAt = Number.isInteger(requestedInsertAt) && requestedInsertAt >= 1 && requestedInsertAt <= instantMessages.length ? requestedInsertAt : instantMessages.length;
+      if (timelyBlock) {
+        instantMessages.splice(timelyInsertAt, 0, { role: "system", content: timelyBlock });
+      }
       if (userHoliday) {
         const profileMessage = instantMessages.find((m) => m.role === "system" && typeof m.content === "string" && m.content.includes("### \u4E92\u52A8\u5BF9\u8C61 (User)\n"));
         if (profileMessage) profileMessage.content = insertUserHolidayInProfile(profileMessage.content, userHoliday);
