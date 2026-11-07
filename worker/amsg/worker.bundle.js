@@ -11927,7 +11927,7 @@ function createSingleUserCloudflareWorker(buildConfig, options = {}) {
 }
 
 // utils/amsgBundleVersion.ts
-var AMSG_BUNDLE_VERSION = "2026-11-07.9";
+var AMSG_BUNDLE_VERSION = "2026-11-08.1";
 
 // worker/amsg/src/skipDiagnostics.ts
 var BODY_ERROR_MAX_CHARS = 200;
@@ -12434,8 +12434,8 @@ var buildTaskInstruction = (mode, promptHint) => {
 var AMSG_AWAY_MESSAGE_META = "amsgAwayMessage";
 var AMSG_AWAY_DELAY_META = "amsgAwayDelayMinutes";
 var buildAwayTaskInstruction = (delayMinutes) => [
-  `\u5BF9\u65B9\u5DF2\u7ECF\u8D85\u8FC7 ${delayMinutes} \u5206\u949F\u6CA1\u8DDF\u4F60\u8BF4\u8BDD\u4E86\uFF0C\u8FD9\u6B21\u662F\u4F60\u4E3B\u52A8\u53BB\u627E\u5BF9\u65B9\u3002`,
-  "\u8FD9\u662F\u4E00\u6B21\u4E3B\u52A8\u627E\u5BF9\u65B9\u7684\u673A\u4F1A\u3002\u7ED3\u5408\u4F60\u4EEC\u6700\u540E\u804A\u5230\u54EA\u513F\u3001\u5BF9\u65B9\u79BB\u5F00\u4E86\u591A\u4E45\u3001\u4F60\u81EA\u5DF1\u8FD9\u4F1A\u513F\u5728\u505A\u4EC0\u4E48\uFF0C\u81EA\u7136\u5730\u53D1\u4E00\u5230\u4E09\u53E5\u79C1\u804A\u3002",
+  `\u5BF9\u65B9\u5DF2\u7ECF\u8D85\u8FC7 ${delayMinutes} \u5206\u949F\u6CA1\u8DDF\u4F60\u8BF4\u8BDD\u4E86\uFF0C\u73B0\u5728\u662F\u4F60\u53EF\u4EE5\u4E3B\u52A8\u7EBF\u4E0A\u8054\u7CFB\u5BF9\u65B9\u7684\u4E00\u6B21\u673A\u4F1A\u3002`,
+  "\u5148\u7ED3\u5408\u4F60\u4EEC\u6700\u540E\u804A\u5230\u54EA\u513F\u3001\u5BF9\u65B9\u79BB\u5F00\u4E86\u591A\u4E45\u3001\u4F60\u81EA\u5DF1\u8FD9\u4F1A\u513F\u5728\u505A\u4EC0\u4E48\uFF0C\u5224\u65AD\u6B64\u523B\u6709\u6CA1\u6709\u81EA\u7136\u8054\u7CFB\u7684\u7406\u7531\uFF1B\u6CA1\u6709\u5C31\u6309\u81EA\u4E3B\u9759\u9ED8\u89C4\u5219\u4E0D\u53D1\u3002\u51B3\u5B9A\u8054\u7CFB\u624D\u53D1\u4E00\u5230\u4E09\u53E5\u79C1\u804A\u3002",
   "\u53EF\u4EE5\u60E6\u8BB0\u5BF9\u65B9\u53BB\u54EA\u4E86\u3001\u5206\u4EAB\u4F60\u521A\u7ECF\u5386\u7684\u4E8B\uFF0C\u6216\u8005\u63A5\u4E0A\u6CA1\u804A\u5B8C\u7684\u8BDD\uFF1B\u4E0D\u8981\u50CF\u7CFB\u7EDF\u63D0\u9192\uFF0C\u4E5F\u4E0D\u8981\u63D0\u300C\u591A\u5C11\u5206\u949F\u300D\u8FD9\u79CD\u8BA1\u65F6\u3002"
 ].join("\n");
 var pad22 = (n) => n.toString().padStart(2, "0");
@@ -20196,9 +20196,12 @@ var buildWorkerConfig = (env) => {
     // 是否接入 MCP 返回 5 / 12；即时对话再把总超时抬到 INSTANT_TOTAL_TIMEOUT_MS。
     hooks: amsgHooks,
     leaseHeartbeatMs: 1e3,
-    // 用户主动触发的即时对话：生成失败本轮就结束，由用户决定是否重发。
-    // 策略由上游在 onBeforeFire 前解析，读取上下文失败也覆盖；整批入箱后仍可补推原文。
-    maxGenerationRetries: (task) => isInstantChatTask(task.metadata) ? 0 : void 0,
+    // 即时聊天：这次生成失败就交还用户决定是否重试。
+    // B方案空闲节拍：这次仅给一次生成机会，前置 onBeforeFire 已用固定 UUID
+    // 排好下一节拍。若本次生成失败，不重复烧模型请求；下一节拍仍照常到来。
+    // 其他用户/角色明确预约的任务不改变作者原生重试规则。
+    // 上游在 onBeforeFire 前解析生成重试策略；这项不修改租约心跳及推送出箱重投。
+    maxGenerationRetries: (task) => isInstantChatTask(task.metadata) || task.metadata?.[AMSG_AWAY_MESSAGE_META] === true ? 0 : void 0,
     // 取消通过租约心跳通知执行中的 Worker；1 秒检测一次，TTL 仍由上游管理。
     // 收尾回执 + 过期跳过回执（config 级 hook）。
     // onFireSettled: 无论这次 fire 是发出去了、跳过了还是抛错了都会调一次，self_log
