@@ -20,7 +20,7 @@ const makeTask = (index: number, at: number) => ({
 }) as any;
 
 async function start(over: {
-  enabled?: boolean; config?: any; pending?: any[]; selfLog?: any; sharedValue?: string;
+  enabled?: boolean; config?: any; pending?: any[]; selfLog?: any; sharedValue?: string; awaySceneLock?: 'date' | 'call';
   builtAt?: number; limits?: Record<string, unknown>; chatMessages?: any[]; nowMs?: number; task?: any; remote?: any[];
 } = {}) {
   const nowMs = over.nowMs ?? now;
@@ -28,6 +28,7 @@ async function start(over: {
     v: FIRE_PACK_VERSION, template: '角色设定 {{AMSG_TASK_INSTRUCTION}}',
     lastUserMessageAt: null, tzId: 'Asia/Tokyo', userTzId: 'Asia/Tokyo', targetName: '用户',
     builtAt: over.builtAt ?? now - 60_000, pendingTasks: over.pending ?? [], scene: null,
+    awaySceneLock: over.awaySceneLock ?? null,
     selfScheduleEnabled: over.enabled ?? true,
     chat: { builtAt: now, messages: over.chatMessages ?? [{ role: 'user', content: '你好' }] },
   };
@@ -61,6 +62,52 @@ beforeEach(() => { vi.spyOn(Date, 'now').mockReturnValue(now); });
 afterEach(() => { vi.restoreAllMocks(); });
 
 describe('amsg2 audit regressions', () => {
+  it('B-mode cloud idle task schedules one future tick and quiet hours skip before LLM', async () => {
+    const task = {
+      id: 30, uuid: '33333333-3333-4333-8333-333333333333',
+      contactName: '角色', nextSendAt: new Date(now).toISOString(), recurrenceType: 'none',
+      metadata: {
+        charId, amsgClientTaskId: 'away-old', amsgAwayMessage: true, amsgAwayDelayMinutes: 120,
+        amsgTaskInstruction: '主动私聊', amsgExpirePolicy: 'force',
+      },
+    };
+    const result = await start({
+      task, limits: { awayEnabled: true, awayDelayMinutes: 120,
+        awayQuietHours: { enabled: true, startTime: '18:00', endTime: '20:00' } },
+    });
+    expect(result.plan).toEqual({ skip: true });
+    expect(result.scheduleTask).toHaveBeenCalledTimes(1);
+    const next = result.scheduleTask.mock.calls[0][0];
+    expect(next.messageSubtype).toBe('chat');
+    expect(next.metadata?.amsgAwayMessage).toBe(true);
+    expect(next.metadata?.amsgSelfScheduled).toBeUndefined();
+    expect(Date.parse(next.firstSendTime)).toBe(now + 120 * 60_000);
+  });
+
+  it('B-mode meeting lock skips idle message but leaves character-scheduled messages alone', async () => {
+    const task = { id: 31, uuid: '44444444-4444-4444-8444-444444444444',
+      nextSendAt: new Date(now).toISOString(), recurrenceType: 'none',
+      metadata: { charId, amsgAwayMessage: true, amsgAwayDelayMinutes: 120, amsgClientTaskId: 'away-previous',
+        amsgTaskInstruction: '私聊', amsgExpirePolicy: 'force' } };
+    const awayResult = await start({ task, awaySceneLock: 'date', limits: { awayEnabled: true } });
+    expect(awayResult.plan).toEqual({ skip: true });
+    expect(awayResult.scheduleTask).toHaveBeenCalledTimes(1);
+    const own = await start({ awaySceneLock: 'date', limits: {
+      awayQuietHours: { enabled: true, startTime: '00:00', endTime: '00:00' },
+    } });
+    expect(own.plan.skip).toBeUndefined();
+  });
+
+  it('disabling idle messages in cloud limits stops chained tasks without generating or rearming', async () => {
+    const task = { id: 32, uuid: '55555555-5555-4555-8555-555555555555',
+      nextSendAt: new Date(now).toISOString(), recurrenceType: 'none',
+      metadata: { charId, amsgAwayMessage: true, amsgAwayDelayMinutes: 120, amsgTaskInstruction: '私聊',
+        amsgExpirePolicy: 'force' } };
+    const result = await start({ task, limits: { awayEnabled: false } });
+    expect(result.plan).toEqual({ skip: true });
+    expect(result.scheduleTask).not.toHaveBeenCalled();
+  });
+
   it('native tools OFF survives an empty MCP list and suppresses native tool declarations', async () => {
     const config = buildToolConfig(undefined, { servers: [], useNativeTools: false });
     expect(config.mcpUseNativeTools).toBe(false);
