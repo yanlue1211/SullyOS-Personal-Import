@@ -24,6 +24,7 @@ import { trackEvent } from '../utils/analytics';
 import { markAmsgStateDirty } from '../utils/amsgStateSync';
 import { setAmsgActiveDate } from '../utils/amsgInteractionGuard';
 import { ActiveMsgClient } from '../utils/activeMsgClient';
+import { syncCloudAwayTask } from '../utils/awayMessage';
 import { isAmsg2EnabledForChar } from '../utils/amsg2Tasks';
 import { isAmsg2GlobalReady, createAmsg2ToolSession, executeAmsg2ToolWithOutcome } from '../utils/amsg2ToolBridge';
 import { extractFireScheduleTextCalls, buildSendAtExample } from '../utils/amsgFireSchedule';
@@ -419,6 +420,10 @@ const DateApp: React.FC = () => {
                 metadata: { source: 'date', dateEncounterId: currentEncounterId, ...(isContinueTurn ? { meetingContinue: true } : {}) },
             });
             markDateTurnDirty(char);
+            // 只有真实新增的用户回合才重置B模式空闲节拍，重试/重掷/AI回复不重排。
+            if (char.awayMessage?.enabled) void syncCloudAwayTask({
+                char, lastUserAt: Date.now(), userProfile, groups, realtimeConfig, apiConfig, updateCharacter,
+            });
         }
 
         // 2. Prepare Context
