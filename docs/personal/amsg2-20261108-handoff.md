@@ -77,3 +77,11 @@
 - `.github/workflows/deploy-cloudflare-worker.yml` 只对旧 `master` 部署静态站点，不是个人主动消息 Worker 的自动升级通道；`.github/workflows/sync-workers-repo.yml` 只监听 `main/master` 并推送到 `Tosd0/sullyos-workers`，也不会自动为本次个人网页分支发布主动消息 Worker。**不要以任何 GitHub Actions 成功代替真实 Worker 验收。**
 - 尚无用户实际 Worker URL 或 Cloudflare 账号的可信确认，也没有可用的 Cloudflare 管理连接。尝试读取历史提及但未经用户确认的 workers.dev 地址未取得可验证回执；因此未确认线上 `GET /config-check` 的实际版本、环境、D1 和 Cron；**未调用 `/self-update`，未更换凭据、部署脚本或操作 D1。**
 - 下一步仅需要真实 Worker 的非敏感地址（或 `/config-check` JSON，注意移除任何凭据），并核对 Cloudflare 现有脚本、实际旧版取包地址及绑定，再决定是否通过原位自更新或保留原绑定的人工升级。真实升级后需复查 `workerVersion`、`instantTick`、`backgroundJobs`、`selfUpdate`、D1、Cron 与实际低成本投递结果。旧数据和 Master Key 保持原样。
+
+### 5.1 用户真机界面回执（2026-11-08 03:18，截图）
+
+- 用户提供的真实 Worker URL：`https://sullyos-amsg.yanlue.workers.dev`（脚本名按 workers.dev 格式可推为 `sullyos-amsg`）。
+- 用户主动消息设置 UI 显示：**Worker 实际自报 `2026-11-07.3`**；该 UI **前端期望 `2026-11-05.3`**，按钮竟然写「更新 Worker 到 2026-11-05.3」。**这是旧前端误提示，有降级风险，不能点**。
+- 截图底部的实际运行构建：`personal/audio-listening@346fa29`，`sw 1.22.0`；查 GitHub `346fa29` 的 `utils/amsgBundleVersion.ts` 确实写 `2026-11-05.3`。正式已发布源码为 `4e740fae`（内置 `2026-11-08.3`），两者相差 22 个提交。请先区分 PWA/SW 缓存 vs 旧 APK/安装包，确认用户跑上新网页再操作版本更新。
+- UI 自动更新栏显示「上次检查 2 小时前，没成功（`UNAUTHORIZED: 共享密钥对不上。`）」；该错误可能来自一次手动或前端触发的受保护更新请求，截图并不能证明服务端 Cron 自查的每次结果。**不要点「随机」重新生成共享密钥**，核对前端保存的 X-Client-Token 与 Worker 既有 `AMSG_SERVER_TOKEN` 是否一致；只修正不一致端，不更换 D1 主密钥。
+- 由于当前执行环境无法访问 `workers.dev` 地址的公开 `/config-check`（网络/DNS 限制），以上事实仅据用户真实界面截图，仍需完整 JSON 的能力位和 CF 面板绑定核对。当前没有对真实 Worker 做任何写操作或升级。
