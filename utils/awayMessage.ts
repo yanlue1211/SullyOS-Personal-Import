@@ -1,9 +1,6 @@
 /**
- * 离开后消息：对方多久没说话，角色就来找对方。两条路按角色二选一（见 docs/away-message.md）：
- *   - 云端：开着主动消息 2.0 且连着 Worker 的角色。每个角色挂一条到点必发的任务，
- *     对方每轮开口后往后推；推得不够及时的那点由 worker 到点推迟兜住。
- *   - 本地：其余角色。每次打开页面时，给超过等待时长没说话的角色一次性补上
- *     「你不在时 TA 发的消息」，时间戳铺在离开那段时间里。
+ * 离开后消息 B 方案：用户没有重新开口时，每经过 X 分钟给 Char 一次机会。
+ * 云端由 Worker 幂等排下下一条；跳过时不调 LLM、不追补；本地仅处理当前有效节拍。
  */
 import type { APIConfig, ActiveMsg2TaskRecord, CharacterProfile, GroupProfile, Message, RealtimeConfig, UserProfile } from '../types';
 import { DB } from './db';
@@ -167,12 +164,21 @@ export const syncCloudAwayTask = async (deps: {
 /** 关掉离开后消息或改了等待时长时调用：取消云端那条，下一轮对方开口时按新设置重建。 */
 export const cancelCloudAwayTasks = async (char: CharacterProfile, updateCharacter: UpdateCharacter): Promise<void> => {
   const away = (char.activeMsg2Config?.tasks ?? []).filter(t => t.away);
-  if (!away.length) return;
+  // 远端链在后台续排，可能不在本地清单里。必须一并取消，不能仅靠旧 UUID。
+  const remote = await ActiveMsgClient.listRemoteTasksForChar(char.id).catch(error => {
+    console.warn('[AwayMessage] 取消时远端清单不可读，Worker 会通过 awayEnabled=false 防继续生成', error);
+    return [];
+  });
+  const targets = new Set<string>([
+    ...away.map(t => t.taskUuid),
+    ...remote.filter(t => t.status === 'pending' && t.clientTaskId?.startsWith('away-')).map(t => t.uuid),
+  ]);
+  if (!targets.size) return;
   const cancelled = new Set<string>();
-  for (const task of away) {
+  for (const taskUuid of targets) {
     try {
-      await ActiveMsgClient.cancelTask(task.taskUuid);
-      cancelled.add(task.taskUuid);
+      await ActiveMsgClient.cancelTask(taskUuid);
+      cancelled.add(taskUuid);
     } catch (error) {
       console.warn('[AwayMessage] 取消云端任务失败', error);
     }
