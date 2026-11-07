@@ -405,6 +405,9 @@ interface FireStash {
   selfScheduleAllowed?: boolean;
   thinkingChainEnabled?: boolean;
   actionResultCommitted?: boolean;
+  /** 线下预约：仅这一场见面成功发出线上正文，才允许解除锁。 */
+  dateExitEncounterId?: string | null;
+  readState?: FireCtx['readState'];
   firePack?: AmsgFirePack;
   writeState?: WriteState;
   scheduledTaskInput?: Record<string, unknown>;
@@ -1115,6 +1118,22 @@ export const amsgFireSettled = async (
 
   // 这一轮往云端回写的条目攒在一起，收尾一次写完。
   const stateWrites: Array<{ key: string; value: string | null }> = [];
+
+  // 云端必须自行结束本场见面：手机关机时不会有人替它清空锁。只在正文已推送或
+  // 已可靠写入 outbox 后生效，模型决定不说/失败不生效；重读限制行防旧预约关闭新见面。
+  if (!stash.instant && delivered && stash.dateExitEncounterId && stash.readState) {
+    try {
+      const currentRows = await stash.readState(amsgStateNamespace(stash.charId), { key: AMSG_LIMITS_KEY });
+      const current = parseAmsgLimitsRecord(currentRows.find((row) => row.key === AMSG_LIMITS_KEY)?.value);
+      if (current?.awaySceneLock === 'date' && current.awayDateEncounterId === stash.dateExitEncounterId) {
+        stateWrites.push({ key: AMSG_LIMITS_KEY, value: JSON.stringify({
+          ...current, awaySceneLock: null, awayDateEncounterId: null, awayDateEndedAt: Date.now(),
+        }) });
+      }
+    } catch (error) {
+      console.warn('[amsg:date-exit] 自主线上消息已发出，但云端结束见面状态失败', error);
+    }
+  }
 
   // 每日计数：定时触发发出去了记一次（多段气泡也只算一次），调了几次模型另记——失败、
   // 判空没发的那几次同样花了钱。即时对话是正常聊天，两样都不记。
@@ -2150,7 +2169,11 @@ export const amsgHooks = {
         ? configuredDelay : Number(taskMeta[AMSG_AWAY_DELAY_META]);
       if (!Number.isFinite(minutes) || minutes <= 0) throw fail('离开后消息等待间隔无效');
       const delayMs = minutes * 60_000;
-      const dueAt = lastUserMessageAt == null ? null : lastUserMessageAt + delayMs;
+      // 自动空闲节拍不能把线下期间当成单纯失联：从上次用户发言或见面结束中较晚者计时。
+      const endAt = typeof limitsRecord?.awayDateEndedAt === 'number' && Number.isFinite(limitsRecord.awayDateEndedAt)
+        ? limitsRecord.awayDateEndedAt : null;
+      const awayAnchor = laterOf(lastUserMessageAt, endAt);
+      const dueAt = awayAnchor == null ? null : awayAnchor + delayMs;
       const waitMs = dueAt == null ? 0 : dueAt - ctx.now.getTime();
       if (waitMs > AWAY_DUE_TOLERANCE_MS) {
         console.log('[amsg:defer]', { taskId: ctx.task.id, reason: 'away-not-due', dueAt });
@@ -2418,6 +2441,11 @@ export const amsgHooks = {
       thinkingChainEnabled: pack.thinkingChainEnabled === true,
       firePack: pack,
       writeState: ctx.writeState,
+      readState: ctx.readState,
+      dateExitEncounterId: !instant && typeof taskMeta.amsgDateExitEncounterId === 'string'
+        && limitsRecord?.awaySceneLock === 'date'
+        && limitsRecord.awayDateEncounterId === taskMeta.amsgDateExitEncounterId
+        ? taskMeta.amsgDateExitEncounterId : null,
       session: createFireSessionState(),
       toolCtx,
       proxyWorkerUrl,
@@ -2924,6 +2952,12 @@ export const amsgHooks = {
       ): typeof payloads => list.map((payload, i) => (i === idx
         ? { ...payload, metadata: { ...(payload.metadata as Record<string, unknown> ?? {}), ...extra } }
         : payload));
+
+      // 仅发出去的那条线上预约允许结束原来的线下会话；没有正文则不会生成此回执。
+      // 客户端按 encounterId 校验，旧排程不能解掉一场新的见面。
+      if (stash.dateExitEncounterId && payloads.length > 0) {
+        payloads = attachMetaAt(payloads, 0, { amsgDateEndedEncounterId: stash.dateExitEncounterId });
+      }
 
       // 本轮取消 / 改期掉的既有任务同样随最后一条回去消账（与排程认领对称：那边是
       // 「D1 多了一行，本地补上」，这边是「D1 那行没了 / 换时间了，本地跟上」）。
