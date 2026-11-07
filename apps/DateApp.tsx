@@ -683,6 +683,8 @@ const DateApp: React.FC = () => {
     };
 
     const onExitSession = () => {
+        // 明确结束线下见面：不同于锁屏/切后台，退出必须解除持久化线下锁。
+        if (char) { setAmsgActiveDate(char.id, false); markDateTurnDirty(char); }
         clearDateResumeAttempt();
         encounterIdRef.current = '';
         // 来自聊天：退出见面回聊天
