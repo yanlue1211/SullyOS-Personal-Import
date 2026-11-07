@@ -19,7 +19,7 @@ on:
     branches:
       - personal/amsg2-integrate-audio-20261108
 permissions:
-  contents: write
+  contents: read
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -37,20 +37,10 @@ jobs:
         run: pnpm exec vitest run utils/awayMessageQuietHours.test.ts utils/amsgInteractionGuard.test.ts utils/awayMessageCore.test.ts utils/amsgLlmCredentials.test.ts utils/activeMsgClient.test.ts utils/awayMessageLocalTick.test.ts utils/awayMessagePrompt.test.ts utils/amsgTaskKinds.test.ts utils/awayMessageModes.test.ts
       - name: Check upstream voice tags and cloud self-scheduling regression
         run: pnpm exec vitest run utils/voiceTagNormalize.test.ts worker/amsg/src/audit-20261018.test.ts worker/amsg/src/index.test.ts utils/toolCallCompat.test.ts utils/replyScope.test.ts utils/cfProvision.test.ts utils/amsgOwnerReconcile.test.ts utils/amsgStateSync.test.ts
+      - name: Verify personal gallery, media, memory context and Moon Nest regression
+        run: pnpm exec vitest run utils/photoChoice.test.ts utils/chatImageSize.test.ts utils/personalChatMedia.test.ts utils/personalRecordingCleanup.test.ts utils/personalInnerVoice.test.ts utils/chatRequestPayload.test.ts utils/contextVolatileSplit.test.ts utils/worldbookScope.test.ts utils/chatPrompts.test.ts utils/yueqiRecording.test.ts utils/storyTheaterReply.test.ts utils/characterApi.test.ts
       - name: Build worker and frontend
         run: pnpm run build
-      # TEMPORARY (integration branch only): store the bundle built from personal sources.
-      # This block and write permission are removed after bundle synchronization.
-      - name: Sync generated personal Worker bundle on integration push
-        if: github.event_name == 'push' && github.ref == 'refs/heads/personal/amsg2-integrate-audio-20261108'
-        run: |
-          if ! git diff --quiet -- worker/amsg/worker.bundle.js; then
-            git config user.name 'github-actions[bot]'
-            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git add worker/amsg/worker.bundle.js
-            git commit -m 'build(amsg2): regenerate worker bundle against personal source'
-            git push origin HEAD:personal/amsg2-integrate-audio-20261108
-          fi
       - name: Verify committed Worker bundle matches source
         run: git diff --exit-code -- worker/amsg/worker.bundle.js
       - uses: actions/setup-node@v4
