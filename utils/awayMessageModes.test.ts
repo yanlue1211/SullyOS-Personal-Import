@@ -58,12 +58,12 @@ const run = async () => runLocalAwayMessages({
 describe('author local away mode vs personal 2.0 B mode', () => {
   it('2.0 OFF: author original one-shot up to three simulated messages, with original distributed timestamps', async () => {
     vi.mocked(safeFetchJson).mockResolvedValue({ choices: [{ message: {
-      content: '第1次联系\\n[[NEXT]]\\n第2次联系\\n[[NEXT]]\\n第3次联系',
+      content: '第1次联系\n[[NEXT]]\n第2次联系\n[[NEXT]]\n第3次联系',
     } }] });
     await run();
     expect(safeFetchJson).toHaveBeenCalledOnce();
     const args = JSON.parse(String(vi.mocked(safeFetchJson).mock.calls[0][1]?.body));
-    const fullPrompt = args.messages.map((m: any) => String(m.content)).join('\\n');
+    const fullPrompt = args.messages.map((m: any) => String(m.content)).join('\n');
     expect(fullPrompt).toContain('请把这 3 次按时间先后分别写出来');
     expect(fullPrompt).toContain('随手拍的照片');
     expect(fullPrompt).not.toContain('[[SILENT]]');
@@ -87,7 +87,7 @@ describe('author local away mode vs personal 2.0 B mode', () => {
     await run();
     expect(safeFetchJson).toHaveBeenCalledOnce();
     const args = JSON.parse(String(vi.mocked(safeFetchJson).mock.calls[0][1]?.body));
-    const fullPrompt = args.messages.map((m: any) => String(m.content)).join('\\n');
+    const fullPrompt = args.messages.map((m: any) => String(m.content)).join('\n');
     expect(fullPrompt).toContain('现在是你可以主动');
     expect(fullPrompt).toContain('[[SILENT]]');
     expect(fullPrompt).not.toContain('请把这 3 次');
