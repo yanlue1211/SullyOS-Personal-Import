@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   AWAY_SEGMENT_MARK,
+  latestAwayTickMs,
+  nextAwayTickMs,
+  isStaleAwayTick,
   decideAwayTaskAction,
   findAwayGapStart,
   planAwaySlots,
@@ -85,5 +88,23 @@ describe('decideAwayTaskAction（云端版每轮发不发请求）', () => {
 
   it('排期已经过了（可能发过，也可能被 worker 推迟着）→ 去改期，远端没了再新建', () => {
     expect(decideAwayTaskAction(NOW - MIN, NOW + DELAY, NOW)).toBe('renew');
+  });
+});
+
+describe('B-mode repeat idle ticks (no catch-up burst)', () => {
+  it('successive ticks remain aligned with the original last user message', () => {
+    const start = Date.parse('2026-11-07T12:00:00Z');
+    const interval = 120 * MIN;
+    expect(nextAwayTickMs(start + interval, interval, start + interval + MIN)).toBe(start + 2 * interval);
+    expect(nextAwayTickMs(start + interval, interval, start + 5 * interval + MIN)).toBe(start + 6 * interval);
+  });
+  it('late ticks are skipped instead of burning LLM calls, while a future tick remains possible', () => {
+    expect(isStaleAwayTick(NOW - 11 * MIN, NOW)).toBe(true);
+    expect(isStaleAwayTick(NOW - 8 * MIN, NOW)).toBe(false);
+  });
+  it('local mode identifies only the current latest tick, not all missed ones', () => {
+    expect(latestAwayTickMs(NOW - 5 * 120 * MIN - 15 * MIN, 120 * MIN, NOW))
+      .toBe(NOW - 15 * MIN);
+    expect(latestAwayTickMs(NOW - 30 * MIN, 120 * MIN, NOW)).toBeNull();
   });
 });
