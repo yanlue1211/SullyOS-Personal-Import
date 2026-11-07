@@ -293,7 +293,7 @@ const DateApp: React.FC = () => {
 
             // 2. 切换模式并刷新数据
             if (encounterIdRef.current !== enteringEncounterId) return;
-            setAmsgActiveDate(char.id, true);
+            setAmsgActiveDate(char.id, true, enteringEncounterId);
             // 小型云端锁先发，防止临近空闲提醒到点时大包还没上传。
             void (isAmsg2EnabledForChar(char) ? ActiveMsgClient.putCharLimits(char) : Promise.resolve()).catch(error => console.warn('[DateApp] 同步云端见面锁失败', error));
             markDateTurnDirty(char);
@@ -456,9 +456,10 @@ const DateApp: React.FC = () => {
                 role: 'system',
                 content: [
                     '【线下会话的未来主动联系工具】',
-                    '你此刻仍然和对方在同一线下场景，只有确实需要未来单独联系时才排程。',
-                    '例如你明天 06:30 有行程、到时想发条消息给对方报备，可以现在预约。',
-                    '排程不意味着对方已离开，也不能在当前线下对话里突然转为线上私聊。',
+                    '你此刻仍然和对方在同一线下场景。主动消息 2.0 排下的所有任务，都是未来要真正通过线上聊天发给对方的消息，不是线下提醒、当面台词或待办事项。',
+                    '只有你确实打算在将来那个时刻与对方分开、通过线上消息主动联系，才允许排程（例如你明早 06:30 出门，届时想发消息报备）。',
+                    '现在能够当面说的事就直接当面说，不要为了提醒带伞、讲一句当面就能讲的话而预约明天的线上通知。',
+                    '排程本身不代表见面已经结束；若预约到点后你决定真的发送线上消息，这次线下见面才算结束。到点保留你原本的自主判断，可以选择不发。',
                     '排程时，在正常线下回复之外独占一行输出 schedule_active_message({"send_at":"YYYY-MM-DDTHH:mm:ss","mode":"auto","prompt_hint":"到时想说什么","expire_policy":"expire"})。',
                     'send_at 用你所在时区的墙钟时间，不带时区后缀，必须晚于当前时间至少一分钟。',
                     '明天此刻的时间示例：' + buildSendAtExample(Date.now(), { tzId }),
@@ -477,7 +478,7 @@ const DateApp: React.FC = () => {
                 updateCharacter: (id, updates) => updateCharacter(id, updates),
             });
             for (const call of scheduleCalls) {
-                const { outcome } = await executeAmsg2ToolWithOutcome('schedule_active_message', call.args, toolSession);
+                const { outcome } = await executeAmsg2ToolWithOutcome('schedule_active_message', { ...call.args, recurrence: 'none', __dateExitEncounterId: currentEncounterId }, toolSession);
                 addToast(outcome.status === 'done'
                   ? '已预约未来主动消息'
                   : '线下主动消息预约失败，可在主动消息 2.0 面板检查',
@@ -1095,7 +1096,7 @@ const DateApp: React.FC = () => {
                     <button onClick={() => startPeek(char, 'invite')} className="text-left rounded-2xl border border-neutral-700 px-6 py-5 hover:bg-neutral-900">
                         <span className="block text-lg">让他靠近</span><span className="block text-xs text-neutral-400 mt-2">由他自然地来到你面前</span>
                     </button>
-                    <button onClick={() => { if (char) { setAmsgActiveDate(char.id, true); void (isAmsg2EnabledForChar(char) ? ActiveMsgClient.putCharLimits(char) : Promise.resolve()).catch(error => console.warn('[DateApp] 见面锁同步失败', error)); markDateTurnDirty(char); } setPeekStatus(''); setMode('session'); }} className="text-left rounded-2xl border border-neutral-700 px-6 py-5 hover:bg-neutral-900">
+                    <button onClick={() => { if (char) { setAmsgActiveDate(char.id, true, encounterIdRef.current); void (isAmsg2EnabledForChar(char) ? ActiveMsgClient.putCharLimits(char) : Promise.resolve()).catch(error => console.warn('[DateApp] 见面锁同步失败', error)); markDateTurnDirty(char); } setPeekStatus(''); setMode('session'); }} className="text-left rounded-2xl border border-neutral-700 px-6 py-5 hover:bg-neutral-900">
                         <span className="block text-lg">直接见面</span><span className="block text-xs text-neutral-400 mt-2">不生成开场白，直接开始互动</span>
                     </button>
                 </div>
