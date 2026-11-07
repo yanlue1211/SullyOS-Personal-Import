@@ -58,6 +58,8 @@ import VersionInfo from '../components/settings/VersionInfo';
 import { isPushVapidReady } from '../utils/pushVapid';
 import ApiCallLogModal from '../components/settings/ApiCallLogModal';
 import StorageUsagePanel from '../components/settings/StorageUsagePanel';
+import { BackupMissingAssetsNotice } from '../components/BackupMissingAssetsNotice';
+import type { BackupMissingAsset } from '../utils/backupMissingAssets';
 import WebCacheControl from '../components/settings/WebCacheControl';
 import McpConnectionConsole from '../components/settings/McpConnectionConsole';
 import { DB } from '../utils/db';
@@ -590,6 +592,7 @@ const Settings: React.FC = () => {
   const [showVisionModelModal, setShowVisionModelModal] = useState(false);
   const [visionModelFilter, setVisionModelFilter] = useState('');
   const [showExportModal, setShowExportModal] = useState(false); // Used for completion now
+  const [exportMissingAssets, setExportMissingAssets] = useState<BackupMissingAsset[]>([]);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [resetting, setResetting] = useState(false);
   /** 云端没清干净时停在这里：本地还一个字节都没动，等用户决定重试还是照样重置。 */
@@ -1516,7 +1519,8 @@ const Settings: React.FC = () => {
           }
 
           // Trigger export (Context handles loading state UI)
-          const blob = await exportSystem(mode, { includeBackendConnection: exportBackendConnection });
+          setExportMissingAssets([]);
+          const blob = await exportSystem(mode, { includeBackendConnection: exportBackendConnection, onMissingAssets: setExportMissingAssets });
           
           const fileName = `Sully_Backup_${mode}_${new Date().toISOString().slice(0, 10)}.zip`;
           if (!Capacitor.isNativePlatform()) {
@@ -2255,6 +2259,7 @@ const Settings: React.FC = () => {
         >
             <StorageUsagePanel />
             <WebCacheControl />
+            <BackupMissingAssetsNotice items={exportMissingAssets} />
 
             <label className="mb-3 flex items-start gap-2 rounded-xl border border-slate-200 bg-white p-3 cursor-pointer">
                 <input
@@ -4295,6 +4300,7 @@ const Settings: React.FC = () => {
                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-8 h-8"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" /></svg>
               </div>
               <p className="text-sm font-bold text-slate-700">备份文件已生成！</p>
+              <div className="text-left"><BackupMissingAssetsNotice items={exportMissingAssets} /></div>
               <p className="text-xs text-slate-500">如果浏览器没有自动下载，请点击下方链接。</p>
               {downloadUrl && <a href={downloadUrl} download={downloadFileName} className="text-primary text-sm underline block py-2">点击手动下载 .zip</a>}
           </div>
