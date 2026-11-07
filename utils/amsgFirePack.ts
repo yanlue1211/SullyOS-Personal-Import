@@ -409,6 +409,8 @@ export interface AmsgFirePackChat {
   messages: { role: string; content: AmsgFirePackChatContent }[];
   /** 这份对话消息打包的时刻（epoch ms）。 */
   builtAt: number;
+  /** Worker 的时效块插在此下标前；无效值按旧版追加到末尾。 */
+  timelyInsertAt?: number;
 }
 
 export interface AmsgFirePack {
@@ -1002,8 +1004,9 @@ const chatContentOk = (content: unknown): boolean => {
 const chatFieldOk = (chat: unknown): boolean => {
   if (chat === undefined) return true;
   if (!chat || typeof chat !== 'object' || Array.isArray(chat)) return false;
-  const { messages, builtAt } = chat as Partial<AmsgFirePackChat>;
+  const { messages, builtAt, timelyInsertAt } = chat as Partial<AmsgFirePackChat>;
   return typeof builtAt === 'number'
+    && (timelyInsertAt === undefined || Number.isInteger(timelyInsertAt))
     && Array.isArray(messages) && messages.length > 0
     && messages.every((m) => !!m && typeof m === 'object'
       && typeof (m as { role?: unknown }).role === 'string'
