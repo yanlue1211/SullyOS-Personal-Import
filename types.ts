@@ -517,6 +517,8 @@ export interface ActiveMsg2CharacterConfig {
   allowSelfRecurring?: boolean;
   /** 角色能不能自己排「到点必发」（用户正在聊天也照发）的消息。没设 = 不能。 */
   allowSelfForce?: boolean;
+  /** 禁发时段按用户设备时区计算；默认不启用，跨午夜可用。 */
+  quietHours?: { enabled: boolean; startTime: string; endTime: string };
   lastSyncedAt?: number;
   lastError?: string;
 }
