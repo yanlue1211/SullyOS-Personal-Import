@@ -574,11 +574,12 @@ const DateSession: React.FC<DateSessionProps> = ({
                 setShowVoiceLangPicker(false);
                 return true;
             }
-            onExit();
+            // 系统返回不能误作「明确结束见面」：展开已有的加号菜单让用户自行选择。
+            setShowMenu(true);
             return true;
         });
         return unregister;
-    }, [voiceFavoriteTarget, voiceFavoriteBusy, showSettings, showMenu, onExit, registerBackHandler]);
+    }, [voiceFavoriteTarget, voiceFavoriteBusy, showSettings, showMenu, registerBackHandler]);
 
     const dateEmotionKeys = [...REQUIRED_EMOTIONS_SET, ...(char.customDateSprites || [])];
 
