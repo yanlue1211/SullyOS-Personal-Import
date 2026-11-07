@@ -1567,7 +1567,8 @@ const buildLimitsEntry = (char: CharacterProfile, updatedAt: number) => ({
   namespace: amsgStateNamespace(char.id),
   owner: { type: 'character', id: char.id, label: char.name },
   key: AMSG_LIMITS_KEY,
-  value: JSON.stringify(buildAmsgLimitsRecord(char.activeMsg2Config, isAmsg2EnabledForChar(char), char.awayMessage?.quietHours, char.awayMessage)),
+  value: JSON.stringify(buildAmsgLimitsRecord(char.activeMsg2Config, isAmsg2EnabledForChar(char), char.awayMessage?.quietHours, char.awayMessage,
+    isAmsgActiveCall(char.id) ? 'call' : isAmsgActiveDate(char.id) ? 'date' : null)),
   updatedAt,
 });
 
