@@ -26,6 +26,10 @@ describe('2.0 云端交互锁', () => {
       {role: 'assistant', metadata: {source: 'date'}},
     ], false, false)).toBe(null);
   });
+  it('挂断后即使结束卡保存失败也不会锁死，后台未明确挂断则保留锁', () => {
+    expect(resolveAmsgInteractionLock([{role:'assistant',metadata:{source:'call'}}], false)).toBe(null);
+    expect(resolveAmsgInteractionLock([{role:'assistant',metadata:{source:'call'}}], true)).toBe('call');
+  });
   it('用户改回线上对话后解除线下锁', () => {
     expect(resolveAmsgInteractionLock([
       {role:'assistant',metadata:{source:'date'}},
