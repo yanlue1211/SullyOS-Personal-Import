@@ -51,7 +51,7 @@ const AwayMessageSettingsModal: React.FC<AwayMessageSettingsModalProps> = ({ isO
         }>
             <div className="space-y-5">
                 <p className="text-xs text-slate-400 leading-relaxed">
-                    你超过设定的时间没说话，{char.name} 就会来找你。一次离开只找一次，你开口后重新计时。
+                    你超过设定时间没说话后，每隔这段时间就给{char.name}一次主动联系你的机会；睡眠禁发或仍在线下见面时跳过，不累计补发。
                 </p>
 
                 <div className="flex items-center justify-between">
@@ -112,7 +112,7 @@ const AwayMessageSettingsModal: React.FC<AwayMessageSettingsModalProps> = ({ isO
                         <p className="pt-2 border-t border-slate-100 text-[11px] text-slate-400 leading-relaxed">
                             {cloud === null ? '' : cloud
                                 ? `${char.name} 开着主动消息 2.0：到时间会直接推送给你。这一次算作「没回时找你」，受主动频率里的上限管。`
-                                : `你下次打开 SullyOS 时，${char.name} 会补上你不在时发的消息。每次打开，每个开了这项的角色会调一次聊天 API。`}
+                                : `没有云端2.0时，打开 SullyOS 只检查最新一个有效时间点，不会一次补发多条；通过检查才会调用API。`}
                         </p>
                     </>
                 )}
