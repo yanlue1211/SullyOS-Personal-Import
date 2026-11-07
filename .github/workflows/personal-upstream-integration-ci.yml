@@ -1,0 +1,60 @@
+name: Personal upstream integration checks
+
+on:
+  pull_request:
+    branches: [personal/audio-listening]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install without lockfile changes
+        run: pnpm install --frozen-lockfile
+      - name: Verify upstream integrations and personal regressions
+        run: >-
+          pnpm vitest run
+          utils/sarNarrative.test.ts
+          utils/sarSimulation.test.ts
+          utils/sarSimulationEdits.test.ts
+          utils/storyTheaterTimeline.test.ts
+          utils/guidebookReplay.test.ts
+          utils/collaborationRouting.test.ts
+          utils/chibiImageExport.test.ts
+          utils/backupMissingAssets.test.ts
+          utils/storageOptimize.test.ts
+          utils/analyticsSnapshot.test.ts
+          utils/homePhotoLibrary.test.ts
+          utils/homePhotoMode.test.ts
+          utils/homePhotoPairSession.test.ts
+          utils/homePhotoPairs.test.ts
+          utils/friendFeedApp.test.ts
+          utils/friendFeedOutput.test.ts
+          utils/friendFeedPublic.test.ts
+          utils/friendFeedSocial.test.ts
+          utils/marketRefresh.test.ts
+          utils/vrWorld/fishingCharacter.test.ts
+          utils/vrWorld/fishingSession.test.ts
+          worker/staticCache.test.ts
+          worker/staticCodeFetch.test.ts
+          utils/visibleTimeout.test.ts
+          scripts/build-metadata.test.ts
+          utils/personalChatMedia.test.ts
+          utils/personalCallMedia.test.ts
+          utils/personalRecordingCleanup.test.ts
+          utils/amsgLlmCredentials.test.ts
+          utils/amsgInstantChat.test.ts
+          utils/activeMsgClient.test.ts
+      - name: Build production assets
+        run: pnpm run build
