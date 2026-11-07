@@ -35,5 +35,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Quiet hours, online/offline lock and original away tests
         run: pnpm exec vitest run utils/awayMessageQuietHours.test.ts utils/amsgInteractionGuard.test.ts utils/awayMessageCore.test.ts
+      - name: Check upstream voice tags and cloud self-scheduling regression
+        run: pnpm exec vitest run utils/voiceTagNormalize.test.ts worker/amsg/src/audit-20261018.test.ts
       - name: Build worker and frontend
         run: pnpm run build
