@@ -94,6 +94,7 @@ import { isScheduleFeatureOn } from '../utils/scheduleGenerator';
 import { evaluateEmotionBackground } from '../hooks/useChatAI';
 import {HOME_SECRETS_UPDATED} from '../utils/homeSecrets';
 import { CHAT_GEN_EVENTS, setChatViewSnapshot, isEmbeddedChatVisible } from '../utils/chatGenEvents';
+import { runLocalAwayMessages } from '../utils/awayMessage';
 import { buildChatRequestPayload } from '../utils/chatRequestPayload';
 import { ChatPrompts } from '../utils/chatPrompts';
 import { extractHtmlBlocks } from '../utils/htmlPrompt';
@@ -2447,6 +2448,14 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
               return;
           }
 
+          // 1.0 暂时留作回退，但同角色打开新版 B 模式时不得双路烧模型费用。
+          // 只跳过本次 1.0 触发，不停掉旧调度；关闭 B 模式后旧配置仍可恢复。
+          if (char.awayMessage?.enabled === true) {
+              drainQueuedProactive();
+              console.log(`🔕 [Proactive/Global] Skipped for ${char.name}: B-mode idle reminder has precedence`);
+              return;
+          }
+
           // 用户正在 DateApp 里和这个角色见面 —— 人就在对方眼前，再发一条
           // 线上主动消息既出戏又显得对见面毫不知情。本轮静默跳过；
           // lastFire 已在调度层记录，下个周期会重新评估。
@@ -3211,6 +3220,28 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       return () => { cancelled = true; };
   // 只在本次数据初始化完成时执行；后续新数据走已修复的统一双写入口。
   // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDataLoaded]);
+
+  // 本地备用路线：只补“离开后自动提醒”；2.0 云端路线由 Worker 自己触发。
+  // 若线下/通话会话尚未结束，不把切后台当作离开。
+  useEffect(() => {
+      if (!isDataLoaded) return;
+      const run = () => {
+          if (document.visibilityState !== 'visible') return;
+          void runLocalAwayMessages({
+              getCharacters: () => charactersRef.current,
+              getApiConfig: () => apiConfigRef.current,
+              getUserProfile: () => userProfileRef.current,
+              getGroups: () => groupsRef.current,
+              getRealtimeConfig: () => realtimeConfigRef.current,
+              isBusyWith: (charId) => suspendedCallRef.current?.charId === charId
+                  || ((activeAppRef.current === AppID.Date || activeAppRef.current === AppID.Call)
+                      && activeCharIdScheduleRef.current === charId),
+          });
+      };
+      run();
+      document.addEventListener('visibilitychange', run);
+      return () => document.removeEventListener('visibilitychange', run);
   }, [isDataLoaded]);
 
   const updateTheme = async (updates: Partial<OSTheme>) => {
