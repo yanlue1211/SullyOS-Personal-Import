@@ -3684,6 +3684,24 @@ describe('worker 配置接线', () => {
     expect(cfg.serializeBy({})).toBeNull();
   });
 
+  it('B方案空闲检查只给一次付费生成机会；自主预约保留作者原本重试策略', () => {
+    const cfg = buildWorkerConfig({
+      AMSG_MASTER_KEY: 'k'.repeat(64),
+      VAPID_EMAIL: 'mailto:a@b.c',
+      VAPID_PUBLIC_KEY: 'pub',
+      VAPID_PRIVATE_KEY: 'priv',
+      DB: {},
+    } as any);
+    const retry = cfg.maxGenerationRetries;
+    expect(retry({ metadata: { charId: 'char-a', amsgAwayMessage: true } })).toBe(0);
+    expect(retry({ metadata: { charId: 'char-a', amsgAwayMessage: true, amsgInstantChat: false } })).toBe(0);
+    expect(retry({ metadata: { charId: 'char-a', amsgInstantChat: true } })).toBe(0);
+    expect(retry({ metadata: { charId: 'char-a', amsgSelfScheduled: true } })).toBeUndefined();
+    expect(retry({ metadata: { charId: 'char-a' } })).toBeUndefined();
+    expect(cfg.leaseHeartbeatMs).toBe(1000);
+    expect(cfg.onFireSettled).toBe(amsgFireSettled);
+  });
+
   // 回归守卫：后台任务原先跟聊天挤在同一个 charId 组里。一次门牌整理最长占住这个角色
   // 120 秒，而它恰恰是在一轮对话刚结束时起跑的——用户下一句话的即时对话任务被排在它
   // 后面，人就干等着「正在输入…」。
