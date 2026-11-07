@@ -39,6 +39,8 @@ jobs:
         run: pnpm exec vitest run utils/voiceTagNormalize.test.ts worker/amsg/src/audit-20261018.test.ts
       - name: Build worker and frontend
         run: pnpm run build
+      - name: Verify committed Worker bundle matches source
+        run: git diff --exit-code -- worker/amsg/worker.bundle.js
       - uses: actions/setup-node@v4
         with:
           node-version: 24
