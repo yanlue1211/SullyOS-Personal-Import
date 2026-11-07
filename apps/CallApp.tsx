@@ -1,5 +1,6 @@
 import { resolveDialogueApi } from '../utils/characterApi';
 import { setAmsgActiveCall } from '../utils/amsgInteractionGuard';
+import { ActiveMsgClient } from '../utils/activeMsgClient';
 import { loadCharacterContextMessages } from '../utils/chatContextRange';
 import { canAnalyzeVoiceSource, isVoiceAudioPriming, primeVoiceAudio, voicePlaybackErrorMessage } from '../utils/voicePlayback';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -1714,7 +1715,7 @@ const CallApp: React.FC = () => {
     resetCurrentCall();
     primeCallAudioFromGesture();
     setViewMode('in-call');
-    if (selectedChar?.id) { setAmsgActiveCall(selectedChar.id, true); markCallTurnDirty(); }
+    if (selectedChar?.id) { setAmsgActiveCall(selectedChar.id, true); void ActiveMsgClient.putCharLimits(selectedChar).catch(error => console.warn('[CallApp] 云端通话锁同步失败', error)); markCallTurnDirty(); }
     setCallStartedAt(Date.now());
     setCallState('listening');
     trackEvent('发起通话');
@@ -1768,6 +1769,7 @@ const CallApp: React.FC = () => {
       await loadCallRecords(selectedChar.id);
       trackEvent('结束一通通话', { 模式: callMode === 'video' ? '视频' : '语音' });
       setAmsgActiveCall(selectedChar.id, false);
+      void ActiveMsgClient.putCharLimits(selectedChar).catch(error => console.warn('[CallApp] 云端挂断状态同步失败', error));
       // 挂断这一下最要紧：用户多半接着就把 App 关了，得把这最后一条也打脏——
       // 打脏即传，微任务内就会冲刷上传。
       markCallTurnDirty();
