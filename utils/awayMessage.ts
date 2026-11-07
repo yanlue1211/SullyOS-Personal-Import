@@ -25,7 +25,7 @@ import { shouldSkipAwayForQuietHours } from './awayMessageQuietHours';
 import { ChatPrompts } from './chatPrompts';
 import { buildChatRequestPayload } from './chatRequestPayload';
 import { applyAssistantPostProcessing } from './applyAssistantPostProcessing';
-import { resolveDialogueApi } from './characterApi';
+import { resolveScheduledMessageApi } from './characterApi';
 import { extractContent, safeFetchJson } from './safeApi';
 import { resolveCharTimeZone } from './timezone';
 import { loadMusicPlaybackSnapshot } from '../context/MusicContext';
@@ -217,7 +217,7 @@ const generateLocalAwayMessages = async (char: CharacterProfile, deps: LocalAway
   const userTzId = Intl.DateTimeFormat().resolvedOptions().timeZone;
   if (shouldSkipAwayForQuietHours({ quietHours: quiet, dueMs: tick, nowMs: now, userTimeZone: userTzId })) return;
   const userProfile = deps.getUserProfile();
-  const api = resolveDialogueApi(deps.getApiConfig(), char);
+  const api = resolveScheduledMessageApi(deps.getApiConfig(), char, char.activeMsg2Config);
   if (!userProfile || !api.baseUrl) return;
   // 只能写一条当前真实时间的消息：不能伪造过去几个小时多次打过招呼。
   const slots = [now];
