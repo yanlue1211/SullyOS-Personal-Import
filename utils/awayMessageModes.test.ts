@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CharacterProfile, Message } from '../types';
 import { DB } from './db';
@@ -21,7 +20,18 @@ let rows: Message[];
 
 beforeEach(() => {
   vi.clearAllMocks();
-  localStorage.clear();
+  // Node 环境隔离测试，避免 jsdom 与 Node 24 undici 的 DecompressionStream 冲突。
+  const store = new Map<string, string>();
+  vi.stubGlobal('localStorage', {
+    getItem: (key: string) => store.get(key) ?? null,
+    setItem: (key: string, value: string) => { store.set(key, value); },
+    removeItem: (key: string) => { store.delete(key); },
+    clear: () => store.clear(),
+  });
+  vi.stubGlobal('window', { dispatchEvent: vi.fn() });
+  vi.stubGlobal('CustomEvent', class {
+    constructor(public type: string, public options?: unknown) {}
+  });
   vi.spyOn(Date, 'now').mockReturnValue(NOW);
   char = {
     id: `away-modes-${serial++}`, name: '阿一',
@@ -44,7 +54,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.restoreAllMocks();
-  localStorage.clear();
+  vi.unstubAllGlobals();
 });
 
 const run = async () => runLocalAwayMessages({
