@@ -10,7 +10,7 @@ import { pendingCloudRetirements } from './amsgCloudRetirement';
 import { readCloudOwnerGeneration } from './amsgCloudOwnerGeneration';
 
 export type CloudOwnerConflict = { id: string; name: string; retired: boolean };
-export const AMSG_OWNER_CONFLICT_EVENT = 'amsg2-owner-conflict';
+export { AMSG_OWNER_CONFLICT_EVENT } from './amsgOwnerEvents';
 
 type Character = { id: string; name: string };
 export function diffCloudOwners(
