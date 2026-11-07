@@ -557,6 +557,8 @@ const ENCRYPTED_DATA_TABLES = [
   'client_state', 'scheduled_messages', 'push_subscriptions',
   'llm_credentials', 'message_outbox', 'cloud_resource_metadata',
 ] as const;
+/** 非加密但由主动消息自己创建的诊断表，也可以在显式清库时一并清理。 */
+const AMSG_OWNED_TABLES: readonly string[] = [...ENCRYPTED_DATA_TABLES, 'worker_diagnostics'];
 
 async function queryD1<Row>(
   token: string, accountId: string, databaseId: string, sql: string,
@@ -626,13 +628,13 @@ export async function guardReusedDatabase(input: {
   };
   // 防止在共享数据库中误删除其它业务的记录；用户要重置请另建库。
   const unknown = userTables.filter(name =>
-    !ENCRYPTED_DATA_TABLES.some(known => known === name));
+    !AMSG_OWNED_TABLES.includes(name));
   if (unknown.length) return {
     ok: false, code: 'CF_ERROR',
     message: '数据库包含其他表，不能安全执行自动清空。请改用新的数据库名称。',
   };
   // 删除只作用于已知 AMSG 表，不删除表结构 / D1 内部迁移记录。
-  for (const name of encryptedTables) {
+  for (const name of userTables.filter(name => AMSG_OWNED_TABLES.includes(name))) {
     const deleted = await queryD1(token, accountId, databaseId, `DELETE FROM "${name}"`);
     if (!deleted.ok) return {
       ok: false, code: 'CF_ERROR',
