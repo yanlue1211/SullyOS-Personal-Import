@@ -611,6 +611,23 @@ describe('ActiveMsgClient.listRemoteTasksForChar 的版本护栏', () => {
       .rejects.toThrow(/重新粘贴部署/);
   });
 
+  it('新 Worker: 密钥错误导致所有任务不可解密，不再误判成没有 charId 的旧 Worker', async () => {
+    vi.spyOn(ActiveMsgClient, 'listAllTasks').mockResolvedValue([
+      { uuid: 'undecipherable-a', status: 'pending', error: { code: 'STORED_DATA_UNDECRYPTABLE' } },
+      { uuid: 'undecipherable-b', status: 'pending', error: { code: 'STORED_DATA_UNDECRYPTABLE' } },
+    ] as any);
+    await expect(ActiveMsgClient.listRemoteTasksForChar('char-1')).resolves.toEqual([]);
+  });
+
+  it('正常任务没有 charId，混入一条解密失败任务时仍按旧 Worker 识别', async () => {
+    vi.spyOn(ActiveMsgClient, 'listAllTasks').mockResolvedValue([
+      { uuid: 'old-worker-row', status: 'pending' },
+      { uuid: 'undecipherable', error: { code: 'STORED_DATA_UNDECRYPTABLE' } },
+    ] as any);
+    await expect(ActiveMsgClient.listRemoteTasksForChar('char-1'))
+      .rejects.toThrow(/重新粘贴部署/);
+  });
+
   it('远端确实一条任务都没有 → 空数组（跟版本无关，别误伤）', async () => {
     vi.spyOn(ActiveMsgClient, 'listAllTasks').mockResolvedValue([]);
     await expect(ActiveMsgClient.listRemoteTasksForChar('char-1')).resolves.toEqual([]);
@@ -2020,6 +2037,28 @@ describe('formatAmsgServerError — 通用后端错误细节透传', () => {
       },
     }, '操作失败');
     expect(text).toBe('服务器内部错误：CLOUD_OWNER_RETIRED: 角色已停用，不能继续写入云端数据');
+  });
+
+  it('新 Worker 报明确的 STORED_DATA_UNDECRYPTABLE，不自动清库且先提示恢复旧 Master Key', () => {
+    const text = formatAmsgServerError({
+      success: false,
+      error: { code: 'STORED_DATA_UNDECRYPTABLE', message: 'Stored data could not be decrypted' },
+    }, '操作失败');
+    expect(text).toContain('Master Key');
+    expect(text).toContain('不可撤销');
+    expect(text).toContain('STORED_DATA_UNDECRYPTABLE');
+    expect(text).not.toContain('Stored data could not be decrypted');
+  });
+
+  it('旧 Worker 把 Decryption failed 包在 OperationError cause 里，也能给出同一套说明', () => {
+    const text = formatAmsgServerError({
+      error: { code: 'INTERNAL_ERROR', message: '服务器内部错误', cause: {
+        name: 'OperationError', message: 'Decryption failed. This could be due to a ciphertext authentication failure',
+      } },
+    }, '操作失败');
+    expect(text).toContain('Master Key');
+    expect(text).toContain('清空云端数据');
+    expect(text).not.toContain('ciphertext authentication failure');
   });
 
   it('客户端体积预检无 message、只有 code 与 bytes/maxBytes 时也能拼出可读报错', () => {
