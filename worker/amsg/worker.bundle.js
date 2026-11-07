@@ -775,6 +775,31 @@ var buildLimitsBrief = (input) => {
   return ["\u7528\u6237\u7ED9\u4F60\u5B9A\u7684\u89C4\u77E9\uFF08\u7CFB\u7EDF\u7167\u7740\u6267\u884C\uFF1A\u8D85\u51FA\u7684\u6392\u4E0D\u4E0A\uFF0C\u6392\u4E0A\u4E86\u5230\u70B9\u4E5F\u4E0D\u53D1\uFF09\uFF1A", ...lines].join("\n");
 };
 
+// utils/amsgTaskKinds.ts
+var AMSG_TASK_KIND_KEY = "amsgKind";
+var readTaskKind = (metadata) => {
+  const raw = metadata?.[AMSG_TASK_KIND_KEY];
+  return typeof raw === "string" && raw ? raw : null;
+};
+var AMSG_BACKGROUND_JOB_SUBTYPE = "job";
+var AMSG_INSTANT_CHAT_SUBTYPE = "instant-chat";
+var AMSG_INSTANT_CHAT_FLAG = "amsgInstantChat";
+var isInstantChatTask = (metadata) => !!metadata && metadata[AMSG_INSTANT_CHAT_FLAG] === true;
+var classifyTaskRow = (row) => {
+  const { metadata } = row;
+  if (metadata) {
+    if (isInstantChatTask(metadata)) return "instant-chat";
+    if (readTaskKind(metadata)) return "background-job";
+    if (metadata.amsgSelfScheduled === true) return "scheduled";
+  }
+  if (row.messageSubtype === AMSG_INSTANT_CHAT_SUBTYPE) return "instant-chat";
+  if (row.messageSubtype === AMSG_BACKGROUND_JOB_SUBTYPE) return "background-job";
+  return "scheduled";
+};
+var AMSG_JOB_NAMESPACE = "amsg:job";
+var AMSG_JOB_TTL_DAYS = 3;
+var AMSG_JOB_ID_KEY = "amsgJobId";
+
 // utils/amsgFirePack.ts
 var AMSG_STATE_NAMESPACE_PREFIX = "amsg:char:";
 var amsgStateNamespace = (charId) => `${AMSG_STATE_NAMESPACE_PREFIX}${charId}`;
@@ -11902,17 +11927,7 @@ function createSingleUserCloudflareWorker(buildConfig, options = {}) {
 }
 
 // utils/amsgBundleVersion.ts
-var AMSG_BUNDLE_VERSION = "2026-11-07.6";
-
-// utils/amsgTaskKinds.ts
-var AMSG_TASK_KIND_KEY = "amsgKind";
-var readTaskKind = (metadata) => {
-  const raw = metadata?.[AMSG_TASK_KIND_KEY];
-  return typeof raw === "string" && raw ? raw : null;
-};
-var AMSG_JOB_NAMESPACE = "amsg:job";
-var AMSG_JOB_TTL_DAYS = 3;
-var AMSG_JOB_ID_KEY = "amsgJobId";
+var AMSG_BUNDLE_VERSION = "2026-11-07.7";
 
 // worker/amsg/src/skipDiagnostics.ts
 var BODY_ERROR_MAX_CHARS = 200;
@@ -13466,8 +13481,6 @@ var TIME_FRAMING_CONVERSATIONAL = "\u65F6\u95F4\u662F\u4F60\u6B64\u523B\u6240\u5
 
 // worker/amsg/src/instantChat.ts
 var INSTANT_TOTAL_TIMEOUT_MS = 6e5;
-var AMSG_INSTANT_CHAT_FLAG = "amsgInstantChat";
-var isInstantChatTask = (metadata) => !!metadata && metadata[AMSG_INSTANT_CHAT_FLAG] === true;
 var buildInstantTimelyBlock = (args) => {
   const blocks = args.blocks.filter((block) => block.trim());
   if (!args.timeAwarenessEnabled && blocks.length === 0) return "";
@@ -19589,7 +19602,7 @@ var amsgHooks = {
         const page = await ctx.listTasks({ status: "pending", limit: 100, offset, includeMetadata: true });
         for (const row of page.tasks) {
           const meta = row.metadata ?? {};
-          if ((row.charId ?? meta.charId) !== charId || row.status !== "pending" || !row.uuid || !row.nextSendAt || meta.amsgInstantChat === true || meta.amsgKind || row.messageSubtype === "instant-chat" && meta.amsgSelfScheduled !== true) continue;
+          if ((row.charId ?? meta.charId) !== charId || row.status !== "pending" || !row.uuid || !row.nextSendAt || classifyTaskRow(row) !== "scheduled") continue;
           const old = known.get(row.uuid);
           live.push({
             ...old,
@@ -19799,7 +19812,9 @@ ${userHoliday}` });
       // 「此刻在做什么」里的钟点跟今日节日同一个开关：关掉时间感知的角色不该从日程块
       // 读到「23:00」——那正是这个开关要挡的东西。日程内容本身照给。
       includeClock: toolPack.timeAwarenessEnabled,
-      mustSpeak: away
+      // B方案每一节拍只是一次发言机会，沿用作者原生【开口之前】自主静默判断。
+      // 到点的自动续排、禁发零LLM均已在 onBeforeFire 完成；这里绝不额外调用模型。
+      mustSpeak: false
     }), userHoliday) + mcpBlock + scheduleBlock;
     return {
       messages: [{ role: "user", content: prompt }],
