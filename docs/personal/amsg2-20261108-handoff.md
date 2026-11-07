@@ -67,3 +67,13 @@
 
 ## 4. 长期原则
 保护数据与原作者记忆体系 > 尊重原生架构并持续吸收作者更新 > 保留所有个人功能 > 认准真实部署版本 > 稳定兼容 > 创新。GitHub 常规读取、修改、提交、测试、正常部署已授权；重大数据损坏/高费用/破坏其他窗口成果必须先确认。不得误把自动测试当成真实上线验收。
+
+## 5. 2026-11-08 接力窗口第一轮核查（只读预检，未进行 Cloudflare 部署）
+
+- GitHub 核对：正式网页分支 `personal/audio-listening` 仍为 `4e740faeb8f24cbe2fde0ff9c7881ddd5217af49`，与交接的基线一致；接力分支比正式分支只多此交接文档（后续若有提交须重新比较）。
+- GitHub Actions 回执已重新读取：Pages `42403899111`、个人版构建 `42403898851`、主动消息专项集成检查 `42403628815` 均为 `success`。这只证明 CI/网页发布，不代表 Cloudflare Worker 已升级。
+- 代码/产物已检查：`utils/amsgBundleVersion.ts` 期望 `2026-11-08.3`；发布分支的 `worker/amsg/worker.bundle.js` 已存在且含该版本标记（blob SHA `6c2fe0a20002feb2f358a6c25fd986b2d5e40eee`）。这只证明仓库有对应包。
+- 新源码 `worker/amsg/src/selfUpdate.ts` 默认取包地址为 `https://raw.githubusercontent.com/yanlue1211/SullyOS-Personal-Import/personal/audio-listening/worker/amsg/worker.bundle.js`，但**旧 Worker 正在运行的自更新代码不一定已采用这个地址**。如果旧 Worker 的 `AMSG_BUNDLE_URL` 或固化默认来源仍指向作者/旧部署仓库，贸然点「更新 Worker」可能继续安装旧包。首次更新前务必核对旧实例的取包来源。
+- `.github/workflows/deploy-cloudflare-worker.yml` 只对旧 `master` 部署静态站点，不是个人主动消息 Worker 的自动升级通道；`.github/workflows/sync-workers-repo.yml` 只监听 `main/master` 并推送到 `Tosd0/sullyos-workers`，也不会自动为本次个人网页分支发布主动消息 Worker。**不要以任何 GitHub Actions 成功代替真实 Worker 验收。**
+- 尚无用户实际 Worker URL 或 Cloudflare 账号的可信确认，也没有可用的 Cloudflare 管理连接。尝试读取历史提及但未经用户确认的 workers.dev 地址未取得可验证回执；因此未确认线上 `GET /config-check` 的实际版本、环境、D1 和 Cron；**未调用 `/self-update`，未更换凭据、部署脚本或操作 D1。**
+- 下一步仅需要真实 Worker 的非敏感地址（或 `/config-check` JSON，注意移除任何凭据），并核对 Cloudflare 现有脚本、实际旧版取包地址及绑定，再决定是否通过原位自更新或保留原绑定的人工升级。真实升级后需复查 `workerVersion`、`instantTick`、`backgroundJobs`、`selfUpdate`、D1、Cron 与实际低成本投递结果。旧数据和 Master Key 保持原样。
