@@ -2192,8 +2192,10 @@ export const amsgHooks = {
         console.log('[amsg:away-skip]', { taskId: ctx.task.id, reason: 'missed-slot' });
         return { skip: true } as const;
       }
-      if (pack.awaySceneLock === 'date' || pack.awaySceneLock === 'call') {
-        console.log('[amsg:away-skip]', { taskId: ctx.task.id, reason: 'interaction-still-open', mode: pack.awaySceneLock });
+      const liveAwayLock = limitsRecord?.awaySceneLock !== undefined
+        ? limitsRecord.awaySceneLock : pack.awaySceneLock;
+      if (liveAwayLock === 'date' || liveAwayLock === 'call') {
+        console.log('[amsg:away-skip]', { taskId: ctx.task.id, reason: 'interaction-still-open', mode: liveAwayLock });
         return { skip: true } as const;
       }
       if (shouldSkipAwayForQuietHours({
