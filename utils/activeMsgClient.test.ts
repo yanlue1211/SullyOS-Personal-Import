@@ -1398,6 +1398,15 @@ describe('ActiveMsgClient.registerPushSubscription（② 订阅按用户登记�
 
     await expect(ActiveMsgClient.registerPushSubscription()).rejects.toThrow('worker 拒绝了订阅');
   });
+
+  it('Worker 拒绝订阅但只返回失败信封时依然抛错', async () => {
+    vi.spyOn(ActiveMsgClient, 'ensurePushSubscription').mockResolvedValue(SUB_JSON as any);
+    reiClient.putPushSubscription.mockResolvedValue({
+      success: false,
+      error: { code: 'INVALID_PUSH_SUBSCRIPTION', message: '订阅地址不被接受' },
+    });
+    await expect(ActiveMsgClient.registerPushSubscription()).rejects.toThrow('订阅地址不被接受');
+  });
 });
 
 // 回归守卫：换一台 worker 就是换一个空的 D1，而浏览器这侧的订阅一个字都没变——
