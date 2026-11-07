@@ -94,6 +94,7 @@ import { normalizeTranslationLangLabel, isTranslationLangPreset } from '../utils
 import { CharacterGroupFilterBar, filterCharactersByGroup, GROUP_FILTER_ALL } from '../components/character/CharacterGroupFilter';
 import { trackEvent, noteMessageSent, presetOrCustom } from '../utils/analytics';
 import { markAmsgStateDirty, markAmsgStateDirtyForAll } from '../utils/amsgStateSync';
+import { endAmsgDateFromOnlineUserMessage } from '../utils/amsgInteractionGuard';
 import { AMSG_INSTANT_CHAT_PENDING_EVENT, AMSG_INSTANT_CHAT_PENDING_LS_KEY, getInstantChatPending } from '../utils/amsgInstantChat';
 import { formatAmsgToolTrace } from '../utils/amsgToolTrace';
 import { formatHours } from '../utils/format';
@@ -1416,6 +1417,15 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
 
     // --- Actions ---
 
+    // 见面保护只有在用户真正在线上发出消息并成功落库后才解除。
+    // 立刻发小型 limits 同步，同时把完整 fire_pack 打脏让后续状态同步兜底。
+    const finishDateOnOnlineUserSend = (targetChar: CharacterProfile) => {
+        if (!endAmsgDateFromOnlineUserMessage(targetChar.id, Date.now())) return;
+        markAmsgStateDirty({ char: targetChar, userProfile, groups, realtimeConfig });
+        void ActiveMsgClient.putCharLimits(targetChar).catch(error =>
+            console.warn('[Chat] 线上消息已解除本地见面状态，云端 limits 同步失败（待下次状态同步重试）', error));
+    };
+
     const sendText = async (customContent?: string, customType?: MessageType, metadata?: any) => {
         if (!char || (!input.trim() && !customContent)) return;
         // 只累加内存里的计数，这里不发任何请求；页面切走时才按区间报一次。见 utils/analytics.ts
@@ -1504,6 +1514,8 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
         }
 
         const savedUserMsgId = await DB.saveMessage(msgPayload);
+
+        finishDateOnOnlineUserSend(char);
 
         if (type === 'image') {
             // 相册是消息的附带记录：保留来源消息引用供收藏/去重使用，但相册写入失败
@@ -1964,6 +1976,7 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
             content: trimmed,
             metadata: { fromMcdMiniApp: true },
         } as any);
+        finishDateOnOnlineUserSend(char);
         const recent = await DB.getRecentMessagesByCharId(char.id, 200);
         setMessages(recent);
         triggerAI(recent);
@@ -2056,6 +2069,7 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
             content: trimmed,
             metadata: { fromLuckinMiniApp: true },
         } as any);
+        finishDateOnOnlineUserSend(char);
         const recent = await DB.getRecentMessagesByCharId(char.id, 200);
         setMessages(recent);
         triggerAI(recent);
