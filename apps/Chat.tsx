@@ -75,11 +75,12 @@ import ProactiveSettingsModal from '../components/chat/ProactiveSettingsModal';
 import ActiveMsg2SettingsModal from '../components/chat/ActiveMsg2SettingsModal';
 import AwayMessageSettingsModal from '../components/chat/AwayMessageSettingsModal';
 import {
-    cancelCloudAwayTasks, isAwayCloudRoute, syncCloudAwayTask, pauseCloudAwaySyncForSettings,
+    cancelCloudAwayTasks, syncCloudAwayTask, pauseCloudAwaySyncForSettings,
     isLatestCloudAwaySettings, resumeCloudAwaySyncForSettings, waitForCloudAwaySync,
     enqueueCloudAwaySettingsUpdate,
 } from '../utils/awayMessage';
 import { getLastRealUserMessageAt } from '../utils/amsg2ExpireGuard';
+import { isAmsg2GlobalReady } from '../utils/amsg2ToolBridge';
 import { ActiveMsgClient } from '../utils/activeMsgClient';
 import ThinkingChainSettingsModal from '../components/chat/ThinkingChainSettingsModal';
 import ScheduleChangeNotice from '../components/chat/ScheduleChangeNotice';
@@ -4708,16 +4709,16 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
                         await waitForCloudAwaySync(char.id);
                         if (!isLatestCloudAwaySettings(char.id, settingsEpoch)) return;
                         const updatedChar = { ...char, awayMessage: config };
-                        const [wasCloud, willCloud] = await Promise.all([
-                            isAwayCloudRoute(char), isAwayCloudRoute(updatedChar),
-                        ]);
-                        if (!isLatestCloudAwaySettings(char.id, settingsEpoch) || (!wasCloud && !willCloud)) return;
+                        // 即使本地已经显示关闭，仍允许再保存一次来清理上次网络失败
+                        // 留在云端的空闲任务，不能只凭旧 enabled=false 就跳过。
+                        const cloudConfigured = await isAmsg2GlobalReady();
+                        if (!isLatestCloudAwaySettings(char.id, settingsEpoch) || !cloudConfigured) return;
                         if (!config.enabled) {
                             try {
                                 // 先在云端关闸，再取消旧任务；即使上传失败也尽力取消。
                                 await ActiveMsgClient.putCharLimits(updatedChar);
                             } finally {
-                                if (old?.enabled) await cancelCloudAwayTasks(char, updateCharacter);
+                                await cancelCloudAwayTasks(char, updateCharacter);
                             }
                             return;
                         }
