@@ -1,6 +1,6 @@
 /**
  * Read-only public preflight for the known personal production Worker.
- * Exactly one unauthenticated GET /config-check; never reads secrets or calls a paid model.
+ * Exactly two unauthenticated GETs: /config-check and /debug; no secret values or paid models.
  * An inaccessible endpoint is reported as UNKNOWN, never as a successful live deployment.
  * This script is intentionally informational and non-blocking for PR CI.
  */
@@ -47,6 +47,45 @@ try {
 } catch (error) {
   // Do not print arbitrary response bodies, URLs from redirects, or credential-bearing error text.
   report('UNKNOWN: cannot reach public Worker from GitHub runner; do not infer anything about deployment', {
+    errorType: error instanceof Error ? error.name : 'unknown',
+  });
+}
+
+// The existing Worker already exposes a read-only /debug inspection route.
+// Perform exactly one additional GET before a production release; only report
+// whitelisted health booleans/status/counts. Never dump the raw debug response.
+try {
+  const response = await fetch('https://sullyos-amsg.yanlue.workers.dev/debug', {
+    method: 'GET',
+    redirect: 'error',
+    signal: AbortSignal.timeout(8000),
+    headers: { Accept: 'application/json' },
+  });
+  if (!response.ok) {
+    report('DEBUG_UNKNOWN: Worker debug HTTP error', { httpStatus: response.status });
+  } else {
+    const body = await response.json();
+    if (body?.success !== true || !body.data || typeof body.data !== 'object') {
+      report('DEBUG_UNKNOWN: unexpected Worker debug response');
+    } else {
+      const { config, storage, tick, schema } = body.data;
+      const safeCount = value => Number.isSafeInteger(value) && value >= 0 ? value : null;
+      report('DEBUG_READONLY: existing production Worker and D1 status (no secret values)', {
+        configurationOk: config?.ok === true,
+        d1Reachable: storage?.reachable === true,
+        schemaReady: storage?.schemaReady === true ? true : storage?.schemaReady === false ? false : null,
+        schemaProbePresent: schema !== null && schema !== undefined,
+        tickStatus: ['idle', 'healthy', 'failing', 'stalled', 'unknown'].includes(tick) ? tick : 'unknown',
+        pendingTaskCount: safeCount(storage?.pendingTasks),
+        overdueTaskCount: safeCount(storage?.overdueTasks),
+        registeredPush: storage?.pushSubscriptionRegistered === true,
+        pushDeliveryStatus: storage?.pushDelivery && typeof storage.pushDelivery === 'object'
+          ? 'available' : 'unknown',
+      });
+    }
+  }
+} catch (error) {
+  report('DEBUG_UNKNOWN: cannot inspect public production Worker debug from CI', {
     errorType: error instanceof Error ? error.name : 'unknown',
   });
 }
