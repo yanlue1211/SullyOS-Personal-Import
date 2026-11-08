@@ -153,6 +153,36 @@ describe('cloud away first-task creation and passive repair', () => {
     expect(ActiveMsgClient.updatePendingTasksRemote).not.toHaveBeenCalled();
   });
 
+  it('concurrent first-task bootstrap holds the lock before async Worker probes', async () => {
+    const deps = createDeps(makeChar());
+    const first = syncCloudAwayTask(deps, { seedOnly: true });
+    const second = syncCloudAwayTask(deps, { seedOnly: true });
+    expect(await Promise.all([first, second])).toEqual([true, false]);
+    expect(ActiveMsgClient.listRemoteTasksForChar).toHaveBeenCalledOnce();
+    expect(ActiveMsgClient.scheduleCharacterTask).toHaveBeenCalledOnce();
+  });
+
+  it('rapid real-user messages coalesce to latest activity instead of losing the rearm', async () => {
+    const deps = createDeps(makeChar());
+    // 第一次只会创建一条，随后最新的用户消息会重新读取那条并推迟。
+    vi.mocked(ActiveMsgClient.listRemoteTasksForChar)
+      .mockResolvedValueOnce([] as any)
+      .mockResolvedValueOnce([{
+        uuid: 'new-away-uuid', clientTaskId: 'away-new-away-uuid', status: 'pending',
+        nextSendAt: new Date(NOW + 60_000).toISOString(),
+      }] as any);
+    const first = syncCloudAwayTask({ ...deps, lastUserAt: NOW - 5 * HOUR });
+    const latest = syncCloudAwayTask({ ...deps, lastUserAt: NOW });
+    expect(await latest).toBe(false); // 在前一轮网络读写中，先登记最新发言。
+    expect(await first).toBe(true);
+    await vi.waitFor(() => expect(ActiveMsgClient.updatePendingTasksRemote).toHaveBeenCalledOnce());
+    expect(ActiveMsgClient.scheduleCharacterTask).toHaveBeenCalledOnce();
+    expect(ActiveMsgClient.listRemoteTasksForChar).toHaveBeenCalledTimes(2);
+    expect(ActiveMsgClient.updatePendingTasksRemote).toHaveBeenCalledWith(
+      ['new-away-uuid'], { nextSendAt: new Date(NOW + 4 * HOUR).toISOString() },
+    );
+  });
+
   it('does not create paid activity for a character with no prior real user message', async () => {
     const char = makeChar();
     vi.spyOn(DB, 'getRecentMessagesByCharId').mockResolvedValue([] as any);
