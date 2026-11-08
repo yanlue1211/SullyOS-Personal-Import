@@ -72,6 +72,18 @@ export const isAwayCloudWorkerCompatible = async (): Promise<boolean> => {
 
 const cloudInFlight = new Set<string>();
 const cloudCooldownUntil = new Map<string, number>();
+// 同一角色连续发言时，只补处理最新一次真实用户消息；绝不能让旧同步操作
+// 的网络等待吞掉新互动，也不能让两个同步并发创建两条空闲链。
+type CloudAwaySyncDeps = {
+  char: CharacterProfile;
+  lastUserAt: number;
+  userProfile: UserProfile;
+  groups: GroupProfile[];
+  realtimeConfig: RealtimeConfig;
+  apiConfig: APIConfig;
+  updateCharacter: UpdateCharacter;
+};
+const cloudPendingRearm = new Map<string, CloudAwaySyncDeps>();
 
 const awaySendAtMs = (task: ActiveMsg2TaskRecord): number | null => {
   const ms = Date.parse(task.nextSendAt ?? task.firstSendTime);
@@ -85,25 +97,26 @@ const awaySendAtMs = (task: ActiveMsg2TaskRecord): number | null => {
  * 把云端那条离开后消息排到「对方最后一次开口 + 等待时长」。
  * 已有任务排得够晚就什么都不发；排早了原地改期；远端已经没有（发过了 / 被取消）就新建。
  */
-export const syncCloudAwayTask = async (deps: {
-  char: CharacterProfile;
-  lastUserAt: number;
-  userProfile: UserProfile;
-  groups: GroupProfile[];
-  realtimeConfig: RealtimeConfig;
-  apiConfig: APIConfig;
-  updateCharacter: UpdateCharacter;
-}, options: { seedOnly?: boolean } = {}): Promise<boolean> => {
+export const syncCloudAwayTask = async (deps: CloudAwaySyncDeps, options: { seedOnly?: boolean } = {}): Promise<boolean> => {
   const { char } = deps;
-  if (!char.awayMessage?.enabled || cloudInFlight.has(char.id)) return false;
+  if (!char.awayMessage?.enabled) return false;
+  if (cloudInFlight.has(char.id)) {
+    // 前台补建（seedOnly）不抢排程；真实用户新互动必须排队，旧任务稍后会按新时间改期。
+    if (!options.seedOnly) {
+      const previous = cloudPendingRearm.get(char.id);
+      if (!previous || deps.lastUserAt >= previous.lastUserAt) cloudPendingRearm.set(char.id, deps);
+    }
+    return false;
+  }
   if ((cloudCooldownUntil.get(char.id) ?? 0) > Date.now()) return false;
-  if (!await isAwayCloudRoute(char)) return false;
-  const scheduleConfig = char.activeMsg2Config ?? { enabled: false, tasks: [] };
-  // 旧 Worker 不认识 B 模式标记，若提前排程会绕开禁发和下一次续排，必须零副作用停在这里。
-  if (!await isAwayCloudWorkerCompatible()) return false;
-
+  // 必须先占住锁，再做任何异步读（Worker 就绪检测也会 await）。
+  // 否则两次快速发送都过了最初的 has 检查，会各建一条云端空闲任务。
   cloudInFlight.add(char.id);
   try {
+    if (!await isAwayCloudRoute(char)) return false;
+    const scheduleConfig = char.activeMsg2Config ?? { enabled: false, tasks: [] };
+    // 旧 Worker 不认识 B 模式标记，若提前排程会绕开禁发和下一次续排，必须零副作用停在这里。
+    if (!await isAwayCloudWorkerCompatible()) return false;
     const delayMinutes = resolveAwayDelayMinutes(char);
     const now = Date.now();
     const delayMs = delayMinutes * 60_000;
@@ -201,11 +214,20 @@ export const syncCloudAwayTask = async (deps: {
     return false;
   } finally {
     cloudInFlight.delete(char.id);
+    const pending = cloudPendingRearm.get(char.id);
+    if (pending) {
+      cloudPendingRearm.delete(char.id);
+      // 只回放最新一次，避免每条用户消息各读写一轮 Worker；无模型调用。
+      // 后续如果再次快速发言，仍按同一规则合并到最新时间。
+      void syncCloudAwayTask(pending);
+    }
   }
 };
 
 /** 关掉离开后消息或改了等待时长时调用：取消云端那条，下一轮对方开口时按新设置重建。 */
 export const cancelCloudAwayTasks = async (char: CharacterProfile, updateCharacter: UpdateCharacter): Promise<void> => {
+  // 关闭/改间隔时不能再执行按旧配置排队的用户互动改期。
+  cloudPendingRearm.delete(char.id);
   const away = (char.activeMsg2Config?.tasks ?? []).filter(t => t.away || t.clientTaskId?.startsWith('away-'));
   // 远端链在后台续排，可能不在本地清单里。必须一并取消，不能仅靠旧 UUID。
   const remote = await ActiveMsgClient.listRemoteTasksForChar(char.id).catch(error => {
