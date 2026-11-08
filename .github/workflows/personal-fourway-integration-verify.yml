@@ -1,0 +1,43 @@
+name: Personal four-way upstream compatibility gate
+on:
+  pull_request:
+    paths:
+      - 'utils/fourwayPersonalIntegration.test.ts'
+      - 'utils/assetReferenceLock*'
+      - 'utils/blobGc*'
+      - 'utils/blobRef*'
+      - 'utils/storageOptimize*'
+      - 'utils/storyTheater*'
+      - 'utils/phoneGeneration*'
+      - 'apps/room3d/homeRomance.ts'
+      - 'apps/room3d/model.js'
+      - 'apps/room3d/editor.js'
+      - 'apps/CheckPhone.tsx'
+      - 'context/OSContext.tsx'
+      - 'utils/db.ts'
+      - 'types.ts'
+      - '.github/workflows/personal-fourway-integration-verify.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: One database, four features, no memory changes
+        run: pnpm exec vitest run utils/fourwayPersonalIntegration.test.ts
+      - name: All four independent feature suites
+        run: pnpm exec vitest run utils/assetReferenceLock.test.ts utils/blobRef.test.ts utils/blobGc.test.ts utils/blobDedupe.test.ts utils/storageOptimize.test.ts utils/storyTheaterManualArchive.test.ts utils/storyTheaterArchive.test.ts utils/storyTheater.test.ts utils/storyTheaterReply.test.ts utils/phoneGeneration.test.ts utils/phoneEvidence.test.ts utils/relationshipChat.test.ts utils/homeRomance.test.ts utils/home3DBackup.test.ts utils/room3d.test.ts
+      - name: Protect personal chat images, backups and request context
+        run: pnpm exec vitest run utils/activityBackup.test.ts utils/personalChatMedia.test.ts utils/photoChoice.test.ts utils/chatRequestPayload.test.ts
+      - name: Full frontend + Worker build, no paid LLM calls
+        run: pnpm run build
