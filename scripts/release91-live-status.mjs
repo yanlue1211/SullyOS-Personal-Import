@@ -16,8 +16,8 @@ let pagesMatched = false, workerMatched = false;
 try {
   const response = await get(pages + '?release91=' + Date.now(), 'text/html');
   const html = await response.text();
-  const commit = html.match(/["']__BUILD_COMMIT__["']\\s*:\\s*["']([0-9a-f]{7,40})["']/)?.[1] ?? null;
-  const branch = html.match(/["']__BUILD_BRANCH__["']\\s*:\\s*["']([^"']+)["']/)?.[1] ?? null;
+  const commit = html.match(/["']__BUILD_COMMIT__["']\s*:\s*["']([0-9a-f]{7,40})["']/)?.[1] ?? null;
+  const branch = html.match(/["']__BUILD_BRANCH__["']\s*:\s*["']([^"']+)["']/)?.[1] ?? null;
   pagesMatched = commit === expected.pagesCommit && branch === expected.branch;
   report('PAGES_VERSION', { commit, branch, expected: expected.pagesCommit, matched: pagesMatched });
 } catch (e) {
