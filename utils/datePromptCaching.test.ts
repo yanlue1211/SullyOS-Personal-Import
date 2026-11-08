@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DatePrompts } from './datePrompts';
+import * as oracle from '../features/experience/oracle';
+vi.mock('../features/experience/oracle', () => ({ oracleContext: vi.fn().mockResolvedValue('') }));
+
 import { toAnthropicRequest } from './anthropicApi';
 import * as palace from './memoryPalace/pipeline';
 import * as location from './userLocation';
@@ -49,6 +52,21 @@ beforeEach(() => {
     vi.spyOn(schedules, 'getDailyScheduleForChar').mockResolvedValue(null);
 });
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
+
+describe('个人版我谕道具实时状态仍进入上下文', () => {
+    it('道具状态改变只更新后置实时块，不污染稳定缓存前缀', async () => {
+        vi.mocked(oracle.oracleContext).mockResolvedValueOnce('【道具甲正在生效】')
+            .mockResolvedValueOnce('【道具乙正在生效】');
+        const char = makeChar();
+        const first = await build('send', char);
+        const second = await build('send', char);
+        expect(first.messages[0]).toEqual(second.messages[0]);
+        expect(first.messages[0].content).not.toContain('道具甲');
+        expect(cachedHistory(native(first))).toEqual(cachedHistory(native(second)));
+        expect(text(first)).toContain('道具甲');
+        expect(text(second)).toContain('道具乙');
+    });
+});
 
 describe('见面稳定前缀与原生缓存边界', () => {
     it.each(['send', 'reroll', 'approach', 'invite'] as const)('%s 跨分钟、随机线索变化不改变稳定系统与历史缓存前缀', async mode => {
