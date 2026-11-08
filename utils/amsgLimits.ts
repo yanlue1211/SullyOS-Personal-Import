@@ -194,6 +194,8 @@ export const parseAmsgLimitsRecord = (value: string | null | undefined): AmsgLim
  * 哪个时区无关。换日了就从零数起，不用清。
  */
 export const AMSG_DAILY_SENDS_KEY = 'daily_sends';
+/** 独立于角色自主预约的离开提醒每日账本，不参加 2.0 主动频率限制。 */
+export const AMSG_AWAY_DAILY_SENDS_KEY = 'away_daily_sends';
 
 export interface AmsgDailySends {
   v: 1;
