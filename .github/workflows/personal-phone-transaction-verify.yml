@@ -24,7 +24,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Verify phone transactions and previous phone cards/relations
-        run: pnpm exec vitest run utils/phoneGeneration.test.ts utils/phoneEvidence.test.ts utils/phoneCard.test.ts utils/phoneContacts.test.ts
+        run: pnpm exec vitest run utils/phoneGeneration.test.ts utils/phoneEvidence.test.ts utils/relationshipChat.test.ts
       - name: Verify private chat, backup, media, context and memory integration
         run: pnpm exec vitest run utils/personalChatMedia.test.ts utils/activityBackup.test.ts utils/chatRequestPayload.test.ts
       - name: Build front-end and worker without paid requests
