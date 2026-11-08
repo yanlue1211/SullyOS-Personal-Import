@@ -74,7 +74,6 @@ import {
   bumpRecurringSend,
   countRecurringSends,
   countUnansweredSends,
-  countAwayUnansweredSends,
   formatFireTimeShort,
   describeFirePackVersion,
   parseFirePack,
@@ -2339,7 +2338,7 @@ export const amsgHooks = {
     }
 
     const maxUnansweredSends = limits.maxUnansweredSends;
-    // 离开后消息也归它管：它发出去就算一次「没回时找你」，后面角色自排的接着往上数。
+    // 只限制角色的自主预约，离开后消息走独立空闲计时，不占自主预约额度。
     if (!instant && selfScheduled
       && countUnansweredSends(selfLog) >= maxUnansweredSends) {
       console.log('[amsg:unanswered-limit-skip]', {
@@ -2388,7 +2387,8 @@ export const amsgHooks = {
     const dailyDay = dayKeyInZone(nowMs, pack.userTzId);
     const dailySendsKey = away ? AMSG_AWAY_DAILY_SENDS_KEY : AMSG_DAILY_SENDS_KEY;
     const dailySends = parseDailySends(charRows.find((r) => r.key === dailySendsKey)?.value);
-    const sentToday = sendsOnDay(dailySends, dailyDay);
+    const normalDailySends = away ? parseDailySends(charRows.find((r) => r.key === AMSG_DAILY_SENDS_KEY)?.value) : dailySends;
+    const sentToday = sendsOnDay(normalDailySends, dailyDay);
     if (!instant && !away && sentToday >= limits.dailySendCap) {
       console.log('[amsg:daily-limit-skip]', {
         taskId: ctx.task.id, charId, day: dailyDay, sentToday, cap: limits.dailySendCap,
