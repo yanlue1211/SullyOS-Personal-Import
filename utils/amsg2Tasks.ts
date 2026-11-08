@@ -244,7 +244,7 @@ export const buildFireTaskListBlock = (
 ): string => {
   const tz: AmsgTzRef = { tzId: opts.tzId };
   const listed = tasks
-    .filter((t) => isPendingTask(t, opts.nowMs))
+    .filter((t) => !t.away && isPendingTask(t, opts.nowMs))
     .filter((t) => !opts.excludeClientTaskId || t.clientTaskId !== opts.excludeClientTaskId);
   if (listed.length === 0) return '';
 
