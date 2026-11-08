@@ -59,6 +59,7 @@ afterEach(() => {
 
 const run = async () => runLocalAwayMessages({
   getCharacters: () => [char],
+  updateCharacter: vi.fn(),
   getApiConfig: () => ({ baseUrl: 'https://fixture.invalid/v1', apiKey: '', model: 'fixture' } as any),
   getUserProfile: () => ({ name: '小明' } as any),
   getGroups: () => [], getRealtimeConfig: () => ({} as any),
