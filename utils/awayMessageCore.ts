@@ -17,8 +17,8 @@ export const MAX_AWAY_SEGMENTS = 3;
 /** 模型输出里分隔「不同时刻发的消息」的标记，单独占一行。 */
 export const AWAY_SEGMENT_MARK = '[[NEXT]]';
 
-/** 云端任务的排期离目标时刻差不到这么多就不去改它：差的那点由 worker 到点推迟兜住。 */
-export const AWAY_RENEW_SLACK_MS = 10 * 60_000;
+/** 精度只宽限 1 分钟的 Cron 抖动，不能把用户新互动后的十分钟视为无需改期。 */
+export const AWAY_RENEW_SLACK_MS = 60_000;
 
 export const resolveAwayDelayMinutes = (char: Pick<CharacterProfile, 'awayMessage'>): number => {
   const minutes = char.awayMessage?.delayMinutes;
