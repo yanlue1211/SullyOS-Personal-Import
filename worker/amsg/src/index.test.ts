@@ -1057,8 +1057,8 @@ describe('频率与额度（到点兜底闸）', () => {
     });
     ctx.scheduleTask = vi.fn();
     const prompt = fired(await amsgHooks.onBeforeFire(ctx)).messages[0].content;
-    expect(prompt).toContain('现在还能再排 2 次');
-    expect(prompt).toContain('现在挂着 0 个');
+    expect(prompt).toContain('已用 1/3 次');
+    expect(prompt).toContain('挂着 0/1 个');
   });
 
   it('「不停」（0）时重复任务一直照发', async () => {
@@ -1136,9 +1136,9 @@ describe('频率与额度（到点兜底闸）', () => {
     ctx.scheduleTask = vi.fn();
     const prompt = fired(await amsgHooks.onBeforeFire(ctx)).messages[0].content;
     expect(prompt).toContain('用户给你定的规矩');
-    // 连发 3 次，正在发的这一次占 1 次 → 还能再排 2 次；今天发过 1 次 + 这一次 → 还剩 3 次。
-    expect(prompt).toContain('现在还能再排 2 次');
-    expect(prompt).toContain('今天还能再主动找对方 3 次');
+    // 连发 3 次，正在发的这一次占 1 次 → 已用 1/3；今天发过 1 次 + 这一次 → 已用 2/5。
+    expect(prompt).toContain('已用 1/3 次');
+    expect(prompt).toContain('今天的主动联系：已用 2/5 次');
   });
 });
 
