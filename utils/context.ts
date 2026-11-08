@@ -236,9 +236,9 @@ export const ContextBuilder = {
     },
 
     /**
-     * buildCoreContext(deferVolatile) 的另一半：时间 → 记忆宫殿召回 → 情绪 buff。
-     * 三块的开关判定与 buildCoreContext 内联版完全一致，只是输出位置交给调用方
-     * （聊天主路径放到消息数组末尾的"当前状态" system 消息里）。
+     * buildCoreContext(deferVolatile) 的另一半：当前时间、记忆召回、情绪及日程。
+     * 聊天和见面共用同一出口；位置、节假日仅在调用方显式请求时加入，
+     * 且不移动或修改原始记忆提取/召回逻辑。
      */
     buildVolatileCoreState: async (
         char: CharacterProfile,
@@ -251,13 +251,20 @@ export const ContextBuilder = {
             /** 仅本次请求共用的读取结果；不缓存到下一轮，null 也不重复查询。 */
             scheduleSnapshot?: Promise<DailySchedule | null>;
             memoryPalaceContext?: string;
-            timeOptions?: { lastInteractionTs?: number; skipTimeAwareness?: boolean; conversational?: boolean };
+            /** 为见面等入口显式传入用户，才读取本轮位置和节假日。 */
+            user?: UserProfile;
+            timeOptions?: {
+                lastInteractionTs?: number; skipTimeAwareness?: boolean; conversational?: boolean;
+                includeUserLocation?: boolean; userHolidays?: UserHolidayConfig; skipUserHoliday?: boolean;
+            };
         },
     ): Promise<string> => {
         let context = ContextBuilder.buildTimeAwarenessBlock(char, options?.timeOptions);
 
         if (char.memoryPalaceEnabled) {
-            const mpContext = char.memoryPalaceInjection || options?.memoryPalaceContext;
+            const rawMpContext = char.memoryPalaceInjection || options?.memoryPalaceContext;
+            const mpContext = rawMpContext && options?.timeOptions?.skipTimeAwareness
+                ? stripMemoryPalaceDateStamps(rawMpContext) : rawMpContext;
             if (mpContext && mpContext.trim()) {
                 context += `${mpContext}\n\n`;
             }
@@ -265,7 +272,18 @@ export const ContextBuilder = {
 
         context += ContextBuilder.buildEmotionContext(char, options?.emotion);
 
-        if (options?.scheduleDelivery !== 'worker') context += await ContextBuilder.buildCurrentScheduleContext(char, options?.emotion?.surface === 'chat', options?.scheduleSnapshot);
+        if (options?.scheduleDelivery !== 'worker') {
+            context += await ContextBuilder.buildCurrentScheduleContext(char, options?.emotion?.surface === 'chat', options?.scheduleSnapshot, options?.timeOptions);
+        }
+        if (options?.user && !options.timeOptions?.skipTimeAwareness) {
+            if (options.timeOptions?.includeUserLocation) {
+                context += await getUserLocationContext(options.user.name, char.id);
+            }
+            if (char.timeAwarenessEnabled !== false && !options.timeOptions?.skipUserHoliday) {
+                const holiday = getCachedUserHolidayReminder(options.user.name, options.timeOptions?.userHolidays);
+                if (holiday) context += `- ${holiday}\n\n`;
+            }
+        }
         return context;
     },
 
