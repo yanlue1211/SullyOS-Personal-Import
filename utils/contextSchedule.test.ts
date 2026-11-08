@@ -11,7 +11,7 @@ beforeEach(()=>{m.load.mockReset().mockResolvedValue(schedule);vi.useFakeTimers(
 afterEach(()=>vi.useRealTimers());
 it('default core includes current and full-day schedule even with false; changes are read each request',async()=>{
  let core=await ContextBuilder.buildCoreContext(char,user,false);
- expect(core).toContain('日程标记画画');expect(core).toContain('晚间安排');expect(core).toContain('当前时段：09:00');
+ expect(core).toContain('日程标记画画');expect(core).toContain('晚间安排');expect(core).toContain('09:00 日程标记画画');
  expect(m.load).toHaveBeenCalledWith(char);
  m.load.mockResolvedValue({slots:[{startTime:'00:00',activity:'已更新日程'}]});
  core=await ContextBuilder.buildCoreContext(char,user);
