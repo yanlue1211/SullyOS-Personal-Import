@@ -87,6 +87,23 @@ const getRealTimeStr = (tz?: string): string => {
 const isDateTimeAwarenessOn = (char: CharacterProfile): boolean =>
     char.dateTimeAwarenessEnabled !== false;
 
+/**
+ * 见面实时块只进入历史后的本轮输入附近，不进入可缓存的固定 system。
+ * 复用 ContextBuilder 原生状态出口，不复制记忆召回/日程逻辑。
+ */
+const buildDateLiveContext = async (char: CharacterProfile, user: UserProfile, conversational: boolean): Promise<string> => {
+    const dateTimeOn = isDateTimeAwarenessOn(char);
+    let context = '[System: 见面实时状态 (Live Context)]\n以下是本轮的状态与背景；角色设定和表达规则仍见系统设定。\n\n';
+    context += await ContextBuilder.buildVolatileCoreState(char, {
+        user,
+        timeOptions: { skipTimeAwareness: !dateTimeOn, conversational, includeUserLocation: true },
+    });
+    if (conversational && dateTimeOn) {
+        context += `1. **Time**: 当前时间 ${getRealTimeStr(resolveCharTimeZone(char))}。\n`;
+    }
+    return context;
+};
+
 /** 立绘系统要求必备的五种基础情绪；角色自定义立绘在此之上叠加 */
 export const REQUIRED_DATE_EMOTIONS = ['normal', 'happy', 'angry', 'sad', 'shy'];
 
@@ -591,8 +608,6 @@ const getTimeGapHint = (lastMsgTimestamp: number | undefined, tz?: string): stri
  * 风格 / 人称 / 自定义补充按 char.dateStyleConfig 动态拼装。
  */
 const buildVNModeBlock = (char: CharacterProfile, userName: string): string => {
-    const dateTimeOn = isDateTimeAwarenessOn(char);
-    const timeLine = dateTimeOn ? `1. **Time**: 当前时间 ${getRealTimeStr(resolveCharTimeZone(char))}。\n` : '';
     const dateEmotions = getDateEmotions(char);
     const styleConfig = char.dateStyleConfig;
     const preset = getStylePreset(styleConfig);
@@ -613,7 +628,7 @@ ${char.dateVoiceEnabled ? getDateVoiceGuide() : ''}
 ${preset.block}
 
 ${digBlock}${povBlock}${extraBlock}### 场景上下文
-${timeLine}- **Location**: 你们现在**面对面**。
+- **Location**: 你们现在**面对面**。
 - **Context**: 参考历史记录。如果刚刚才看到开场白（Opening），请自然接话。
 ${observeBlock}`;
 };
@@ -692,8 +707,10 @@ export const DatePrompts = {
             history: apiMessages.map(message => ({ ...message, content: typeof message.content === 'string'
                 ? message.content : message.content.filter((part: any) => part?.type === 'text').map((part: any) => part.text).join(' ') })),
             includeDetailedMemories: false,
-            timeOptions: { skipTimeAwareness: !isDateTimeAwarenessOn(char), includeUserLocation: true },
+            timeOptions: { skipTimeAwareness: !dateTimeOn, skipUserHoliday: true },
+            layout: { deferVolatile: true },
         }));
+        const liveContext = await buildDateLiveContext(char, userProfile, false);
 
         // 文风预设也作用于开场感知；人称（pov）刻意不作用——peek 的设计就是
         // 第三人称旁观镜头（用户还没"走过去"），人称指令只影响 session 内叙述
@@ -726,10 +743,13 @@ ${invite ? '描写角色自己的到来、动作与必要的开场台词，停�
 3. **描写风格**: ${preset.peekHint}。${isObserveOn(char) ? '先按下方「观测协议」输出观测块，再开始描写内容（描写本身不要加任何前缀）。' : '不要输出任何前缀，直接输出描写内容。'}
 ${extraBlock ? `\n${extraBlock}` : ''}${isObserveOn(char) ? `\n${buildObserveBlock(char)}` : ''}`;
 
+        const hasHistoryPrefix = context.history.some(message => message.role === 'user' || message.role === 'assistant');
         return {
             messages: [
                 ...context.messages,
+                ...(hasHistoryPrefix ? [{ role: 'system', content: liveContext }] : []),
                 { role: 'user', content: `[最近记录 (Previous Context)] 见以上消息历史。${contextSeparator}${peekInstructions}\n\n(Start sensing...)` },
+                ...(!hasHistoryPrefix ? [{ role: 'system', content: liveContext }] : []),
                 { role: 'system', content: buildDateInteractionPrinciples(char.name, userProfile?.name || '对方', invite ? 'invite' : true) },
             ],
         };
@@ -764,14 +784,18 @@ ${extraBlock ? `\n${extraBlock}` : ''}${isObserveOn(char) ? `\n${buildObserveBlo
         const conversation = [...historyMsgs, { role: 'user', content: pendingContent }];
 
         const dateTimeOn = isDateTimeAwarenessOn(char);
-        // 向量召回挂到 char.memoryPalaceInjection，buildCoreContext 会读取
+        // 召回仍由原生 injectMemoryPalace 获取，本轮实时块读取结果，不改记忆逻辑。
         await injectMemoryPalace(char, allMsgs, undefined, userProfile?.name, { omitDates: !dateTimeOn });
         const context = (await ContextBuilder.buildCharacterContext({
             char, user: userProfile, history: conversation,
-            timeOptions: { skipTimeAwareness: !dateTimeOn, conversational: true, includeUserLocation: true },
+            timeOptions: { skipTimeAwareness: !dateTimeOn, conversational: true, skipUserHoliday: true },
+            layout: { deferVolatile: true },
         }));
-        const systemPrompt = context.coreContext + await oracleContext(char.id)
-            + buildVNModeBlock(char, userProfile?.name || '')
+        // 仅固定格式规则参与稳定前缀；个人「心声」及 SAR 本轮状态继续注入，
+        // 但移到易变尾段，避免它们随本轮状态改变破坏原生缓存。
+        const systemPrompt = context.coreContext + buildVNModeBlock(char, userProfile?.name || '');
+        const liveContext = await buildDateLiveContext(char, userProfile, true)
+            + await oracleContext(char.id)
             + ContextBuilder.buildSARModuleContext(char, userProfile, 'date');
 
         // 每轮轮换的聚焦线索：把注意力推向不同的具体方向，相邻回复天然有差异
@@ -783,12 +807,22 @@ ${extraBlock ? `\n${extraBlock}` : ''}${isObserveOn(char) ? `\n${buildObserveBlo
         const messagesWithWorldbooks = context.history;
         // depth=0 会在末条用户消息之后插入世界书，不能给数组最后一项追加 VN 指令。
         const pendingMessage = conversation[conversation.length - 1];
+        const pendingIndex = messagesWithWorldbooks.indexOf(pendingMessage);
+        const hasHistoryPrefix = (pendingIndex >= 0 ? messagesWithWorldbooks.slice(0, pendingIndex) : messagesWithWorldbooks)
+            .some(message => message.role === 'user' || message.role === 'assistant');
         return {
             messages: [
                 { role: 'system', content: systemPrompt },
-                ...messagesWithWorldbooks.map(message => message === pendingMessage
-                    ? { ...message, content: Array.isArray(pendingContent)?[...pendingContent,{type:'text',text:note}]:`${pendingContent}\n\n${note}` }
-                    : message),
+                ...messagesWithWorldbooks.flatMap(message => message === pendingMessage
+                    ? [
+                        ...(hasHistoryPrefix ? [{ role: 'system', content: liveContext }] : []),
+                        { ...message, content: Array.isArray(pendingContent)
+                            ? [...pendingContent, {type:'text',text:note}]
+                            : `${pendingContent}\n\n${note}` },
+                    ]
+                    : [message]),
+                // 空历史的实时块必须位于 user 之后，防止原生接口合并进固定 system。
+                ...(!hasHistoryPrefix ? [{ role: 'system', content: liveContext }] : []),
                 { role: 'system', content: buildDateInteractionPrinciples(char.name, userProfile?.name || '对方') },
             ],
         };
