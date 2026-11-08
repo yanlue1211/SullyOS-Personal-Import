@@ -74,7 +74,11 @@ import MemoryContextSelfCheck from '../components/chat/MemoryContextSelfCheck';
 import ProactiveSettingsModal from '../components/chat/ProactiveSettingsModal';
 import ActiveMsg2SettingsModal from '../components/chat/ActiveMsg2SettingsModal';
 import AwayMessageSettingsModal from '../components/chat/AwayMessageSettingsModal';
-import { cancelCloudAwayTasks, isAwayCloudRoute, syncCloudAwayTask } from '../utils/awayMessage';
+import {
+    cancelCloudAwayTasks, isAwayCloudRoute, syncCloudAwayTask, pauseCloudAwaySyncForSettings,
+    isLatestCloudAwaySettings, resumeCloudAwaySyncForSettings, waitForCloudAwaySync,
+    enqueueCloudAwaySettingsUpdate,
+} from '../utils/awayMessage';
 import { getLastRealUserMessageAt } from '../utils/amsg2ExpireGuard';
 import { ActiveMsgClient } from '../utils/activeMsgClient';
 import ThinkingChainSettingsModal from '../components/chat/ThinkingChainSettingsModal';
@@ -4693,41 +4697,52 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
                 char={char}
                 onSave={config => {
                     const old = char.awayMessage;
+                    // 保存当下就隔离旧请求：不能等 put limits 的网络请求返回，
+                    // 否则旧异步建链可能在关闭后补出一条幽灵任务。
+                    const settingsEpoch = pauseCloudAwaySyncForSettings(char.id);
                     updateCharacter(char.id, { awayMessage: config });
-                    // 两种任务的启停互不代管。尤其关掉离开后消息时，新配置的云端路由
-                    // 已经是 false，但旧链仍可能在跑：要先写 awayEnabled=false，
-                    // 然后取消旧任务。不能拿「新路由是关的」跳过云端同步。
-                    void (async () => {
+                    // 同一角色的多次设置保存按顺序处理，最终以最新一次为准；
+                    // 预约消息和即时聊天不受这道空闲任务锁影响。
+                    void enqueueCloudAwaySettingsUpdate(char.id, async () => {
+                        if (!isLatestCloudAwaySettings(char.id, settingsEpoch)) return;
+                        await waitForCloudAwaySync(char.id);
+                        if (!isLatestCloudAwaySettings(char.id, settingsEpoch)) return;
                         const updatedChar = { ...char, awayMessage: config };
                         const [wasCloud, willCloud] = await Promise.all([
                             isAwayCloudRoute(char), isAwayCloudRoute(updatedChar),
                         ]);
-                        if (!wasCloud && !willCloud) return;
+                        if (!isLatestCloudAwaySettings(char.id, settingsEpoch) || (!wasCloud && !willCloud)) return;
                         if (!config.enabled) {
                             try {
+                                // 先在云端关闸，再取消旧任务；即使上传失败也尽力取消。
                                 await ActiveMsgClient.putCharLimits(updatedChar);
                             } finally {
-                                // 即使网络抖动导致限制行没写成，也要尽力取消旧链。
                                 if (old?.enabled) await cancelCloudAwayTasks(char, updateCharacter);
                             }
                             return;
                         }
-                        // 改间隔先上传新限制，再取消旧节拍并补建，防止网络失败时
-                        // 把原本还能正常运行的提醒先删掉。
+                        // 改间隔先上传新限制，再取消旧节拍并补建，避免失败时提前删掉旧任务。
                         await ActiveMsgClient.putCharLimits(updatedChar);
+                        if (!isLatestCloudAwaySettings(char.id, settingsEpoch)) return;
                         if (old?.enabled && old.delayMinutes !== config.delayMinutes) {
                             await cancelCloudAwayTasks(char, updateCharacter);
                         }
+                        if (!isLatestCloudAwaySettings(char.id, settingsEpoch)) return;
                         const recent = await DB.getRecentMessagesByCharId(char.id, 50, true);
                         const lastUserAt = getLastRealUserMessageAt(recent);
+                        if (!isLatestCloudAwaySettings(char.id, settingsEpoch)) return;
+                        // 仅补缺 / 校验已有未来链；成功解除设置锁后才开始新建。
+                        resumeCloudAwaySyncForSettings(char.id, settingsEpoch);
                         if (lastUserAt == null) return;
-                        // 仅补缺 / 校验已有未来链，不调用模型、不追补旧空闲时段。
                         await syncCloudAwayTask({
                             char: updatedChar, lastUserAt, userProfile, groups, realtimeConfig, apiConfig, updateCharacter,
                         }, { seedOnly: true });
-                    })().catch(err => {
+                    }).catch(err => {
+                        if (!isLatestCloudAwaySettings(char.id, settingsEpoch)) return;
                         console.warn('[AwayMessage] 云端禁发配置或首条空闲任务同步失败', err);
                         addToast('离开后消息已保存在本机，但云端同步失败；下次打开会自动重查', 'error');
+                    }).finally(() => {
+                        resumeCloudAwaySyncForSettings(char.id, settingsEpoch);
                     });
                 }}
             />}
