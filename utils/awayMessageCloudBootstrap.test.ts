@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DB } from './db';
 import { ActiveMsgClient } from './activeMsgClient';
 import { ActiveMsgStore } from './activeMsgStore';
-import { runLocalAwayMessages, syncCloudAwayTask } from './awayMessage';
+import { isAwayCloudRoute, runLocalAwayMessages, syncCloudAwayTask } from './awayMessage';
 import type { CharacterProfile } from '../types';
 
 vi.mock('./activeMsgClient', () => ({ ActiveMsgClient: {
@@ -46,6 +46,21 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe('cloud away first-task creation and passive repair', () => {
+  it('离开后云端模式独立于预约开关：没有 2.0 config 也建立空闲任务，且不偷偷打开预约', async () => {
+    const char = makeChar();
+    delete (char as any).activeMsg2Config;
+    expect(await isAwayCloudRoute(char)).toBe(true);
+    const deps = createDeps(char);
+    expect(await syncCloudAwayTask(deps, { seedOnly: true })).toBe(true);
+    expect(ActiveMsgClient.scheduleCharacterTask).toHaveBeenCalledWith(expect.objectContaining({
+      config: expect.objectContaining({ enabled: false }),
+      task: expect.objectContaining({ away: { delayMinutes: 240 } }),
+    }));
+    const updater = deps.updateCharacter.mock.calls[0][1];
+    const update = updater({ id: char.id } as any);
+    expect(update.activeMsg2Config.enabled).toBe(false);
+    expect(update.activeMsg2Config.tasks[0].away).toBe(true);
+  });
   it('saving or opening without a pending loop seeds only a future opportunity, never an immediate paid catch-up', async () => {
     const deps = createDeps(makeChar());
     const result = await syncCloudAwayTask(deps, { seedOnly: true });

@@ -14424,7 +14424,7 @@ function buildScheduledPush(message, build, extraMeta, bannerBody) {
 }
 
 // utils/amsgBundleVersion.ts
-var AMSG_BUNDLE_VERSION = "2026-11-08.3";
+var AMSG_BUNDLE_VERSION = "2026-11-08.4";
 
 // worker/amsg/src/reproduction.ts
 async function writeDiagnosticStage(writeState, runId, event, fields = {}) {
@@ -20056,7 +20056,7 @@ var amsgHooks = {
       });
     }
     if (!instant && away) {
-      if (!pack.selfScheduleEnabled || limitsRecord?.selfScheduleEnabled === false || limitsRecord?.awayEnabled === false) {
+      if (limitsRecord?.awayEnabled === false) {
         console.log("[amsg:away-skip]", { taskId: ctx.task.id, reason: "away-disabled" });
         return { skip: true };
       }
@@ -20160,7 +20160,7 @@ var amsgHooks = {
     const clientTaskId = typeof taskMeta.amsgClientTaskId === "string" ? taskMeta.amsgClientTaskId : "";
     const nowMs = ctx.now.getTime();
     const scheduleOff = !pack.selfScheduleEnabled || limitsRecord?.selfScheduleEnabled === false;
-    if (!instant && (scheduleOff || selfScheduled && recurring && !limits.allowSelfRecurring)) {
+    if (!instant && (!away && scheduleOff || selfScheduled && recurring && !limits.allowSelfRecurring)) {
       console.log("[amsg:schedule-off-skip]", {
         taskId: ctx.task.id,
         charId,

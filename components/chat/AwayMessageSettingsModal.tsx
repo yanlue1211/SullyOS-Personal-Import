@@ -5,6 +5,7 @@ import { AWAY_DELAY_OPTIONS, resolveAwayDelayMinutes } from '../../utils/awayMes
 import { isAwayCloudRoute, isAwayCloudWorkerCompatible } from '../../utils/awayMessage';
 import { ActiveMsgClient } from '../../utils/activeMsgClient';
 import { dayKeyInZone, type AmsgDailySends } from '../../utils/amsgLimits';
+import type { RemoteTaskProjection } from '../../utils/amsg2Tasks';
 
 interface AwayMessageSettingsModalProps {
     isOpen: boolean;
@@ -24,6 +25,7 @@ const AwayMessageSettingsModal: React.FC<AwayMessageSettingsModalProps> = ({ isO
     const [cloud, setCloud] = useState<boolean | null>(null);
     const [workerCompatible, setWorkerCompatible] = useState<boolean | null>(null);
     const [nextAwayAt, setNextAwayAt] = useState<string | null>(null);
+    const [awayTasks, setAwayTasks] = useState<RemoteTaskProjection[]>([]);
     const [awayDailySends, setAwayDailySends] = useState<AmsgDailySends | null>(null);
 
     useEffect(() => {
@@ -37,6 +39,7 @@ const AwayMessageSettingsModal: React.FC<AwayMessageSettingsModalProps> = ({ isO
         setCloud(null);
         setWorkerCompatible(null);
         setNextAwayAt(null);
+        setAwayTasks([]);
         setAwayDailySends(null);
         void isAwayCloudRoute(char).then(async v => {
             if (cancelled) return;
@@ -51,10 +54,9 @@ const AwayMessageSettingsModal: React.FC<AwayMessageSettingsModalProps> = ({ isO
                     ]);
                     if (cancelled) return;
                     if (remote.status === 'fulfilled') {
-                        const next = remote.value
-                            .filter(task => task.status === 'pending' && task.clientTaskId?.startsWith('away-'))
-                            .map(task => task.nextSendAt).filter((at): at is string => Boolean(at))
-                            .sort()[0];
+                        const ownTasks = remote.value.filter(task => task.status === 'pending' && task.clientTaskId?.startsWith('away-'));
+                        setAwayTasks(ownTasks);
+                        const next = ownTasks.map(task => task.nextSendAt).filter((at): at is string => Boolean(at)).sort()[0];
                         setNextAwayAt(next ?? null);
                     }
                     if (status.status === 'fulfilled') setAwayDailySends(status.value.awayDailySends);
@@ -62,7 +64,7 @@ const AwayMessageSettingsModal: React.FC<AwayMessageSettingsModalProps> = ({ isO
             }
         });
         return () => { cancelled = true; };
-    }, [isOpen, char]);
+    }, [isOpen, char.id]);
 
     const handleSave = () => {
         onSave({ enabled, delayMinutes: delay, quietHours: { enabled: quietEnabled, startTime: quietStart, endTime: quietEnd } });
@@ -145,6 +147,16 @@ const AwayMessageSettingsModal: React.FC<AwayMessageSettingsModalProps> = ({ isO
                                 <p>下一次离开提醒：{nextAwayAt
                                     ? new Date(nextAwayAt).toLocaleString()
                                     : '暂无云端待触发任务（保存后会补建，或下次进入时自动检查）'}</p>
+                                <div className="mt-3 rounded-xl border border-violet-100 bg-violet-50/40 p-3 space-y-2">
+                                    <div className="font-bold text-violet-700">云端离开后排程（{awayTasks.length}）</div>
+                                    {awayTasks.length === 0 ? <div className="text-slate-500">暂无待执行的离开后任务，保存设置后会检查是否需要补建。</div> : awayTasks.map(task => (
+                                        <div key={task.uuid} className="rounded-lg bg-white p-2.5 text-slate-600">
+                                            <div>下一次联系机会：{task.nextSendAt ? new Date(task.nextSendAt).toLocaleString() : '等待云端同步'}</div>
+                                            <div className="text-[10px] text-slate-400 mt-1">任务 #{task.uuid.slice(0, 8)} · 自动离开提醒</div>
+                                        </div>
+                                    ))}
+                                    {awayTasks.length > 1 && <div className="text-amber-600">检测到多条离开后任务，自动同步时会尝试整理重复排程。</div>}
+                                </div>
                                 {awayDailySends?.day === dayKeyInZone(Date.now(), Intl.DateTimeFormat().resolvedOptions().timeZone) && (
                                     <p className="mt-1">今天离开后成功联系 {awayDailySends.sends} 次
                                         {awayDailySends.llmCalls != null ? ` · 后台 AI 调用 ${awayDailySends.llmCalls} 次` : ''}
@@ -157,7 +169,7 @@ const AwayMessageSettingsModal: React.FC<AwayMessageSettingsModalProps> = ({ isO
                                 ? workerCompatible === null ? '正在核对云端 Worker 版本…'
                                     : workerCompatible
                                         ? `${char.name} 已使用独立空闲提醒：与 TA 的自主预约分开计数，睡眠禁发和见面/通话保护只拦自动空闲机会。`
-                                        : '云端 Worker 版本未匹配或无法验证：已保护旧任务，暂停创建新的循环空闲提醒。先检查主动消息2.0的 Worker 更新状态。'
+                                        : '云端 Worker 版本未匹配或无法验证：已保护旧任务，暂停创建新的循环空闲提醒。先检查主动消息 Worker 更新状态。'
                                 : `没有云端2.0时，打开 SullyOS 只检查最新一个有效时间点，不会一次补发多条；通过检查才会调用API。`}
                         </p>
                     </>

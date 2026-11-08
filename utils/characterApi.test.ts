@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { describeDialogueApi, pickDialogueApi, resolveDialogueApi, dialogueMaxTokens } from './characterApi';
+import { describeDialogueApi, pickDialogueApi, resolveDialogueApi, resolveScheduledMessageApi, dialogueMaxTokens } from './characterApi';
 import { buildCharChatCredRow, buildCharEmotionCredRow, buildCharInstantCredRow } from './amsgLlmCredentials';
 import { stripSensitiveCardFields } from './characterCard';
 
@@ -10,6 +10,12 @@ const app = { baseUrl: 'https://app.test/v1', apiKey: 'app-key', model: 'app' };
 const char = { id: 'a', dialogueApi: personal };
 
 describe('dialogue routing', () => {
+  it('主动 1.0/预约/离开后共用独立 API，未配置完整严格拒绝昂贵回退', () => {
+    const shared = { enabled: false, useSecondaryApi: true, secondaryApi: { baseUrl: 'https://cheap.test/v1', apiKey: 'cheap-key', model: 'cheap-model' } };
+    expect(resolveScheduledMessageApi(globalApi, char, shared)).toMatchObject(shared.secondaryApi);
+    expect(() => resolveScheduledMessageApi(globalApi, char, { ...shared, secondaryApi: { ...shared.secondaryApi, model: '' } })).toThrow(/阻止回退/);
+    expect(resolveScheduledMessageApi(globalApi, char, { enabled: false })).toMatchObject(personal);
+  });
   it('validates output limits and inherits the global setting unless explicitly overridden', () => {
     for (const maxTokens of [0, -1, 1.5, NaN, Infinity, '2000']) expect(dialogueMaxTokens({ maxTokens } as any)).toBe(8000);
     expect(dialogueMaxTokens(resolveDialogueApi({ ...globalApi, maxTokens: 2048 }, char))).toBe(2048);

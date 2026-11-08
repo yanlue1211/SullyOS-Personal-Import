@@ -640,7 +640,7 @@ describe('ActiveMsgClient.cancelAllTasksForChar', () => {
   afterEach(() => { vi.restoreAllMocks(); });
 
   /** 远端投影的最小形状（只有 uuid 与子类型参与取消判定）。 */
-  const remoteRows = (rows: Array<{ uuid: string; messageSubtype?: string }>) =>
+  const remoteRows = (rows: Array<{ uuid: string; messageSubtype?: string; clientTaskId?: string }>) =>
     vi.spyOn(ActiveMsgClient, 'listRemoteTasksForChar')
       .mockResolvedValue(rows.map((r) => ({ ...r, lastError: null })) as any);
 
@@ -653,6 +653,19 @@ describe('ActiveMsgClient.cancelAllTasksForChar', () => {
     expect(targets).toEqual(['remote-1', 'remote-2']);
     expect(failed.size).toBe(0);
     expect(cancel.mock.calls.map((c) => c[0])).toEqual(['remote-1', 'remote-2']);
+  });
+
+  it('关闭预约时只撤销预约任务，保留离开后排程；完整清理仍能取消两种任务', async () => {
+    remoteRows([{ uuid: 'appointment-1', clientTaskId: 'scheduled-1' },
+      { uuid: 'away-1', clientTaskId: 'away-remote-1' },
+      { uuid: 'instant-1', messageSubtype: 'instant-chat' }]);
+    const cancel = vi.spyOn(ActiveMsgClient, 'cancelTask').mockResolvedValue({ uuid: '', alreadyGone: false });
+    const appointmentOnly = await ActiveMsgClient.cancelAllTasksForChar('char-1', [], 'appointments');
+    expect(appointmentOnly.targets).toEqual(['appointment-1']);
+    expect(cancel.mock.calls.map(c => c[0])).toEqual(['appointment-1']);
+    cancel.mockClear();
+    const all = await ActiveMsgClient.cancelAllTasksForChar('char-1', []);
+    expect(all.targets).toEqual(['appointment-1', 'away-1']);
   });
 
   it('远端读不到（老 worker / 断网）→ 退回本地清单，半份证据也比不取消强', async () => {
