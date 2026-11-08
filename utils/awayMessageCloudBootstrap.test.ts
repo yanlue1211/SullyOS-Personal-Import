@@ -210,7 +210,8 @@ describe('cloud away first-task creation and passive repair', () => {
     finishSchedule({ uuid: 'late-away', clientTaskId: 'away-late-away', firstSendAt: new Date(NOW + 4 * HOUR).toISOString() });
     expect(await start).toBe(false);
     await cancelling;
-    expect(ActiveMsgClient.cancelTask).toHaveBeenCalledExactlyOnceWith('late-away');
+    expect(ActiveMsgClient.cancelTask).toHaveBeenCalledOnce();
+    expect(ActiveMsgClient.cancelTask).toHaveBeenCalledWith('late-away');
     // 已经关掉的角色不能被旧的成功回执写回一条本地幽灵任务。
     expect(deps.updateCharacter).toHaveBeenCalledOnce();
     const filtered = deps.updateCharacter.mock.calls[0][1];
