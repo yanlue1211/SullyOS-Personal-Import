@@ -4,6 +4,7 @@ import {
   parseSelfLog,
 } from './amsgFirePack';
 import { AMSG_DAILY_SENDS_KEY, AMSG_AWAY_DAILY_SENDS_KEY, bumpDailySends } from './amsgLimits';
+import { keepUncancelledTasks } from './amsg2Tasks';
 
 const userAt = Date.parse('2026-11-08T08:00:00Z');
 const entry = (id: string, away: boolean) => ({
@@ -12,6 +13,14 @@ const entry = (id: string, away: boolean) => ({
 });
 
 describe('离开后消息与自主预约的额度真正隔离', () => {
+  it('关闭预约时离开后任务保持原样，不会被误写为取消失败或新冒出的幽灵预约', () => {
+    const away = { taskUuid: 'away-uuid', mode: 'auto', firstSendTime: new Date(userAt).toISOString(),
+      recurrenceType: 'none', status: 'scheduled', source: 'user', createdAt: userAt, away: true } as any;
+    const appointment = { ...away, taskUuid: 'appointment-uuid', away: undefined };
+    const result = keepUncancelledTasks([away, appointment], new Set(['appointment-uuid']), new Set(),
+      { failed: '远端失败', appeared: '关闭期间出现' });
+    expect(result).toEqual([away]);
+  });
   it('自动离开联系 3 次不会吃掉自主预约未回复上限', () => {
     let log = createSelfLog(userAt, userAt);
     for (let i = 0; i < 3; i++) {

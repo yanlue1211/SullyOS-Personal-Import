@@ -4694,17 +4694,30 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
                 onSave={config => {
                     const old = char.awayMessage;
                     updateCharacter(char.id, { awayMessage: config });
-                    // 顺序很重要：先取消旧间隔的链，再写新限制，最后补建第一条。
-                    // 过去只更新了 limits，直到下一轮聊天才会创建 away 任务，
-                    // 用户保存后直接离开的话，Worker 从来没有机会触发。
+                    // 两种任务的启停互不代管。尤其关掉离开后消息时，新配置的云端路由
+                    // 已经是 false，但旧链仍可能在跑：要先写 awayEnabled=false，
+                    // 然后取消旧任务。不能拿「新路由是关的」跳过云端同步。
                     void (async () => {
-                        if (old?.enabled && (!config.enabled || old.delayMinutes !== config.delayMinutes)) {
+                        const updatedChar = { ...char, awayMessage: config };
+                        const [wasCloud, willCloud] = await Promise.all([
+                            isAwayCloudRoute(char), isAwayCloudRoute(updatedChar),
+                        ]);
+                        if (!wasCloud && !willCloud) return;
+                        if (!config.enabled) {
+                            try {
+                                await ActiveMsgClient.putCharLimits(updatedChar);
+                            } finally {
+                                // 即使网络抖动导致限制行没写成，也要尽力取消旧链。
+                                if (old?.enabled) await cancelCloudAwayTasks(char, updateCharacter);
+                            }
+                            return;
+                        }
+                        // 改间隔先上传新限制，再取消旧节拍并补建，防止网络失败时
+                        // 把原本还能正常运行的提醒先删掉。
+                        await ActiveMsgClient.putCharLimits(updatedChar);
+                        if (old?.enabled && old.delayMinutes !== config.delayMinutes) {
                             await cancelCloudAwayTasks(char, updateCharacter);
                         }
-                        const updatedChar = { ...char, awayMessage: config };
-                        if (!await isAwayCloudRoute(updatedChar)) return;
-                        await ActiveMsgClient.putCharLimits(updatedChar);
-                        if (!config.enabled) return;
                         const recent = await DB.getRecentMessagesByCharId(char.id, 50, true);
                         const lastUserAt = getLastRealUserMessageAt(recent);
                         if (lastUserAt == null) return;
