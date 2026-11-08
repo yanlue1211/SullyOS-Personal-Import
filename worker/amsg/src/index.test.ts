@@ -744,15 +744,20 @@ describe('离开后云端机会不依赖预约消息开关', () => {
   });
 
   it('预约关闭且离开后也关闭：不调用模型、不续排', async () => {
-    const { ctx } = awayCtx({ awayEnabled: false });
+    const { ctx, writeState } = awayCtx({ awayEnabled: false });
     await expect(amsgHooks.onBeforeFire(ctx)).resolves.toEqual({ skip: true });
     expect(ctx.scheduleTask).not.toHaveBeenCalled();
+    const awayWrites = writeState.mock.calls.flatMap(([, records]) => records.filter((entry: { key: string }) => entry.key === AMSG_AWAY_LAST_SKIP_KEY));
+    expect(awayWrites).toHaveLength(1);
+    expect(JSON.parse(String(awayWrites[0].value)).reason).toBe('away-disabled');
   });
 
   it.each(['date', 'call'] as const)('预约关闭时离开后仍尊重 %s 锁：只续排、不生成', async (sceneLock) => {
-    const { ctx } = awayCtx({ sceneLock });
+    const { ctx, writeState } = awayCtx({ sceneLock });
     await expect(amsgHooks.onBeforeFire(ctx)).resolves.toEqual({ skip: true });
     expect(ctx.scheduleTask).toHaveBeenCalledOnce();
+    const awayWrites = writeState.mock.calls.flatMap(([, records]) => records.filter((entry: { key: string }) => entry.key === AMSG_AWAY_LAST_SKIP_KEY));
+    expect(JSON.parse(String(awayWrites[0].value)).reason).toBe(sceneLock === 'date' ? 'away-date-lock' : 'away-call-lock');
   });
 });
 

@@ -2177,8 +2177,20 @@ export const amsgHooks = {
     // 跳过路径必须发生在模型生成之前，不能因为拦截而发生模型请求/重试风暴。
     // 用户自己预约的任务不带 away 标记，完全不经过这个循环。
     if (!instant && away) {
+      // 每次实际进入 Worker 后的系统跳过才留痕；没有进入这里绝不能假称角色决定静默。
+      // 单次写入只含时刻、原因和任务编号，不记录原文、思考或 API 凭据。
+      const recordAwaySkip = async (reason: AmsgLastSkip['reason']): Promise<void> => {
+        await writeLastSkip(ctx.writeState, charId, {
+          v: 1,
+          taskUuid: typeof ctx.task.uuid === 'string' ? ctx.task.uuid : null,
+          occurrenceMs,
+          reason,
+          skippedAt: ctx.now.getTime(),
+        }, true);
+      };
       if (limitsRecord?.awayEnabled === false) {
         console.log('[amsg:away-skip]', { taskId: ctx.task.id, reason: 'away-disabled' });
+        await recordAwaySkip('away-disabled');
         return { skip: true } as const;
       }
       const configuredDelay = Number(limitsRecord?.awayDelayMinutes);
@@ -2236,12 +2248,14 @@ export const amsgHooks = {
       }
       if (isStaleAwayTick(occurrenceMs, ctx.now.getTime())) {
         console.log('[amsg:away-skip]', { taskId: ctx.task.id, reason: 'missed-slot' });
+        await recordAwaySkip('away-missed-slot');
         return { skip: true } as const;
       }
       const liveAwayLock = limitsRecord?.awaySceneLock !== undefined
         ? limitsRecord.awaySceneLock : pack.awaySceneLock;
       if (liveAwayLock === 'date' || liveAwayLock === 'call') {
         console.log('[amsg:away-skip]', { taskId: ctx.task.id, reason: 'interaction-still-open', mode: liveAwayLock });
+        await recordAwaySkip(liveAwayLock === 'date' ? 'away-date-lock' : 'away-call-lock');
         return { skip: true } as const;
       }
       if (shouldSkipAwayForQuietHours({
@@ -2251,6 +2265,7 @@ export const amsgHooks = {
         userTimeZone: pack.userTzId,
       })) {
         console.log('[amsg:away-skip]', { taskId: ctx.task.id, reason: 'user-quiet-hours' });
+        await recordAwaySkip('away-quiet-hours');
         return { skip: true } as const;
       }
     }

@@ -209,6 +209,11 @@ export const LAST_SKIP_REASONS = [
   'min-gap',
   'recurring-unanswered',
   'daily-limit',
+  'away-disabled',
+  'away-missed-slot',
+  'away-date-lock',
+  'away-call-lock',
+  'away-quiet-hours',
 ] as const;
 
 export interface AmsgLastSkip {
@@ -293,6 +298,16 @@ export const describeLastSkip = (skip: AmsgLastSkip, formatTime: (ms: number) =>
       return `${when} 那条重复消息这次没发——你已经连续几次没回它了，先停一停；你回一句话，它就照常恢复。`;
     case 'daily-limit':
       return `${when} 那次主动消息没发——今天 ta 主动找你的次数已经到了你设的每日上限，跳过的这次不会补发，明天重新计数。`;
+    case 'away-disabled':
+      return `${when} 离开后消息已关闭，旧任务被系统拦下，没有请求 AI。`;
+    case 'away-missed-slot':
+      return `${when} 离开后消息本次节拍已错过，系统跳过且不补发，没有请求 AI。`;
+    case 'away-date-lock':
+      return `${when} 仍处于线下见面，离开后消息自动跳过；下一次机会照常，没有请求 AI。`;
+    case 'away-call-lock':
+      return `${when} 仍处于语音或视频通话，离开后消息自动跳过；下一次机会照常，没有请求 AI。`;
+    case 'away-quiet-hours':
+      return `${when} 位于设置的睡眠禁发时段，离开后消息跳过且不补发，没有请求 AI。`;
   }
 };
 

@@ -14425,7 +14425,7 @@ function buildScheduledPush(message, build, extraMeta, bannerBody) {
 }
 
 // utils/amsgBundleVersion.ts
-var AMSG_BUNDLE_VERSION = "2026-11-08.6";
+var AMSG_BUNDLE_VERSION = "2026-11-08.7";
 
 // worker/amsg/src/reproduction.ts
 async function writeDiagnosticStage(writeState, runId, event, fields = {}) {
@@ -20057,8 +20057,18 @@ var amsgHooks = {
       });
     }
     if (!instant && away) {
+      const recordAwaySkip = async (reason) => {
+        await writeLastSkip(ctx.writeState, charId, {
+          v: 1,
+          taskUuid: typeof ctx.task.uuid === "string" ? ctx.task.uuid : null,
+          occurrenceMs,
+          reason,
+          skippedAt: ctx.now.getTime()
+        }, true);
+      };
       if (limitsRecord?.awayEnabled === false) {
         console.log("[amsg:away-skip]", { taskId: ctx.task.id, reason: "away-disabled" });
+        await recordAwaySkip("away-disabled");
         return { skip: true };
       }
       const configuredDelay = Number(limitsRecord?.awayDelayMinutes);
@@ -20106,11 +20116,13 @@ var amsgHooks = {
       }
       if (isStaleAwayTick(occurrenceMs, ctx.now.getTime())) {
         console.log("[amsg:away-skip]", { taskId: ctx.task.id, reason: "missed-slot" });
+        await recordAwaySkip("away-missed-slot");
         return { skip: true };
       }
       const liveAwayLock = limitsRecord?.awaySceneLock !== void 0 ? limitsRecord.awaySceneLock : pack.awaySceneLock;
       if (liveAwayLock === "date" || liveAwayLock === "call") {
         console.log("[amsg:away-skip]", { taskId: ctx.task.id, reason: "interaction-still-open", mode: liveAwayLock });
+        await recordAwaySkip(liveAwayLock === "date" ? "away-date-lock" : "away-call-lock");
         return { skip: true };
       }
       if (shouldSkipAwayForQuietHours({
@@ -20120,6 +20132,7 @@ var amsgHooks = {
         userTimeZone: pack.userTzId
       })) {
         console.log("[amsg:away-skip]", { taskId: ctx.task.id, reason: "user-quiet-hours" });
+        await recordAwaySkip("away-quiet-hours");
         return { skip: true };
       }
     }
