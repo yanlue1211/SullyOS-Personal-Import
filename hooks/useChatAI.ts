@@ -1433,6 +1433,24 @@ export const useChatAI = ({
                 },
             } : undefined;
 
+            // 主动消息 2.0 前台自排的分流诊断：只有布尔值和工具数量，绝不记 API Key、
+            // 用户聊天内容或排程参数。没有调用工具时也记录，便于区分「未注入」与
+            // 「模型看见工具但没有调用」；不额外触发任何 API 或 Worker 请求。
+            appendInstantTraceEntry({
+                ts: new Date().toISOString(),
+                event: 'amsg2-local-capability',
+                charId: char.id,
+                charEnabled: isAmsg2EnabledForChar(char),
+                globalReady: amsg2ToolsInjected || !isAmsg2EnabledForChar(char) ? amsg2ToolsInjected : false,
+                scheduleDeclared: Array.isArray(baseReqBody.tools) && baseReqBody.tools.some(
+                    (tool: any) => tool?.function?.name === 'schedule_active_message'),
+                mcpChatActive: payload.flags.mcpChatActive,
+                mcpNativePreferred: getMcpUseNativeTools(),
+                toolChoice: baseReqBody.tool_choice ?? 'none',
+                totalTools: Array.isArray(baseReqBody.tools) ? baseReqBody.tools.length : 0,
+                streaming: !!userStream,
+            });
+
             // 主请求即将发出 → 立即并行发射情绪评估（错峰延迟已按用户要求取消，见定义处注释）。
             fireLocalEmotionEval?.();
 
@@ -1504,6 +1522,23 @@ export const useChatAI = ({
                 // 又退回原 messages，会让模型忘掉工具签名和「每步只输出一行」的约定。
                 baseReqBody.messages = fallbackBody.messages;
                 }
+            }
+            if (isAmsg2EnabledForChar(char)) {
+                const firstMessage = data?.choices?.[0]?.message;
+                appendInstantTraceEntry({
+                    ts: new Date().toISOString(),
+                    event: 'amsg2-local-first-response',
+                    charId: char.id,
+                    scheduleDeclared: Array.isArray(baseReqBody.tools) && baseReqBody.tools.some(
+                        (tool: any) => tool?.function?.name === 'schedule_active_message'),
+                    nativeCalls: Array.isArray(firstMessage?.tool_calls) ? firstMessage.tool_calls.length : 0,
+                    scheduleCalled: Array.isArray(firstMessage?.tool_calls) && firstMessage.tool_calls.some(
+                        (tool: any) => tool?.function?.name === 'schedule_active_message'),
+                    legacyFunctionCall: !!firstMessage?.function_call?.name,
+                    finishReason: typeof data?.choices?.[0]?.finish_reason === 'string'
+                        ? data.choices[0].finish_reason.slice(0, 30) : null,
+                    mcpCompatibilityMessages: payload.flags.mcpChatActive && !getMcpUseNativeTools(),
+                });
             }
             console.log(`⏱ [API call] ${Math.round(performance.now() - apiT0)}ms`);
             updateTokenUsage(data, historyMsgCount, 'initial');
