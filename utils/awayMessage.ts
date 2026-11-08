@@ -7,6 +7,7 @@ import { DB } from './db';
 import { ActiveMsgClient } from './activeMsgClient';
 import { applyScheduledTask, isAmsg2EnabledForChar } from './amsg2Tasks';
 import { isAmsg2GlobalReady } from './amsg2ToolBridge';
+import { getLastRealUserMessageAt } from './amsg2ExpireGuard';
 import { ActiveMsgStore } from './activeMsgStore';
 import {
   decideAwayTaskAction,
@@ -78,7 +79,10 @@ const awaySendAtMs = (task: ActiveMsg2TaskRecord): number | null => {
 };
 
 /**
- * 每轮聊天开始时调用（不用 await）：把云端那条离开后消息排到「对方最后一次开口 + 等待时长」。
+ * 每轮聊天开始时调用；也供「刚启用设置」和「开机修复失联任务」调用。
+ * seedOnly=true 不抢已有的有效未来任务；只有缺任务时才从现在重新等待完整间隔，
+ * 不在打开网页时补烧离开了几小时的旧节拍。
+ * 把云端那条离开后消息排到「对方最后一次开口 + 等待时长」。
  * 已有任务排得够晚就什么都不发；排早了原地改期；远端已经没有（发过了 / 被取消）就新建。
  */
 export const syncCloudAwayTask = async (deps: {
@@ -89,19 +93,20 @@ export const syncCloudAwayTask = async (deps: {
   realtimeConfig: RealtimeConfig;
   apiConfig: APIConfig;
   updateCharacter: UpdateCharacter;
-}): Promise<void> => {
+}, options: { seedOnly?: boolean } = {}): Promise<boolean> => {
   const { char } = deps;
-  if (!char.awayMessage?.enabled || cloudInFlight.has(char.id)) return;
-  if ((cloudCooldownUntil.get(char.id) ?? 0) > Date.now()) return;
-  if (!await isAwayCloudRoute(char) || !char.activeMsg2Config) return;
+  if (!char.awayMessage?.enabled || cloudInFlight.has(char.id)) return false;
+  if ((cloudCooldownUntil.get(char.id) ?? 0) > Date.now()) return false;
+  if (!await isAwayCloudRoute(char) || !char.activeMsg2Config) return false;
   // 旧 Worker 不认识 B 模式标记，若提前排程会绕开禁发和下一次续排，必须零副作用停在这里。
-  if (!await isAwayCloudWorkerCompatible()) return;
+  if (!await isAwayCloudWorkerCompatible()) return false;
 
   cloudInFlight.add(char.id);
   try {
     const delayMinutes = resolveAwayDelayMinutes(char);
     const now = Date.now();
-    const targetMs = Math.max(deps.lastUserAt + delayMinutes * 60_000, now + 60_000);
+    const delayMs = delayMinutes * 60_000;
+    const targetMs = Math.max(deps.lastUserAt + delayMs, now + (options.seedOnly ? delayMs : 60_000));
     const sendAt = new Date(targetMs).toISOString();
     // B 模式下 Worker 每次 fire 会创建下一节拍，客户端本地列表不一定认领过它。
     // 新用户开口时必须先和远端对账：否则老链在云端继续，我们又凭旧的本地清单
@@ -121,7 +126,12 @@ export const syncCloudAwayTask = async (deps: {
       ? { taskUuid: keep.uuid, nextSendAt: keep.nextSendAt || sendAt, firstSendTime: keep.nextSendAt || sendAt,
           clientTaskId: keep.clientTaskId || `away-${keep.uuid}`, mode: 'auto' as const, away: true }
       : undefined;
-    const action = decideAwayTaskAction(record ? awaySendAtMs(record as ActiveMsg2TaskRecord) : null, targetMs, now);
+    const existingAt = record ? awaySendAtMs(record as ActiveMsg2TaskRecord) : null;
+    // 前台启动只是补链：不能把已经正常续排的下一节拍改成「打开页面 + 四小时」。
+    // 但若用户发言后旧任务排得过早，仍须正常改期，避免在用户刚说话后就催下一条。
+    const validExisting = options.seedOnly && existingAt != null && existingAt > now
+      && existingAt >= deps.lastUserAt + delayMs - 10 * 60_000;
+    const action = validExisting ? 'keep' : decideAwayTaskAction(existingAt, targetMs, now);
     if (action === 'keep') {
       // 面板里也要看见 Worker 在离线时生成的下一节拍，不要永远显示旧的 UUID。
       if (record && !localAway.some(old => old.taskUuid === record.taskUuid)) {
@@ -134,7 +144,7 @@ export const syncCloudAwayTask = async (deps: {
           },
         } : {});
       }
-      return;
+      return true;
     }
 
     if (action === 'renew' && record) {
@@ -149,7 +159,7 @@ export const syncCloudAwayTask = async (deps: {
             } as ActiveMsg2TaskRecord, {}, now),
           },
         } : {});
-        return;
+        return true;
       }
       if (failed.length) throw new Error('离开后消息改期失败');
       // 到点已消费、远端任务已经不在：下面只补建一条新链。
@@ -183,9 +193,11 @@ export const syncCloudAwayTask = async (deps: {
         tasks: applyScheduledTask((prev.activeMsg2Config.tasks ?? []).filter(t => !t.away), created, {}, Date.now()),
       },
     } : {});
+    return true;
   } catch (error) {
     console.warn('[AwayMessage] 云端任务同步失败', error);
     cloudCooldownUntil.set(char.id, Date.now() + FAILURE_COOLDOWN_MS);
+    return false;
   } finally {
     cloudInFlight.delete(char.id);
   }
@@ -225,6 +237,7 @@ export const cancelCloudAwayTasks = async (char: CharacterProfile, updateCharact
 
 export interface LocalAwayDeps {
   getCharacters: () => CharacterProfile[];
+  updateCharacter: UpdateCharacter;
   getApiConfig: () => APIConfig;
   getUserProfile: () => UserProfile | null | undefined;
   getGroups: () => GroupProfile[];
@@ -235,6 +248,9 @@ export interface LocalAwayDeps {
 
 let localRunning = false;
 const localCooldownUntil = new Map<string, number>();
+// 一次前台会话最多给每个角色核查一次远端空闲链；失败允许下次切前台重试。
+// key 带间隔，避免改设置后旧标记挡住新配置。
+const cloudSeededSession = new Set<string>();
 
 /** 打开页面 / 切回前台时调用：逐个给该补的角色补上离开期间的消息。 */
 export const runLocalAwayMessages = async (deps: LocalAwayDeps): Promise<void> => {
@@ -244,7 +260,24 @@ export const runLocalAwayMessages = async (deps: LocalAwayDeps): Promise<void> =
     for (const char of deps.getCharacters().filter(c => c.awayMessage?.enabled)) {
       if ((localCooldownUntil.get(char.id) ?? 0) > Date.now() || deps.isBusyWith(char.id)) continue;
       try {
-        if (await isAwayCloudRoute(char)) continue;
+        if (await isAwayCloudRoute(char)) {
+          const seedKey = char.id + ':' + resolveAwayDelayMinutes(char);
+          if (cloudSeededSession.has(seedKey)) continue;
+          const userProfile = deps.getUserProfile();
+          if (!userProfile) continue;
+          const recent = await DB.getRecentMessagesByCharId(char.id, 50, true);
+          const lastUserAt = getLastRealUserMessageAt(recent);
+          if (lastUserAt == null) continue;
+          // 以前只在发送聊天消息时才会建空闲循环：启用后不聊天就永远没有第一条任务。
+          // 现在进前台时只读远端清单并补缺，已有未来任务不改期，不调用模型。
+          const ready = await syncCloudAwayTask({
+            char, lastUserAt, userProfile, groups: deps.getGroups(),
+            realtimeConfig: deps.getRealtimeConfig(), apiConfig: deps.getApiConfig(),
+            updateCharacter: deps.updateCharacter,
+          }, { seedOnly: true });
+          if (ready) cloudSeededSession.add(seedKey);
+          continue;
+        }
         // 作者原版：2.0 没开启的角色仍可使用「离开后消息」，
         // 打开页面时一次最多补三段、这次离开只补一次。
         // B 方案循环节拍只属于明确开启 2.0 的角色（Worker 不可用时走本地 B 兜底）。
