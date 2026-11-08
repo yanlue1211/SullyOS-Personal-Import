@@ -737,11 +737,14 @@ describe('离开后云端机会不依赖预约消息开关', () => {
   };
 
   it('预约关闭且离开后开启：仍给离开后模型机会、并在云端续排下次节拍', async () => {
-    const { ctx } = awayCtx();
+    const { ctx, writeState } = awayCtx();
     const outcome = fired(await amsgHooks.onBeforeFire(ctx));
     expect(outcome.messages[0]?.content).toBeTruthy();
     expect(ctx.scheduleTask).toHaveBeenCalledOnce();
     expect(ctx.scheduleTask.mock.calls[0][0].metadata.amsgAwayMessage).toBe(true);
+    const trace = writeState.mock.calls.flatMap(([, entries]) =>
+      entries.filter((e: { key: string }) => e.key === AMSG_AWAY_TRACE_KEY));
+    expect(JSON.parse(String(trace[0].value)).entries[0].stage).toBe('entered');
   });
 
   it('实际 Worker 收尾后的成功写成「已入投递」而非保证手机送达，失败和重试另记', async () => {

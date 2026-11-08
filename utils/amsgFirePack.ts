@@ -201,7 +201,7 @@ export const AMSG_AWAY_LAST_SKIP_KEY = 'away_last_skip';
 /** 最近 12 次离开后机会的无隐私诊断；只记录时刻、状态与短原因码。 */
 export const AMSG_AWAY_TRACE_KEY = 'away_trace_v1';
 export const AMSG_AWAY_TRACE_MAX = 12;
-export type AmsgAwayTraceStage = 'skipped' | 'silent' | 'queued' | 'failed' | 'retrying';
+export type AmsgAwayTraceStage = 'entered' | 'deferred' | 'skipped' | 'silent' | 'queued' | 'failed' | 'retrying';
 export interface AmsgAwayTraceEntry {
   id: string;
   at: number;
@@ -216,7 +216,7 @@ export const parseAmsgAwayTrace = (value: string | null | undefined): AmsgAwayTr
     if (!data || data.v !== 1 || !Array.isArray(data.entries)) return [];
     return data.entries.filter((e: any) => e && typeof e.id === 'string' && e.id.length <= 140
       && Number.isFinite(e.at) && Number.isFinite(e.occurrenceMs)
-      && ['skipped', 'silent', 'queued', 'failed', 'retrying'].includes(e.stage)
+      && ['entered', 'deferred', 'skipped', 'silent', 'queued', 'failed', 'retrying'].includes(e.stage)
       && (e.reason === undefined || typeof e.reason === 'string' && /^[a-z-]{1,40}$/.test(e.reason))
       && (e.llmCalls === undefined || Number.isInteger(e.llmCalls) && e.llmCalls >= 0 && e.llmCalls <= 100)
     ).slice(-AMSG_AWAY_TRACE_MAX);

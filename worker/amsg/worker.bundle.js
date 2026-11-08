@@ -1118,7 +1118,7 @@ var parseAmsgAwayTrace = (value) => {
     const data = JSON.parse(value || "null");
     if (!data || data.v !== 1 || !Array.isArray(data.entries)) return [];
     return data.entries.filter(
-      (e) => e && typeof e.id === "string" && e.id.length <= 140 && Number.isFinite(e.at) && Number.isFinite(e.occurrenceMs) && ["skipped", "silent", "queued", "failed", "retrying"].includes(e.stage) && (e.reason === void 0 || typeof e.reason === "string" && /^[a-z-]{1,40}$/.test(e.reason)) && (e.llmCalls === void 0 || Number.isInteger(e.llmCalls) && e.llmCalls >= 0 && e.llmCalls <= 100)
+      (e) => e && typeof e.id === "string" && e.id.length <= 140 && Number.isFinite(e.at) && Number.isFinite(e.occurrenceMs) && ["entered", "deferred", "skipped", "silent", "queued", "failed", "retrying"].includes(e.stage) && (e.reason === void 0 || typeof e.reason === "string" && /^[a-z-]{1,40}$/.test(e.reason)) && (e.llmCalls === void 0 || Number.isInteger(e.llmCalls) && e.llmCalls >= 0 && e.llmCalls <= 100)
     ).slice(-AMSG_AWAY_TRACE_MAX);
   } catch {
     return [];
@@ -14439,7 +14439,7 @@ function buildScheduledPush(message, build, extraMeta, bannerBody) {
 }
 
 // utils/amsgBundleVersion.ts
-var AMSG_BUNDLE_VERSION = "2026-11-08.9";
+var AMSG_BUNDLE_VERSION = "2026-11-08.10";
 
 // worker/amsg/src/reproduction.ts
 async function writeDiagnosticStage(writeState, runId, event, fields = {}) {
@@ -20124,6 +20124,13 @@ var amsgHooks = {
       const waitMs = dueAt == null ? 0 : dueAt - ctx.now.getTime();
       if (waitMs > AWAY_DUE_TOLERANCE_MS) {
         console.log("[amsg:defer]", { taskId: ctx.task.id, reason: "away-not-due", dueAt });
+        await writeAwayTrace(ctx.readState, ctx.writeState, charId, {
+          id: `${String(ctx.task.uuid || "unknown")}@${occurrenceMs}`,
+          at: ctx.now.getTime(),
+          occurrenceMs,
+          stage: "deferred",
+          reason: "away-not-due"
+        });
         return { defer: { afterMs: Math.min(waitMs, AWAY_MAX_DEFER_MS) } };
       }
       if (typeof ctx.scheduleTask !== "function") throw fail3("Worker \u4E0D\u652F\u6301\u7A7A\u95F2\u63D0\u9192\u5FAA\u73AF\u6392\u7A0B\uFF0C\u8BF7\u66F4\u65B0\u4E91\u7AEF\u7248\u672C");
@@ -20154,6 +20161,13 @@ var amsgHooks = {
         console.warn("[amsg:away-rearm] \u7EED\u6392\u4E0B\u4E00\u8282\u62CD\u5931\u8D25\uFF0C\u5DF2\u5EF6\u540E\u91CD\u8BD5\uFF08\u96F6\u6A21\u578B\u8C03\u7528\uFF09", {
           taskId: ctx.task.id,
           name: error instanceof Error ? error.name : "unknown"
+        });
+        await writeAwayTrace(ctx.readState, ctx.writeState, charId, {
+          id: `${String(ctx.task.uuid || "unknown")}@${occurrenceMs}`,
+          at: ctx.now.getTime(),
+          occurrenceMs,
+          stage: "deferred",
+          reason: "away-rearm-retry"
         });
         return { defer: { afterMs: 5 * 6e4 } };
       }
@@ -20503,6 +20517,12 @@ ${userHoliday}` });
       // 到点的自动续排、禁发零LLM均已在 onBeforeFire 完成；这里绝不额外调用模型。
       mustSpeak: false
     }), userHoliday) + mcpBlock + scheduleBlock + replyScopeBlock;
+    if (away) await writeAwayTrace(ctx.readState, ctx.writeState, charId, {
+      id: `${String(ctx.task.uuid || "unknown")}@${occurrenceMs}`,
+      at: ctx.now.getTime(),
+      occurrenceMs,
+      stage: "entered"
+    });
     return {
       messages: [{ role: "user", content: prompt }],
       ...common

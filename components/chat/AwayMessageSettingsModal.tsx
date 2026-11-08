@@ -175,6 +175,8 @@ const AwayMessageSettingsModal: React.FC<AwayMessageSettingsModalProps> = ({ isO
                                       <div key={item.id} className="rounded-lg bg-violet-50/60 p-2 text-slate-700">
                                         {new Date(item.occurrenceMs).toLocaleString()} · {item.stage === 'queued'
                                           ? '已进入推送/收件箱（不能证明手机已收到）'
+                                          : item.stage === 'entered' ? '已到 Worker 生成入口（模型是否真正调用待核实）'
+                                          : item.stage === 'deferred' ? '尚未到新的联系时间，本次已推迟'
                                           : item.stage === 'silent' ? '模型执行后没有可发送的正文'
                                           : item.stage === 'failed' ? '本次云端处理失败'
                                           : item.stage === 'retrying' ? '本次失败，云端计划重试'
@@ -183,7 +185,8 @@ const AwayMessageSettingsModal: React.FC<AwayMessageSettingsModalProps> = ({ isO
                                           （{({
                                             'away-disabled': '关闭离开后消息', 'away-missed-slot': '错过时间',
                                             'away-date-lock': '仍在线下见面', 'away-call-lock': '仍在通话',
-                                            'away-quiet-hours': '睡眠禁发', declined: 'Char 决定不说',
+                                            'away-quiet-hours': '睡眠禁发', 'away-not-due': '用户新互动后尚未到时间',
+                                            'away-rearm-retry': '续排失败、稍后重试', declined: 'Char 决定不说',
                                             'empty-generation': '没有生成正文', 'side-effects-only': '只执行了动作',
                                           } as Record<string, string>)[item.reason] || '其他跳过原因'}）
                                         </span>}

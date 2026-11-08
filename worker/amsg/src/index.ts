@@ -2247,6 +2247,10 @@ export const amsgHooks = {
       const waitMs = dueAt == null ? 0 : dueAt - ctx.now.getTime();
       if (waitMs > AWAY_DUE_TOLERANCE_MS) {
         console.log('[amsg:defer]', { taskId: ctx.task.id, reason: 'away-not-due', dueAt });
+        await writeAwayTrace(ctx.readState, ctx.writeState, charId, {
+          id: `${String(ctx.task.uuid || 'unknown')}@${occurrenceMs}`,
+          at: ctx.now.getTime(), occurrenceMs, stage: 'deferred', reason: 'away-not-due',
+        });
         return { defer: { afterMs: Math.min(waitMs, AWAY_MAX_DEFER_MS) } } as const;
       }
 
@@ -2284,6 +2288,10 @@ export const amsgHooks = {
         // 不把异常原文记到日志，避免意外泄露上游私有参数/凭据。
         console.warn('[amsg:away-rearm] 续排下一节拍失败，已延后重试（零模型调用）', {
           taskId: ctx.task.id, name: error instanceof Error ? error.name : 'unknown',
+        });
+        await writeAwayTrace(ctx.readState, ctx.writeState, charId, {
+          id: `${String(ctx.task.uuid || 'unknown')}@${occurrenceMs}`,
+          at: ctx.now.getTime(), occurrenceMs, stage: 'deferred', reason: 'away-rearm-retry',
         });
         return { defer: { afterMs: 5 * 60_000 } } as const;
       }
@@ -2779,6 +2787,10 @@ export const amsgHooks = {
       // 到点的自动续排、禁发零LLM均已在 onBeforeFire 完成；这里绝不额外调用模型。
       mustSpeak: false,
     }), userHoliday) + mcpBlock + scheduleBlock + replyScopeBlock;
+    if (away) await writeAwayTrace(ctx.readState, ctx.writeState, charId, {
+      id: `${String(ctx.task.uuid || 'unknown')}@${occurrenceMs}`,
+      at: ctx.now.getTime(), occurrenceMs, stage: 'entered',
+    });
     return {
       messages: [{ role: 'user' as const, content: prompt }],
       ...common,
