@@ -24,6 +24,7 @@ import {
   AMSG_CHAT_FAIL_KEY,
   AMSG_FIRE_PACK_KEY,
   AMSG_LAST_SKIP_KEY,
+  AMSG_AWAY_LAST_SKIP_KEY,
   AMSG_SELF_LOG_KEY,
   AMSG_SILENT_MARK,
   AMSG_SLOT_CURRENT_TIME,
@@ -3607,6 +3608,24 @@ describe('stale 跳过留痕（onStaleSkip）', () => {
     expect(written!.skip.reason).toBe('stale');
     expect(written!.skip.occurrenceMs).toBe(Date.parse(occurrence));
     expect(written!.skip.staleAction).toBe('expired');
+  });
+
+  it('离开后消息过期只记录到离开后账本，不污染预约消息的最近跳过', async () => {
+    const writeState = makeWriteState();
+    await amsgStaleSkip(
+      { id: 110, uuid: TASK_ROW_UUID },
+      {
+        reason: 'stale', action: 'expired',
+        metadata: { charId: CHAR_ID, amsgAwayMessage: true },
+        occurrenceMs: Date.parse('2026-07-25T09:00:00.000Z'),
+        skippedCount: 1, nextSendAt: null, writeState,
+      },
+    );
+    expect(lastSkipOf(writeState)).toBeNull();
+    const awayWrites = writeState.mock.calls.flatMap(([, entries]) =>
+      entries.filter((entry: { key: string }) => entry.key === AMSG_AWAY_LAST_SKIP_KEY));
+    expect(awayWrites).toHaveLength(1);
+    expect(JSON.parse(String(awayWrites[0].value)).reason).toBe('stale');
   });
 
   it('诊断任务过期跳过时留一条 fire-settled，不写主动消息的 last_skip', async () => {
