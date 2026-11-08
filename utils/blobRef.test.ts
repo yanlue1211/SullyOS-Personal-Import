@@ -76,6 +76,63 @@ describe('putImageBlob / getBlobForRef / deleteBlobRef', () => {
 });
 
 describe('deleteBlobRefIfUnreferenced', () => {
+    it('legacy direct deletion keeps a photo that is still referenced by the album or chat', async () => {
+        const ref = await putImageBlob(dataUrlToBlob(TINY_PNG));
+        await seedStore('gallery', [{ id: 'keep-album-media', url: ref }]);
+        try {
+            await deleteBlobRef(ref);
+            expect(await getBlobForRef(ref)).not.toBeNull();
+        } finally {
+            await clearStore('gallery');
+        }
+        await deleteBlobRef(ref);
+        expect(await getBlobForRef(ref)).toBeNull();
+    });
+
+    it('checks references again after the browser cross-tab lock is acquired', async () => {
+        const ref = await putImageBlob(dataUrlToBlob(TINY_PNG));
+        const previous = Object.getOwnPropertyDescriptor(navigator, 'locks');
+        let lockRequested = 0;
+        Object.defineProperty(navigator, 'locks', {
+            configurable: true,
+            value: {
+                request: async (_name: string, _options: { mode: string }, action: () => Promise<unknown>) => {
+                    lockRequested++;
+                    // Simulate another tab saving a reference while we were waiting
+                    // for the lock, *after* the first reference scan was complete.
+                    await DB.saveAsset('asset-safe-concurrent-ref', ref);
+                    return action();
+                },
+            },
+        });
+        try {
+            expect(await deleteBlobRefIfUnreferenced(ref)).toBe(false);
+            expect(lockRequested).toBe(1);
+            expect(await getBlobForRef(ref)).not.toBeNull();
+        } finally {
+            if (previous) Object.defineProperty(navigator, 'locks', previous);
+            else delete (navigator as any).locks;
+            await DB.deleteAsset('asset-safe-concurrent-ref');
+        }
+        expect(await deleteBlobRefIfUnreferenced(ref)).toBe(true);
+    });
+
+    it('keeps the image if the final reference scan cannot read the database', async () => {
+        const ref = await putImageBlob(dataUrlToBlob(TINY_PNG));
+        const before = DB.getStoreRowsPage;
+        let n = 0;
+        DB.getStoreRowsPage = (async (...args: Parameters<typeof before>) => {
+            if (++n > 18) throw new Error('scan failed');
+            return before(...args);
+        }) as typeof before;
+        try {
+            expect(await deleteBlobRefIfUnreferenced(ref)).toBe(false);
+            expect(await getBlobForRef(ref)).not.toBeNull();
+        } finally {
+            DB.getStoreRowsPage = before;
+        }
+    });
+
     it('外观预设仍引用时保留，引用移除后才删除', async () => {
         const ref = await putImageBlob(dataUrlToBlob(TINY_PNG));
         await DB.saveAsset('appearance_preset_blobref_test', JSON.stringify({ wallpaper: ref }));
