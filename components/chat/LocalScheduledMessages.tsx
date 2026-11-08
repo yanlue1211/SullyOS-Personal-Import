@@ -8,16 +8,16 @@ export default function LocalScheduledMessages({ charId }: { charId: string }) {
     const [tasks, setTasks] = useState<ScheduledMessage[]>([]);
     const [error, setError] = useState('');
     const [loaded, setLoaded] = useState(false);
+    const [loadedCharId, setLoadedCharId] = useState<string | null>(null);
     const [pending, setPending] = useState<string>();
     useEffect(() => {
         // 旧功能已退役：仅在确有未完成的历史任务时才展示取消入口。
         // 首次展开设置时只读本地数据库，不轮询；点开后才每 5 秒刷新。
         let alive = true;
-        setLoaded(false); setTasks([]); setError('');
         const refresh = async () => {
             try {
                 const rows = await DB.getScheduledMessages(charId);
-                if (alive) { setTasks(rows); setLoaded(true); setError(''); }
+                if (alive) { setTasks(rows); setLoadedCharId(charId); setLoaded(true); setError(''); }
             } catch { if (alive) setError('暂时无法读取任务，请收起后重试。'); }
         };
         void refresh();
@@ -37,7 +37,9 @@ export default function LocalScheduledMessages({ charId }: { charId: string }) {
         finally { setPending(undefined); }
     };
     // 空队列不再留一块历史功能的空设置；失败仍给用户恢复入口。
-    if (!error && (!loaded || tasks.length === 0)) return null;
+    // 不在 details 展开时清空任务列表，否则会卸载正在展开的节点，
+    // 造成 React open=true 与原生 <details> 实际关闭错位。角色切换时也不露出别人的任务。
+    if (!error && (!loaded || loadedCharId !== charId || tasks.length === 0)) return null;
     return <details className="rounded-2xl border border-emerald-100 bg-emerald-50/50 p-3" onToggle={event => setOpen(event.currentTarget.open)}>
         <summary className="cursor-pointer text-xs font-bold text-emerald-800">历史本地待发消息 · 仅管理旧任务</summary>
         {open && <div className="mt-3 space-y-3">
