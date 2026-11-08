@@ -189,8 +189,8 @@ export interface PromptBuildOptions {
      * 易变段（召回/buff/音乐/日程/群聊/彼方）照常保留，它们在发送时刻是新鲜的，
      * 而 worker 拿不到。不裁的话，模型会在一份 prompt 里看到两个钟、两份互不
      * 重叠的热搜（前端快照版 + worker 现拉版），且两段都自称「来自真实世界」。
-     * `[schedule_message]` 教学是否保留还要看角色的 2.0 开关，见下方
-     * scheduleMessageTagEnabled 处的说明。
+     * `[schedule_message]` 教学始终按角色的 2.0 开关互斥：开 2.0 只教
+     * 云端工具，关 2.0 才教旧本地标签；与是否经过及时对话无关。
      */
     timelyByWorker?: boolean;
 }
