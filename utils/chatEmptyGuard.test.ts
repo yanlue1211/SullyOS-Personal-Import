@@ -14,6 +14,7 @@ vi.mock('../context/OSContext', () => { const context = {
     theme: {}, userProfile: { name: '测试用户', avatar: '', bio: '' },
     apiConfig: {}, apiPresets: [], availableModels: [], customThemes: [], groups: [], characterGroups: [],
     unreadMessages: {}, realtimeConfig: {}, memoryPalaceConfig: {}, remoteVectorConfig: {},
+    proactiveComposingChars: {},
     closeApp: state.close, openApp: vi.fn(), clearUnread: vi.fn(), setActiveCharacterId: vi.fn(),
     addToast: vi.fn(), updateCharacter: vi.fn(), updateUserProfile: vi.fn(),
 }; return { useOS: () => ({ ...context, characters: state.characters }) }; });
