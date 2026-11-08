@@ -244,7 +244,7 @@ export const buildFireTaskListBlock = (
 ): string => {
   const tz: AmsgTzRef = { tzId: opts.tzId };
   const listed = tasks
-    .filter((t) => !t.away && isPendingTask(t, opts.nowMs))
+    .filter((t) => !t.away && !t.clientTaskId?.startsWith('away-') && isPendingTask(t, opts.nowMs))
     .filter((t) => !opts.excludeClientTaskId || t.clientTaskId !== opts.excludeClientTaskId);
   if (listed.length === 0) return '';
 
@@ -547,8 +547,11 @@ export const reconcileTasksWithRemote = (
 
   const synced = local.map((task) => {
     const row = byUuid.get(task.taskUuid);
-    if (!row?.nextSendAt || row.nextSendAt === task.nextSendAt) return task;
-    return { ...task, nextSendAt: row.nextSendAt };
+    // 旧版面板曾把云端离开任务当成预约认领，按持久化归属键自愈。
+    const normalized = !task.away && task.clientTaskId?.startsWith('away-')
+      ? { ...task, away: true, source: 'user' as const } : task;
+    if (!row?.nextSendAt || row.nextSendAt === normalized.nextSendAt) return normalized;
+    return { ...normalized, nextSendAt: row.nextSendAt };
   });
 
   const adopted = remote
@@ -561,6 +564,7 @@ export const reconcileTasksWithRemote = (
       !known.has(row.uuid)
       && row.nextSendAt && row.recurrenceType && row.messageType
       && row.status !== 'failed'
+      && !row.clientTaskId?.startsWith('away-')
       && classifyTaskRow(row) === 'scheduled'
     ))
     .map((row): ActiveMsg2TaskRecord => ({
@@ -658,7 +662,7 @@ export const keepUncancelledTasks = (
 ): ActiveMsg2TaskRecord[] =>
   tasks
     .filter((t) => failedUuids.has(t.taskUuid) || !attemptedUuids.has(t.taskUuid))
-    .map((t) => t.away ? t : ({
+    .map((t) => t.away || t.clientTaskId?.startsWith('away-') ? t : ({
       ...t,
       lastError: failedUuids.has(t.taskUuid) ? notes.failed : notes.appeared,
     }));

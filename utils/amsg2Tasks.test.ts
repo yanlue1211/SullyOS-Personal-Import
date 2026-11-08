@@ -650,6 +650,17 @@ describe('reconcileTasksWithRemote（跟远端底账对一次账）', () => {
   // 角色在 fire 里给自己排的任务是随 push 认领的。那条 push 推失败、或者被防穿帮闸
   // 吞掉，认领就跟着没了，而任务在 D1 里照常到点触发——面板列不出来、用户也取消不掉，
   // 唯一的办法是关掉整个 2.0 或者删角色。
+  it('远端离开后链不认领进预约清单，旧版误认领可自动修复归属', () => {
+    const row = remoteRow({ uuid: 'cloud-away', clientTaskId: 'away-cloud-away' });
+    expect(reconcileTasksWithRemote([], [row])).toEqual([]);
+    const adoptedBefore = task({ taskUuid: 'cloud-away', clientTaskId: 'away-cloud-away', away: undefined });
+    const corrected = reconcileTasksWithRemote([adoptedBefore], [row]);
+    expect(corrected).toHaveLength(1);
+    expect(corrected[0].away).toBe(true);
+    expect(corrected[0].source).toBe('user');
+    expect(buildFireTaskListBlock(corrected, { nowMs: Date.parse('2026-08-02T00:00:00Z'), tzId: 'UTC' })).toBe('');
+  });
+
   it('远端有、本地没有的任务补回清单', () => {
     const out = reconcileTasksWithRemote([], [remoteRow()]);
     expect(out.map((t) => t.taskUuid)).toEqual(['amsgself-char1-1754179200000-0']);

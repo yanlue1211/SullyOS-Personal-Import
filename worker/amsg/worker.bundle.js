@@ -13717,7 +13717,7 @@ var currentOccurrenceMs = (task, nowMs) => {
 };
 var buildFireTaskListBlock = (tasks, opts) => {
   const tz = { tzId: opts.tzId };
-  const listed = tasks.filter((t) => !t.away && isPendingTask(t, opts.nowMs)).filter((t) => !opts.excludeClientTaskId || t.clientTaskId !== opts.excludeClientTaskId);
+  const listed = tasks.filter((t) => !t.away && !t.clientTaskId?.startsWith("away-") && isPendingTask(t, opts.nowMs)).filter((t) => !opts.excludeClientTaskId || t.clientTaskId !== opts.excludeClientTaskId);
   if (listed.length === 0) return "";
   return [
     "",
@@ -14424,7 +14424,7 @@ function buildScheduledPush(message, build, extraMeta, bannerBody) {
 }
 
 // utils/amsgBundleVersion.ts
-var AMSG_BUNDLE_VERSION = "2026-11-08.4";
+var AMSG_BUNDLE_VERSION = "2026-11-08.5";
 
 // worker/amsg/src/reproduction.ts
 async function writeDiagnosticStage(writeState, runId, event, fields = {}) {

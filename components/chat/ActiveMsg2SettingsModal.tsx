@@ -518,7 +518,7 @@ const ActiveMsg2SettingsModal: React.FC<ActiveMsg2SettingsModalProps> = ({
         // 与删角色共用一份）。取消失败的保留在本地清单里，下次重开面板可重试。
         const { targets, failed } = await ActiveMsgClient.cancelAllTasksForChar(
           char.id,
-          tasks.filter(t => !t.away).map((t) => t.taskUuid),
+          tasks.filter(t => !t.away && !t.clientTaskId?.startsWith('away-')).map((t) => t.taskUuid),
           'appointments',
         );
         const attempted = new Set(targets);
@@ -659,7 +659,7 @@ const ActiveMsg2SettingsModal: React.FC<ActiveMsg2SettingsModalProps> = ({
       + (todayCount.llmCalls ? `，后台一共调用了 ${todayCount.llmCalls} 次 AI` : '')
     : null;
   // 关掉「可以排重复的」时会一起取消的那几条（在那一页上提前说）。
-  const scheduleTasks = tasks.filter((t) => !t.away);
+  const scheduleTasks = tasks.filter((t) => !t.away && !t.clientTaskId?.startsWith('away-'));
   const selfRecurringTaskCount = scheduleTasks.filter((t) => t.source === 'character'
     && t.recurrenceType !== 'none' && isPendingTask(t, now)).length;
 

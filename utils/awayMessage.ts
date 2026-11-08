@@ -112,7 +112,7 @@ export const syncCloudAwayTask = async (deps: {
     // B 模式下 Worker 每次 fire 会创建下一节拍，客户端本地列表不一定认领过它。
     // 新用户开口时必须先和远端对账：否则老链在云端继续，我们又凭旧的本地清单
     // 创建一条新链，两个链交错触发会倍增模型调用次数。
-    const localAway = (scheduleConfig.tasks ?? []).filter(t => t.away);
+    const localAway = (scheduleConfig.tasks ?? []).filter(t => t.away || t.clientTaskId?.startsWith('away-'));
     const remote = await ActiveMsgClient.listRemoteTasksForChar(char.id);
     const remoteAway = remote.filter(t => t.status === 'pending'
       && (t.clientTaskId?.startsWith('away-') || localAway.some(old => old.taskUuid === t.uuid)));
@@ -139,7 +139,7 @@ export const syncCloudAwayTask = async (deps: {
         deps.updateCharacter(char.id, prev => ({
           activeMsg2Config: {
             ...(prev.activeMsg2Config ?? { enabled: false, tasks: [] }),
-            tasks: applyScheduledTask((prev.activeMsg2Config?.tasks ?? []).filter(t => !t.away), {
+            tasks: applyScheduledTask((prev.activeMsg2Config?.tasks ?? []).filter(t => !t.away && !t.clientTaskId?.startsWith('away-')), {
               ...record, recurrenceType: 'none', expirePolicy: 'force', source: 'user', status: 'scheduled', createdAt: now,
             } as ActiveMsg2TaskRecord, {}, now),
           },
@@ -154,7 +154,7 @@ export const syncCloudAwayTask = async (deps: {
         deps.updateCharacter(char.id, prev => ({
           activeMsg2Config: {
             ...(prev.activeMsg2Config ?? { enabled: false, tasks: [] }),
-            tasks: applyScheduledTask((prev.activeMsg2Config?.tasks ?? []).filter(t => !t.away), {
+            tasks: applyScheduledTask((prev.activeMsg2Config?.tasks ?? []).filter(t => !t.away && !t.clientTaskId?.startsWith('away-')), {
               ...record, nextSendAt: sendAt, firstSendTime: sendAt,
               recurrenceType: 'none', expirePolicy: 'force', source: 'user', status: 'scheduled', createdAt: now,
             } as ActiveMsg2TaskRecord, {}, now),
@@ -191,7 +191,7 @@ export const syncCloudAwayTask = async (deps: {
       activeMsg2Config: {
         ...(prev.activeMsg2Config ?? { enabled: false, tasks: [] }),
         // 旧的那条已经发过或不在了，换成新的；每个角色只留一条。
-        tasks: applyScheduledTask((prev.activeMsg2Config?.tasks ?? []).filter(t => !t.away), created, {}, Date.now()),
+        tasks: applyScheduledTask((prev.activeMsg2Config?.tasks ?? []).filter(t => !t.away && !t.clientTaskId?.startsWith('away-')), created, {}, Date.now()),
       },
     }));
     return true;
@@ -206,7 +206,7 @@ export const syncCloudAwayTask = async (deps: {
 
 /** 关掉离开后消息或改了等待时长时调用：取消云端那条，下一轮对方开口时按新设置重建。 */
 export const cancelCloudAwayTasks = async (char: CharacterProfile, updateCharacter: UpdateCharacter): Promise<void> => {
-  const away = (char.activeMsg2Config?.tasks ?? []).filter(t => t.away);
+  const away = (char.activeMsg2Config?.tasks ?? []).filter(t => t.away || t.clientTaskId?.startsWith('away-'));
   // 远端链在后台续排，可能不在本地清单里。必须一并取消，不能仅靠旧 UUID。
   const remote = await ActiveMsgClient.listRemoteTasksForChar(char.id).catch(error => {
     console.warn('[AwayMessage] 取消时远端清单不可读，Worker 会通过 awayEnabled=false 防继续生成', error);
