@@ -25,16 +25,17 @@ try {
 }
 try {
   const response = await get(worker + 'config-check', 'application/json');
-  const info = await response.json();
+  const envelope = await response.json();
+  const info = envelope?.success === true && envelope.data && typeof envelope.data === 'object' ? envelope.data : {};
   const version = typeof info.workerVersion === 'string' ? info.workerVersion : null;
   workerMatched = version === expected.worker;
   report('WORKER_VERSION', {
     workerVersion: version, expected: expected.worker, matched: workerMatched,
-    configurationOk: info.configurationOk === true,
+    configurationOk: info.ok === true,
     instantTick: info.instantTick === true,
-    selfUpdateSupported: info.selfUpdateSupported === true,
+    selfUpdateSupported: info.selfUpdate?.supported === true,
     backgroundJobs: info.backgroundJobs === true,
-    warningCount: Array.isArray(info.warningCodes) ? info.warningCodes.length : null,
+    warningCount: Array.isArray(info.warnings) ? info.warnings.length : null,
     missingCount: Array.isArray(info.missing) ? info.missing.length : null,
   });
 } catch (e) {
