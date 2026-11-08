@@ -3231,6 +3231,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           if (document.visibilityState !== 'visible') return;
           void runLocalAwayMessages({
               getCharacters: () => charactersRef.current,
+              updateCharacter,
               getApiConfig: () => apiConfigRef.current,
               getUserProfile: () => userProfileRef.current,
               getGroups: () => groupsRef.current,
