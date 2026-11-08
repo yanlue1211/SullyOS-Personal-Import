@@ -12,6 +12,7 @@ on:
       - 'utils/away**'
       - 'types.ts'
       - 'worker/amsg/**'
+      - 'scripts/amsg2-production-preflight.mjs'
       - 'package.json'
       - 'pnpm-lock.yaml'
       - '.github/workflows/personal-amsg2-away-verify.yml'
