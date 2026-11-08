@@ -34,7 +34,7 @@ export function buildUserCancelledNotices(
   nowMs: number = Date.now(),
 ): Amsg2ExpiredNoticeRecord[] {
   return tasks
-    .filter((t) => isPendingTask(t, nowMs))
+    .filter((t) => !t.away && isPendingTask(t, nowMs))
     .map((t) => ({
       // 编号跟「到点没发」的回执分开：同一条任务可能先有一次没发、之后才被手动取消，两件事都得说。
       // 同一条任务重复取消只会命中同一个 id，台账按 id 去重，天然幂等。
