@@ -24,6 +24,7 @@
 通过 GitHub Actions 的单次匿名 **GET /config-check**（workflow `42481121249`，job `128733052404`）拿到真实响应，只有白名单状态字段，没有上传聊天、密钥或用户资料：
 
 - 生产 Worker **当前版本为 `2026-11-08.3`**，**不是** PR 需要的 `2026-11-08.10`；所以 PR **不能据此宣布上线**。
+- **生产 /debug 只读验证**（GitHub Actions `42481850813`，job `128735298312`）：`d1Reachable=true`、`schemaReady=true`、`tickStatus=healthy`、待发任务 2 条、逾期 0 条、`registeredPush=true`。这说明**现有 D1 可读且表结构齐全、已有推送订阅、当前待发任务没有逾期**；但无法核对 D1 绑定 ID 或证明锁屏真实送达，`healthy` 也不是 Cron 触发历史的直接证明。
 - `configurationOk=true`、`missing=[]`、`warningCodes=[]`，表示该公开自检报告配置无缺项（不等于确认 D1 身份或推送实际送达）。
 - `instantTick=true`、`backgroundJobs=true`、`selfUpdateSupported=true`。这只能说明自更新能力存在，**不能证明更新取包 URL 指向个人仓库，也不能代替原位升级权限核验**。
 
