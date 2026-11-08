@@ -14,7 +14,7 @@ describe('legacy browser D1 quota messaging compatibility', () => {
             expect(describeD1LimitCode(null)).toBe('');
         } finally {
             if (original) Object.defineProperty(Object, 'hasOwn', original);
-            else delete (Object as typeof Object & { hasOwn?: unknown }).hasOwn;
+            else Reflect.deleteProperty(Object, 'hasOwn');
         }
     });
 });
