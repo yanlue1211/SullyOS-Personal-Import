@@ -1,0 +1,39 @@
+name: Personal integrated release acceptance
+on:
+  pull_request:
+    paths:
+      - 'apps/**'
+      - 'components/**'
+      - 'context/**'
+      - 'features/collaboration/**'
+      - 'hooks/**'
+      - 'utils/**'
+      - 'worker/amsg/**'
+      - 'types.ts'
+      - '.github/workflows/personal-final-release-verify.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Integrated once-only active-message, call and prompt tests
+        run: pnpm exec vitest run utils/amsgCallPresence.test.ts utils/amsgLimits.test.ts utils/amsg2TaskContext.test.ts utils/amsgInstantChat.wiring.test.ts utils/awayMessagePrompt.test.ts utils/awayMessageCore.test.ts utils/replyScope.test.ts utils/toolCallCompat.test.ts
+      - name: Protect chat, memory context, music and MoonNest
+        run: pnpm exec vitest run utils/chatRequestPayload.test.ts utils/personalChatMedia.test.ts utils/yueqi.test.ts utils/activityBackup.test.ts utils/chatEmptyGuard.test.ts
+      - name: Cross-feature and transactional persistence regression
+        run: pnpm exec vitest run utils/fourwayPersonalIntegration.test.ts utils/phoneGeneration.test.ts utils/storyTheaterManualArchive.test.ts utils/homeRomance.test.ts utils/blobRef.test.ts utils/blobGc.test.ts
+      - name: Verify exact compiled Worker and matching version
+        run: pnpm run worker:check
+      - name: Production frontend build
+        run: pnpm run build
