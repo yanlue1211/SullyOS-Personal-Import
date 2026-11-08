@@ -10,7 +10,8 @@ export default function LocalScheduledMessages({ charId }: { charId: string }) {
     const [loaded, setLoaded] = useState(false);
     const [pending, setPending] = useState<string>();
     useEffect(() => {
-        if (!open) return;
+        // 旧功能已退役：仅在确有未完成的历史任务时才展示取消入口。
+        // 首次展开设置时只读本地数据库，不轮询；点开后才每 5 秒刷新。
         let alive = true;
         setLoaded(false); setTasks([]); setError('');
         const refresh = async () => {
@@ -20,8 +21,8 @@ export default function LocalScheduledMessages({ charId }: { charId: string }) {
             } catch { if (alive) setError('暂时无法读取任务，请收起后重试。'); }
         };
         void refresh();
-        const timer = window.setInterval(refresh, 5000);
-        return () => { alive = false; window.clearInterval(timer); };
+        const timer = open ? window.setInterval(refresh, 5000) : undefined;
+        return () => { alive = false; if (timer !== undefined) window.clearInterval(timer); };
     }, [open, charId]);
     const cancel = async (task: ScheduledMessage) => {
         setPending(task.id); setError('');
@@ -35,10 +36,12 @@ export default function LocalScheduledMessages({ charId }: { charId: string }) {
         } catch { setError('取消失败，请重试。'); }
         finally { setPending(undefined); }
     };
+    // 空队列不再留一块历史功能的空设置；失败仍给用户恢复入口。
+    if (!error && (!loaded || tasks.length === 0)) return null;
     return <details className="rounded-2xl border border-emerald-100 bg-emerald-50/50 p-3" onToggle={event => setOpen(event.currentTarget.open)}>
-        <summary className="cursor-pointer text-xs font-bold text-emerald-800">稍后联系 · 本地任务</summary>
+        <summary className="cursor-pointer text-xs font-bold text-emerald-800">历史本地待发消息 · 仅管理旧任务</summary>
         {open && <div className="mt-3 space-y-3">
-            <p className="text-[11px] leading-relaxed text-slate-500">这里显示当前角色尚未发送的本地消息，需保持糯米机运行。云端任务请到主动消息 2.0 查看。时间按你的设备显示。</p>
+            <p className="text-[11px] leading-relaxed text-slate-500">旧版本地预约已停用，不会创建新任务。这里仅保留过去已经安排、尚未发送的消息，等待原有投递或由你取消；云端预约请前往聊天加号里的「预约消息」。</p>
             {error && <p role="alert" className="text-xs text-rose-600">{error}</p>}
             {!loaded && !error && <p className="text-xs text-slate-400">正在读取…</p>}
             {loaded && !tasks.length && <p className="py-2 text-xs text-slate-400">暂时没有待发消息</p>}
