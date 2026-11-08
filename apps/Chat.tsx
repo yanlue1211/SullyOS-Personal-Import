@@ -74,7 +74,8 @@ import MemoryContextSelfCheck from '../components/chat/MemoryContextSelfCheck';
 import ProactiveSettingsModal from '../components/chat/ProactiveSettingsModal';
 import ActiveMsg2SettingsModal from '../components/chat/ActiveMsg2SettingsModal';
 import AwayMessageSettingsModal from '../components/chat/AwayMessageSettingsModal';
-import { cancelCloudAwayTasks, isAwayCloudRoute } from '../utils/awayMessage';
+import { cancelCloudAwayTasks, isAwayCloudRoute, syncCloudAwayTask } from '../utils/awayMessage';
+import { getLastRealUserMessageAt } from '../utils/amsg2ExpireGuard';
 import { ActiveMsgClient } from '../utils/activeMsgClient';
 import ThinkingChainSettingsModal from '../components/chat/ThinkingChainSettingsModal';
 import ScheduleChangeNotice from '../components/chat/ScheduleChangeNotice';
@@ -4693,17 +4694,28 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
                 onSave={config => {
                     const old = char.awayMessage;
                     updateCharacter(char.id, { awayMessage: config });
-                    // 云端 Worker 要实时知道睡眠规则，不等下一次聊天的大快照。
-                    // 这里只更新自动空闲提醒的配置，不动自排任务清单。
-                    void isAwayCloudRoute({ ...char, awayMessage: config }).then(async cloud => {
-                        if (cloud) await ActiveMsgClient.putCharLimits({ ...char, awayMessage: config });
-                    }).catch(err => {
-                        console.warn('[AwayMessage] 睡眠时段同步失败', err);
-                        addToast('离开后消息的禁发时段已保存在本机，但未成功同步云端，请重试保存', 'error');
+                    // 顺序很重要：先取消旧间隔的链，再写新限制，最后补建第一条。
+                    // 过去只更新了 limits，直到下一轮聊天才会创建 away 任务，
+                    // 用户保存后直接离开的话，Worker 从来没有机会触发。
+                    void (async () => {
+                        if (old?.enabled && (!config.enabled || old.delayMinutes !== config.delayMinutes)) {
+                            await cancelCloudAwayTasks(char, updateCharacter);
+                        }
+                        const updatedChar = { ...char, awayMessage: config };
+                        if (!await isAwayCloudRoute(updatedChar)) return;
+                        await ActiveMsgClient.putCharLimits(updatedChar);
+                        if (!config.enabled) return;
+                        const recent = await DB.getRecentMessagesByCharId(char.id, 50, true);
+                        const lastUserAt = getLastRealUserMessageAt(recent);
+                        if (lastUserAt == null) return;
+                        // 仅补缺 / 校验已有未来链，不调用模型、不追补旧空闲时段。
+                        await syncCloudAwayTask({
+                            char: updatedChar, lastUserAt, userProfile, groups, realtimeConfig, apiConfig, updateCharacter,
+                        }, { seedOnly: true });
+                    })().catch(err => {
+                        console.warn('[AwayMessage] 云端禁发配置或首条空闲任务同步失败', err);
+                        addToast('离开后消息已保存在本机，但云端同步失败；下次打开会自动重查', 'error');
                     });
-                    if (old?.enabled && (!config.enabled || old.delayMinutes !== config.delayMinutes)) {
-                        void cancelCloudAwayTasks(char, updateCharacter);
-                    }
                 }}
             />}
 
