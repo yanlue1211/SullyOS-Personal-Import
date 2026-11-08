@@ -651,11 +651,12 @@ const ActiveMsg2SettingsModal: React.FC<ActiveMsg2SettingsModalProps> = ({
     && dailySends.day === dayKeyInZone(now, Intl.DateTimeFormat().resolvedOptions().timeZone)
     ? dailySends : null;
   const todayLine = todayCount && todayCount.sends > 0
-    ? `今天 TA 已主动找你 ${todayCount.sends} 次`
+    ? `今天 TA 的主动预约已发送 ${todayCount.sends} 次`
       + (todayCount.llmCalls ? `，后台一共调用了 ${todayCount.llmCalls} 次 AI` : '')
     : null;
   // 关掉「可以排重复的」时会一起取消的那几条（在那一页上提前说）。
-  const selfRecurringTaskCount = tasks.filter((t) => t.source === 'character'
+  const scheduleTasks = tasks.filter((t) => !t.away);
+  const selfRecurringTaskCount = scheduleTasks.filter((t) => t.source === 'character'
     && t.recurrenceType !== 'none' && isPendingTask(t, now)).length;
 
   return (
@@ -787,14 +788,14 @@ const ActiveMsg2SettingsModal: React.FC<ActiveMsg2SettingsModalProps> = ({
 
         {/* 关着 2.0 也照样列出来：关闭时没取消掉的任务还会响，藏起来的话用户只能对着
             一个空面板盲点「关闭 2.0」重试。关着时只给「取消」，不给编辑。 */}
-        {tasks.length > 0 ? (
+        {scheduleTasks.length > 0 ? (
           <div>
             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 block pl-1">
-              任务列表（{tasks.length}）
+              TA 的主动预约（{scheduleTasks.length}）
             </label>
             {/* 一次 render 内所有任务用同一个 now，免得同屏卡片踩在不同的时刻上判定。 */}
             <div className="space-y-2">
-              {tasks.map((t) => {
+              {scheduleTasks.map((t) => {
                 // 循环任务显示的是「下一次」，不是创建时那个锚点（见 currentOccurrenceMs）。
                 const occurrenceMs = currentOccurrenceMs(t, now);
                 const missingRemote = isRemoteMissingTask(t, knownRemoteUuids, now);
