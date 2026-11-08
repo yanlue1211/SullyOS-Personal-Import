@@ -3,6 +3,8 @@ import Modal from '../os/Modal';
 import { CharacterProfile } from '../../types';
 import { AWAY_DELAY_OPTIONS, resolveAwayDelayMinutes } from '../../utils/awayMessageCore';
 import { isAwayCloudRoute, isAwayCloudWorkerCompatible } from '../../utils/awayMessage';
+import { ActiveMsgClient } from '../../utils/activeMsgClient';
+import type { AmsgDailySends } from '../../utils/amsgLimits';
 
 interface AwayMessageSettingsModalProps {
     isOpen: boolean;
@@ -21,6 +23,8 @@ const AwayMessageSettingsModal: React.FC<AwayMessageSettingsModalProps> = ({ isO
     const [quietEnd, setQuietEnd] = useState(char.awayMessage?.quietHours?.endTime || '08:00');
     const [cloud, setCloud] = useState<boolean | null>(null);
     const [workerCompatible, setWorkerCompatible] = useState<boolean | null>(null);
+    const [nextAwayAt, setNextAwayAt] = useState<string | null>(null);
+    const [awayDailySends, setAwayDailySends] = useState<AmsgDailySends | null>(null);
 
     useEffect(() => {
         if (!isOpen) return;
@@ -32,12 +36,29 @@ const AwayMessageSettingsModal: React.FC<AwayMessageSettingsModalProps> = ({ isO
         let cancelled = false;
         setCloud(null);
         setWorkerCompatible(null);
+        setNextAwayAt(null);
+        setAwayDailySends(null);
         void isAwayCloudRoute(char).then(async v => {
             if (cancelled) return;
             setCloud(v);
             if (v) {
                 const ready = await isAwayCloudWorkerCompatible();
                 if (!cancelled) setWorkerCompatible(ready);
+                if (ready) {
+                    const [remote, status] = await Promise.allSettled([
+                        ActiveMsgClient.listRemoteTasksForChar(char.id),
+                        ActiveMsgClient.readPanelStatus(char.id),
+                    ]);
+                    if (cancelled) return;
+                    if (remote.status === 'fulfilled') {
+                        const next = remote.value
+                            .filter(task => task.status === 'pending' && task.clientTaskId?.startsWith('away-'))
+                            .map(task => task.nextSendAt).filter((at): at is string => Boolean(at))
+                            .sort()[0];
+                        setNextAwayAt(next ?? null);
+                    }
+                    if (status.status === 'fulfilled') setAwayDailySends(status.value.awayDailySends);
+                }
             }
         });
         return () => { cancelled = true; };
@@ -119,11 +140,23 @@ const AwayMessageSettingsModal: React.FC<AwayMessageSettingsModalProps> = ({ isO
                               </div>
                             )}
                         </div>
+                        {cloud && workerCompatible && (
+                            <div className="pt-2 border-t border-slate-100 text-xs text-violet-700 leading-relaxed">
+                                <p>下一次离开提醒：{nextAwayAt
+                                    ? new Date(nextAwayAt).toLocaleString()
+                                    : '暂无云端待触发任务（保存后会补建，或下次进入时自动检查）'}</p>
+                                {awayDailySends?.day === new Date().toLocaleDateString('en-CA') && (
+                                    <p className="mt-1">今天离开后成功联系 {awayDailySends.sends} 次
+                                        {awayDailySends.llmCalls != null ? ` · 后台 AI 调用 ${awayDailySends.llmCalls} 次` : ''}
+                                    </p>
+                                )}
+                            </div>
+                        )}
                         <p className="pt-2 border-t border-slate-100 text-[11px] text-slate-400 leading-relaxed">
                             {cloud === null ? '正在确认 Worker…' : cloud
                                 ? workerCompatible === null ? '正在核对云端 Worker 版本…'
                                     : workerCompatible
-                                        ? `${char.name} 开着主动消息 2.0：到时间会直接推送给你。这一次算作「没回时找你」，受主动频率里的上限管。`
+                                        ? `${char.name} 已使用独立空闲提醒：与 TA 的自主预约分开计数，睡眠禁发和见面/通话保护只拦自动空闲机会。`
                                         : '云端 Worker 版本未匹配或无法验证：已保护旧任务，暂停创建新的循环空闲提醒。先检查主动消息2.0的 Worker 更新状态。'
                                 : `没有云端2.0时，打开 SullyOS 只检查最新一个有效时间点，不会一次补发多条；通过检查才会调用API。`}
                         </p>
