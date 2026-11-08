@@ -9,10 +9,12 @@ export interface AmsgInteractionMessage {
 }
 
 /**
- * 通话是否尚未显式挂断由客户端持久化，不能在页面被系统杀掉后直接推断「通话结束」。
- * 存的是布尔状态，不存任何通话正文/密钥。
+ * 通话锁仅对当前正在运行的 JS 会话有效：手机杀后台意味着真实的
+ * 通话 UI / 音频已终止，绝不能凭昨天 localStorage 里的 true 持续拦截。
+ * 后台/锁屏没有重启 JS 时内存锁仍在，云端另有带 TTL 的低频心跳。
  */
-const ACTIVE_CALL_KEY = 'sully_amsg2_call_active_v1';
+const ACTIVE_CALL_KEY = 'sully_amsg2_call_active_v1'; // legacy marker, ignored as liveness proof
+const activeCallsInThisRuntime = new Set<string>();
 const ACTIVE_DATE_KEY = 'sully_amsg2_date_active_v1';
 const ACTIVE_DATE_ENCOUNTER_KEY = 'sully_amsg2_date_encounter_v1';
 const ACTIVE_DATE_ENDED_AT_KEY = 'sully_amsg2_date_ended_at_v1';
@@ -79,6 +81,10 @@ export function isAmsgActiveDate(charId: string): boolean {
 }
 export function setAmsgActiveCall(charId: string, active: boolean): void {
   if (!charId) return;
+  if (active) activeCallsInThisRuntime.add(charId);
+  else activeCallsInThisRuntime.delete(charId);
+  // Keep the old best-effort marker solely for older clients; never read it back
+  // as a live call after the app has restarted.
   try {
     const old = JSON.parse(localStorage.getItem(ACTIVE_CALL_KEY) || '{}') as Record<string, boolean>;
     if (active) old[charId] = true;
@@ -87,10 +93,7 @@ export function setAmsgActiveCall(charId: string, active: boolean): void {
   } catch { /* 隐私浏览器回退为消息来源推断 */ }
 }
 export function isAmsgActiveCall(charId: string): boolean {
-  try {
-    const map = JSON.parse(localStorage.getItem(ACTIVE_CALL_KEY) || '{}') as Record<string, unknown>;
-    return map[charId] === true;
-  } catch { return false; }
+  return activeCallsInThisRuntime.has(charId);
 }
 
 /**
