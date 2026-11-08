@@ -929,6 +929,7 @@ var parseAmsgLimitsRecord = (value) => {
   return null;
 };
 var AMSG_DAILY_SENDS_KEY = "daily_sends";
+var AMSG_AWAY_DAILY_SENDS_KEY = "away_daily_sends";
 var DAILY_COUNTED_KEEP = 20;
 var dayKeyInZone = (nowMs, tzId) => {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -1206,14 +1207,21 @@ var createSelfLog = (basePackAt, anchorUserMsgAt = null) => ({
   anchorUserMsgAt,
   entries: [],
   unansweredSends: 0,
+  awayUnansweredSends: 0,
+  separatedAwayCounts: true,
   recurringSends: {},
   tasks: []
 });
-var countUnansweredSends = (log) => log ? log.unansweredSends : 0;
+var countUnansweredSends = (log) => {
+  if (!log) return 0;
+  if (log.separatedAwayCounts === true) return log.unansweredSends;
+  return Math.min(log.unansweredSends, log.entries.filter((e) => !e.reply && !e.away && !e.id.startsWith("away-")).length);
+};
+var countAwayUnansweredSends = (log) => log?.awayUnansweredSends ?? log?.entries.filter((e) => e.away || e.id.startsWith("away-")).length ?? 0;
 var reconcileSelfLogWithPack = (stored, pack, lastUserMessageAt) => {
   let log = stored ?? createSelfLog(pack.builtAt, lastUserMessageAt);
   if (lastUserMessageAt != null && (log.anchorUserMsgAt == null || lastUserMessageAt > log.anchorUserMsgAt)) {
-    log = { ...log, anchorUserMsgAt: lastUserMessageAt, entries: [], unansweredSends: 0, recurringSends: {} };
+    log = { ...log, anchorUserMsgAt: lastUserMessageAt, entries: [], unansweredSends: 0, awayUnansweredSends: 0, separatedAwayCounts: true, recurringSends: {} };
   }
   if (log.basePackAt !== pack.builtAt) {
     const adopted = new Set(pack.pendingTasks.map((task) => task.taskUuid));
@@ -1239,7 +1247,9 @@ var appendSelfLogEntry = (log, entry) => {
   return {
     ...log,
     entries: [...kept, { ...entry, text: text2 }].slice(-SELF_LOG_MAX_ENTRIES),
-    unansweredSends: log.unansweredSends + (entry.reply || alreadyLogged ? 0 : 1)
+    unansweredSends: countUnansweredSends(log) + (entry.reply || entry.away || alreadyLogged ? 0 : 1),
+    awayUnansweredSends: countAwayUnansweredSends(log) + (entry.away && !alreadyLogged ? 1 : 0),
+    separatedAwayCounts: true
   };
 };
 var parseSelfLog = (value) => {
@@ -13707,7 +13717,7 @@ var currentOccurrenceMs = (task, nowMs) => {
 };
 var buildFireTaskListBlock = (tasks, opts) => {
   const tz = { tzId: opts.tzId };
-  const listed = tasks.filter((t) => isPendingTask(t, opts.nowMs)).filter((t) => !opts.excludeClientTaskId || t.clientTaskId !== opts.excludeClientTaskId);
+  const listed = tasks.filter((t) => !t.away && isPendingTask(t, opts.nowMs)).filter((t) => !opts.excludeClientTaskId || t.clientTaskId !== opts.excludeClientTaskId);
   if (listed.length === 0) return "";
   return [
     "",
@@ -14778,7 +14788,6 @@ function shouldSkipAwayForQuietHours(args) {
 }
 
 // utils/awayMessageCore.ts
-var AWAY_RENEW_SLACK_MS = 10 * 6e4;
 var nextAwayTickMs = (occurrenceMs, intervalMs, nowMs) => {
   if (!Number.isFinite(occurrenceMs) || !Number.isFinite(nowMs) || !Number.isFinite(intervalMs) || intervalMs <= 0) throw new Error("Invalid away tick");
   return occurrenceMs + (Math.floor(Math.max(0, nowMs - occurrenceMs) / intervalMs) + 1) * intervalMs;
@@ -19433,7 +19442,7 @@ var amsgFireSettled = async (info) => {
         llmCalls,
         sentId: `${stash.clientTaskId || "task"}@${stash.occurrenceMs}`
       });
-      stateWrites.push({ key: AMSG_DAILY_SENDS_KEY, value: JSON.stringify(stash.dailySends) });
+      stateWrites.push({ key: stash.dailySendsKey, value: JSON.stringify(stash.dailySends) });
     }
   }
   if (stash.instant && info.status === "failed" && info.willRetry === false && !committed && stash.taskUuid) {
@@ -19484,7 +19493,8 @@ var amsgFireSettled = async (info) => {
       text: text2,
       // 即时对话是在答用户刚说的话——列进自述块保持连续性，但不占「主动连发」的额度
       // （带这个标记的条目不会让 selfLog.unansweredSends 加一）。
-      ...stash.instant ? { reply: true } : {}
+      ...stash.instant ? { reply: true } : {},
+      ...stash.away ? { away: true } : {}
     });
     if (next !== stash.selfLog) {
       stash.selfLog = next;
@@ -19612,10 +19622,10 @@ var raceEmotionEval = (promise, lateNote = "\u8BC4\u4F30\u6CA1\u8D76\u4E0A\u8FD9
 };
 var countCommittedSelfSends = (stash) => {
   const refundedSends = stash.cancelledTasks.filter((uuid) => stash.plannedSelfSendUuids.includes(uuid)).length;
-  return countUnansweredSends(stash.selfLog) + stash.plannedSelfSends - refundedSends + stash.scheduledTasks.length + (stash.instant ? 0 : 1);
+  return countUnansweredSends(stash.selfLog) + stash.plannedSelfSends - refundedSends + stash.scheduledTasks.length + (stash.instant || stash.away ? 0 : 1);
 };
 var selfScheduleBusyTimes = (stash, nowMs, excludeUuid) => {
-  const busy = liveTaskView(stash).filter((t) => t.taskUuid !== excludeUuid).map((t) => currentOccurrenceMs(t, nowMs)).filter((ms) => ms != null);
+  const busy = liveTaskView(stash).filter((t) => t.taskUuid !== excludeUuid && !t.away).map((t) => currentOccurrenceMs(t, nowMs)).filter((ms) => ms != null);
   if (stash.lastSelfSendAt != null) busy.push(stash.lastSelfSendAt);
   if (!stash.instant) busy.push(nowMs);
   return busy;
@@ -20162,7 +20172,7 @@ var amsgHooks = {
       return { skip: true };
     }
     const maxUnansweredSends = limits.maxUnansweredSends;
-    if (!instant && (selfScheduled || away) && countUnansweredSends(selfLog) >= maxUnansweredSends) {
+    if (!instant && selfScheduled && countUnansweredSends(selfLog) >= maxUnansweredSends) {
       console.log("[amsg:unanswered-limit-skip]", {
         taskId: ctx.task.id,
         charId,
@@ -20173,7 +20183,7 @@ var amsgHooks = {
       return { skip: true };
     }
     const occurrenceEntryId = `${clientTaskId || "task"}@${occurrenceMs}`;
-    const lastSelfSendAt = selfLog.entries.filter((e) => !e.reply && e.id !== occurrenceEntryId).map((e) => e.startedAt ?? e.at).reduce((latest, at) => latest == null || at > latest ? at : latest, null);
+    const lastSelfSendAt = selfLog.entries.filter((e) => !e.reply && !e.away && !e.id.startsWith("away-") && e.id !== occurrenceEntryId).map((e) => e.startedAt ?? e.at).reduce((latest, at) => latest == null || at > latest ? at : latest, null);
     if (!instant && selfScheduled && limits.minSendGapMs > 0 && lastSelfSendAt != null && nowMs < lastSelfSendAt + limits.minSendGapMs - FIRE_GAP_TOLERANCE_MS) {
       console.log("[amsg:min-gap-skip]", {
         taskId: ctx.task.id,
@@ -20195,9 +20205,11 @@ var amsgHooks = {
       return { skip: true };
     }
     const dailyDay = dayKeyInZone(nowMs, pack.userTzId);
-    const dailySends = parseDailySends(charRows.find((r) => r.key === AMSG_DAILY_SENDS_KEY)?.value);
-    const sentToday = sendsOnDay(dailySends, dailyDay);
-    if (!instant && sentToday >= limits.dailySendCap) {
+    const dailySendsKey = away ? AMSG_AWAY_DAILY_SENDS_KEY : AMSG_DAILY_SENDS_KEY;
+    const dailySends = parseDailySends(charRows.find((r) => r.key === dailySendsKey)?.value);
+    const normalDailySends = away ? parseDailySends(charRows.find((r) => r.key === AMSG_DAILY_SENDS_KEY)?.value) : dailySends;
+    const sentToday = sendsOnDay(normalDailySends, dailyDay);
+    if (!instant && !away && sentToday >= limits.dailySendCap) {
       console.log("[amsg:daily-limit-skip]", {
         taskId: ctx.task.id,
         charId,
@@ -20228,6 +20240,7 @@ var amsgHooks = {
             recurrenceType: row.recurrenceType || "none",
             expirePolicy: meta.amsgExpirePolicy === "force" ? "force" : old?.expirePolicy || "expire",
             source: meta.amsgSelfScheduled === true ? "character" : old?.source || "user",
+            away: meta[AMSG_AWAY_MESSAGE_META] === true || old?.away === true,
             status: "scheduled",
             createdAt: old?.createdAt || Date.parse(row.createdAt || "") || nowMs
           });
@@ -20242,7 +20255,7 @@ var amsgHooks = {
     const canSelfSchedule = typeof ctx.scheduleTask === "function" && selfScheduleAllowed;
     const tz = { tzId: pack.tzId };
     const { toolCtx, proxyWorkerUrl, xhsCookie } = buildToolCtx(toolPack, toolConfig);
-    const plannedSelfSendTasks = otherLiveTasks.filter((t) => t.source === "character" && (ctx.listTasks || isPendingTask(t, ctx.now.getTime())) && t.taskUuid !== ctx.task.uuid);
+    const plannedSelfSendTasks = otherLiveTasks.filter((t) => !t.away && t.source === "character" && (ctx.listTasks || isPendingTask(t, ctx.now.getTime())) && t.taskUuid !== ctx.task.uuid);
     const stash = {
       selfScheduleAllowed,
       thinkingChainEnabled: pack.thinkingChainEnabled === true,
@@ -20265,7 +20278,7 @@ var amsgHooks = {
       mcpSpentMs: 0,
       // 「还能不能再排」按客户端已知的 + 角色自己排过还没被认领的一起算，
       // 不然角色离线期间连排几次就能绕过每角色的任务上限。
-      pendingTaskCount: otherLiveTasks.length,
+      pendingTaskCount: otherLiveTasks.filter((t) => !t.away).length,
       pendingTasks: livePendingTasks,
       scheduledTasks: [],
       // 序号与 scheduledTasks 一样从空账起步；此后只增不减（取消不回退，见字段注释）。
@@ -20277,6 +20290,8 @@ var amsgHooks = {
       recurring,
       dailyDay,
       dailySends,
+      dailySendsKey,
+      away,
       dailyCounted: false,
       firedAt: nowMs,
       plannedSelfSends: plannedSelfSendTasks.length,
@@ -20324,7 +20339,7 @@ var amsgHooks = {
     const limitsBrief = canSelfSchedule ? buildLimitsBrief({
       limits,
       committedSends: countCommittedSelfSends(stash),
-      activeTasks: otherLiveTasks.length,
+      activeTasks: otherLiveTasks.filter((t) => !t.away).length,
       earliestText: limits.minSendGapMs > 0 ? formatFireTimeShort(earliestSlotAfter(
         nowMs + MIN_SCHEDULE_LEAD_MS2,
         limits.minSendGapMs,
