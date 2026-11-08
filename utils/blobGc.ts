@@ -56,6 +56,7 @@
 
 import { DB } from './db';
 import { blobStore } from './blobStore';
+import { withAssetReferenceLock } from './assetReferenceLock';
 import { tryAcquireMaintenanceLock, releaseMaintenanceLock, currentMaintenanceHolder } from './maintenanceLock';
 
 // 引用面里的 17 张表。名字与 db.ts 的 STORE_* 常量值一一对应
@@ -136,7 +137,11 @@ export async function runBlobGc(opts?: { minAgeMs?: number }) {
         throw new Error(`另一项存储维护（${currentMaintenanceHolder()}）正在进行，请稍后再试。`);
     }
     try {
-        return await blobStore.gc({ refSources: iterateRefSources(), ...opts });
+        // Keep mark + sweep under one cross-tab maintenance lock. The SDK still
+        // owns all its own safety valves, including the 72-hour age fence.
+        return await withAssetReferenceLock('exclusive', () =>
+            blobStore.gc({ refSources: iterateRefSources(), ...opts }),
+        );
     } finally {
         releaseMaintenanceLock();
     }

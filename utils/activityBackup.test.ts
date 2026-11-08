@@ -8,7 +8,7 @@ import { stripBackupImages } from './backupExport';
 import { streamBackupArrayStore } from './backupStoreStreaming';
 import { assembleV2Backup, writeV2Backup } from './backupFormat';
 import { collectBlobRefs, readBlobsIndex, restoreBlobsFromZip, writeBlobsToZip } from './backupBlobs';
-import { deleteBlobRef, getBlobForRef, putImageBlob, restoreBlobRef } from './blobRef';
+import { getBlobForRef, putImageBlob, restoreBlobRef } from './blobRef';
 import { assignHalloweenCostume, finishHalloweenDialogue, giveHalloweenCandy } from './vrWorld/kanataHalloween';
 import { addCatchToState, createFishingMarketState, readFishingMarketState, rollFishingCatch, saveFishingMarketState } from './vrWorld/fishingMarket';
 import { ensureDinosaurGarden } from './vrWorld/dinosaurGarden';
@@ -38,7 +38,10 @@ async function archive(data: Record<string, unknown>, zip = new JSZip(), prewrit
     const loaded = await JSZip.loadAsync(await zip.generateAsync({type:'uint8array'}));
     const restored = await assembleV2Backup(loaded,JSON.parse(await loaded.file('manifest.json')!.async('string')));
     // Simulate moving to a device without the original image bytes.
-    for (const token of refs) { await deleteBlobRef(token); expect(await getBlobForRef(token)).toBeNull(); }
+    // Test-only device-transfer fixture: erase bytes directly while references still
+    // exist in the source DB. Production deleteBlobRef now intentionally refuses
+    // to delete referenced media (e.g. the feed we are backing up).
+    for (const token of refs) { await DB.deleteBlobAsset(token.slice('blobref:'.length)); expect(await getBlobForRef(token)).toBeNull(); }
     await restoreBlobsFromZip(loaded,await readBlobsIndex(loaded),restoreBlobRef);
     return restored;
 }
