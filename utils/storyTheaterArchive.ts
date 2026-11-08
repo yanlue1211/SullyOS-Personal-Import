@@ -1,7 +1,7 @@
 import type { APIConfig, Message, StoryTheaterArchive, StoryTheaterEntry } from '../types';
 import { DB, openDB } from './db';
 import { extractContent, safeResponseJson } from './safeApi';
-import { describeStoryApiError, storyTheaterThreadId } from './storyTheater';
+import { describeStoryApiError, makeStoryTheaterId, storyTheaterThreadId } from './storyTheater';
 import { hasSummaryReasoningLeak } from './summaryReasoning';
 
 /** Summaries must come from the final channel, never a reasoning-only fallback. */
@@ -59,6 +59,87 @@ const sourceKey = (entry: StoryTheaterEntry, archive: StoryTheaterArchive) => JS
 ]);
 const rowsKey = (messages: Message[]) => JSON.stringify(messages.map(message => [message.id, message.role, message.content]));
 const running = new Set<string>();
+
+/** Explicit-only: archive *all* unfinished layers of a saved fictional theater.
+ * The API request is only made on a user click. Original messages stay intact.
+ * If other tabs mutate the entry or messages during generation, the transaction
+ * aborts instead of overwriting newer work or marking unprocessed text archived.
+ */
+export async function archiveStoryManually(
+    entryId: string,
+    api: Pick<APIConfig, 'baseUrl' | 'apiKey' | 'model'>,
+): Promise<StoryTheaterEntry> {
+    const key = `manual:${entryId}`;
+    if (running.has(key)) throw new Error('正在总结这段剧情，请稍候');
+    running.add(key);
+    try {
+        const entry = (await DB.getStoryTheaters()).find(item => item.id === entryId);
+        if (!entry) throw new Error('请先保存这段剧情');
+        if (entry.writesToCharacterMemory || entry.archiveMode !== 'manual') {
+            throw new Error('只有开启手动总结的虚构剧场可以使用此功能');
+        }
+        const threadId = storyTheaterThreadId(entryId);
+        const pendingRows = (rows: Message[]): Message[] => rows
+            .filter(row => row.charId === threadId && !row.groupId
+                && row.metadata?.source === 'story_theater' && !row.metadata?.theaterArchived)
+            .sort((a, b) => a.id - b.id);
+        const rows = pendingRows(await DB.getMessagesByCharId(threadId, true));
+        if (!rows.length) throw new Error('暂时没有待总结的剧情');
+        if (rows[rows.length - 1].role !== 'assistant') {
+            throw new Error('请先完成本轮回复，再手动总结');
+        }
+        const summary = await generateStoryArchiveSummary(entry.title, rows, api);
+        const db = await openDB();
+        return new Promise<StoryTheaterEntry>((resolve, reject) => {
+            // Atomic update: either all source layers and the box persist, or none.
+            const tx = db.transaction(['story_theaters', 'messages'], 'readwrite');
+            const stories = tx.objectStore('story_theaters');
+            const messages = tx.objectStore('messages');
+            const readStory = stories.get(entryId);
+            const readRows = messages.index('charId').getAll(IDBKeyRange.only(threadId));
+            let waiting = 2, updated: StoryTheaterEntry, failure: unknown;
+            tx.oncomplete = () => resolve(updated);
+            tx.onerror = () => reject(failure || tx.error);
+            tx.onabort = () => reject(failure || tx.error || new Error('总结保存失败，原文已保留'));
+            const finish = () => {
+                if (--waiting) return;
+                try {
+                    const current = readStory.result as StoryTheaterEntry | undefined;
+                    const liveRows = pendingRows(readRows.result as Message[]);
+                    if (!current || current.writesToCharacterMemory || current.archiveMode !== 'manual'
+                        || JSON.stringify(current) !== JSON.stringify(entry)
+                        || rowsKey(liveRows) !== rowsKey(rows)) {
+                        throw new Error('剧情已在其他窗口变更，本次没有归档，请重新打开后重试');
+                    }
+                    updated = {
+                        ...current,
+                        archives: [...current.archives, {
+                            id: makeStoryTheaterId(), strategy: 'summary', summary,
+                            fromMessageId: rows[0].id, toMessageId: rows[rows.length - 1].id,
+                            messageCount: rows.length, createdAt: Date.now(),
+                        }],
+                        updatedAt: Date.now(),
+                    };
+                    for (const row of liveRows) {
+                        messages.put({ ...row, metadata: {
+                            ...row.metadata,
+                            theaterArchived: true,
+                            theaterArchiveStrategy: 'summary',
+                        } });
+                    }
+                    stories.put(updated);
+                } catch (error) {
+                    failure = error;
+                    tx.abort();
+                }
+            };
+            readStory.onsuccess = finish;
+            readRows.onsuccess = finish;
+        });
+    } finally {
+        running.delete(key);
+    }
+}
 
 export async function regenerateStoryArchiveSummary(entryId: string, archiveId: string, api: Pick<APIConfig, 'baseUrl' | 'apiKey' | 'model'>): Promise<StoryTheaterEntry> {
     const key = JSON.stringify([entryId, archiveId]);
