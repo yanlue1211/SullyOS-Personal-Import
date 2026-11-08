@@ -791,7 +791,11 @@ export const useChatAI = ({
             const fullHistory = contextRange?.messages || null;
             const contextMsgs = fullHistory || currentMsgs;
             // 离开后消息（云端）：对方刚开过口，把那条任务往后推。不等它，失败只影响这一条。
-            const awayLastUserAt = getLastRealUserMessageAt(contextMsgs);
+            // DB 上下文范围可能只包含上一轮；刚发送的消息先进入 React state。
+            // 取两份的较新真实用户时间，避免以旧锚点推算，导致下一次离开提醒不改期。
+            const awayFromContext = getLastRealUserMessageAt(contextMsgs);
+            const awayFromCurrent = getLastRealUserMessageAt(currentMsgs);
+            const awayLastUserAt = Math.max(awayFromContext ?? 0, awayFromCurrent ?? 0) || null;
             if (char.awayMessage?.enabled && awayLastUserAt != null) {
                 void syncCloudAwayTask({
                     char, lastUserAt: awayLastUserAt, userProfile, groups, realtimeConfig, apiConfig, updateCharacter,
