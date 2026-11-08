@@ -2798,7 +2798,7 @@ export const ActiveMsgClient = {
     // 用户和角色共用（见 amsgLimits 的 maxActiveTasks）。
     const maxActiveTasks = resolveAmsgLimits(config).maxActiveTasks;
     const pendingOthers = getPendingTasks(config, Date.now())
-      .filter((t) => t.taskUuid !== replaceTaskUuid);
+      .filter((t) => t.taskUuid !== replaceTaskUuid && !t.away);
     // 离开后消息是用户开的系统任务，不跟角色抢名额；名额满时它也不能建不出来。
     if (!task.away && pendingOthers.length >= maxActiveTasks) {
       throw new Error(`该角色已经排好了 ${maxActiveTasks} 次主动消息，到上限了（上限在「主动频率」里调），请先取消或合并已有的。`);
