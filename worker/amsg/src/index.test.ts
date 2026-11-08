@@ -761,8 +761,9 @@ describe('离开后云端机会不依赖预约消息开关', () => {
       } as any);
       const trace = writeState.mock.calls.flatMap(([, entries]) =>
         entries.filter((e: { key: string }) => e.key === AMSG_AWAY_TRACE_KEY));
-      expect(trace, item.status).toHaveLength(1);
-      expect(JSON.parse(String(trace[0].value)).entries[0]).toMatchObject({
+      // onBeforeFire 先记 Worker 已进入，收尾覆盖同一机会；测试假的 readState 不持久化。
+      expect(trace, item.status).toHaveLength(2);
+      expect(JSON.parse(String(trace.at(-1)!.value)).entries[0]).toMatchObject({
         stage: item.expected, llmCalls: 1,
       });
     }
@@ -780,7 +781,8 @@ describe('离开后云端机会不依赖预约消息开关', () => {
     } as any);
     const trace = writeState.mock.calls.flatMap(([, entries]) =>
       entries.filter((e: { key: string }) => e.key === AMSG_AWAY_TRACE_KEY));
-    expect(JSON.parse(String(trace[0].value)).entries[0]).toMatchObject({
+    expect(trace).toHaveLength(2);
+    expect(JSON.parse(String(trace.at(-1)!.value)).entries[0]).toMatchObject({
       stage: 'silent', reason: 'side-effects-only', llmCalls: 1,
     });
   });
