@@ -249,9 +249,11 @@ export interface LocalAwayDeps {
 
 let localRunning = false;
 const localCooldownUntil = new Map<string, number>();
-// 一次前台会话最多给每个角色核查一次远端空闲链；失败允许下次切前台重试。
-// key 带间隔，避免改设置后旧标记挡住新配置。
-const cloudSeededSession = new Set<string>();
+// 前台检查成功后短暂冷却，避免多次切出切入反复读 Worker。
+// 不能整次页面会话永久跳过：Worker 如果丢失下一节拍，之后切回前台还要能补链。
+// key 带间隔，避免改设置后旧标记挡住新配置；失败不缓存，下一次可重试。
+const CLOUD_SEED_RECHECK_MS = 15 * 60_000;
+const cloudSeededUntil = new Map<string, number>();
 
 /** 打开页面 / 切回前台时调用：逐个给该补的角色补上离开期间的消息。 */
 export const runLocalAwayMessages = async (deps: LocalAwayDeps): Promise<void> => {
@@ -263,7 +265,7 @@ export const runLocalAwayMessages = async (deps: LocalAwayDeps): Promise<void> =
       try {
         if (await isAwayCloudRoute(char)) {
           const seedKey = char.id + ':' + resolveAwayDelayMinutes(char);
-          if (cloudSeededSession.has(seedKey)) continue;
+          if ((cloudSeededUntil.get(seedKey) ?? 0) > Date.now()) continue;
           const userProfile = deps.getUserProfile();
           if (!userProfile) continue;
           const recent = await DB.getRecentMessagesByCharId(char.id, 50, true);
@@ -276,7 +278,7 @@ export const runLocalAwayMessages = async (deps: LocalAwayDeps): Promise<void> =
             realtimeConfig: deps.getRealtimeConfig(), apiConfig: deps.getApiConfig(),
             updateCharacter: deps.updateCharacter,
           }, { seedOnly: true });
-          if (ready) cloudSeededSession.add(seedKey);
+          if (ready) cloudSeededUntil.set(seedKey, Date.now() + CLOUD_SEED_RECHECK_MS);
           continue;
         }
         // 云端仍须在见面或通话中完成补建，以免前台关闭后完全没有循环任务；
