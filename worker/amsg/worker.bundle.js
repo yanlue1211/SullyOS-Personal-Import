@@ -20187,6 +20187,12 @@ var amsgHooks = {
         });
         return { defer: { afterMs: 5 * 6e4 } };
       }
+      await writeAwayTrace(ctx.readState, ctx.writeState, charId, {
+        id: `${String(ctx.task.uuid || "unknown")}@${occurrenceMs}`,
+        at: ctx.now.getTime(),
+        occurrenceMs,
+        stage: "entered"
+      });
       if (isStaleAwayTick(occurrenceMs, ctx.now.getTime())) {
         console.log("[amsg:away-skip]", { taskId: ctx.task.id, reason: "missed-slot" });
         await recordAwaySkip("away-missed-slot");
@@ -20540,12 +20546,6 @@ ${userHoliday}` });
       // 到点的自动续排、禁发零LLM均已在 onBeforeFire 完成；这里绝不额外调用模型。
       mustSpeak: false
     }), userHoliday) + mcpBlock + scheduleBlock + replyScopeBlock;
-    if (away) await writeAwayTrace(ctx.readState, ctx.writeState, charId, {
-      id: `${String(ctx.task.uuid || "unknown")}@${occurrenceMs}`,
-      at: ctx.now.getTime(),
-      occurrenceMs,
-      stage: "entered"
-    });
     return {
       messages: [{ role: "user", content: prompt }],
       ...common
