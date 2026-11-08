@@ -679,19 +679,15 @@ ${uname} 的化身正挂在《彼方》的【${roomName}】${act ? `，状态写
             && (!forFirePack || isWorkerReachableUrl(xhsServerUrl))
         );
         const xhsEnabled = !!(char.xhsEnabled && mcpXhsAvailable);
-        // `[schedule_message]` 排的是本地定时消息：存在浏览器里，靠 OSContext 那个 5 秒
-        // 轮询的 React 定时器派发，App 关着就不存在。主动消息 2.0 到点生成走的是另一条路
-        // （worker 到点跑，不需要 App 开着），它有自己的排程工具，worker 会把说明追加在
-        // fire_pack 末尾。两套一起教，角色会挑错的那套，然后「我到点叫你」就落空了。
-        // 所以只在「这一轮 worker 不会教云端排程工具」时才教本地标签：
-        // - 打包（forFirePack）：worker 到点必带排程工具说明 → 不教；
-        // - 即时对话（timelyByWorker）且角色开着主动消息 2.0：worker 同样会注入排程
-        //   工具 → 不教。「2.0 开着」的判据与 activeMsgClient 里 fire_pack 的
-        //   selfScheduleEnabled 同源（都走 isAmsg2EnabledForChar）；
-        // - 即时对话但角色 2.0 关着：云端不给排程能力，本地标签是唯一的定时手段 → 照教；
-        // - 本地生成：worker 不参与 → 照教。
-        const scheduleMessageTagEnabled = !forFirePack
-            && !(timelyByWorker && isAmsg2EnabledForChar(char));
+        // `[schedule_message]` 是旧的「本地定时发送」：只靠浏览器 5 秒轮询，
+        // 杀后台后无法保证送达，不等于云端主动消息 2.0 的 schedule_active_message。
+        // 历史上只在及时对话路径屏蔽旧标签，普通聊天即使开着 2.0 仍教两套预约：
+        // Claude 可能调用云端工具，Gemini 却偏向稳定提示词里的本地文本标签。
+        // 按**角色主动消息 2.0 开关**互斥教学（和 worker fire_pack 端口径一致）：
+        // 开着 2.0 → 普通聊天/即时对话都只用云端工具；
+        // 关着 2.0 → 原样保留本地标签，给老用户继续使用；
+        // forFirePack → 始终不教旧本地标签。无需修改旧解析器、定时任务或 Lite。
+        const scheduleMessageTagEnabled = !forFirePack && !isAmsg2EnabledForChar(char);
 
         chatRules += `### 聊天 App 行为规范 (Chat App Rules)
 ${humanStyle ? `**TOP 1｜ChatApp 格式（本节最高优先级）**：你是发消息的真实存在，以自然短句、短气泡为主；一个气泡一行，气泡间直接另起一行（使用真实换行，不要用反斜杠和字母 n 代替换行）。
