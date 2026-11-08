@@ -24,7 +24,7 @@ describe('single-user image reference coordination', () => {
             expect(order).toEqual(['first-start', 'first-end', 'second-start']);
         } finally {
             if (previous) Object.defineProperty(navigator, 'locks', previous);
-            else delete (navigator as Navigator & { locks?: LockManager }).locks;
+            else delete (navigator as any).locks;
         }
     });
 
@@ -44,7 +44,7 @@ describe('single-user image reference coordination', () => {
             expect(calls).toEqual([{ name: 'sully-personal-image-references-v1', mode: 'exclusive' }]);
         } finally {
             if (previous) Object.defineProperty(navigator, 'locks', previous);
-            else delete (navigator as Navigator & { locks?: LockManager }).locks;
+            else delete (navigator as any).locks;
         }
     });
 });
