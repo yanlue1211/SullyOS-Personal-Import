@@ -14439,7 +14439,7 @@ function buildScheduledPush(message, build, extraMeta, bannerBody) {
 }
 
 // utils/amsgBundleVersion.ts
-var AMSG_BUNDLE_VERSION = "2026-11-08.10";
+var AMSG_BUNDLE_VERSION = "2026-11-08.11";
 
 // worker/amsg/src/reproduction.ts
 async function writeDiagnosticStage(writeState, runId, event, fields = {}) {
@@ -14844,6 +14844,22 @@ var parseAmsgChatPresence = (raw) => {
 };
 var isFreshChatPresence = (value, charId, nowMs) => Boolean(
   value && value.v === 1 && value.charId === charId && value.activeAt <= nowMs + 1e4 && nowMs - value.activeAt <= CHAT_PRESENCE_TTL_MS
+);
+
+// utils/amsgCallPresence.ts
+var AMSG_CALL_PRESENCE_KEY = "call_presence_v1";
+var AMSG_CALL_HEARTBEAT_MS = 4 * 6e4;
+var AMSG_CALL_PRESENCE_TTL_MS = 30 * 6e4;
+var parseAmsgCallPresence = (raw) => {
+  try {
+    const value = JSON.parse(raw || "null");
+    return value?.v === 1 && typeof value.charId === "string" && typeof value.active === "boolean" && typeof value.at === "number" && Number.isFinite(value.at) ? value : null;
+  } catch {
+    return null;
+  }
+};
+var isFreshAmsgCallPresence = (presence, charId, nowMs) => Boolean(
+  presence && presence.v === 1 && presence.charId === charId && presence.active === true && presence.at <= nowMs + 6e4 && nowMs - presence.at <= AMSG_CALL_PRESENCE_TTL_MS
 );
 
 // utils/realtimeWorldCore.ts
@@ -20176,8 +20192,15 @@ var amsgHooks = {
         await recordAwaySkip("away-missed-slot");
         return { skip: true };
       }
-      const liveAwayLock = limitsRecord?.awaySceneLock !== void 0 ? limitsRecord.awaySceneLock : pack.awaySceneLock;
-      if (liveAwayLock === "date" || liveAwayLock === "call") {
+      const storedAwayLock = limitsRecord?.awaySceneLock !== void 0 ? limitsRecord.awaySceneLock : pack.awaySceneLock;
+      const callPresenceRow = charRows.find((r) => r.key === AMSG_CALL_PRESENCE_KEY);
+      const liveCall = isFreshAmsgCallPresence(
+        parseAmsgCallPresence(callPresenceRow?.value),
+        charId,
+        ctx.now.getTime()
+      );
+      const liveAwayLock = liveCall ? "call" : storedAwayLock === "date" ? "date" : null;
+      if (liveAwayLock) {
         console.log("[amsg:away-skip]", { taskId: ctx.task.id, reason: "interaction-still-open", mode: liveAwayLock });
         await recordAwaySkip(liveAwayLock === "date" ? "away-date-lock" : "away-call-lock");
         return { skip: true };
