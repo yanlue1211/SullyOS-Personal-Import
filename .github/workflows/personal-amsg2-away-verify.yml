@@ -25,6 +25,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Diagnostic only: one unauthenticated read-only request. A transient failure is UNKNOWN,
+      # not a passing production deployment or reason to block local regression tests.
+      - name: Read-only production Worker preflight (no secrets, no LLM)
+        run: node scripts/amsg2-production-preflight.mjs
       - uses: pnpm/action-setup@v4
         with:
           version: 10
