@@ -718,6 +718,7 @@ describe('离开后云端机会不依赖预约消息开关', () => {
   const awayCtx = (extra: {
     awayEnabled?: boolean;
     sceneLock?: 'date' | 'call';
+    missingToolPack?: boolean;
   } = {}) => {
     const fourHoursAgo = NOW.getTime() - 240 * 60_000;
     const rows = [
@@ -725,7 +726,7 @@ describe('离开后云端机会不依赖预约消息开关', () => {
         selfScheduleEnabled: false,
         ...(extra.sceneLock ? { awaySceneLock: extra.sceneLock } : {}),
       }) },
-      { key: AMSG_TOOL_PACK_KEY, value: toolPackValue },
+      ...(extra.missingToolPack ? [] : [{ key: AMSG_TOOL_PACK_KEY, value: toolPackValue }]),
       limitsRow({ awayEnabled: extra.awayEnabled ?? true, awayDelayMinutes: 240 }, false),
     ];
     const result = makeCtx({
@@ -745,6 +746,21 @@ describe('离开后云端机会不依赖预约消息开关', () => {
     const trace = writeState.mock.calls.flatMap(([, entries]) =>
       entries.filter((e: { key: string }) => e.key === AMSG_AWAY_TRACE_KEY));
     expect(JSON.parse(String(trace[0].value)).entries[0].stage).toBe('entered');
+  });
+
+  it('已续排下一次机会、但 tool_pack 缺失时仍留下 Worker 进入记录（不冒充 AI 静默）', async () => {
+    const { ctx, writeState } = awayCtx({ missingToolPack: true });
+    await expect(amsgHooks.onBeforeFire(ctx)).rejects.toThrow(/tool_pack/);
+    // 旧逻辑在生成完整 prompt 后才写 entered；此时下一条已经安排好，
+    // 面板却显示「没有记录」，无法区别 Worker 工作过与 Char 选择静默。
+    expect(ctx.scheduleTask).toHaveBeenCalledOnce();
+    const trace = writeState.mock.calls.flatMap(([, entries]) =>
+      entries.filter((entry: { key: string }) => entry.key === AMSG_AWAY_TRACE_KEY));
+    expect(trace).toHaveLength(1);
+    expect(JSON.parse(String(trace[0].value)).entries[0]).toMatchObject({
+      stage: 'entered', occurrenceMs: NOW.getTime(),
+    });
+    expect(ctx.scratch.fire).toBeUndefined(); // 没有实际走到模型。
   });
 
   it('实际 Worker 收尾后的成功写成「已入投递」而非保证手机送达，失败和重试另记', async () => {
@@ -806,7 +822,10 @@ describe('离开后云端机会不依赖预约消息开关', () => {
     const awayWrites = writeState.mock.calls.flatMap(([, records]) => records.filter((entry: { key: string }) => entry.key === AMSG_AWAY_LAST_SKIP_KEY));
     expect(JSON.parse(String(awayWrites[0].value)).reason).toBe(sceneLock === 'date' ? 'away-date-lock' : 'away-call-lock');
     const trace = writeState.mock.calls.flatMap(([, records]) => records.filter((entry: { key: string }) => entry.key === AMSG_AWAY_TRACE_KEY));
-    expect(JSON.parse(String(trace[0].value)).entries[0].stage).toBe('skipped');
+    // 先记 Worker 已经完成下一节拍排程；随后 scene lock 把本次机会
+    // 标为跳过（无 LLM）。最终面板以最新的「跳过」为准。
+    expect(trace).toHaveLength(2);
+    expect(JSON.parse(String(trace.at(-1)!.value)).entries[0].stage).toBe('skipped');
   });
 });
 

@@ -2295,6 +2295,14 @@ export const amsgHooks = {
         });
         return { defer: { afterMs: 5 * 60_000 } } as const;
       }
+      // 这里已确认 Worker 真正消费本次离开后节拍，并成功建立下一条云端任务。
+      // 在后续 tool_pack、上下文或模型准备阶段出错时，也要有最少一条客观留痕；
+      // 不能把「下一次已排好，但未发消息」误认成 Char 自己决定不说。
+      // 该状态只表示 Worker 已处理及续排，绝不表示已经调用 AI。
+      await writeAwayTrace(ctx.readState, ctx.writeState, charId, {
+        id: `${String(ctx.task.uuid || 'unknown')}@${occurrenceMs}`,
+        at: ctx.now.getTime(), occurrenceMs, stage: 'entered',
+      });
       if (isStaleAwayTick(occurrenceMs, ctx.now.getTime())) {
         console.log('[amsg:away-skip]', { taskId: ctx.task.id, reason: 'missed-slot' });
         await recordAwaySkip('away-missed-slot');
@@ -2787,10 +2795,6 @@ export const amsgHooks = {
       // 到点的自动续排、禁发零LLM均已在 onBeforeFire 完成；这里绝不额外调用模型。
       mustSpeak: false,
     }), userHoliday) + mcpBlock + scheduleBlock + replyScopeBlock;
-    if (away) await writeAwayTrace(ctx.readState, ctx.writeState, charId, {
-      id: `${String(ctx.task.uuid || 'unknown')}@${occurrenceMs}`,
-      at: ctx.now.getTime(), occurrenceMs, stage: 'entered',
-    });
     return {
       messages: [{ role: 'user' as const, content: prompt }],
       ...common,
