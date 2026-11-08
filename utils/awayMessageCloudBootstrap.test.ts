@@ -2,7 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DB } from './db';
 import { ActiveMsgClient } from './activeMsgClient';
 import { ActiveMsgStore } from './activeMsgStore';
-import { isAwayCloudRoute, runLocalAwayMessages, syncCloudAwayTask } from './awayMessage';
+import {
+  isAwayCloudRoute, runLocalAwayMessages, syncCloudAwayTask, cancelCloudAwayTasks,
+  pauseCloudAwaySyncForSettings, resumeCloudAwaySyncForSettings, waitForCloudAwaySync,
+  isLatestCloudAwaySettings, enqueueCloudAwaySettingsUpdate,
+} from './awayMessage';
 import type { CharacterProfile } from '../types';
 
 vi.mock('./activeMsgClient', () => ({ ActiveMsgClient: {
@@ -181,6 +185,85 @@ describe('cloud away first-task creation and passive repair', () => {
     expect(ActiveMsgClient.updatePendingTasksRemote).toHaveBeenCalledWith(
       ['new-away-uuid'], { nextSendAt: new Date(NOW + 4 * HOUR).toISOString() },
     );
+  });
+
+  it('closing while remote scheduling is in flight waits and cancels the actual new UUID', async () => {
+    const char = makeChar();
+    const deps = createDeps(char);
+    let finishSchedule!: (result: any) => void;
+    vi.mocked(ActiveMsgClient.scheduleCharacterTask).mockImplementationOnce(
+      () => new Promise(resolve => { finishSchedule = resolve; }),
+    );
+    vi.mocked(ActiveMsgClient.listRemoteTasksForChar)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{
+        uuid: 'late-away', clientTaskId: 'away-late-away', status: 'pending',
+        nextSendAt: new Date(NOW + 4 * HOUR).toISOString(),
+      }] as any);
+    const start = syncCloudAwayTask(deps);
+    await vi.waitFor(() => expect(ActiveMsgClient.scheduleCharacterTask).toHaveBeenCalledOnce());
+    const epoch = pauseCloudAwaySyncForSettings(char.id);
+    const cancelling = cancelCloudAwayTasks(char, deps.updateCharacter);
+    await Promise.resolve();
+    // 取消任务不能只看建链前的空清单；须等刚才的排程请求完成。
+    expect(ActiveMsgClient.listRemoteTasksForChar).toHaveBeenCalledOnce();
+    finishSchedule({ uuid: 'late-away', clientTaskId: 'away-late-away', firstSendAt: new Date(NOW + 4 * HOUR).toISOString() });
+    expect(await start).toBe(false);
+    await cancelling;
+    expect(ActiveMsgClient.cancelTask).toHaveBeenCalledExactlyOnceWith('late-away');
+    // 已经关掉的角色不能被旧的成功回执写回一条本地幽灵任务。
+    expect(deps.updateCharacter).toHaveBeenCalledOnce();
+    const filtered = deps.updateCharacter.mock.calls[0][1];
+    expect(filtered({ activeMsg2Config: { enabled: false, tasks: [] } } as any)
+      .activeMsg2Config.tasks).toEqual([]);
+    resumeCloudAwaySyncForSettings(char.id, epoch);
+  });
+
+  it('old pending user rearm is discarded after settings change, never creates another old-interval chain', async () => {
+    const char = makeChar();
+    const deps = createDeps(char);
+    let finishSchedule!: (result: any) => void;
+    vi.mocked(ActiveMsgClient.scheduleCharacterTask).mockImplementationOnce(
+      () => new Promise(resolve => { finishSchedule = resolve; }),
+    );
+    const start = syncCloudAwayTask({ ...deps, lastUserAt: NOW - 5 * HOUR });
+    await vi.waitFor(() => expect(ActiveMsgClient.scheduleCharacterTask).toHaveBeenCalledOnce());
+    await syncCloudAwayTask({ ...deps, lastUserAt: NOW });
+    const epoch = pauseCloudAwaySyncForSettings(char.id);
+    finishSchedule({ uuid: 'old-away', clientTaskId: 'away-old-away', firstSendAt: new Date(NOW + 4 * HOUR).toISOString() });
+    expect(await start).toBe(false);
+    await waitForCloudAwaySync(char.id);
+    await Promise.resolve();
+    expect(ActiveMsgClient.listRemoteTasksForChar).toHaveBeenCalledOnce();
+    expect(ActiveMsgClient.scheduleCharacterTask).toHaveBeenCalledOnce();
+    resumeCloudAwaySyncForSettings(char.id, epoch);
+  });
+
+  it('rapid settings changes remain serialized and only the latest can resume cloud activity', async () => {
+    const char = makeChar();
+    const order: string[] = [];
+    let finishFirst!: () => void;
+    const firstEpoch = pauseCloudAwaySyncForSettings(char.id);
+    const first = enqueueCloudAwaySettingsUpdate(char.id, async () => {
+      order.push('first-start');
+      await new Promise<void>(resolve => { finishFirst = resolve; });
+      order.push('first-end');
+    });
+    await vi.waitFor(() => expect(order).toEqual(['first-start']));
+    const secondEpoch = pauseCloudAwaySyncForSettings(char.id);
+    const second = enqueueCloudAwaySettingsUpdate(char.id, async () => {
+      order.push('second-start');
+      expect(isLatestCloudAwaySettings(char.id, firstEpoch)).toBe(false);
+      expect(isLatestCloudAwaySettings(char.id, secondEpoch)).toBe(true);
+    });
+    resumeCloudAwaySyncForSettings(char.id, firstEpoch);
+    expect(await syncCloudAwayTask(createDeps(char))).toBe(false);
+    finishFirst();
+    await Promise.all([first, second]);
+    expect(order).toEqual(['first-start', 'first-end', 'second-start']);
+    resumeCloudAwaySyncForSettings(char.id, secondEpoch);
+    expect(await syncCloudAwayTask(createDeps(char), { seedOnly: true })).toBe(true);
+    expect(ActiveMsgClient.scheduleCharacterTask).toHaveBeenCalledOnce();
   });
 
   it('does not create paid activity for a character with no prior real user message', async () => {
