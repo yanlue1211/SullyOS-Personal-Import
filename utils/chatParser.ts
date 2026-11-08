@@ -1,12 +1,10 @@
 import { withReplyCancellation, type ReplyRun } from './chatReplyCancellation';
 
 import { DB } from './db';
-import { LocalNotifications } from '@capacitor/local-notifications';
 import { CharacterProfile, CharPlaylistSong } from '../types';
 import { sanitizeForBubble } from './sanitize';
 import { extractTransferCommands } from './transferFormat';
 import { executeLifeDirectives } from './lifeRecords';
-import { wallClockToTimestamp } from './timezone';
 import { CollaborationStore } from '../features/collaboration/store';
 import {
     collaborationFileMessageMetadata,
@@ -14,49 +12,28 @@ import {
     resolveCollaborationFileByTitle,
 } from '../features/collaboration/chatLibrary';
 
-/** Shared local scheduler: status cards may invoke this without executing unrelated actions. */
-export async function executeLocalScheduledMessages(content:string,charId:string,charName:string,addToast:(message:string,type:'info'|'success'|'error')=>void,charTz?:string,replyRun?:ReplyRun){
- const replyStep=<T>(operation:()=>Promise<T>)=>withReplyCancellation(replyRun,operation);
- replyRun?.check();
-        const scheduleRegex = /\[schedule_message \| (.*?) \| fixed \| (.*?)\]/g;
-        let match;
-        while ((match = scheduleRegex.exec(content)) !== null) {
-            const timeStr = match[1].trim();
-            const msgContent = match[2].trim();
-            // 角色照着自己那边的钟写时间，按设备时区解释会整体偏一个时差：
-            // 纽约角色在自己上午说「今晚 21:00 找你」，设备在中国就会算成已经过期。
-            const dueTime = wallClockToTimestamp(timeStr, charTz);
-            // 时间写歪 / 已经过去的一律不排。这两种情况下角色在正文里往往已经把话说出去了
-            // （「我到点叫你」），排不上就是一句空头承诺，所以留一行日志说清是哪条、为什么，
-            // 别让它悄无声息地消失。离线补收时尤其常见：消息是凌晨发的，人第二天早上才打开。
-            if (isNaN(dueTime)) {
-                console.warn('[ScheduledMessage] 时间解析不了，这条不排:', timeStr, '内容:', msgContent);
-                addToast('本地定时消息未安排：时间格式无法识别。','error');
-                continue;
-            }
-            if (dueTime <= Date.now()) {
-                addToast('本地定时消息未安排：指定时间已经过去。','info');
-                console.warn(
-                    '[ScheduledMessage] 时间已经过去，这条不排:', timeStr,
-                    `(角色时区 ${charTz ?? '设备默认'}，晚了 ${Math.round((Date.now() - dueTime) / 60000)} 分钟)`,
-                    '内容:', msgContent,
-                );
-                continue;
-            }
-            const notificationId = Math.floor(Math.random() * 2147483646) + 1;
-            const inserted = await replyStep(async () => DB.saveScheduledMessage({ notificationId, id: `sched-${Date.now()}-${Math.random()}`, charId, content: msgContent, dueAt: dueTime, createdAt: Date.now() }));
-            if (inserted === false) continue;
-            try {
-                const hasPerm = await replyStep(async () => LocalNotifications.checkPermissions());
-                if (hasPerm.display === 'granted') {
-                    await replyStep(async () => LocalNotifications.schedule({ notifications: [{ title: charName, body: msgContent, id: notificationId, schedule: { at: new Date(dueTime) }, smallIcon: 'ic_stat_icon_config_sample' }] }));
-                }
-            } catch (e) { replyRun?.check(); console.log("Notification schedule skipped (web mode)"); }
-
-            addToast(`${charName} 已保存本地定时消息（需保持糯米机运行）`, 'info');
-        }
-        return content.replace(scheduleRegex, '').trim();
-
+/**
+ * 旧版「过段时间找你」本地创建入口已退役。
+ *
+ * 历史消息/某些模型仍可能输出旧的 [schedule_message | ...] 标签：
+ * 只剥离它并告知无法新建，绝不能再偷偷写入浏览器本地队列。
+ * **不删除任何已保存的旧任务**；OSContext 仍会兑现已有到期消息，
+ * 用户也可在旧本地任务列表里取消存量任务。
+ *
+ * 保留导出签名，供旧回复状态卡调用，不引入 DB 迁移或备份破坏。
+ */
+export async function executeLocalScheduledMessages(
+    content: string, _charId: string, _charName: string,
+    addToast: (message: string, type: 'info' | 'success' | 'error') => void,
+    _charTz?: string, replyRun?: ReplyRun,
+): Promise<string> {
+    replyRun?.check();
+    const scheduleRegex = /\[schedule_message \| (.*?) \| fixed \| (.*?)\]/g;
+    const hadLegacySchedule = scheduleRegex.test(content);
+    if (hadLegacySchedule) {
+        addToast('旧版仅本机定时消息已停用；请在「预约消息」中开启云端 2.0 后重新安排。', 'info');
+    }
+    return content.replace(scheduleRegex, '').trim();
 }
 
 export interface MusicActionSnapshot {
