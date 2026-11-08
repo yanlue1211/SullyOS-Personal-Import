@@ -1,0 +1,38 @@
+name: Personal author Nov 8 small fixes acceptance
+on:
+  pull_request:
+    paths:
+      - 'utils/context.ts'
+      - 'utils/datePrompts*'
+      - 'utils/contextSchedule*'
+      - 'utils/chatPrompts.ts'
+      - 'utils/amsgD1Limits.ts'
+      - '.github/workflows/personal-author-1108-cache-verify.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Date mode and actual Anthropic cache prefix boundaries
+        run: pnpm exec vitest run utils/datePromptCaching.test.ts utils/datePrompts.test.ts utils/contextSchedule.test.ts utils/timeAwarenessRequests.test.ts
+      - name: Protect private chat, worldbooks and native caching
+        run: pnpm exec vitest run utils/contextVolatileSplit.test.ts utils/contextWorldbook.test.ts utils/chatRequestPayload.test.ts utils/anthropicApi.test.ts utils/chatPrompts.test.ts
+      - name: Protect collaboration, tools and memory-context routing
+        run: pnpm exec vitest run utils/collaborationRouting.test.ts utils/replyScope.test.ts utils/toolCallCompat.test.ts utils/personalInnerVoice.test.ts
+      - name: Build production frontend and unchanged Cloudflare Worker
+        run: pnpm run build
+      - name: No unintended Worker code change
+        run: git diff --exit-code -- worker/amsg/worker.bundle.js
