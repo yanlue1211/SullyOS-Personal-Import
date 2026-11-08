@@ -720,6 +720,7 @@ describe('离开后云端机会不依赖预约消息开关', () => {
     awayEnabled?: boolean;
     sceneLock?: 'date' | 'call';
     callPresenceAt?: number | null;
+    missingToolPack?: boolean;
   } = {}) => {
     const fourHoursAgo = NOW.getTime() - 240 * 60_000;
     const rows = [
@@ -727,7 +728,7 @@ describe('离开后云端机会不依赖预约消息开关', () => {
         selfScheduleEnabled: false,
         ...(extra.sceneLock ? { awaySceneLock: extra.sceneLock } : {}),
       }) },
-      { key: AMSG_TOOL_PACK_KEY, value: toolPackValue },
+      ...(extra.missingToolPack ? [] : [{ key: AMSG_TOOL_PACK_KEY, value: toolPackValue }]),
       ...(extra.sceneLock === 'call' && extra.callPresenceAt !== null ? [{
         key: AMSG_CALL_PRESENCE_KEY,
         value: JSON.stringify({
@@ -754,6 +755,19 @@ describe('离开后云端机会不依赖预约消息开关', () => {
     const trace = writeState.mock.calls.flatMap(([, entries]) =>
       entries.filter((e: { key: string }) => e.key === AMSG_AWAY_TRACE_KEY));
     expect(JSON.parse(String(trace[0].value)).entries[0].stage).toBe('entered');
+  });
+
+  it('Worker 完成下一节拍排程、但 tool_pack 缺失时仍有进入记录，不冒充 AI 静默', async () => {
+    const { ctx, writeState } = awayCtx({ missingToolPack: true });
+    await expect(amsgHooks.onBeforeFire(ctx)).rejects.toThrow(/tool_pack/);
+    expect(ctx.scheduleTask).toHaveBeenCalledOnce();
+    const trace = writeState.mock.calls.flatMap(([, entries]) =>
+      entries.filter((entry: { key: string }) => entry.key === AMSG_AWAY_TRACE_KEY));
+    expect(trace).toHaveLength(1);
+    expect(JSON.parse(String(trace[0].value)).entries[0]).toMatchObject({
+      stage: 'entered', occurrenceMs: NOW.getTime(),
+    });
+    expect(ctx.scratch.fire).toBeUndefined();
   });
 
   it('实际 Worker 收尾后的成功写成「已入投递」而非保证手机送达，失败和重试另记', async () => {
@@ -832,7 +846,8 @@ describe('离开后云端机会不依赖预约消息开关', () => {
     const awayWrites = writeState.mock.calls.flatMap(([, records]) => records.filter((entry: { key: string }) => entry.key === AMSG_AWAY_LAST_SKIP_KEY));
     expect(JSON.parse(String(awayWrites[0].value)).reason).toBe(sceneLock === 'date' ? 'away-date-lock' : 'away-call-lock');
     const trace = writeState.mock.calls.flatMap(([, records]) => records.filter((entry: { key: string }) => entry.key === AMSG_AWAY_TRACE_KEY));
-    expect(JSON.parse(String(trace[0].value)).entries[0].stage).toBe('skipped');
+    expect(trace).toHaveLength(2);
+    expect(JSON.parse(String(trace.at(-1)!.value)).entries[0].stage).toBe('skipped');
   });
 });
 
