@@ -822,7 +822,10 @@ describe('离开后云端机会不依赖预约消息开关', () => {
     const awayWrites = writeState.mock.calls.flatMap(([, records]) => records.filter((entry: { key: string }) => entry.key === AMSG_AWAY_LAST_SKIP_KEY));
     expect(JSON.parse(String(awayWrites[0].value)).reason).toBe(sceneLock === 'date' ? 'away-date-lock' : 'away-call-lock');
     const trace = writeState.mock.calls.flatMap(([, records]) => records.filter((entry: { key: string }) => entry.key === AMSG_AWAY_TRACE_KEY));
-    expect(JSON.parse(String(trace[0].value)).entries[0].stage).toBe('skipped');
+    // 先记 Worker 已经完成下一节拍排程；随后 scene lock 把本次机会
+    // 标为跳过（无 LLM）。最终面板以最新的「跳过」为准。
+    expect(trace).toHaveLength(2);
+    expect(JSON.parse(String(trace.at(-1)!.value)).entries[0].stage).toBe('skipped');
   });
 });
 
