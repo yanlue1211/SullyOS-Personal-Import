@@ -1117,7 +1117,9 @@ var parseAmsgAwayTrace = (value) => {
   try {
     const data = JSON.parse(value || "null");
     if (!data || data.v !== 1 || !Array.isArray(data.entries)) return [];
-    return data.entries.filter((e) => e && typeof e.id === "string" && e.id.length <= 140 && Number.isFinite(e.at) && Number.isFinite(e.occurrenceMs) && ["skipped", "silent", "queued", "failed", "retrying"].includes(e.stage) && (e.reason === void 0 || typeof e.reason === "string" && /^[a-z-]{1,40}$/.test(e.reason)) && (e.llmCalls === void 0 || Number.isInteger(e.llmCalls) && e.llmCalls >= 0 && e.llmCalls <= 100)).slice(-AMSG_AWAY_TRACE_MAX);
+    return data.entries.filter(
+      (e) => e && typeof e.id === "string" && e.id.length <= 140 && Number.isFinite(e.at) && Number.isFinite(e.occurrenceMs) && ["skipped", "silent", "queued", "failed", "retrying"].includes(e.stage) && (e.reason === void 0 || typeof e.reason === "string" && /^[a-z-]{1,40}$/.test(e.reason)) && (e.llmCalls === void 0 || Number.isInteger(e.llmCalls) && e.llmCalls >= 0 && e.llmCalls <= 100)
+    ).slice(-AMSG_AWAY_TRACE_MAX);
   } catch {
     return [];
   }
@@ -19311,8 +19313,8 @@ var writeAwayTrace = async (readState, writeState, charId, event) => {
     const rows = await readState(ns, { key: AMSG_AWAY_TRACE_KEY });
     const stored = parseAmsgAwayTrace(rows.find((row) => row.key === AMSG_AWAY_TRACE_KEY)?.value);
     await writeState(ns, [{ key: AMSG_AWAY_TRACE_KEY, value: appendAmsgAwayTrace(stored, event) }]);
-  } catch (err) {
-    console.warn("[amsg:away-trace] \u5199\u5165\u5931\u8d25", err instanceof Error ? err.name : "unknown");
+  } catch (err6) {
+    console.warn("[amsg:away-trace] \u5199\u5165\u5931\u8D25", err6 instanceof Error ? err6.name : "unknown");
   }
 };
 var writeLastSkip = async (writeState, charId, skip, away = false) => {
@@ -19552,7 +19554,9 @@ var amsgFireSettled = async (info) => {
     const stage = delivered ? "queued" : info.status === "failed" ? info.willRetry ? "retrying" : "failed" : stash.awaySilenceReason ? "silent" : "skipped";
     await writeAwayTrace(stash.readState, info.writeState, stash.charId, {
       id: `${stash.taskUuid || "unknown"}@${stash.occurrenceMs}`,
-      at: Date.now(), occurrenceMs: stash.occurrenceMs, stage,
+      at: Date.now(),
+      occurrenceMs: stash.occurrenceMs,
+      stage,
       ...stash.awaySilenceReason ? { reason: stash.awaySilenceReason } : {},
       ...typeof info.llmCalls === "number" && Number.isFinite(info.llmCalls) ? { llmCalls: Math.min(100, Math.max(0, Math.floor(info.llmCalls))) } : {}
     });
@@ -20092,7 +20096,10 @@ var amsgHooks = {
       const recordAwaySkip = async (reason) => {
         await writeAwayTrace(ctx.readState, ctx.writeState, charId, {
           id: `${String(ctx.task.uuid || "unknown")}@${occurrenceMs}`,
-          at: ctx.now.getTime(), occurrenceMs, stage: "skipped", reason
+          at: ctx.now.getTime(),
+          occurrenceMs,
+          stage: "skipped",
+          reason
         });
         await writeLastSkip(ctx.writeState, charId, {
           v: 1,
