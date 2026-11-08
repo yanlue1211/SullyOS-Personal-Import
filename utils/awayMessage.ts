@@ -258,7 +258,7 @@ export const runLocalAwayMessages = async (deps: LocalAwayDeps): Promise<void> =
   localRunning = true;
   try {
     for (const char of deps.getCharacters().filter(c => c.awayMessage?.enabled)) {
-      if ((localCooldownUntil.get(char.id) ?? 0) > Date.now() || deps.isBusyWith(char.id)) continue;
+      if ((localCooldownUntil.get(char.id) ?? 0) > Date.now()) continue;
       try {
         if (await isAwayCloudRoute(char)) {
           const seedKey = char.id + ':' + resolveAwayDelayMinutes(char);
@@ -278,6 +278,9 @@ export const runLocalAwayMessages = async (deps: LocalAwayDeps): Promise<void> =
           if (ready) cloudSeededSession.add(seedKey);
           continue;
         }
+        // 云端仍须在见面或通话中完成补建，以免前台关闭后完全没有循环任务；
+        // 本地生成必须尊重当前场景，绝不能趁见面/通话偷偷发送。
+        if (deps.isBusyWith(char.id)) continue;
         // 作者原版：2.0 没开启的角色仍可使用「离开后消息」，
         // 打开页面时一次最多补三段、这次离开只补一次。
         // B 方案循环节拍只属于明确开启 2.0 的角色（Worker 不可用时走本地 B 兜底）。
