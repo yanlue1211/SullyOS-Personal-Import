@@ -4,7 +4,7 @@ import { CharacterProfile } from '../../types';
 import { AWAY_DELAY_OPTIONS, resolveAwayDelayMinutes } from '../../utils/awayMessageCore';
 import { isAwayCloudRoute, isAwayCloudWorkerCompatible } from '../../utils/awayMessage';
 import { ActiveMsgClient } from '../../utils/activeMsgClient';
-import type { AmsgDailySends } from '../../utils/amsgLimits';
+import { dayKeyInZone, type AmsgDailySends } from '../../utils/amsgLimits';
 
 interface AwayMessageSettingsModalProps {
     isOpen: boolean;
@@ -145,7 +145,7 @@ const AwayMessageSettingsModal: React.FC<AwayMessageSettingsModalProps> = ({ isO
                                 <p>下一次离开提醒：{nextAwayAt
                                     ? new Date(nextAwayAt).toLocaleString()
                                     : '暂无云端待触发任务（保存后会补建，或下次进入时自动检查）'}</p>
-                                {awayDailySends?.day === new Date().toLocaleDateString('en-CA') && (
+                                {awayDailySends?.day === dayKeyInZone(Date.now(), Intl.DateTimeFormat().resolvedOptions().timeZone) && (
                                     <p className="mt-1">今天离开后成功联系 {awayDailySends.sends} 次
                                         {awayDailySends.llmCalls != null ? ` · 后台 AI 调用 ${awayDailySends.llmCalls} 次` : ''}
                                     </p>
