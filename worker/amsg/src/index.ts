@@ -140,6 +140,11 @@ import {
   parseAmsgChatPresence,
 } from '../../../utils/amsgChatPresence';
 import {
+  AMSG_CALL_PRESENCE_KEY,
+  isFreshAmsgCallPresence,
+  parseAmsgCallPresence,
+} from '../../../utils/amsgCallPresence';
+import {
   AMSG_GLOBAL_NAMESPACE,
   AMSG_TOOL_CONFIG_KEY,
   AMSG_TOOL_PACK_KEY,
@@ -2300,9 +2305,18 @@ export const amsgHooks = {
         await recordAwaySkip('away-missed-slot');
         return { skip: true } as const;
       }
-      const liveAwayLock = limitsRecord?.awaySceneLock !== undefined
+      const storedAwayLock = limitsRecord?.awaySceneLock !== undefined
         ? limitsRecord.awaySceneLock : pack.awaySceneLock;
-      if (liveAwayLock === 'date' || liveAwayLock === 'call') {
+      // A killed browser cannot run the manual hangup handler. The old client
+      // persisted a "call" boolean forever; it can survive across nights and
+      // wrongly suppress every future away opportunity. Only a fresh, active
+      // heartbeat written by a real running call is proof of a live call.
+      // The date/meeting lock remains persistent and is NOT subject to this TTL.
+      const callPresenceRow = charRows.find(r => r.key === AMSG_CALL_PRESENCE_KEY);
+      const liveCall = isFreshAmsgCallPresence(
+        parseAmsgCallPresence(callPresenceRow?.value), charId, ctx.now.getTime());
+      const liveAwayLock = liveCall ? 'call' : storedAwayLock === 'date' ? 'date' : null;
+      if (liveAwayLock) {
         console.log('[amsg:away-skip]', { taskId: ctx.task.id, reason: 'interaction-still-open', mode: liveAwayLock });
         await recordAwaySkip(liveAwayLock === 'date' ? 'away-date-lock' : 'away-call-lock');
         return { skip: true } as const;
