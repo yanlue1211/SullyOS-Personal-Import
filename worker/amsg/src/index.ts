@@ -1300,9 +1300,9 @@ export const amsgFireSettled = async (
 
   // 只有已确认的最终结果才归档；outbox 成功不等于手机实际收到。
   if (stash.away && !cancelled) {
-    const stage: AmsgAwayTraceEntry['stage'] = delivered ? 'queued'
-      : info.status === 'failed' ? (info.willRetry ? 'retrying' : 'failed')
-      : stash.awaySilenceReason ? 'silent' : 'skipped';
+    const stage: AmsgAwayTraceEntry['stage'] = info.status === 'failed' && !delivered
+      ? (info.willRetry ? 'retrying' : 'failed')
+      : stash.awaySilenceReason ? 'silent' : delivered ? 'queued' : 'skipped';
     await writeAwayTrace(stash.readState, info.writeState, stash.charId, {
       id: `${stash.taskUuid || 'unknown'}@${stash.occurrenceMs}`,
       at: Date.now(), occurrenceMs: stash.occurrenceMs, stage,

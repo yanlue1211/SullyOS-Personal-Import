@@ -14439,7 +14439,7 @@ function buildScheduledPush(message, build, extraMeta, bannerBody) {
 }
 
 // utils/amsgBundleVersion.ts
-var AMSG_BUNDLE_VERSION = "2026-11-08.8";
+var AMSG_BUNDLE_VERSION = "2026-11-08.9";
 
 // worker/amsg/src/reproduction.ts
 async function writeDiagnosticStage(writeState, runId, event, fields = {}) {
@@ -19551,7 +19551,7 @@ var amsgFireSettled = async (info) => {
     }
   }
   if (stash.away && !cancelled) {
-    const stage = delivered ? "queued" : info.status === "failed" ? info.willRetry ? "retrying" : "failed" : stash.awaySilenceReason ? "silent" : "skipped";
+    const stage = info.status === "failed" && !delivered ? info.willRetry ? "retrying" : "failed" : stash.awaySilenceReason ? "silent" : delivered ? "queued" : "skipped";
     await writeAwayTrace(stash.readState, info.writeState, stash.charId, {
       id: `${stash.taskUuid || "unknown"}@${stash.occurrenceMs}`,
       at: Date.now(),

@@ -765,6 +765,23 @@ describe('离开后云端机会不依赖预约消息开关', () => {
     }
   });
 
+  it('只执行动作但没有聊天正文，即使动作结果进收件箱也不能记录成主动发过消息', async () => {
+    const { ctx, writeState } = awayCtx();
+    fired(await amsgHooks.onBeforeFire(ctx));
+    const stash = ctx.scratch.fire as any;
+    stash.awaySilenceReason = 'side-effects-only';
+    stash.actionResultCommitted = true;
+    await amsgFireSettled({
+      scratch: ctx.scratch, writeState, status: 'skipped',
+      outboxed: false, sentCount: 0, willRetry: false, llmCalls: 1,
+    } as any);
+    const trace = writeState.mock.calls.flatMap(([, entries]) =>
+      entries.filter((e: { key: string }) => e.key === AMSG_AWAY_TRACE_KEY));
+    expect(JSON.parse(String(trace[0].value)).entries[0]).toMatchObject({
+      stage: 'silent', reason: 'side-effects-only', llmCalls: 1,
+    });
+  });
+
   it('预约关闭且离开后也关闭：不调用模型、不续排', async () => {
     const { ctx, writeState } = awayCtx({ awayEnabled: false });
     await expect(amsgHooks.onBeforeFire(ctx)).resolves.toEqual({ skip: true });
