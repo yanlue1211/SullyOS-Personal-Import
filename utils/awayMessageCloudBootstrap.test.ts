@@ -104,6 +104,55 @@ describe('cloud away first-task creation and passive repair', () => {
     expect(ActiveMsgClient.scheduleCharacterTask).toHaveBeenCalledOnce();
   });
 
+  it('later foreground resumes recheck and repair a cloud chain missing after initial success', async () => {
+    const char = makeChar();
+    vi.spyOn(DB, 'getRecentMessagesByCharId').mockResolvedValue([{
+      id: 1, charId: char.id, role: 'user', type: 'text', content: '在吗', timestamp: NOW - 5 * HOUR,
+    }] as any);
+    const deps = {
+      getCharacters: () => [char], updateCharacter: vi.fn(),
+      getApiConfig: () => ({} as any), getUserProfile: () => ({ name: '用户' } as any),
+      getGroups: () => [], getRealtimeConfig: () => ({} as any), isBusyWith: () => false,
+    };
+    await runLocalAwayMessages(deps);
+    await runLocalAwayMessages(deps);
+    expect(ActiveMsgClient.listRemoteTasksForChar).toHaveBeenCalledOnce();
+    expect(ActiveMsgClient.scheduleCharacterTask).toHaveBeenCalledOnce();
+
+    // 同一 PWA 页面未重启，超过短暂冷却后再切回前台仍可修复失联任务。
+    // 模拟 Worker 丢了第一条任务；补建的是未来节拍，不追补过去的旧机会。
+    vi.mocked(Date.now).mockReturnValue(NOW + 16 * 60_000);
+    await runLocalAwayMessages(deps);
+    expect(ActiveMsgClient.listRemoteTasksForChar).toHaveBeenCalledTimes(2);
+    expect(ActiveMsgClient.scheduleCharacterTask).toHaveBeenCalledTimes(2);
+    const repaired = vi.mocked(ActiveMsgClient.scheduleCharacterTask).mock.calls[1][0].task;
+    expect(Date.parse(repaired.firstSendTime)).toBe(NOW + 16 * 60_000 + 4 * HOUR);
+  });
+
+  it('later foreground inspection keeps the existing future Worker task, without rearming or paying for AI', async () => {
+    const char = makeChar();
+    vi.spyOn(DB, 'getRecentMessagesByCharId').mockResolvedValue([{
+      id: 1, charId: char.id, role: 'user', type: 'text', content: '晚安', timestamp: NOW - 5 * HOUR,
+    }] as any);
+    vi.mocked(ActiveMsgClient.listRemoteTasksForChar)
+      .mockResolvedValueOnce([] as any)
+      .mockResolvedValueOnce([{
+        uuid: 'existing-away', clientTaskId: 'away-existing-away', status: 'pending',
+        nextSendAt: new Date(NOW + HOUR).toISOString(),
+      }] as any);
+    const deps = {
+      getCharacters: () => [char], updateCharacter: vi.fn(),
+      getApiConfig: () => ({} as any), getUserProfile: () => ({ name: '用户' } as any),
+      getGroups: () => [], getRealtimeConfig: () => ({} as any), isBusyWith: () => false,
+    };
+    await runLocalAwayMessages(deps);
+    vi.mocked(Date.now).mockReturnValue(NOW + 16 * 60_000);
+    await runLocalAwayMessages(deps);
+    expect(ActiveMsgClient.listRemoteTasksForChar).toHaveBeenCalledTimes(2);
+    expect(ActiveMsgClient.scheduleCharacterTask).toHaveBeenCalledOnce();
+    expect(ActiveMsgClient.updatePendingTasksRemote).not.toHaveBeenCalled();
+  });
+
   it('does not create paid activity for a character with no prior real user message', async () => {
     const char = makeChar();
     vi.spyOn(DB, 'getRecentMessagesByCharId').mockResolvedValue([] as any);
