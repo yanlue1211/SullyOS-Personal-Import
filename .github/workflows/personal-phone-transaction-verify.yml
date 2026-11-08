@@ -1,0 +1,31 @@
+name: Personal phone transaction regression
+on:
+  pull_request:
+    paths:
+      - 'apps/CheckPhone.tsx'
+      - 'context/OSContext.tsx'
+      - 'utils/db.ts'
+      - 'utils/phoneGeneration*'
+      - '.github/workflows/personal-phone-transaction-verify.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Verify phone transactions and previous phone cards/relations
+        run: pnpm exec vitest run utils/phoneGeneration.test.ts utils/phoneEvidence.test.ts utils/relationshipChat.test.ts
+      - name: Verify private chat, backup, media, context and memory integration
+        run: pnpm exec vitest run utils/personalChatMedia.test.ts utils/activityBackup.test.ts utils/chatRequestPayload.test.ts
+      - name: Build front-end and worker without paid requests
+        run: pnpm run build

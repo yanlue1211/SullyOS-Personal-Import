@@ -26,6 +26,7 @@ import { dataUrlToBlob, blobToDataUrl, hashBlob } from '@rei-standard/blob-store
 import { DB } from './db';
 import { blobStore } from './blobStore';
 import { REF_SOURCE_STORES } from './blobGc';
+import { withAssetReferenceLock } from './assetReferenceLock';
 import type { AppearancePreset, ChatTheme } from '../types';
 import { resolveBuiltinRoomAssetUrl } from './roomTemplateAssets';
 
@@ -90,8 +91,19 @@ export async function restoreBlobRef(token: string, blob: Blob): Promise<void> {
  * 新增这类裸删调用点时，记得把字段一并登记过去。
  */
 export async function deleteBlobRef(ref: string | undefined | null): Promise<void> {
-    if (!ref) return;
-    await blobStore.delete(ref);
+    if (!ref || !isBlobRef(ref)) return;
+    // Some legacy callers still delete directly after switching an image. Before
+    // physically removing a Blob, scan *all* single-user reference surfaces while
+    // holding the same lock as manual GC and storage optimization.
+    await withAssetReferenceLock('exclusive', async () => {
+        try {
+            if (await isRefStillReferenced(ref)) return;
+        } catch {
+            // Scan failed or a reference surface is unreadable: keep the image.
+            return;
+        }
+        await blobStore.delete(ref);
+    });
 }
 
 // 引用面扫描的分页大小。与 blobGc / blobDedupe 同值：批间事务各自独立，内存峰值只有一批。
@@ -150,13 +162,18 @@ export async function deleteBlobRefIfUnreferenced(ref: string | undefined | null
     if (!ref || !isBlobRef(ref)) return false;
 
     try {
+        // First check is advisory only. The reference may change while waiting
+        // for another tab's asset lock; scan a second time *inside* the lock.
         if (await isRefStillReferenced(ref)) return false;
+        return await withAssetReferenceLock('exclusive', async () => {
+            if (await isRefStillReferenced(ref)) return false;
+            await blobStore.delete(ref);
+            return true;
+        });
     } catch {
+        // Any scan failure means the candidate might be in use: fail closed.
         return false;
     }
-
-    await deleteBlobRef(ref);
-    return true;
 }
 
 // ─── data URL ⇄ Blob 互转 ───────────────────────────────────────

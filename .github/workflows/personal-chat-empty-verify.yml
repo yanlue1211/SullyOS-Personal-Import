@@ -1,0 +1,29 @@
+name: Personal chat empty-character hook guard
+on:
+  pull_request:
+    paths:
+      - 'apps/Chat.tsx'
+      - 'utils/chatEmptyGuard.test.ts'
+      - '.github/workflows/personal-chat-empty-verify.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Verify zero-character chat and restored character hook order
+        run: pnpm exec vitest run utils/chatEmptyGuard.test.ts
+      - name: Preserve chat and personal memory prompt paths
+        run: pnpm exec vitest run utils/chatRequestPayload.test.ts utils/personalChatMedia.test.ts
+      - name: Build complete app and Worker without paid requests
+        run: pnpm run build

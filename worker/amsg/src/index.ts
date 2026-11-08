@@ -140,6 +140,11 @@ import {
   parseAmsgChatPresence,
 } from '../../../utils/amsgChatPresence';
 import {
+  AMSG_CALL_PRESENCE_KEY,
+  isFreshAmsgCallPresence,
+  parseAmsgCallPresence,
+} from '../../../utils/amsgCallPresence';
+import {
   AMSG_GLOBAL_NAMESPACE,
   AMSG_TOOL_CONFIG_KEY,
   AMSG_TOOL_PACK_KEY,
@@ -2295,14 +2300,29 @@ export const amsgHooks = {
         });
         return { defer: { afterMs: 5 * 60_000 } } as const;
       }
+      // Record the Worker consuming and rearming this opportunity before downstream
+      // tool-pack / prompt building. This never claims an AI call or successful push.
+      await writeAwayTrace(ctx.readState, ctx.writeState, charId, {
+        id: `${String(ctx.task.uuid || 'unknown')}@${occurrenceMs}`,
+        at: ctx.now.getTime(), occurrenceMs, stage: 'entered',
+      });
       if (isStaleAwayTick(occurrenceMs, ctx.now.getTime())) {
         console.log('[amsg:away-skip]', { taskId: ctx.task.id, reason: 'missed-slot' });
         await recordAwaySkip('away-missed-slot');
         return { skip: true } as const;
       }
-      const liveAwayLock = limitsRecord?.awaySceneLock !== undefined
+      const storedAwayLock = limitsRecord?.awaySceneLock !== undefined
         ? limitsRecord.awaySceneLock : pack.awaySceneLock;
-      if (liveAwayLock === 'date' || liveAwayLock === 'call') {
+      // A killed browser cannot run the manual hangup handler. The old client
+      // persisted a "call" boolean forever; it can survive across nights and
+      // wrongly suppress every future away opportunity. Only a fresh, active
+      // heartbeat written by a real running call is proof of a live call.
+      // The date/meeting lock remains persistent and is NOT subject to this TTL.
+      const callPresenceRow = charRows.find(r => r.key === AMSG_CALL_PRESENCE_KEY);
+      const liveCall = isFreshAmsgCallPresence(
+        parseAmsgCallPresence(callPresenceRow?.value), charId, ctx.now.getTime());
+      const liveAwayLock = liveCall ? 'call' : storedAwayLock === 'date' ? 'date' : null;
+      if (liveAwayLock) {
         console.log('[amsg:away-skip]', { taskId: ctx.task.id, reason: 'interaction-still-open', mode: liveAwayLock });
         await recordAwaySkip(liveAwayLock === 'date' ? 'away-date-lock' : 'away-call-lock');
         return { skip: true } as const;
@@ -2787,10 +2807,6 @@ export const amsgHooks = {
       // 到点的自动续排、禁发零LLM均已在 onBeforeFire 完成；这里绝不额外调用模型。
       mustSpeak: false,
     }), userHoliday) + mcpBlock + scheduleBlock + replyScopeBlock;
-    if (away) await writeAwayTrace(ctx.readState, ctx.writeState, charId, {
-      id: `${String(ctx.task.uuid || 'unknown')}@${occurrenceMs}`,
-      at: ctx.now.getTime(), occurrenceMs, stage: 'entered',
-    });
     return {
       messages: [{ role: 'user' as const, content: prompt }],
       ...common,

@@ -2328,6 +2328,8 @@ export interface StoryTheaterEntry {
     /** 归档时至少留在会话里的最近楼层数；旧数据默认 5。 */
     archiveKeepRecent?: number;
     archiveStrategy: StoryTheaterArchiveStrategy;
+    /** Default auto. Manual summarization is only available in the isolated fictional theater. */
+    archiveMode?: 'auto' | 'manual';
     archives: StoryTheaterArchive[];
     /** 从演员挂载世界书去重得到；只影响本剧情，不改外部挂载。 */
     selectedWorldbookIds: string[];

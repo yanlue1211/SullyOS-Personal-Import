@@ -3077,12 +3077,13 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
     };
 
     const handleQuickReply = useCallback((message: Message) => {
+        if (!char) return;
         setReplyTarget({
             ...message,
             metadata: { ...message.metadata, senderName: message.role === 'user' ? '我' : char.name }
         });
         trackEvent('引用回复一条消息');
-    }, [char.name]);
+    }, [char?.name]);
 
     const handleReplyMessage = () => {
         if (!selectedMessage) return;
@@ -3653,7 +3654,13 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
     // 喂进 CSS url() 的地址；data: / http(s) 之类的非令牌值渲染期原样透传。
     // hook 必须在下面的空态早退之前调用，所以用可选链读 char。
     const resolvedChatBackground = useBlobRefUrl(homePhone?undefined:char?.chatBackground ?? osTheme.chatBackground);
-    // 兜底：正常情况下 OSContext 启动时一定会保底一个角色，char 不该为空。
+    // Render-safe memo hooks must be reached even when a character is momentarily
+    // unavailable (initial load, import or last-character deletion). Their position
+    // cannot depend on whether this render takes the empty-state return.
+    const mergedFineTune = useMemo(() => mergeChatFineTune(osTheme, homePhone?undefined:char?.chatFineTune), [osTheme, char?.chatFineTune,!!homePhone]);
+    const chatFineTuneCss = useMemo(() => buildChatFineTuneCss(mergedFineTune), [mergedFineTune]);
+    const selectedAvatarFrameCss=useMemo(()=>avatarFrameLayer([osTheme.chatChromeCustomCss,char?.chromeCustomCss].filter(Boolean).join('\n')),[osTheme.chatChromeCustomCss,char?.chromeCustomCss]);
+    // Chat may temporarily have no valid selected character; preserve hook order.
     // 但若 init 期间某个 store 读取失败（数据其实还在 IndexedDB 里），characters 可能暂时为空，
     // 此时下面读 char 上的字段会直接抛 "undefined is not an object" 把整个 App 崩到错误页。
     // 这里给个温和空态，避免硬崩，也好让用户能退回桌面/重启恢复。
@@ -3720,11 +3727,7 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
     // 动森下强制覆盖角色自定义聊天背景，保证整机一致的彩蛋观感
     // 进入/切换的过场由 CharacterEntryTransition 覆盖层负责，根容器不再自己做淡入。
     const finalRootStyle = acnh ? acnhRootStyle : chatRootStyle;
-    // 聊天细节微调（外观 → 聊天细节，全局打底；角色开了「聊天装扮」时逐字段覆盖）：
-    // CSS 全默认时为空串不注入；chatModuleAlign 不走 CSS，作为布局属性传给 MessageItem。
-    const mergedFineTune = useMemo(() => mergeChatFineTune(osTheme, homePhone?undefined:char?.chatFineTune), [osTheme, char?.chatFineTune,!!homePhone]);
-    const chatFineTuneCss = useMemo(() => buildChatFineTuneCss(mergedFineTune), [mergedFineTune]);
-    const selectedAvatarFrameCss=useMemo(()=>avatarFrameLayer([osTheme.chatChromeCustomCss,char?.chromeCustomCss].filter(Boolean).join('\n')),[osTheme.chatChromeCustomCss,char?.chromeCustomCss]);
+    // CSS values above are memoized before the temporary empty-chat early return.
     const chatAvatarSizeClass = osTheme.chatAvatarSize === 'small' ? 'w-7 h-7' : osTheme.chatAvatarSize === 'large' ? 'w-12 h-12' : 'w-9 h-9';
     const chatAvatarRadiusClass = osTheme.chatAvatarShape === 'square' ? 'rounded-sm' : osTheme.chatAvatarShape === 'rounded' ? 'rounded-xl' : 'rounded-full';
     const chatPendingAvatarClass = `${chatAvatarSizeClass} ${chatAvatarRadiusClass} object-cover`;

@@ -12,6 +12,7 @@ import { handleLocalBack } from '../utils/localBackHandlers';
 import { updateVirtualTimeIfChanged } from '../utils/blurPolicy';
 import {isHomeAssetDisposal} from '../utils/homeAssetCancellation';
 import { processHomeMemoryAfterSave } from '../utils/homeMemoryPostHook';
+import { mergePhoneGeneration, PHONE_GENERATION_COMMITTED, type PhoneGeneration } from '../utils/phoneGeneration';
 import { homeSharedRecipients } from '../utils/homeSharedEvents';
 import { homeRecords } from '../utils/homeRecords';
 import { readFriendFeed } from '../utils/friendFeed';
@@ -96,6 +97,9 @@ import { evaluateEmotionBackground } from '../hooks/useChatAI';
 import {HOME_SECRETS_UPDATED} from '../utils/homeSecrets';
 import { CHAT_GEN_EVENTS, setChatViewSnapshot, isEmbeddedChatVisible } from '../utils/chatGenEvents';
 import { runLocalAwayMessages } from '../utils/awayMessage';
+import { isAmsgActiveCall } from '../utils/amsgInteractionGuard';
+import { syncAmsgCallPresence } from '../utils/amsgCallPresenceSync';
+import { AMSG_CALL_HEARTBEAT_MS } from '../utils/amsgCallPresence';
 import { buildChatRequestPayload } from '../utils/chatRequestPayload';
 import { ChatPrompts } from '../utils/chatPrompts';
 import { extractHtmlBlocks } from '../utils/htmlPrompt';
@@ -3177,6 +3181,21 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           }
       };
 
+      // Persisted phone cards and phone evidence are committed in one DB transaction;
+      // reflect only the delta in memory. Never overwrite the latest DB character.
+      const onPhoneGenerationCommitted = (event: Event) => {
+          const detail = (event as CustomEvent<{ charId: string; generation: PhoneGeneration }>).detail;
+          if (!detail?.charId || !detail.generation) return;
+          setCharacters(previous => previous.map(char => {
+              if (char.id !== detail.charId) return char;
+              const next = { ...char, phoneState: mergePhoneGeneration(char.phoneState, detail.generation) };
+              markAmsgStateDirty({ char: next, userProfile: userProfileRef.current,
+                  groups: groupsRef.current, realtimeConfig: realtimeConfigRef.current });
+              return next;
+          }));
+          setLastMsgTimestamp(Date.now());
+      };
+      window.addEventListener(PHONE_GENERATION_COMMITTED, onPhoneGenerationCommitted);
       window.addEventListener('amsg2-tasks-adopted', tasksAdoptedHandler);
       window.addEventListener(SAR_MODULE_RUNTIME_CHANGED_EVENT, sarModuleRuntimeChangedHandler);
       const linkedArchiveDeletedHandler = (event: Event) => {
@@ -3194,6 +3213,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       window.addEventListener('char-music-profile-updated', musicProfileSyncHandler);
       window.addEventListener(MEMORY_AUTO_ARCHIVE_SYNC_EVENT, memoryAutoArchiveSyncHandler);
       return () => {
+          window.removeEventListener(PHONE_GENERATION_COMMITTED, onPhoneGenerationCommitted);
           window.removeEventListener('amsg2-tasks-adopted', tasksAdoptedHandler);
           window.removeEventListener(SAR_MODULE_RUNTIME_CHANGED_EVENT, sarModuleRuntimeChangedHandler);
           window.removeEventListener(LINKED_ARCHIVE_DELETED, linkedArchiveDeletedHandler);
@@ -3227,6 +3247,24 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       return () => { cancelled = true; };
   // 只在本次数据初始化完成时执行；后续新数据走已修复的统一双写入口。
   // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDataLoaded]);
+
+  // 只在真正有通话（包含切回桌面的已挂起通话）期间续租云端通话锁。
+  // 不在页面隐藏时强行挂断：锁屏/后台切换仍可能是有效通话。
+  // 一旦 PWA 被系统彻底杀掉，这个 interval 停止，Worker 的有限 TTL 就会
+  // 自动释放旧的 call 锁，不再隔天一直误判「仍在通话」。
+  useEffect(() => {
+      if (!isDataLoaded) return;
+      const heartbeat = () => {
+          for (const character of charactersRef.current) {
+              if (!character.awayMessage?.enabled || !isAmsgActiveCall(character.id)) continue;
+              void syncAmsgCallPresence(character, true).catch(error => {
+                  console.warn('[AmsgCallPresence] 通话存活心跳同步失败', error);
+              });
+          }
+      };
+      const timer = window.setInterval(heartbeat, AMSG_CALL_HEARTBEAT_MS);
+      return () => window.clearInterval(timer);
   }, [isDataLoaded]);
 
   // 本地备用路线：只补“离开后自动提醒”；2.0 云端路线由 Worker 自己触发。
