@@ -25,6 +25,7 @@ import StoryVectorMemoryPanel from './StoryVectorMemoryPanel';
 import StoryArchivePanel from './StoryArchivePanel';
 import { StoryAppearanceButton, StoryTheaterThemeProvider } from './StoryTheaterTheme';
 import { deleteStoryTheaterData } from '../../../utils/storyTheaterDeletion';
+import { archiveStoryManually } from '../../../utils/storyTheaterArchive';
 
 interface Props {
     onSwitchCompanion: () => void;
@@ -34,7 +35,7 @@ interface Props {
 type View = 'list' | 'editor' | 'session' | 'preset' | 'masks' | 'vectors' | 'archives';
 
 const StoryTheaterContent: React.FC<Props> = ({ onSwitchCompanion, onClose }) => {
-    const { characters, userProfile, addToast, remoteVectorConfig } = useOS();
+    const { characters, userProfile, addToast, remoteVectorConfig, apiConfig } = useOS();
     const [view, setView] = useState<View>('list');
     const [entries, setEntries] = useState<StoryTheaterEntry[]>([]);
     const [customPresets, setCustomPresets] = useState<StoryTheaterPreset[]>([]);
@@ -84,6 +85,14 @@ const StoryTheaterContent: React.FC<Props> = ({ onSwitchCompanion, onClose }) =>
         setActiveEntry(normalized);
         setEntries(current => [normalized, ...current.filter(item => item.id !== normalized.id)].sort((a, b) => b.updatedAt - a.updatedAt));
     }, []);
+
+    const manualArchive = useCallback(async (entryId: string): Promise<StoryTheaterEntry> => {
+        const updated = await archiveStoryManually(entryId, apiConfig);
+        setActiveEntry(updated);
+        setEntries(current => [updated, ...current.filter(item => item.id !== updated.id)].sort((a, b) => b.updatedAt - a.updatedAt));
+        addToast('未归档正文已收进事件盒，原文仍完整保留', 'success');
+        return updated;
+    }, [addToast, apiConfig]);
 
     const savePreset = useCallback(async (next: StoryTheaterPreset) => {
         if (next.builtIn) return;
@@ -209,6 +218,7 @@ const StoryTheaterContent: React.FC<Props> = ({ onSwitchCompanion, onClose }) =>
         presets={presets}
         onCancel={() => setView(entries.some(item => item.id === activeEntry.id) ? 'session' : 'list')}
         onSave={saveEntry}
+        onManualArchive={manualArchive}
         onImportPreset={importPreset}
         onEditPreset={(preset, draft) => { setActiveEntry(draft); setEditingPreset(preset); setView('preset'); }}
         onOpenMaskBox={draft => { if (maskLocked || draft.writesToCharacterMemory) return; setActiveEntry(draft); setView('masks'); }}
