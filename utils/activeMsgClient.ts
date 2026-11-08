@@ -87,6 +87,7 @@ import {
   AMSG2_INSTANT_STUB_TEMPLATE,
   AMSG_INSTANT_CHAT_SUBTYPE,
   AMSG_LAST_SKIP_KEY,
+  AMSG_AWAY_LAST_SKIP_KEY,
   AMSG_SLOT_SELF_LOG,
   AMSG_SLOT_TASK_LIST,
   AMSG_SLOT_TIME_SINCE_USER,
@@ -4184,6 +4185,7 @@ export const ActiveMsgClient = {
    */
   async readPanelStatus(charId: string): Promise<{
     lastSkip: AmsgLastSkip | null;
+    awayLastSkip: AmsgLastSkip | null;
     dailySends: AmsgDailySends | null;
     awayDailySends: AmsgDailySends | null;
   }> {
@@ -4191,17 +4193,18 @@ export const ActiveMsgClient = {
       const config = await ensureWorkerReady();
       const client = await initializeClient(config);
       const response = await client.getClientState(amsgStateNamespace(charId));
-      if (!response?.success) return { lastSkip: null, dailySends: null, awayDailySends: null };
+      if (!response?.success) return { lastSkip: null, awayLastSkip: null, dailySends: null, awayDailySends: null };
       const entries = (response.data?.entries ?? []) as Array<{ key: string; value: string }>;
       const valueOf = (key: string) => entries.find((e) => e?.key === key)?.value || null;
       const skipValue = valueOf(AMSG_LAST_SKIP_KEY);
       return {
         lastSkip: skipValue ? parseLastSkip(skipValue) : null,
+        awayLastSkip: valueOf(AMSG_AWAY_LAST_SKIP_KEY) ? parseLastSkip(valueOf(AMSG_AWAY_LAST_SKIP_KEY)!) : null,
         dailySends: parseDailySends(valueOf(AMSG_DAILY_SENDS_KEY)),
         awayDailySends: parseDailySends(valueOf(AMSG_AWAY_DAILY_SENDS_KEY)),
       };
     } catch {
-      return { lastSkip: null, dailySends: null, awayDailySends: null };
+      return { lastSkip: null, awayLastSkip: null, dailySends: null, awayDailySends: null };
     }
   },
 

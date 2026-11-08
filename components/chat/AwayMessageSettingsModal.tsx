@@ -5,6 +5,7 @@ import { AWAY_DELAY_OPTIONS, resolveAwayDelayMinutes } from '../../utils/awayMes
 import { isAwayCloudRoute, isAwayCloudWorkerCompatible } from '../../utils/awayMessage';
 import { ActiveMsgClient } from '../../utils/activeMsgClient';
 import { dayKeyInZone, type AmsgDailySends } from '../../utils/amsgLimits';
+import { describeLastSkip, type AmsgLastSkip } from '../../utils/amsgFirePack';
 import type { RemoteTaskProjection } from '../../utils/amsg2Tasks';
 
 interface AwayMessageSettingsModalProps {
@@ -27,6 +28,7 @@ const AwayMessageSettingsModal: React.FC<AwayMessageSettingsModalProps> = ({ isO
     const [nextAwayAt, setNextAwayAt] = useState<string | null>(null);
     const [awayTasks, setAwayTasks] = useState<RemoteTaskProjection[]>([]);
     const [awayDailySends, setAwayDailySends] = useState<AmsgDailySends | null>(null);
+    const [awayLastSkip, setAwayLastSkip] = useState<AmsgLastSkip | null>(null);
 
     useEffect(() => {
         if (!isOpen) return;
@@ -41,6 +43,7 @@ const AwayMessageSettingsModal: React.FC<AwayMessageSettingsModalProps> = ({ isO
         setNextAwayAt(null);
         setAwayTasks([]);
         setAwayDailySends(null);
+        setAwayLastSkip(null);
         void isAwayCloudRoute(char).then(async v => {
             if (cancelled) return;
             setCloud(v);
@@ -59,7 +62,10 @@ const AwayMessageSettingsModal: React.FC<AwayMessageSettingsModalProps> = ({ isO
                         const next = ownTasks.map(task => task.nextSendAt).filter((at): at is string => Boolean(at)).sort()[0];
                         setNextAwayAt(next ?? null);
                     }
-                    if (status.status === 'fulfilled') setAwayDailySends(status.value.awayDailySends);
+                    if (status.status === 'fulfilled') {
+                        setAwayDailySends(status.value.awayDailySends);
+                        setAwayLastSkip(status.value.awayLastSkip);
+                    }
                 }
             }
         });
@@ -157,6 +163,11 @@ const AwayMessageSettingsModal: React.FC<AwayMessageSettingsModalProps> = ({ isO
                                     ))}
                                     {awayTasks.length > 1 && <div className="text-amber-600">检测到多条离开后任务，自动同步时会尝试整理重复排程。</div>}
                                 </div>
+                                {awayLastSkip && (
+                                    <p className="mt-2 rounded-xl border border-amber-100 bg-amber-50 p-3 text-amber-700">
+                                        {describeLastSkip(awayLastSkip, time => new Date(time).toLocaleString()).replaceAll('主动消息', '离开后消息')}
+                                    </p>
+                                )}
                                 {awayDailySends?.day === dayKeyInZone(Date.now(), Intl.DateTimeFormat().resolvedOptions().timeZone) && (
                                     <p className="mt-1">今天离开后成功联系 {awayDailySends.sends} 次
                                         {awayDailySends.llmCalls != null ? ` · 后台 AI 调用 ${awayDailySends.llmCalls} 次` : ''}

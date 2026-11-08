@@ -61,6 +61,7 @@ import {
   AMSG_CHAT_FAIL_KEY,
   AMSG_FIRE_PACK_KEY,
   AMSG_LAST_SKIP_KEY,
+  AMSG_AWAY_LAST_SKIP_KEY,
   AMSG_SELF_LOG_KEY,
   AMSG2_INSTANT_STUB_TEMPLATE,
   type AmsgChatFailRecord,
@@ -845,11 +846,12 @@ const writeLastSkip = async (
   writeState: WriteState | undefined,
   charId: string,
   skip: AmsgLastSkip,
+  away = false,
 ): Promise<void> => {
   if (typeof writeState !== 'function') return;
   try {
     await writeState(amsgStateNamespace(charId), [
-      { key: AMSG_LAST_SKIP_KEY, value: JSON.stringify(skip) },
+      { key: away ? AMSG_AWAY_LAST_SKIP_KEY : AMSG_LAST_SKIP_KEY, value: JSON.stringify(skip) },
     ]);
   } catch (error) {
     console.warn('[amsg:skip] 跳过原因写入失败（跳过本身照常生效，只是面板少一句说明）', error);
@@ -1368,7 +1370,7 @@ export const amsgStaleSkip = async (
     staleAction: info.action,
     skippedCount: info.skippedCount,
     nextSendAtMs: Number.isFinite(nextSendAtMs) ? nextSendAtMs : null,
-  });
+  }, meta[AMSG_AWAY_MESSAGE_META] === true);
   // 即时对话的过期上面已经用 chat_fail 交代过了；这里只管定时主动消息。
   if (!isInstantChatTask(meta) && info.occurrenceMs != null) {
     await emitFireSkip(info.emitResult, {
@@ -2939,7 +2941,7 @@ export const amsgHooks = {
         occurrenceMs: stash.occurrenceMs,
         reason: decision.reason,
         skippedAt: Date.now(),
-      });
+      }, stash.away);
       // 定时主动消息这次没发：也告诉客户端一声，角色下一轮聊天时知道这条没说出去。
       if (!stash.instant) {
         await emitFireSkip(ctx.emitResult, {

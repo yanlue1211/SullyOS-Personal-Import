@@ -195,6 +195,8 @@ export const unpackStateValue = async (value: string): Promise<string> => {
  * 「刚才为什么没响」，不是审计流水，攒着只会越积越多。
  */
 export const AMSG_LAST_SKIP_KEY = 'last_skip';
+/** 离开后消息独立的最近跳过记录，绝不误入预约面板。 */
+export const AMSG_AWAY_LAST_SKIP_KEY = 'away_last_skip';
 
 /** last_skip 的原因枚举（新增值时 describeLastSkip 的人话文案要一起补）。 */
 export const LAST_SKIP_REASONS = [

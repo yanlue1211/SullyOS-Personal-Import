@@ -1110,6 +1110,7 @@ var unpackStateValue = async (value) => {
   return new TextDecoder().decode(raw);
 };
 var AMSG_LAST_SKIP_KEY = "last_skip";
+var AMSG_AWAY_LAST_SKIP_KEY = "away_last_skip";
 var AMSG_SLOT_CURRENT_TIME = "{{AMSG_CURRENT_TIME}}";
 var AMSG_SLOT_TIME_SINCE_USER = "{{AMSG_TIME_SINCE_USER}}";
 var AMSG_SLOT_AWAY_HINT = "{{AMSG_AWAY_HINT}}";
@@ -14424,7 +14425,7 @@ function buildScheduledPush(message, build, extraMeta, bannerBody) {
 }
 
 // utils/amsgBundleVersion.ts
-var AMSG_BUNDLE_VERSION = "2026-11-08.5";
+var AMSG_BUNDLE_VERSION = "2026-11-08.6";
 
 // worker/amsg/src/reproduction.ts
 async function writeDiagnosticStage(writeState, runId, event, fields = {}) {
@@ -19291,11 +19292,11 @@ var offloadOversizedPush = async (payload, writeState, charId, clientTaskId, seg
   }
   return current;
 };
-var writeLastSkip = async (writeState, charId, skip) => {
+var writeLastSkip = async (writeState, charId, skip, away = false) => {
   if (typeof writeState !== "function") return;
   try {
     await writeState(amsgStateNamespace(charId), [
-      { key: AMSG_LAST_SKIP_KEY, value: JSON.stringify(skip) }
+      { key: away ? AMSG_AWAY_LAST_SKIP_KEY : AMSG_LAST_SKIP_KEY, value: JSON.stringify(skip) }
     ]);
   } catch (error) {
     console.warn("[amsg:skip] \u8DF3\u8FC7\u539F\u56E0\u5199\u5165\u5931\u8D25\uFF08\u8DF3\u8FC7\u672C\u8EAB\u7167\u5E38\u751F\u6548\uFF0C\u53EA\u662F\u9762\u677F\u5C11\u4E00\u53E5\u8BF4\u660E\uFF09", error);
@@ -19571,7 +19572,7 @@ var amsgStaleSkip = async (task, info) => {
     staleAction: info.action,
     skippedCount: info.skippedCount,
     nextSendAtMs: Number.isFinite(nextSendAtMs) ? nextSendAtMs : null
-  });
+  }, meta[AMSG_AWAY_MESSAGE_META] === true);
   if (!isInstantChatTask(meta) && info.occurrenceMs != null) {
     await emitFireSkip(info.emitResult, {
       charId,
@@ -20613,7 +20614,7 @@ ${userHoliday}` });
         occurrenceMs: stash.occurrenceMs,
         reason: decision.reason,
         skippedAt: Date.now()
-      });
+      }, stash.away);
       if (!stash.instant) {
         await emitFireSkip(ctx.emitResult, {
           charId: stash.charId,
