@@ -1,0 +1,31 @@
+name: Personal home romantic relationship compatibility
+on:
+  pull_request:
+    paths:
+      - 'apps/room3d/homeRomance.ts'
+      - 'apps/room3d/HomeRomanceSettings.tsx'
+      - 'apps/room3d/model.js'
+      - 'apps/room3d/editor.js'
+      - 'apps/room3d/types.ts'
+      - 'utils/homeRomance.test.ts'
+      - '.github/workflows/personal-home-romance-verify.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Test legacy home opt-in and opt-out, photo, backup, room3d
+        run: pnpm exec vitest run utils/homeRomance.test.ts utils/home3DBackup.test.ts utils/room3d.test.ts
+      - name: Verify frontend/Worker build without paid models
+        run: pnpm run build
