@@ -1441,7 +1441,7 @@ export const useChatAI = ({
                 event: 'amsg2-local-capability',
                 charId: char.id,
                 charEnabled: isAmsg2EnabledForChar(char),
-                globalReady: amsg2ToolsInjected || !isAmsg2EnabledForChar(char) ? amsg2ToolsInjected : false,
+                toolGatePassed: amsg2ToolsInjected,
                 scheduleDeclared: Array.isArray(baseReqBody.tools) && baseReqBody.tools.some(
                     (tool: any) => tool?.function?.name === 'schedule_active_message'),
                 mcpChatActive: payload.flags.mcpChatActive,
@@ -1506,6 +1506,15 @@ export const useChatAI = ({
                 const mcpOnly = payload.flags.mcpChatActive
                     && !payload.flags.luckinChatActive && !payload.flags.mcdActive && !payload.flags.luckinActive;
                 if (!mcpOnly || !baseReqBody.tools?.length || !shouldRetryMcpWithoutTools(requestError)) throw requestError;
+                if (amsg2ToolsInjected) appendInstantTraceEntry({
+                    ts: new Date().toISOString(),
+                    event: 'amsg2-local-tools-rejected-fallback',
+                    charId: char.id,
+                    scheduleWasDeclared: baseReqBody.tools?.some((tool: any) => tool?.function?.name === 'schedule_active_message') === true,
+                    // 工具拒绝后现有 MCP 文本回退会删除所有工具，但不会执行预约文本协议；
+                    // 留明确诊断，不能把用户看到的「我会预约」当作已创建任务。
+                    bookingToolUnavailableInFallback: true,
+                });
                 console.warn('🔌 [MCP] 当前中转拒绝 tools 请求，降级为正文工具调用兼容模式');
                 // 这条路把 tools 全删了，角色排不了新任务；排程现状照样要带——它得知道
                 // 自己名下已经有哪些承诺，否则又会在正文里许一遍。
