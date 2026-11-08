@@ -4190,6 +4190,8 @@ export const ActiveMsgClient = {
     lastSkip: AmsgLastSkip | null;
     awayLastSkip: AmsgLastSkip | null;
     awayTrace: AmsgAwayTraceEntry[];
+    /** 区分云端诊断读失败与确实没有历史记录；不可据空值推断 Cron 未运行。 */
+    statusReadOk: boolean;
     dailySends: AmsgDailySends | null;
     awayDailySends: AmsgDailySends | null;
   }> {
@@ -4197,7 +4199,7 @@ export const ActiveMsgClient = {
       const config = await ensureWorkerReady();
       const client = await initializeClient(config);
       const response = await client.getClientState(amsgStateNamespace(charId));
-      if (!response?.success) return { lastSkip: null, awayLastSkip: null, awayTrace: [], dailySends: null, awayDailySends: null };
+      if (!response?.success) return { lastSkip: null, awayLastSkip: null, awayTrace: [], statusReadOk: false, dailySends: null, awayDailySends: null };
       const entries = (response.data?.entries ?? []) as Array<{ key: string; value: string }>;
       const valueOf = (key: string) => entries.find((e) => e?.key === key)?.value || null;
       const skipValue = valueOf(AMSG_LAST_SKIP_KEY);
@@ -4205,11 +4207,12 @@ export const ActiveMsgClient = {
         lastSkip: skipValue ? parseLastSkip(skipValue) : null,
         awayLastSkip: valueOf(AMSG_AWAY_LAST_SKIP_KEY) ? parseLastSkip(valueOf(AMSG_AWAY_LAST_SKIP_KEY)!) : null,
         awayTrace: parseAmsgAwayTrace(valueOf(AMSG_AWAY_TRACE_KEY)),
+        statusReadOk: true,
         dailySends: parseDailySends(valueOf(AMSG_DAILY_SENDS_KEY)),
         awayDailySends: parseDailySends(valueOf(AMSG_AWAY_DAILY_SENDS_KEY)),
       };
     } catch {
-      return { lastSkip: null, awayLastSkip: null, awayTrace: [], dailySends: null, awayDailySends: null };
+      return { lastSkip: null, awayLastSkip: null, awayTrace: [], statusReadOk: false, dailySends: null, awayDailySends: null };
     }
   },
 

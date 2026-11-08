@@ -30,6 +30,8 @@ const AwayMessageSettingsModal: React.FC<AwayMessageSettingsModalProps> = ({ isO
     const [awayDailySends, setAwayDailySends] = useState<AmsgDailySends | null>(null);
     const [awayLastSkip, setAwayLastSkip] = useState<AmsgLastSkip | null>(null);
     const [awayTrace, setAwayTrace] = useState<AmsgAwayTraceEntry[]>([]);
+    const [diagnosticsReadable, setDiagnosticsReadable] = useState<boolean | null>(null);
+    const [taskListReadable, setTaskListReadable] = useState<boolean | null>(null);
 
     useEffect(() => {
         if (!isOpen) return;
@@ -46,6 +48,8 @@ const AwayMessageSettingsModal: React.FC<AwayMessageSettingsModalProps> = ({ isO
         setAwayDailySends(null);
         setAwayLastSkip(null);
         setAwayTrace([]);
+        setDiagnosticsReadable(null);
+        setTaskListReadable(null);
         void isAwayCloudRoute(char).then(async v => {
             if (cancelled) return;
             setCloud(v);
@@ -58,12 +62,14 @@ const AwayMessageSettingsModal: React.FC<AwayMessageSettingsModalProps> = ({ isO
                         ActiveMsgClient.readPanelStatus(char.id),
                     ]);
                     if (cancelled) return;
+                    setTaskListReadable(remote.status === 'fulfilled');
                     if (remote.status === 'fulfilled') {
                         const ownTasks = remote.value.filter(task => task.status === 'pending' && task.clientTaskId?.startsWith('away-'));
                         setAwayTasks(ownTasks);
                         const next = ownTasks.map(task => task.nextSendAt).filter((at): at is string => Boolean(at)).sort()[0];
                         setNextAwayAt(next ?? null);
                     }
+                    setDiagnosticsReadable(status.status === 'fulfilled' && status.value.statusReadOk);
                     if (status.status === 'fulfilled') {
                         setAwayDailySends(status.value.awayDailySends);
                         setAwayLastSkip(status.value.awayLastSkip);
@@ -158,7 +164,8 @@ const AwayMessageSettingsModal: React.FC<AwayMessageSettingsModalProps> = ({ isO
                                     : '暂无云端待触发任务（保存后会补建，或下次进入时自动检查）'}</p>
                                 <div className="mt-3 rounded-xl border border-violet-100 bg-violet-50/40 p-3 space-y-2">
                                     <div className="font-bold text-violet-700">云端离开后排程（{awayTasks.length}）</div>
-                                    {awayTasks.length === 0 ? <div className="text-slate-500">暂无待执行的离开后任务，保存设置后会检查是否需要补建。</div> : awayTasks.map(task => (
+                                    {taskListReadable === false ? <div className="text-amber-700">云端任务清单暂时读取失败，不能判断有没有下一条。请检查 Worker 连接后重新打开。</div>
+                                        : awayTasks.length === 0 ? <div className="text-slate-500">暂无待执行的离开后任务，保存设置后会检查是否需要补建。</div> : awayTasks.map(task => (
                                         <div key={task.uuid} className="rounded-lg bg-white p-2.5 text-slate-600">
                                             <div>下一次联系机会：{task.nextSendAt ? new Date(task.nextSendAt).toLocaleString() : '等待云端同步'}</div>
                                             <div className="text-[10px] text-slate-400 mt-1">任务 #{task.uuid.slice(0, 8)} · 自动离开提醒</div>
@@ -169,7 +176,8 @@ const AwayMessageSettingsModal: React.FC<AwayMessageSettingsModalProps> = ({ isO
                                 <div className="mt-3 rounded-xl border border-violet-100 bg-white p-3 space-y-2">
                                   <div className="font-bold text-violet-700">最近离开后联系机会（最多 12 次）</div>
                                   <p className="text-[11px] text-slate-400">仅统计实际进入 Worker 并留下回执的机会；没有记录不能证明 Cron 未执行，旧版记录不会补造。不保存任何聊天内容。</p>
-                                  {awayTrace.length === 0
+                                  {diagnosticsReadable === false ? <p className="text-amber-700">云端诊断暂时读不到，不能判断 Cron 是否执行或模型是否调用，请稍后重试。</p>
+                                    : awayTrace.length === 0
                                     ? <p className="text-slate-500">目前还没有可核实的执行记录。</p>
                                     : [...awayTrace].reverse().map(item => (
                                       <div key={item.id} className="rounded-lg bg-violet-50/60 p-2 text-slate-700">
