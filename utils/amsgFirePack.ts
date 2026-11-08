@@ -195,6 +195,37 @@ export const unpackStateValue = async (value: string): Promise<string> => {
  * 「刚才为什么没响」，不是审计流水，攒着只会越积越多。
  */
 export const AMSG_LAST_SKIP_KEY = 'last_skip';
+/** 离开后消息独立的最近跳过记录，绝不误入预约面板。 */
+export const AMSG_AWAY_LAST_SKIP_KEY = 'away_last_skip';
+
+/** 最近 12 次离开后机会的无隐私诊断；只记录时刻、状态与短原因码。 */
+export const AMSG_AWAY_TRACE_KEY = 'away_trace_v1';
+export const AMSG_AWAY_TRACE_MAX = 12;
+export type AmsgAwayTraceStage = 'entered' | 'deferred' | 'skipped' | 'silent' | 'queued' | 'failed' | 'retrying';
+export interface AmsgAwayTraceEntry {
+  id: string;
+  at: number;
+  occurrenceMs: number;
+  stage: AmsgAwayTraceStage;
+  reason?: string;
+  llmCalls?: number;
+}
+export const parseAmsgAwayTrace = (value: string | null | undefined): AmsgAwayTraceEntry[] => {
+  try {
+    const data = JSON.parse(value || 'null');
+    if (!data || data.v !== 1 || !Array.isArray(data.entries)) return [];
+    return data.entries.filter((e: any) => e && typeof e.id === 'string' && e.id.length <= 140
+      && Number.isFinite(e.at) && Number.isFinite(e.occurrenceMs)
+      && ['entered', 'deferred', 'skipped', 'silent', 'queued', 'failed', 'retrying'].includes(e.stage)
+      && (e.reason === undefined || typeof e.reason === 'string' && /^[a-z-]{1,40}$/.test(e.reason))
+      && (e.llmCalls === undefined || Number.isInteger(e.llmCalls) && e.llmCalls >= 0 && e.llmCalls <= 100)
+    ).slice(-AMSG_AWAY_TRACE_MAX);
+  } catch { return []; }
+};
+export const appendAmsgAwayTrace = (rows: AmsgAwayTraceEntry[], entry: AmsgAwayTraceEntry): string =>
+  JSON.stringify({ v: 1, entries: [...rows.filter(row => row.id !== entry.id), entry]
+    .sort((a, b) => a.at - b.at).slice(-AMSG_AWAY_TRACE_MAX) });
+
 
 /** last_skip 的原因枚举（新增值时 describeLastSkip 的人话文案要一起补）。 */
 export const LAST_SKIP_REASONS = [
@@ -207,6 +238,11 @@ export const LAST_SKIP_REASONS = [
   'min-gap',
   'recurring-unanswered',
   'daily-limit',
+  'away-disabled',
+  'away-missed-slot',
+  'away-date-lock',
+  'away-call-lock',
+  'away-quiet-hours',
 ] as const;
 
 export interface AmsgLastSkip {
@@ -291,6 +327,16 @@ export const describeLastSkip = (skip: AmsgLastSkip, formatTime: (ms: number) =>
       return `${when} 那条重复消息这次没发——你已经连续几次没回它了，先停一停；你回一句话，它就照常恢复。`;
     case 'daily-limit':
       return `${when} 那次主动消息没发——今天 ta 主动找你的次数已经到了你设的每日上限，跳过的这次不会补发，明天重新计数。`;
+    case 'away-disabled':
+      return `${when} 离开后消息已关闭，旧任务被系统拦下，没有请求 AI。`;
+    case 'away-missed-slot':
+      return `${when} 离开后消息本次节拍已错过，系统跳过且不补发，没有请求 AI。`;
+    case 'away-date-lock':
+      return `${when} 仍处于线下见面，离开后消息自动跳过；下一次机会照常，没有请求 AI。`;
+    case 'away-call-lock':
+      return `${when} 仍处于语音或视频通话，离开后消息自动跳过；下一次机会照常，没有请求 AI。`;
+    case 'away-quiet-hours':
+      return `${when} 位于设置的睡眠禁发时段，离开后消息跳过且不补发，没有请求 AI。`;
   }
 };
 
@@ -617,6 +663,8 @@ export interface AmsgSelfLogEntry {
    * 但不算「主动连发」——带这个标记的条目不会让 unansweredSends 加一。
    */
   reply?: boolean;
+  /** 系统自动离开提醒：读入聊天上下文，但不占自主预约的连发额度。 */
+  away?: boolean;
 }
 
 export interface AmsgSelfLog {
@@ -641,6 +689,10 @@ export interface AmsgSelfLog {
    * 为自排链炸屏加的硬闸整个失效。两件事分开记，各自的上限互不干扰。
    */
   unansweredSends: number;
+  /** 离开后消息单独计数，不消耗自主预约额度（旧日志此字段可能不存在）。 */
+  awayUnansweredSends?: number;
+  /** 新版标志：unansweredSends 已经剔除自动离开提醒。 */
+  separatedAwayCounts?: true;
   /**
    * 每天/每周重复的那些任务，在用户没回期间各自响了几次（按任务的 clientTaskId 记）。
    *
@@ -683,6 +735,8 @@ export const createSelfLog = (basePackAt: number, anchorUserMsgAt: number | null
   anchorUserMsgAt,
   entries: [],
   unansweredSends: 0,
+  awayUnansweredSends: 0,
+  separatedAwayCounts: true,
   recurringSends: {},
   tasks: [],
 });
@@ -693,8 +747,18 @@ export const createSelfLog = (basePackAt: number, anchorUserMsgAt: number | null
  * 读的是 unansweredSends 这个独立计数器，不数 entries——entries 只留最近 8 条，
  * 数它的话计数封顶在 8，用户设的 9 / 10 两档就等于「不限」（见 AmsgSelfLog）。
  */
-export const countUnansweredSends = (log: AmsgSelfLog | null): number =>
-  log ? log.unansweredSends : 0;
+export const countUnansweredSends = (log: AmsgSelfLog | null): number => {
+  if (!log) return 0;
+  if (log.separatedAwayCounts === true) return log.unansweredSends;
+  // 从旧 Worker 升级时，旧计数混入了离开后消息。旧摘要只留最近 8 条，
+  // 无法可靠回溯更早的来源；安全地只认仍可辨认的自主消息，不能因为空闲
+  // 提醒先发了三次就永久挡住角色许下的预约。下一次写入变为独立计数。
+  return Math.min(log.unansweredSends, log.entries.filter(e =>
+    !e.reply && !e.away && !e.id.startsWith('away-')).length);
+};
+
+export const countAwayUnansweredSends = (log: AmsgSelfLog | null): number =>
+  log?.awayUnansweredSends ?? log?.entries.filter(e => e.away || e.id.startsWith('away-')).length ?? 0;
 
 /**
  * fire 开场把云端存的自述日志对齐到本次的 fire_pack 与用户发言状态。两段各管各的生死：
@@ -713,7 +777,7 @@ export const reconcileSelfLogWithPack = (
   let log = stored ?? createSelfLog(pack.builtAt, lastUserMessageAt);
   if (lastUserMessageAt != null
     && (log.anchorUserMsgAt == null || lastUserMessageAt > log.anchorUserMsgAt)) {
-    log = { ...log, anchorUserMsgAt: lastUserMessageAt, entries: [], unansweredSends: 0, recurringSends: {} };
+    log = { ...log, anchorUserMsgAt: lastUserMessageAt, entries: [], unansweredSends: 0, awayUnansweredSends: 0, separatedAwayCounts: true, recurringSends: {} };
   }
   if (log.basePackAt !== pack.builtAt) {
     // 只有快照里明确带回的 uuid 才代表客户端已认领；打包时间本身不是回执。
@@ -755,7 +819,9 @@ export const appendSelfLogEntry = (log: AmsgSelfLog, entry: AmsgSelfLogEntry): A
   return {
     ...log,
     entries: [...kept, { ...entry, text }].slice(-SELF_LOG_MAX_ENTRIES),
-    unansweredSends: log.unansweredSends + (entry.reply || alreadyLogged ? 0 : 1),
+    unansweredSends: countUnansweredSends(log) + (entry.reply || entry.away || alreadyLogged ? 0 : 1),
+    awayUnansweredSends: countAwayUnansweredSends(log) + (entry.away && !alreadyLogged ? 1 : 0),
+    separatedAwayCounts: true,
   };
 };
 

@@ -19,7 +19,7 @@ import { collectFriendFeedMedia, exportActivityTextAsset, isActivityTextAsset } 
 import { prepareFriendFeedMainTask, consumeFriendFeedMainReply } from '../utils/friendFeedMain';
 import { releaseFriendFeedEmotionTask } from '../utils/friendFeedEmotion';
 import { retireCloudCharacter } from '../utils/amsgCloudRetirement';
-import { resolveDialogueApi } from '../utils/characterApi';
+import { resolveScheduledMessageApi } from '../utils/characterApi';
 import {isBuiltinAppearance, readBuiltinAppearance} from '../utils/builtinAppearance';
 import { sameSullyIconSnapshot, SULLY_BIBI_UPGRADE_KEY, upgradeBuiltinSullyBibiIcon } from '../utils/builtinAppearanceUpgrade';
 import { browserHolidayCache, deviceTimeZone, getUserHolidayReminder } from '../utils/userHolidays';
@@ -2477,8 +2477,14 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           }
 
           // 页面内主动消息与私聊使用同一角色默认；旧主动消息副 API 不再参与取值。
-          const api = resolveDialogueApi(currentApiConfig, char, currentApiConfig.proactiveApi?.baseUrl ? currentApiConfig.proactiveApi : undefined);
-          if (!api.baseUrl) {
+          let api;
+          try { api = resolveScheduledMessageApi(currentApiConfig, char, char.activeMsg2Config); }
+          catch (error) {
+              console.warn('[Proactive/Global] 独立 API 不完整，停止本次生成', error);
+              drainQueuedProactive();
+              return;
+          }
+          if (!api.baseUrl || !api.apiKey || !api.model) {
               drainQueuedProactive();
               return;
           }
@@ -3231,6 +3237,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           if (document.visibilityState !== 'visible') return;
           void runLocalAwayMessages({
               getCharacters: () => charactersRef.current,
+              updateCharacter,
               getApiConfig: () => apiConfigRef.current,
               getUserProfile: () => userProfileRef.current,
               getGroups: () => groupsRef.current,

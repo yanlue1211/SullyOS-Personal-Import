@@ -929,6 +929,7 @@ var parseAmsgLimitsRecord = (value) => {
   return null;
 };
 var AMSG_DAILY_SENDS_KEY = "daily_sends";
+var AMSG_AWAY_DAILY_SENDS_KEY = "away_daily_sends";
 var DAILY_COUNTED_KEEP = 20;
 var dayKeyInZone = (nowMs, tzId) => {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -1109,6 +1110,21 @@ var unpackStateValue = async (value) => {
   return new TextDecoder().decode(raw);
 };
 var AMSG_LAST_SKIP_KEY = "last_skip";
+var AMSG_AWAY_LAST_SKIP_KEY = "away_last_skip";
+var AMSG_AWAY_TRACE_KEY = "away_trace_v1";
+var AMSG_AWAY_TRACE_MAX = 12;
+var parseAmsgAwayTrace = (value) => {
+  try {
+    const data = JSON.parse(value || "null");
+    if (!data || data.v !== 1 || !Array.isArray(data.entries)) return [];
+    return data.entries.filter(
+      (e) => e && typeof e.id === "string" && e.id.length <= 140 && Number.isFinite(e.at) && Number.isFinite(e.occurrenceMs) && ["entered", "deferred", "skipped", "silent", "queued", "failed", "retrying"].includes(e.stage) && (e.reason === void 0 || typeof e.reason === "string" && /^[a-z-]{1,40}$/.test(e.reason)) && (e.llmCalls === void 0 || Number.isInteger(e.llmCalls) && e.llmCalls >= 0 && e.llmCalls <= 100)
+    ).slice(-AMSG_AWAY_TRACE_MAX);
+  } catch {
+    return [];
+  }
+};
+var appendAmsgAwayTrace = (rows, entry) => JSON.stringify({ v: 1, entries: [...rows.filter((row) => row.id !== entry.id), entry].sort((a, b) => a.at - b.at).slice(-AMSG_AWAY_TRACE_MAX) });
 var AMSG_SLOT_CURRENT_TIME = "{{AMSG_CURRENT_TIME}}";
 var AMSG_SLOT_TIME_SINCE_USER = "{{AMSG_TIME_SINCE_USER}}";
 var AMSG_SLOT_AWAY_HINT = "{{AMSG_AWAY_HINT}}";
@@ -1206,14 +1222,21 @@ var createSelfLog = (basePackAt, anchorUserMsgAt = null) => ({
   anchorUserMsgAt,
   entries: [],
   unansweredSends: 0,
+  awayUnansweredSends: 0,
+  separatedAwayCounts: true,
   recurringSends: {},
   tasks: []
 });
-var countUnansweredSends = (log) => log ? log.unansweredSends : 0;
+var countUnansweredSends = (log) => {
+  if (!log) return 0;
+  if (log.separatedAwayCounts === true) return log.unansweredSends;
+  return Math.min(log.unansweredSends, log.entries.filter((e) => !e.reply && !e.away && !e.id.startsWith("away-")).length);
+};
+var countAwayUnansweredSends = (log) => log?.awayUnansweredSends ?? log?.entries.filter((e) => e.away || e.id.startsWith("away-")).length ?? 0;
 var reconcileSelfLogWithPack = (stored, pack, lastUserMessageAt) => {
   let log = stored ?? createSelfLog(pack.builtAt, lastUserMessageAt);
   if (lastUserMessageAt != null && (log.anchorUserMsgAt == null || lastUserMessageAt > log.anchorUserMsgAt)) {
-    log = { ...log, anchorUserMsgAt: lastUserMessageAt, entries: [], unansweredSends: 0, recurringSends: {} };
+    log = { ...log, anchorUserMsgAt: lastUserMessageAt, entries: [], unansweredSends: 0, awayUnansweredSends: 0, separatedAwayCounts: true, recurringSends: {} };
   }
   if (log.basePackAt !== pack.builtAt) {
     const adopted = new Set(pack.pendingTasks.map((task) => task.taskUuid));
@@ -1239,7 +1262,9 @@ var appendSelfLogEntry = (log, entry) => {
   return {
     ...log,
     entries: [...kept, { ...entry, text: text2 }].slice(-SELF_LOG_MAX_ENTRIES),
-    unansweredSends: log.unansweredSends + (entry.reply || alreadyLogged ? 0 : 1)
+    unansweredSends: countUnansweredSends(log) + (entry.reply || entry.away || alreadyLogged ? 0 : 1),
+    awayUnansweredSends: countAwayUnansweredSends(log) + (entry.away && !alreadyLogged ? 1 : 0),
+    separatedAwayCounts: true
   };
 };
 var parseSelfLog = (value) => {
@@ -13707,7 +13732,7 @@ var currentOccurrenceMs = (task, nowMs) => {
 };
 var buildFireTaskListBlock = (tasks, opts) => {
   const tz = { tzId: opts.tzId };
-  const listed = tasks.filter((t) => isPendingTask(t, opts.nowMs)).filter((t) => !opts.excludeClientTaskId || t.clientTaskId !== opts.excludeClientTaskId);
+  const listed = tasks.filter((t) => !t.away && !t.clientTaskId?.startsWith("away-") && isPendingTask(t, opts.nowMs)).filter((t) => !opts.excludeClientTaskId || t.clientTaskId !== opts.excludeClientTaskId);
   if (listed.length === 0) return "";
   return [
     "",
@@ -14414,7 +14439,7 @@ function buildScheduledPush(message, build, extraMeta, bannerBody) {
 }
 
 // utils/amsgBundleVersion.ts
-var AMSG_BUNDLE_VERSION = "2026-11-08.3";
+var AMSG_BUNDLE_VERSION = "2026-11-08.10";
 
 // worker/amsg/src/reproduction.ts
 async function writeDiagnosticStage(writeState, runId, event, fields = {}) {
@@ -14778,7 +14803,6 @@ function shouldSkipAwayForQuietHours(args) {
 }
 
 // utils/awayMessageCore.ts
-var AWAY_RENEW_SLACK_MS = 10 * 6e4;
 var nextAwayTickMs = (occurrenceMs, intervalMs, nowMs) => {
   if (!Number.isFinite(occurrenceMs) || !Number.isFinite(nowMs) || !Number.isFinite(intervalMs) || intervalMs <= 0) throw new Error("Invalid away tick");
   return occurrenceMs + (Math.floor(Math.max(0, nowMs - occurrenceMs) / intervalMs) + 1) * intervalMs;
@@ -19282,11 +19306,22 @@ var offloadOversizedPush = async (payload, writeState, charId, clientTaskId, seg
   }
   return current;
 };
-var writeLastSkip = async (writeState, charId, skip) => {
+var writeAwayTrace = async (readState, writeState, charId, event) => {
+  if (!readState || !writeState) return;
+  try {
+    const ns = amsgStateNamespace(charId);
+    const rows = await readState(ns, { key: AMSG_AWAY_TRACE_KEY });
+    const stored = parseAmsgAwayTrace(rows.find((row) => row.key === AMSG_AWAY_TRACE_KEY)?.value);
+    await writeState(ns, [{ key: AMSG_AWAY_TRACE_KEY, value: appendAmsgAwayTrace(stored, event) }]);
+  } catch (err6) {
+    console.warn("[amsg:away-trace] \u5199\u5165\u5931\u8D25", err6 instanceof Error ? err6.name : "unknown");
+  }
+};
+var writeLastSkip = async (writeState, charId, skip, away = false) => {
   if (typeof writeState !== "function") return;
   try {
     await writeState(amsgStateNamespace(charId), [
-      { key: AMSG_LAST_SKIP_KEY, value: JSON.stringify(skip) }
+      { key: away ? AMSG_AWAY_LAST_SKIP_KEY : AMSG_LAST_SKIP_KEY, value: JSON.stringify(skip) }
     ]);
   } catch (error) {
     console.warn("[amsg:skip] \u8DF3\u8FC7\u539F\u56E0\u5199\u5165\u5931\u8D25\uFF08\u8DF3\u8FC7\u672C\u8EAB\u7167\u5E38\u751F\u6548\uFF0C\u53EA\u662F\u9762\u677F\u5C11\u4E00\u53E5\u8BF4\u660E\uFF09", error);
@@ -19433,7 +19468,7 @@ var amsgFireSettled = async (info) => {
         llmCalls,
         sentId: `${stash.clientTaskId || "task"}@${stash.occurrenceMs}`
       });
-      stateWrites.push({ key: AMSG_DAILY_SENDS_KEY, value: JSON.stringify(stash.dailySends) });
+      stateWrites.push({ key: stash.dailySendsKey, value: JSON.stringify(stash.dailySends) });
     }
   }
   if (stash.instant && info.status === "failed" && info.willRetry === false && !committed && stash.taskUuid) {
@@ -19484,7 +19519,8 @@ var amsgFireSettled = async (info) => {
       text: text2,
       // 即时对话是在答用户刚说的话——列进自述块保持连续性，但不占「主动连发」的额度
       // （带这个标记的条目不会让 selfLog.unansweredSends 加一）。
-      ...stash.instant ? { reply: true } : {}
+      ...stash.instant ? { reply: true } : {},
+      ...stash.away ? { away: true } : {}
     });
     if (next !== stash.selfLog) {
       stash.selfLog = next;
@@ -19513,6 +19549,17 @@ var amsgFireSettled = async (info) => {
     } catch (error) {
       console.warn("[amsg:self-log] \u5199\u5165\u5931\u8D25\uFF08\u8FD9\u6B21\u7167\u5E38\u53D1\u9001\uFF0C\u4F46\u4E0B\u4E00\u6B21\u5230\u70B9\u89D2\u8272\u4E0D\u4F1A\u77E5\u9053\u8BF4\u8FC7\u8FD9\u53E5\uFF0C\u6BCF\u65E5\u8BA1\u6570\u4E5F\u5C11\u8BB0\u4E00\u6B21\uFF09", error);
     }
+  }
+  if (stash.away && !cancelled) {
+    const stage = info.status === "failed" && !delivered ? info.willRetry ? "retrying" : "failed" : stash.awaySilenceReason ? "silent" : delivered ? "queued" : "skipped";
+    await writeAwayTrace(stash.readState, info.writeState, stash.charId, {
+      id: `${stash.taskUuid || "unknown"}@${stash.occurrenceMs}`,
+      at: Date.now(),
+      occurrenceMs: stash.occurrenceMs,
+      stage,
+      ...stash.awaySilenceReason ? { reason: stash.awaySilenceReason } : {},
+      ...typeof info.llmCalls === "number" && Number.isFinite(info.llmCalls) ? { llmCalls: Math.min(100, Math.max(0, Math.floor(info.llmCalls))) } : {}
+    });
   }
   const instantSettled = stash.instant && (delivered || info.status === "skipped" || cancelled || info.status === "failed" && info.willRetry === false);
   if (instantSettled && stash.instantInputKey) {
@@ -19561,7 +19608,7 @@ var amsgStaleSkip = async (task, info) => {
     staleAction: info.action,
     skippedCount: info.skippedCount,
     nextSendAtMs: Number.isFinite(nextSendAtMs) ? nextSendAtMs : null
-  });
+  }, meta[AMSG_AWAY_MESSAGE_META] === true);
   if (!isInstantChatTask(meta) && info.occurrenceMs != null) {
     await emitFireSkip(info.emitResult, {
       charId,
@@ -19612,10 +19659,10 @@ var raceEmotionEval = (promise, lateNote = "\u8BC4\u4F30\u6CA1\u8D76\u4E0A\u8FD9
 };
 var countCommittedSelfSends = (stash) => {
   const refundedSends = stash.cancelledTasks.filter((uuid) => stash.plannedSelfSendUuids.includes(uuid)).length;
-  return countUnansweredSends(stash.selfLog) + stash.plannedSelfSends - refundedSends + stash.scheduledTasks.length + (stash.instant ? 0 : 1);
+  return countUnansweredSends(stash.selfLog) + stash.plannedSelfSends - refundedSends + stash.scheduledTasks.length + (stash.instant || stash.away ? 0 : 1);
 };
 var selfScheduleBusyTimes = (stash, nowMs, excludeUuid) => {
-  const busy = liveTaskView(stash).filter((t) => t.taskUuid !== excludeUuid).map((t) => currentOccurrenceMs(t, nowMs)).filter((ms) => ms != null);
+  const busy = liveTaskView(stash).filter((t) => t.taskUuid !== excludeUuid && !t.away).map((t) => currentOccurrenceMs(t, nowMs)).filter((ms) => ms != null);
   if (stash.lastSelfSendAt != null) busy.push(stash.lastSelfSendAt);
   if (!stash.instant) busy.push(nowMs);
   return busy;
@@ -20046,8 +20093,25 @@ var amsgHooks = {
       });
     }
     if (!instant && away) {
-      if (!pack.selfScheduleEnabled || limitsRecord?.selfScheduleEnabled === false || limitsRecord?.awayEnabled === false) {
+      const recordAwaySkip = async (reason) => {
+        await writeAwayTrace(ctx.readState, ctx.writeState, charId, {
+          id: `${String(ctx.task.uuid || "unknown")}@${occurrenceMs}`,
+          at: ctx.now.getTime(),
+          occurrenceMs,
+          stage: "skipped",
+          reason
+        });
+        await writeLastSkip(ctx.writeState, charId, {
+          v: 1,
+          taskUuid: typeof ctx.task.uuid === "string" ? ctx.task.uuid : null,
+          occurrenceMs,
+          reason,
+          skippedAt: ctx.now.getTime()
+        }, true);
+      };
+      if (limitsRecord?.awayEnabled === false) {
         console.log("[amsg:away-skip]", { taskId: ctx.task.id, reason: "away-disabled" });
+        await recordAwaySkip("away-disabled");
         return { skip: true };
       }
       const configuredDelay = Number(limitsRecord?.awayDelayMinutes);
@@ -20060,6 +20124,13 @@ var amsgHooks = {
       const waitMs = dueAt == null ? 0 : dueAt - ctx.now.getTime();
       if (waitMs > AWAY_DUE_TOLERANCE_MS) {
         console.log("[amsg:defer]", { taskId: ctx.task.id, reason: "away-not-due", dueAt });
+        await writeAwayTrace(ctx.readState, ctx.writeState, charId, {
+          id: `${String(ctx.task.uuid || "unknown")}@${occurrenceMs}`,
+          at: ctx.now.getTime(),
+          occurrenceMs,
+          stage: "deferred",
+          reason: "away-not-due"
+        });
         return { defer: { afterMs: Math.min(waitMs, AWAY_MAX_DEFER_MS) } };
       }
       if (typeof ctx.scheduleTask !== "function") throw fail3("Worker \u4E0D\u652F\u6301\u7A7A\u95F2\u63D0\u9192\u5FAA\u73AF\u6392\u7A0B\uFF0C\u8BF7\u66F4\u65B0\u4E91\u7AEF\u7248\u672C");
@@ -20091,15 +20162,24 @@ var amsgHooks = {
           taskId: ctx.task.id,
           name: error instanceof Error ? error.name : "unknown"
         });
+        await writeAwayTrace(ctx.readState, ctx.writeState, charId, {
+          id: `${String(ctx.task.uuid || "unknown")}@${occurrenceMs}`,
+          at: ctx.now.getTime(),
+          occurrenceMs,
+          stage: "deferred",
+          reason: "away-rearm-retry"
+        });
         return { defer: { afterMs: 5 * 6e4 } };
       }
       if (isStaleAwayTick(occurrenceMs, ctx.now.getTime())) {
         console.log("[amsg:away-skip]", { taskId: ctx.task.id, reason: "missed-slot" });
+        await recordAwaySkip("away-missed-slot");
         return { skip: true };
       }
       const liveAwayLock = limitsRecord?.awaySceneLock !== void 0 ? limitsRecord.awaySceneLock : pack.awaySceneLock;
       if (liveAwayLock === "date" || liveAwayLock === "call") {
         console.log("[amsg:away-skip]", { taskId: ctx.task.id, reason: "interaction-still-open", mode: liveAwayLock });
+        await recordAwaySkip(liveAwayLock === "date" ? "away-date-lock" : "away-call-lock");
         return { skip: true };
       }
       if (shouldSkipAwayForQuietHours({
@@ -20109,6 +20189,7 @@ var amsgHooks = {
         userTimeZone: pack.userTzId
       })) {
         console.log("[amsg:away-skip]", { taskId: ctx.task.id, reason: "user-quiet-hours" });
+        await recordAwaySkip("away-quiet-hours");
         return { skip: true };
       }
     }
@@ -20150,7 +20231,7 @@ var amsgHooks = {
     const clientTaskId = typeof taskMeta.amsgClientTaskId === "string" ? taskMeta.amsgClientTaskId : "";
     const nowMs = ctx.now.getTime();
     const scheduleOff = !pack.selfScheduleEnabled || limitsRecord?.selfScheduleEnabled === false;
-    if (!instant && (scheduleOff || selfScheduled && recurring && !limits.allowSelfRecurring)) {
+    if (!instant && (!away && scheduleOff || selfScheduled && recurring && !limits.allowSelfRecurring)) {
       console.log("[amsg:schedule-off-skip]", {
         taskId: ctx.task.id,
         charId,
@@ -20162,7 +20243,7 @@ var amsgHooks = {
       return { skip: true };
     }
     const maxUnansweredSends = limits.maxUnansweredSends;
-    if (!instant && (selfScheduled || away) && countUnansweredSends(selfLog) >= maxUnansweredSends) {
+    if (!instant && selfScheduled && countUnansweredSends(selfLog) >= maxUnansweredSends) {
       console.log("[amsg:unanswered-limit-skip]", {
         taskId: ctx.task.id,
         charId,
@@ -20173,7 +20254,7 @@ var amsgHooks = {
       return { skip: true };
     }
     const occurrenceEntryId = `${clientTaskId || "task"}@${occurrenceMs}`;
-    const lastSelfSendAt = selfLog.entries.filter((e) => !e.reply && e.id !== occurrenceEntryId).map((e) => e.startedAt ?? e.at).reduce((latest, at) => latest == null || at > latest ? at : latest, null);
+    const lastSelfSendAt = selfLog.entries.filter((e) => !e.reply && !e.away && !e.id.startsWith("away-") && e.id !== occurrenceEntryId).map((e) => e.startedAt ?? e.at).reduce((latest, at) => latest == null || at > latest ? at : latest, null);
     if (!instant && selfScheduled && limits.minSendGapMs > 0 && lastSelfSendAt != null && nowMs < lastSelfSendAt + limits.minSendGapMs - FIRE_GAP_TOLERANCE_MS) {
       console.log("[amsg:min-gap-skip]", {
         taskId: ctx.task.id,
@@ -20195,9 +20276,11 @@ var amsgHooks = {
       return { skip: true };
     }
     const dailyDay = dayKeyInZone(nowMs, pack.userTzId);
-    const dailySends = parseDailySends(charRows.find((r) => r.key === AMSG_DAILY_SENDS_KEY)?.value);
-    const sentToday = sendsOnDay(dailySends, dailyDay);
-    if (!instant && sentToday >= limits.dailySendCap) {
+    const dailySendsKey = away ? AMSG_AWAY_DAILY_SENDS_KEY : AMSG_DAILY_SENDS_KEY;
+    const dailySends = parseDailySends(charRows.find((r) => r.key === dailySendsKey)?.value);
+    const normalDailySends = away ? parseDailySends(charRows.find((r) => r.key === AMSG_DAILY_SENDS_KEY)?.value) : dailySends;
+    const sentToday = sendsOnDay(normalDailySends, dailyDay);
+    if (!instant && !away && sentToday >= limits.dailySendCap) {
       console.log("[amsg:daily-limit-skip]", {
         taskId: ctx.task.id,
         charId,
@@ -20228,6 +20311,7 @@ var amsgHooks = {
             recurrenceType: row.recurrenceType || "none",
             expirePolicy: meta.amsgExpirePolicy === "force" ? "force" : old?.expirePolicy || "expire",
             source: meta.amsgSelfScheduled === true ? "character" : old?.source || "user",
+            away: meta[AMSG_AWAY_MESSAGE_META] === true || old?.away === true,
             status: "scheduled",
             createdAt: old?.createdAt || Date.parse(row.createdAt || "") || nowMs
           });
@@ -20242,7 +20326,7 @@ var amsgHooks = {
     const canSelfSchedule = typeof ctx.scheduleTask === "function" && selfScheduleAllowed;
     const tz = { tzId: pack.tzId };
     const { toolCtx, proxyWorkerUrl, xhsCookie } = buildToolCtx(toolPack, toolConfig);
-    const plannedSelfSendTasks = otherLiveTasks.filter((t) => t.source === "character" && (ctx.listTasks || isPendingTask(t, ctx.now.getTime())) && t.taskUuid !== ctx.task.uuid);
+    const plannedSelfSendTasks = otherLiveTasks.filter((t) => !t.away && t.source === "character" && (ctx.listTasks || isPendingTask(t, ctx.now.getTime())) && t.taskUuid !== ctx.task.uuid);
     const stash = {
       selfScheduleAllowed,
       thinkingChainEnabled: pack.thinkingChainEnabled === true,
@@ -20265,7 +20349,7 @@ var amsgHooks = {
       mcpSpentMs: 0,
       // 「还能不能再排」按客户端已知的 + 角色自己排过还没被认领的一起算，
       // 不然角色离线期间连排几次就能绕过每角色的任务上限。
-      pendingTaskCount: otherLiveTasks.length,
+      pendingTaskCount: otherLiveTasks.filter((t) => !t.away).length,
       pendingTasks: livePendingTasks,
       scheduledTasks: [],
       // 序号与 scheduledTasks 一样从空账起步；此后只增不减（取消不回退，见字段注释）。
@@ -20277,6 +20361,8 @@ var amsgHooks = {
       recurring,
       dailyDay,
       dailySends,
+      dailySendsKey,
+      away,
       dailyCounted: false,
       firedAt: nowMs,
       plannedSelfSends: plannedSelfSendTasks.length,
@@ -20324,7 +20410,7 @@ var amsgHooks = {
     const limitsBrief = canSelfSchedule ? buildLimitsBrief({
       limits,
       committedSends: countCommittedSelfSends(stash),
-      activeTasks: otherLiveTasks.length,
+      activeTasks: otherLiveTasks.filter((t) => !t.away).length,
       earliestText: limits.minSendGapMs > 0 ? formatFireTimeShort(earliestSlotAfter(
         nowMs + MIN_SCHEDULE_LEAD_MS2,
         limits.minSendGapMs,
@@ -20431,6 +20517,12 @@ ${userHoliday}` });
       // 到点的自动续排、禁发零LLM均已在 onBeforeFire 完成；这里绝不额外调用模型。
       mustSpeak: false
     }), userHoliday) + mcpBlock + scheduleBlock + replyScopeBlock;
+    if (away) await writeAwayTrace(ctx.readState, ctx.writeState, charId, {
+      id: `${String(ctx.task.uuid || "unknown")}@${occurrenceMs}`,
+      at: ctx.now.getTime(),
+      occurrenceMs,
+      stage: "entered"
+    });
     return {
       messages: [{ role: "user", content: prompt }],
       ...common
@@ -20551,10 +20643,12 @@ ${userHoliday}` });
         }
       });
       stash.actionResultCommitted = true;
+      if (stash.away) stash.awaySilenceReason = "side-effects-only";
       stash.selfLogTexts = ["\uFF08\u5DF2\u5B8C\u6210\u52A8\u4F5C\uFF1A" + decision.sideEffects.directives.map((d) => d.type).join("\u3001") + "\uFF09"];
       return { decision: "skip-push" };
     }
     if (decision.decision === "skip-push") {
+      if (stash.away) stash.awaySilenceReason = decision.reason;
       logSkipDiagnostic({
         sessionId: ctx.sessionId,
         reason: decision.reason,
@@ -20598,7 +20692,7 @@ ${userHoliday}` });
         occurrenceMs: stash.occurrenceMs,
         reason: decision.reason,
         skippedAt: Date.now()
-      });
+      }, stash.away);
       if (!stash.instant) {
         await emitFireSkip(ctx.emitResult, {
           charId: stash.charId,

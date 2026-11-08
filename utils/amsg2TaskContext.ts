@@ -34,7 +34,7 @@ export function buildUserCancelledNotices(
   nowMs: number = Date.now(),
 ): Amsg2ExpiredNoticeRecord[] {
   return tasks
-    .filter((t) => isPendingTask(t, nowMs))
+    .filter((t) => !t.away && !t.clientTaskId?.startsWith('away-') && isPendingTask(t, nowMs))
     .map((t) => ({
       // 编号跟「到点没发」的回执分开：同一条任务可能先有一次没发、之后才被手动取消，两件事都得说。
       // 同一条任务重复取消只会命中同一个 id，台账按 id 去重，天然幂等。
@@ -239,7 +239,7 @@ export async function collectAmsg2TaskContext(
   const now = Date.now();
 
   const unnotified = (await ActiveMsgStore.getExpiredNotices(char.id)).filter((r) => !r.notifiedAt);
-  const pending = getPendingTasks(config, now);
+  const pending = getPendingTasks(config, now).filter(task => !task.away && !task.clientTaskId?.startsWith('away-'));
   return {
     // 时间按角色的钟写：这一段是给角色看的，到点 worker 渲染的那份也是角色时区，
     // 两边对不上的话，纽约角色会在同一轮里读到差一个时差的两个「同一条任务」。

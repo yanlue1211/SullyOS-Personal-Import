@@ -36,6 +36,7 @@ import {
 } from './amsg2Tasks';
 import {
   AMSG_DAILY_SENDS_KEY,
+  AMSG_AWAY_DAILY_SENDS_KEY,
   AMSG_LIMITS_KEY,
   type AmsgDailySends,
   buildAmsgLimitsRecord,
@@ -86,6 +87,10 @@ import {
   AMSG2_INSTANT_STUB_TEMPLATE,
   AMSG_INSTANT_CHAT_SUBTYPE,
   AMSG_LAST_SKIP_KEY,
+  AMSG_AWAY_LAST_SKIP_KEY,
+  AMSG_AWAY_TRACE_KEY,
+  parseAmsgAwayTrace,
+  type AmsgAwayTraceEntry,
   AMSG_SLOT_SELF_LOG,
   AMSG_SLOT_TASK_LIST,
   AMSG_SLOT_TIME_SINCE_USER,
@@ -2741,11 +2746,13 @@ export const ActiveMsgClient = {
   async cancelAllTasksForChar(
     charId: string,
     localTaskUuids: string[],
+    scope: 'all' | 'appointments' = 'all',
   ): Promise<{ targets: string[]; failed: Set<string> }> {
     let targets: string[];
     try {
       targets = (await this.listRemoteTasksForChar(charId))
-        .filter((task) => classifyTaskRow(task) === 'scheduled')
+        .filter((task) => classifyTaskRow(task) === 'scheduled'
+          && (scope === 'all' || !task.clientTaskId?.startsWith('away-')))
         .map((task) => task.uuid);
     } catch {
       targets = localTaskUuids;
@@ -2798,7 +2805,7 @@ export const ActiveMsgClient = {
     // 用户和角色共用（见 amsgLimits 的 maxActiveTasks）。
     const maxActiveTasks = resolveAmsgLimits(config).maxActiveTasks;
     const pendingOthers = getPendingTasks(config, Date.now())
-      .filter((t) => t.taskUuid !== replaceTaskUuid);
+      .filter((t) => t.taskUuid !== replaceTaskUuid && !t.away && !t.clientTaskId?.startsWith('away-'));
     // 离开后消息是用户开的系统任务，不跟角色抢名额；名额满时它也不能建不出来。
     if (!task.away && pendingOthers.length >= maxActiveTasks) {
       throw new Error(`该角色已经排好了 ${maxActiveTasks} 次主动消息，到上限了（上限在「主动频率」里调），请先取消或合并已有的。`);
@@ -3232,6 +3239,7 @@ export const ActiveMsgClient = {
     // 会消费模板的新任务）且本地任务清单为空时，用占位模板省掉每次发送的二次全量
     // 构建与上传。2.0 开着 / 还挂着任务（含取消失败的幽灵行）就老老实实带真模板。
     const templateStub = !isAmsg2EnabledForChar(char)
+      && !char.awayMessage?.enabled
       && (char.activeMsg2Config?.tasks?.length ?? 0) === 0;
     const firePack: AmsgFirePack = {
       ...(await buildFirePack(char, userProfile, groups, realtimeConfig, undefined, { templateStub })),
@@ -4041,7 +4049,7 @@ export const ActiveMsgClient = {
     updated: number;
     failed: number;
   }> {
-    const characters = (await DB.getAllCharacters()).filter(isAmsg2EnabledForChar);
+    const characters = (await DB.getAllCharacters()).filter(char => isAmsg2EnabledForChar(char) || char.awayMessage?.enabled);
     if (!characters.length) return { status: 'no-tasks', updated: 0, failed: 0 };
     const remoteTasks = await this.listAllTasks();
     let updated = 0;
@@ -4083,7 +4091,7 @@ export const ActiveMsgClient = {
       hasTasks = true;
       try {
         const result = await this.refreshCharPendingAiTaskCredentials({
-          char, config: char.activeMsg2Config!, apiConfig, tasks, remoteTasks,
+          char, config: char.activeMsg2Config ?? { enabled: false, tasks: [] }, apiConfig, tasks, remoteTasks,
         });
         updated += result.updated;
         failed += result.failed;
@@ -4180,22 +4188,31 @@ export const ActiveMsgClient = {
    */
   async readPanelStatus(charId: string): Promise<{
     lastSkip: AmsgLastSkip | null;
+    awayLastSkip: AmsgLastSkip | null;
+    awayTrace: AmsgAwayTraceEntry[];
+    /** 区分云端诊断读失败与确实没有历史记录；不可据空值推断 Cron 未运行。 */
+    statusReadOk: boolean;
     dailySends: AmsgDailySends | null;
+    awayDailySends: AmsgDailySends | null;
   }> {
     try {
       const config = await ensureWorkerReady();
       const client = await initializeClient(config);
       const response = await client.getClientState(amsgStateNamespace(charId));
-      if (!response?.success) return { lastSkip: null, dailySends: null };
+      if (!response?.success) return { lastSkip: null, awayLastSkip: null, awayTrace: [], statusReadOk: false, dailySends: null, awayDailySends: null };
       const entries = (response.data?.entries ?? []) as Array<{ key: string; value: string }>;
       const valueOf = (key: string) => entries.find((e) => e?.key === key)?.value || null;
       const skipValue = valueOf(AMSG_LAST_SKIP_KEY);
       return {
         lastSkip: skipValue ? parseLastSkip(skipValue) : null,
+        awayLastSkip: valueOf(AMSG_AWAY_LAST_SKIP_KEY) ? parseLastSkip(valueOf(AMSG_AWAY_LAST_SKIP_KEY)!) : null,
+        awayTrace: parseAmsgAwayTrace(valueOf(AMSG_AWAY_TRACE_KEY)),
+        statusReadOk: true,
         dailySends: parseDailySends(valueOf(AMSG_DAILY_SENDS_KEY)),
+        awayDailySends: parseDailySends(valueOf(AMSG_AWAY_DAILY_SENDS_KEY)),
       };
     } catch {
-      return { lastSkip: null, dailySends: null };
+      return { lastSkip: null, awayLastSkip: null, awayTrace: [], statusReadOk: false, dailySends: null, awayDailySends: null };
     }
   },
 

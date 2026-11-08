@@ -15,7 +15,7 @@ import { loadCharacterContextRange } from './chatContextRange';
 import { ChatPrompts } from './chatPrompts';
 import { buildChatRequestPayload } from './chatRequestPayload';
 import { applyAssistantPostProcessing } from './applyAssistantPostProcessing';
-import { resolveDialogueApi } from './characterApi';
+import { resolveScheduledMessageApi } from './characterApi';
 import { normalizeChatApiUrl } from './amsgLlmCredentials';
 import { extractContent, safeFetchJson } from './safeApi';
 import { buildNativeLocalAwayHint } from './awayMessageNativePrompt';
@@ -30,7 +30,7 @@ export const generateNativeLocalAwayMessages = async (char: CharacterProfile, de
   const lastUserAt = findAwayGapStart(recent, delayMs, now);
   if (lastUserAt == null) return;
   const userProfile = deps.getUserProfile();
-  const api = resolveDialogueApi(deps.getApiConfig(), char);
+  const api = resolveScheduledMessageApi(deps.getApiConfig(), char, char.activeMsg2Config);
   if (!userProfile || !api.baseUrl) return;
 
   // 时刻不早于最后一条消息：显示顺序看 id，时间戳倒挂会让气泡上的钟跳回去。

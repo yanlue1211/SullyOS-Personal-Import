@@ -61,6 +61,11 @@ import {
   AMSG_CHAT_FAIL_KEY,
   AMSG_FIRE_PACK_KEY,
   AMSG_LAST_SKIP_KEY,
+  AMSG_AWAY_LAST_SKIP_KEY,
+  AMSG_AWAY_TRACE_KEY,
+  appendAmsgAwayTrace,
+  parseAmsgAwayTrace,
+  type AmsgAwayTraceEntry,
   AMSG_SELF_LOG_KEY,
   AMSG2_INSTANT_STUB_TEMPLATE,
   type AmsgChatFailRecord,
@@ -87,6 +92,7 @@ import {
 } from '../../../utils/amsgFirePack';
 import {
   AMSG_DAILY_SENDS_KEY,
+  AMSG_AWAY_DAILY_SENDS_KEY,
   AMSG_LIMITS_KEY,
   type AmsgDailySends,
   type AmsgLimits,
@@ -491,6 +497,10 @@ interface FireStash {
   dailyDay: string;
   /** fire 开场读到的每日计数（收尾时在它上面累加再写回）。 */
   dailySends: AmsgDailySends | null;
+  /** 两种消息只共用调度器，不共用频率/日计费账本。 */
+  dailySendsKey: string;
+  away: boolean;
+  awaySilenceReason?: AmsgLastSkip['reason'];
   /** 这次 fire 已经记进每日计数了（收尾 hook 被调两次也只记一回）。 */
   dailyCounted: boolean;
   /** 这次 fire 开始的时刻；日志条目的 startedAt（间隔的锚点）就是它。 */
@@ -837,15 +847,34 @@ export const offloadOversizedPush = async (
  *
  * best-effort：写不进去不能连累这次 skip 本身——闸该拦还是要拦，少一句解释而已。
  */
+/** 仅按实际云端回执记录机会，不读取聊天正文；失败绝不影响消息投递。 */
+const writeAwayTrace = async (
+  readState: FireCtx['readState'] | undefined,
+  writeState: WriteState | undefined,
+  charId: string,
+  event: AmsgAwayTraceEntry,
+): Promise<void> => {
+  if (!readState || !writeState) return;
+  try {
+    const ns = amsgStateNamespace(charId);
+    const rows = await readState(ns, { key: AMSG_AWAY_TRACE_KEY });
+    const stored = parseAmsgAwayTrace(rows.find(row => row.key === AMSG_AWAY_TRACE_KEY)?.value);
+    await writeState(ns, [{ key: AMSG_AWAY_TRACE_KEY, value: appendAmsgAwayTrace(stored, event) }]);
+  } catch (err) {
+    console.warn('[amsg:away-trace] 写入失败', err instanceof Error ? err.name : 'unknown');
+  }
+};
+
 const writeLastSkip = async (
   writeState: WriteState | undefined,
   charId: string,
   skip: AmsgLastSkip,
+  away = false,
 ): Promise<void> => {
   if (typeof writeState !== 'function') return;
   try {
     await writeState(amsgStateNamespace(charId), [
-      { key: AMSG_LAST_SKIP_KEY, value: JSON.stringify(skip) },
+      { key: away ? AMSG_AWAY_LAST_SKIP_KEY : AMSG_LAST_SKIP_KEY, value: JSON.stringify(skip) },
     ]);
   } catch (error) {
     console.warn('[amsg:skip] 跳过原因写入失败（跳过本身照常生效，只是面板少一句说明）', error);
@@ -1153,7 +1182,7 @@ export const amsgFireSettled = async (
         llmCalls,
         sentId: `${stash.clientTaskId || 'task'}@${stash.occurrenceMs}`,
       });
-      stateWrites.push({ key: AMSG_DAILY_SENDS_KEY, value: JSON.stringify(stash.dailySends) });
+      stateWrites.push({ key: stash.dailySendsKey, value: JSON.stringify(stash.dailySends) });
     }
   }
 
@@ -1234,6 +1263,7 @@ export const amsgFireSettled = async (
       // 即时对话是在答用户刚说的话——列进自述块保持连续性，但不占「主动连发」的额度
       // （带这个标记的条目不会让 selfLog.unansweredSends 加一）。
       ...(stash.instant ? { reply: true } : {}),
+      ...(stash.away ? { away: true } : {}),
     });
     // 整段只有副作用标签（正文为空）时 append 原样返回——没有话可记。
     if (next !== stash.selfLog) {
@@ -1266,6 +1296,20 @@ export const amsgFireSettled = async (
     } catch (error) {
       console.warn('[amsg:self-log] 写入失败（这次照常发送，但下一次到点角色不会知道说过这句，每日计数也少记一次）', error);
     }
+  }
+
+  // 只有已确认的最终结果才归档；outbox 成功不等于手机实际收到。
+  if (stash.away && !cancelled) {
+    const stage: AmsgAwayTraceEntry['stage'] = info.status === 'failed' && !delivered
+      ? (info.willRetry ? 'retrying' : 'failed')
+      : stash.awaySilenceReason ? 'silent' : delivered ? 'queued' : 'skipped';
+    await writeAwayTrace(stash.readState, info.writeState, stash.charId, {
+      id: `${stash.taskUuid || 'unknown'}@${stash.occurrenceMs}`,
+      at: Date.now(), occurrenceMs: stash.occurrenceMs, stage,
+      ...(stash.awaySilenceReason ? { reason: stash.awaySilenceReason } : {}),
+      ...(typeof info.llmCalls === 'number' && Number.isFinite(info.llmCalls)
+        ? { llmCalls: Math.min(100, Math.max(0, Math.floor(info.llmCalls))) } : {}),
+    });
   }
 
   // 一次性即时对话的独立输入快照（amsg:instant-input）在本轮落定后不会再被任何任务读取：
@@ -1363,7 +1407,7 @@ export const amsgStaleSkip = async (
     staleAction: info.action,
     skippedCount: info.skippedCount,
     nextSendAtMs: Number.isFinite(nextSendAtMs) ? nextSendAtMs : null,
-  });
+  }, meta[AMSG_AWAY_MESSAGE_META] === true);
   // 即时对话的过期上面已经用 chat_fail 交代过了；这里只管定时主动消息。
   if (!isInstantChatTask(meta) && info.occurrenceMs != null) {
     await emitFireSkip(info.emitResult, {
@@ -1475,7 +1519,7 @@ const countCommittedSelfSends = (stash: FireStash): number => {
     .filter((uuid) => stash.plannedSelfSendUuids.includes(uuid)).length;
   return countUnansweredSends(stash.selfLog)
     + stash.plannedSelfSends - refundedSends + stash.scheduledTasks.length
-    + (stash.instant ? 0 : 1);
+    + (stash.instant || stash.away ? 0 : 1);
 };
 
 /**
@@ -1485,7 +1529,7 @@ const countCommittedSelfSends = (stash: FireStash): number => {
  */
 const selfScheduleBusyTimes = (stash: FireStash, nowMs: number, excludeUuid?: string): number[] => {
   const busy = liveTaskView(stash)
-    .filter(t => t.taskUuid !== excludeUuid)
+    .filter(t => t.taskUuid !== excludeUuid && !t.away)
     .map((t) => currentOccurrenceMs(t, nowMs))
     .filter((ms): ms is number => ms != null);
   if (stash.lastSelfSendAt != null) busy.push(stash.lastSelfSendAt);
@@ -1979,7 +2023,7 @@ export const amsgHooks = {
     const taskPolicy = typeof taskMeta.amsgExpirePolicy === 'string'
       ? taskMeta.amsgExpirePolicy : undefined;
     const selfScheduled = taskMeta.amsgSelfScheduled === true;
-    // 离开后消息：到点必发、计入连发上限，对方又开过口就原地推迟（见 docs/away-message.md）。
+    // 离开后消息：独立的空闲提醒（不占自主预约的连发 / 日额度）；用户再开口就推迟。
     const away = taskMeta[AMSG_AWAY_MESSAGE_META] === true;
     const recurring = ctx.task.recurrenceType === 'daily' || ctx.task.recurrenceType === 'weekly';
 
@@ -2170,9 +2214,24 @@ export const amsgHooks = {
     // 跳过路径必须发生在模型生成之前，不能因为拦截而发生模型请求/重试风暴。
     // 用户自己预约的任务不带 away 标记，完全不经过这个循环。
     if (!instant && away) {
-      if (!pack.selfScheduleEnabled || limitsRecord?.selfScheduleEnabled === false
-          || limitsRecord?.awayEnabled === false) {
+      // 每次实际进入 Worker 后的系统跳过才留痕；没有进入这里绝不能假称角色决定静默。
+      // 单次写入只含时刻、原因和任务编号，不记录原文、思考或 API 凭据。
+      const recordAwaySkip = async (reason: AmsgLastSkip['reason']): Promise<void> => {
+        await writeAwayTrace(ctx.readState, ctx.writeState, charId, {
+          id: `${String(ctx.task.uuid || 'unknown')}@${occurrenceMs}`,
+          at: ctx.now.getTime(), occurrenceMs, stage: 'skipped', reason,
+        });
+        await writeLastSkip(ctx.writeState, charId, {
+          v: 1,
+          taskUuid: typeof ctx.task.uuid === 'string' ? ctx.task.uuid : null,
+          occurrenceMs,
+          reason,
+          skippedAt: ctx.now.getTime(),
+        }, true);
+      };
+      if (limitsRecord?.awayEnabled === false) {
         console.log('[amsg:away-skip]', { taskId: ctx.task.id, reason: 'away-disabled' });
+        await recordAwaySkip('away-disabled');
         return { skip: true } as const;
       }
       const configuredDelay = Number(limitsRecord?.awayDelayMinutes);
@@ -2188,6 +2247,10 @@ export const amsgHooks = {
       const waitMs = dueAt == null ? 0 : dueAt - ctx.now.getTime();
       if (waitMs > AWAY_DUE_TOLERANCE_MS) {
         console.log('[amsg:defer]', { taskId: ctx.task.id, reason: 'away-not-due', dueAt });
+        await writeAwayTrace(ctx.readState, ctx.writeState, charId, {
+          id: `${String(ctx.task.uuid || 'unknown')}@${occurrenceMs}`,
+          at: ctx.now.getTime(), occurrenceMs, stage: 'deferred', reason: 'away-not-due',
+        });
         return { defer: { afterMs: Math.min(waitMs, AWAY_MAX_DEFER_MS) } } as const;
       }
 
@@ -2226,16 +2289,22 @@ export const amsgHooks = {
         console.warn('[amsg:away-rearm] 续排下一节拍失败，已延后重试（零模型调用）', {
           taskId: ctx.task.id, name: error instanceof Error ? error.name : 'unknown',
         });
+        await writeAwayTrace(ctx.readState, ctx.writeState, charId, {
+          id: `${String(ctx.task.uuid || 'unknown')}@${occurrenceMs}`,
+          at: ctx.now.getTime(), occurrenceMs, stage: 'deferred', reason: 'away-rearm-retry',
+        });
         return { defer: { afterMs: 5 * 60_000 } } as const;
       }
       if (isStaleAwayTick(occurrenceMs, ctx.now.getTime())) {
         console.log('[amsg:away-skip]', { taskId: ctx.task.id, reason: 'missed-slot' });
+        await recordAwaySkip('away-missed-slot');
         return { skip: true } as const;
       }
       const liveAwayLock = limitsRecord?.awaySceneLock !== undefined
         ? limitsRecord.awaySceneLock : pack.awaySceneLock;
       if (liveAwayLock === 'date' || liveAwayLock === 'call') {
         console.log('[amsg:away-skip]', { taskId: ctx.task.id, reason: 'interaction-still-open', mode: liveAwayLock });
+        await recordAwaySkip(liveAwayLock === 'date' ? 'away-date-lock' : 'away-call-lock');
         return { skip: true } as const;
       }
       if (shouldSkipAwayForQuietHours({
@@ -2245,6 +2314,7 @@ export const amsgHooks = {
         userTimeZone: pack.userTzId,
       })) {
         console.log('[amsg:away-skip]', { taskId: ctx.task.id, reason: 'user-quiet-hours' });
+        await recordAwaySkip('away-quiet-hours');
         return { skip: true } as const;
       }
     }
@@ -2324,7 +2394,7 @@ export const amsgHooks = {
     // 关 2.0 时客户端会先把 limits 写成关、再去取消任务——取消扫完之后才冒出来的
     // （正在跑的那一轮顺手排的）、以及取消失败留下的，都在这里拦住，一个 token 都不花。
     const scheduleOff = !pack.selfScheduleEnabled || limitsRecord?.selfScheduleEnabled === false;
-    if (!instant && (scheduleOff || (selfScheduled && recurring && !limits.allowSelfRecurring))) {
+    if (!instant && ((!away && scheduleOff) || (selfScheduled && recurring && !limits.allowSelfRecurring))) {
       console.log('[amsg:schedule-off-skip]', {
         taskId: ctx.task.id, charId, selfScheduled, recurring, scheduleOff,
       });
@@ -2333,8 +2403,8 @@ export const amsgHooks = {
     }
 
     const maxUnansweredSends = limits.maxUnansweredSends;
-    // 离开后消息也归它管：它发出去就算一次「没回时找你」，后面角色自排的接着往上数。
-    if (!instant && (selfScheduled || away)
+    // 只限制角色的自主预约，离开后消息走独立空闲计时，不占自主预约额度。
+    if (!instant && selfScheduled
       && countUnansweredSends(selfLog) >= maxUnansweredSends) {
       console.log('[amsg:unanswered-limit-skip]', {
         taskId: ctx.task.id,
@@ -2353,7 +2423,7 @@ export const amsgHooks = {
     // 会平白差出一整次生成的时长。同一次触发重跑时，日志里那条就是它自己，不算。
     const occurrenceEntryId = `${clientTaskId || 'task'}@${occurrenceMs}`;
     const lastSelfSendAt = selfLog.entries
-      .filter((e) => !e.reply && e.id !== occurrenceEntryId)
+      .filter((e) => !e.reply && !e.away && !e.id.startsWith('away-') && e.id !== occurrenceEntryId)
       .map((e) => e.startedAt ?? e.at)
       .reduce<number | null>((latest, at) => (latest == null || at > latest ? at : latest), null);
     if (!instant && selfScheduled && limits.minSendGapMs > 0 && lastSelfSendAt != null
@@ -2380,9 +2450,11 @@ export const amsgHooks = {
     // 每日上限：用户面板排的也算（用户自己选的口径），即时对话不算——那是正常聊天。
     // 「今天」按用户那边的日期：这是用户的钱包闸，跟角色活在哪个时区无关。
     const dailyDay = dayKeyInZone(nowMs, pack.userTzId);
-    const dailySends = parseDailySends(charRows.find((r) => r.key === AMSG_DAILY_SENDS_KEY)?.value);
-    const sentToday = sendsOnDay(dailySends, dailyDay);
-    if (!instant && sentToday >= limits.dailySendCap) {
+    const dailySendsKey = away ? AMSG_AWAY_DAILY_SENDS_KEY : AMSG_DAILY_SENDS_KEY;
+    const dailySends = parseDailySends(charRows.find((r) => r.key === dailySendsKey)?.value);
+    const normalDailySends = away ? parseDailySends(charRows.find((r) => r.key === AMSG_DAILY_SENDS_KEY)?.value) : dailySends;
+    const sentToday = sendsOnDay(normalDailySends, dailyDay);
+    if (!instant && !away && sentToday >= limits.dailySendCap) {
       console.log('[amsg:daily-limit-skip]', {
         taskId: ctx.task.id, charId, day: dailyDay, sentToday, cap: limits.dailySendCap,
       });
@@ -2414,6 +2486,7 @@ export const amsgHooks = {
             recurrenceType: (row.recurrenceType || 'none') as ActiveMsg2TaskRecord['recurrenceType'],
             expirePolicy: meta.amsgExpirePolicy === 'force' ? 'force' : old?.expirePolicy || 'expire',
             source: meta.amsgSelfScheduled === true ? 'character' : old?.source || 'user',
+            away: meta[AMSG_AWAY_MESSAGE_META] === true || old?.away === true,
             status: 'scheduled', createdAt: old?.createdAt || Date.parse(row.createdAt || '') || nowMs,
           });
         }
@@ -2446,7 +2519,7 @@ export const amsgHooks = {
     // 连发额度里「先前排了还没响」那一份的快照：条数进 plannedSelfSends，uuid 留一份
     // 给排程闸退额度用（本轮取消掉快照里的任务时按交集抵扣，cancel + 重排额度中性）。
     const plannedSelfSendTasks = otherLiveTasks
-      .filter((t) => t.source === 'character' && (ctx.listTasks || isPendingTask(t, ctx.now.getTime()))
+      .filter((t) => !t.away && t.source === 'character' && (ctx.listTasks || isPendingTask(t, ctx.now.getTime()))
         // 正在触发的这条重复任务，下一次要等下个周期，不算「用户没回期间还要发的」。
         && t.taskUuid !== ctx.task.uuid);
     // 显式标注而不是 satisfies：下面即时对话那一支要往 emotionEvalPromise 上写 promise，
@@ -2476,7 +2549,7 @@ export const amsgHooks = {
       mcpSpentMs: 0,
       // 「还能不能再排」按客户端已知的 + 角色自己排过还没被认领的一起算，
       // 不然角色离线期间连排几次就能绕过每角色的任务上限。
-      pendingTaskCount: otherLiveTasks.length,
+      pendingTaskCount: otherLiveTasks.filter((t) => !t.away).length,
       pendingTasks: livePendingTasks,
       scheduledTasks: [],
       // 序号与 scheduledTasks 一样从空账起步；此后只增不减（取消不回退，见字段注释）。
@@ -2488,6 +2561,8 @@ export const amsgHooks = {
       recurring,
       dailyDay,
       dailySends,
+      dailySendsKey,
+      away,
       dailyCounted: false,
       firedAt: nowMs,
       plannedSelfSends: plannedSelfSendTasks.length,
@@ -2567,7 +2642,7 @@ export const amsgHooks = {
       ? buildLimitsBrief({
         limits,
         committedSends: countCommittedSelfSends(stash),
-        activeTasks: otherLiveTasks.length,
+        activeTasks: otherLiveTasks.filter((t) => !t.away).length,
         earliestText: limits.minSendGapMs > 0
           ? formatFireTimeShort(earliestSlotAfter(
             nowMs + MIN_SCHEDULE_LEAD_MS, limits.minSendGapMs, selfScheduleBusyTimes(stash, nowMs)), tz)
@@ -2712,6 +2787,10 @@ export const amsgHooks = {
       // 到点的自动续排、禁发零LLM均已在 onBeforeFire 完成；这里绝不额外调用模型。
       mustSpeak: false,
     }), userHoliday) + mcpBlock + scheduleBlock + replyScopeBlock;
+    if (away) await writeAwayTrace(ctx.readState, ctx.writeState, charId, {
+      id: `${String(ctx.task.uuid || 'unknown')}@${occurrenceMs}`,
+      at: ctx.now.getTime(), occurrenceMs, stage: 'entered',
+    });
     return {
       messages: [{ role: 'user' as const, content: prompt }],
       ...common,
@@ -2871,11 +2950,13 @@ export const amsgHooks = {
         },
       });
       stash.actionResultCommitted = true;
+      if (stash.away) stash.awaySilenceReason = 'side-effects-only';
       stash.selfLogTexts = ['（已完成动作：' + decision.sideEffects.directives.map(d => d.type).join('、') + '）'];
       return { decision: 'skip-push' as const };
     }
 
     if (decision.decision === 'skip-push') {
+      if (stash.away) stash.awaySilenceReason = decision.reason;
       // 先把模型这轮回了个什么记一行：last_skip 只有一个 reason，分不清是 content 为 null、
       // 正文全在思考块里、被截断，还是中转站把报错包在了 200 里（见 ./skipDiagnostics）。
       logSkipDiagnostic({
@@ -2930,7 +3011,7 @@ export const amsgHooks = {
         occurrenceMs: stash.occurrenceMs,
         reason: decision.reason,
         skippedAt: Date.now(),
-      });
+      }, stash.away);
       // 定时主动消息这次没发：也告诉客户端一声，角色下一轮聊天时知道这条没说出去。
       if (!stash.instant) {
         await emitFireSkip(ctx.emitResult, {

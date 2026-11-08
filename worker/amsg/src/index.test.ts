@@ -24,6 +24,8 @@ import {
   AMSG_CHAT_FAIL_KEY,
   AMSG_FIRE_PACK_KEY,
   AMSG_LAST_SKIP_KEY,
+  AMSG_AWAY_LAST_SKIP_KEY,
+  AMSG_AWAY_TRACE_KEY,
   AMSG_SELF_LOG_KEY,
   AMSG_SILENT_MARK,
   AMSG_SLOT_CURRENT_TIME,
@@ -708,6 +710,103 @@ describe('连发上限（到点兜底闸）', () => {
       charRows: rowsWith(JSON.stringify(log), { maxUnansweredSends: 10 }),
     });
     fired(await amsgHooks.onBeforeFire(ctx));
+  });
+});
+
+// ─── 离开后消息与预约消息在 Worker 入口的强隔离 ───
+describe('离开后云端机会不依赖预约消息开关', () => {
+  const awayCtx = (extra: {
+    awayEnabled?: boolean;
+    sceneLock?: 'date' | 'call';
+  } = {}) => {
+    const fourHoursAgo = NOW.getTime() - 240 * 60_000;
+    const rows = [
+      { key: AMSG_FIRE_PACK_KEY, value: firePackValue(fourHoursAgo, {
+        selfScheduleEnabled: false,
+        ...(extra.sceneLock ? { awaySceneLock: extra.sceneLock } : {}),
+      }) },
+      { key: AMSG_TOOL_PACK_KEY, value: toolPackValue },
+      limitsRow({ awayEnabled: extra.awayEnabled ?? true, awayDelayMinutes: 240 }, false),
+    ];
+    const result = makeCtx({
+      charRows: rows,
+      metadata: { amsgAwayMessage: true, amsgAwayDelayMinutes: 240, amsgClientTaskId: 'away-test-1' },
+    });
+    result.ctx.scheduleTask = vi.fn(async () => ({ uuid: 'next-away-task' }));
+    return result;
+  };
+
+  it('预约关闭且离开后开启：仍给离开后模型机会、并在云端续排下次节拍', async () => {
+    const { ctx, writeState } = awayCtx();
+    const outcome = fired(await amsgHooks.onBeforeFire(ctx));
+    expect(outcome.messages[0]?.content).toBeTruthy();
+    expect(ctx.scheduleTask).toHaveBeenCalledOnce();
+    expect(ctx.scheduleTask.mock.calls[0][0].metadata.amsgAwayMessage).toBe(true);
+    const trace = writeState.mock.calls.flatMap(([, entries]) =>
+      entries.filter((e: { key: string }) => e.key === AMSG_AWAY_TRACE_KEY));
+    expect(JSON.parse(String(trace[0].value)).entries[0].stage).toBe('entered');
+  });
+
+  it('实际 Worker 收尾后的成功写成「已入投递」而非保证手机送达，失败和重试另记', async () => {
+    for (const item of [
+      { status: 'sent', sentCount: 1, willRetry: false, expected: 'queued' },
+      { status: 'failed', sentCount: 0, willRetry: true, expected: 'retrying' },
+      { status: 'failed', sentCount: 0, willRetry: false, expected: 'failed' },
+    ]) {
+      const { ctx, writeState } = awayCtx();
+      fired(await amsgHooks.onBeforeFire(ctx));
+      await amsgFireSettled({
+        scratch: ctx.scratch, writeState, status: item.status,
+        sentCount: item.sentCount, willRetry: item.willRetry, llmCalls: 1,
+      } as any);
+      const trace = writeState.mock.calls.flatMap(([, entries]) =>
+        entries.filter((e: { key: string }) => e.key === AMSG_AWAY_TRACE_KEY));
+      // onBeforeFire 先记 Worker 已进入，收尾覆盖同一机会；测试假的 readState 不持久化。
+      expect(trace, item.status).toHaveLength(2);
+      expect(JSON.parse(String(trace.at(-1)!.value)).entries[0]).toMatchObject({
+        stage: item.expected, llmCalls: 1,
+      });
+    }
+  });
+
+  it('只执行动作但没有聊天正文，即使动作结果进收件箱也不能记录成主动发过消息', async () => {
+    const { ctx, writeState } = awayCtx();
+    fired(await amsgHooks.onBeforeFire(ctx));
+    const stash = ctx.scratch.fire as any;
+    stash.awaySilenceReason = 'side-effects-only';
+    stash.actionResultCommitted = true;
+    await amsgFireSettled({
+      scratch: ctx.scratch, writeState, status: 'skipped',
+      outboxed: false, sentCount: 0, willRetry: false, llmCalls: 1,
+    } as any);
+    const trace = writeState.mock.calls.flatMap(([, entries]) =>
+      entries.filter((e: { key: string }) => e.key === AMSG_AWAY_TRACE_KEY));
+    expect(trace).toHaveLength(2);
+    expect(JSON.parse(String(trace.at(-1)!.value)).entries[0]).toMatchObject({
+      stage: 'silent', reason: 'side-effects-only', llmCalls: 1,
+    });
+  });
+
+  it('预约关闭且离开后也关闭：不调用模型、不续排', async () => {
+    const { ctx, writeState } = awayCtx({ awayEnabled: false });
+    await expect(amsgHooks.onBeforeFire(ctx)).resolves.toEqual({ skip: true });
+    expect(ctx.scheduleTask).not.toHaveBeenCalled();
+    const awayWrites = writeState.mock.calls.flatMap(([, records]) => records.filter((entry: { key: string }) => entry.key === AMSG_AWAY_LAST_SKIP_KEY));
+    expect(awayWrites).toHaveLength(1);
+    expect(JSON.parse(String(awayWrites[0].value)).reason).toBe('away-disabled');
+    const trace = writeState.mock.calls.flatMap(([, records]) => records.filter((entry: { key: string }) => entry.key === AMSG_AWAY_TRACE_KEY));
+    expect(trace).toHaveLength(1);
+    expect(JSON.parse(String(trace[0].value)).entries[0]).toMatchObject({ stage: 'skipped', reason: 'away-disabled' });
+  });
+
+  it.each(['date', 'call'] as const)('预约关闭时离开后仍尊重 %s 锁：只续排、不生成', async (sceneLock) => {
+    const { ctx, writeState } = awayCtx({ sceneLock });
+    await expect(amsgHooks.onBeforeFire(ctx)).resolves.toEqual({ skip: true });
+    expect(ctx.scheduleTask).toHaveBeenCalledOnce();
+    const awayWrites = writeState.mock.calls.flatMap(([, records]) => records.filter((entry: { key: string }) => entry.key === AMSG_AWAY_LAST_SKIP_KEY));
+    expect(JSON.parse(String(awayWrites[0].value)).reason).toBe(sceneLock === 'date' ? 'away-date-lock' : 'away-call-lock');
+    const trace = writeState.mock.calls.flatMap(([, records]) => records.filter((entry: { key: string }) => entry.key === AMSG_AWAY_TRACE_KEY));
+    expect(JSON.parse(String(trace[0].value)).entries[0].stage).toBe('skipped');
   });
 });
 
@@ -3563,6 +3662,24 @@ describe('stale 跳过留痕（onStaleSkip）', () => {
     expect(written!.skip.reason).toBe('stale');
     expect(written!.skip.occurrenceMs).toBe(Date.parse(occurrence));
     expect(written!.skip.staleAction).toBe('expired');
+  });
+
+  it('离开后消息过期只记录到离开后账本，不污染预约消息的最近跳过', async () => {
+    const writeState = makeWriteState();
+    await amsgStaleSkip(
+      { id: 110, uuid: TASK_ROW_UUID },
+      {
+        reason: 'stale', action: 'expired',
+        metadata: { charId: CHAR_ID, amsgAwayMessage: true },
+        occurrenceMs: Date.parse('2026-07-25T09:00:00.000Z'),
+        skippedCount: 1, nextSendAt: null, writeState,
+      },
+    );
+    expect(lastSkipOf(writeState)).toBeNull();
+    const awayWrites = writeState.mock.calls.flatMap(([, entries]) =>
+      entries.filter((entry: { key: string }) => entry.key === AMSG_AWAY_LAST_SKIP_KEY));
+    expect(awayWrites).toHaveLength(1);
+    expect(JSON.parse(String(awayWrites[0].value)).reason).toBe('stale');
   });
 
   it('诊断任务过期跳过时留一条 fire-settled，不写主动消息的 last_skip', async () => {

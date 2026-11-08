@@ -323,7 +323,7 @@ async function handleSchedule(args: Record<string, any>, deps: Amsg2ToolDeps): P
   if (!args.__replaceTaskUuid && !args.__makeupForTaskUuid) {
     const unansweredLimit = limits.maxUnansweredSends;
     const plannedSelfSends = config.tasks
-      .filter((t) => t.source === 'character' && isPendingTask(t, Date.now()))
+      .filter((t) => !t.away && !t.clientTaskId?.startsWith('away-') && t.source === 'character' && isPendingTask(t, Date.now()))
       .length;
     if (plannedSelfSends + 1 > unansweredLimit) {
       return reject(deps, 'unanswered_limit', `对方还没回复，这期间你已经排了 ${plannedSelfSends} 次后续，用户设的连发上限是 ${unansweredLimit} 次——这次别排了，等 ta 回复再说。`);
@@ -345,7 +345,7 @@ async function handleSchedule(args: Record<string, any>, deps: Amsg2ToolDeps): P
   if (Number.isFinite(sendAtMs)) {
     const now = Date.now();
     const busy = getPendingTasks(config, now)
-      .filter((t) => t.taskUuid !== args.__replaceTaskUuid)
+      .filter((t) => !t.away && !t.clientTaskId?.startsWith('away-') && t.taskUuid !== args.__replaceTaskUuid)
       .map((t) => currentOccurrenceMs(t, now))
       .filter((ms): ms is number => ms != null);
     const rules = checkSelfScheduleRules({
@@ -440,12 +440,12 @@ const resolveTargetTask = (
   config: LoadedConfig,
   taskIdArg: unknown,
 ): { task?: ActiveMsg2TaskRecord; error?: string } => {
-  const tasks = config.tasks;
+  const tasks = config.tasks.filter(t => !t.away && !t.clientTaskId?.startsWith('away-'));
   if (typeof taskIdArg === 'string' && taskIdArg.trim()) {
     const task = findTaskByShortId(tasks, taskIdArg.trim());
     return task ? { task } : { error: `没有找到短 id 为 ${taskIdArg} 的任务，请先用 list_active_messages 查看。` };
   }
-  const pending = getPendingTasks(config, Date.now());
+  const pending = getPendingTasks(config, Date.now()).filter(t => !t.away && !t.clientTaskId?.startsWith('away-'));
   if (pending.length === 1) return { task: pending[0] };
   if (pending.length === 0 && tasks.length === 1) return { task: tasks[0] };
   return { error: '当前有多个任务，请带 task_id（短 id）指定要操作哪一个。' };
@@ -498,7 +498,7 @@ async function handleRenew(args: Record<string, any>, deps: Amsg2ToolDeps): Prom
 async function handleList(deps: Amsg2ToolDeps): Promise<string> {
   const config = readConfig(deps);
   const charTz = resolveCharTimeZone(deps.char);
-  const tasks = config.tasks;
+  const tasks = config.tasks.filter(t => !t.away && !t.clientTaskId?.startsWith('away-'));
   if (!tasks.length) return '当前角色没有任何定时主动消息任务。';
   const now = Date.now();
   const lines = tasks.map((t) => {

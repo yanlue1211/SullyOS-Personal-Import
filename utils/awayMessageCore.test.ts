@@ -79,8 +79,11 @@ describe('decideAwayTaskAction（云端版每轮发不发请求）', () => {
     expect(decideAwayTaskAction(null, NOW + DELAY, NOW)).toBe('create');
   });
 
-  it('排期离目标不到 10 分钟 → 不发请求，差的由 worker 推迟兜住', () => {
-    expect(decideAwayTaskAction(NOW + DELAY - 5 * MIN, NOW + DELAY, NOW)).toBe('keep');
+  it('排期在一分钟误差内 → 保持旧任务，避免无意义网络改期', () => {
+    expect(decideAwayTaskAction(NOW + DELAY - 30_000, NOW + DELAY, NOW)).toBe('keep');
+  });
+  it('最近用户又开口，原计划早了五分钟 → 必须重新计时', () => {
+    expect(decideAwayTaskAction(NOW + DELAY - 5 * MIN, NOW + DELAY, NOW)).toBe('renew');
   });
 
   it('排得比新目标晚很多 → 重新对齐，不能因为旧链太晚漏掉这一轮', () => {
