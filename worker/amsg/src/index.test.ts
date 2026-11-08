@@ -44,6 +44,7 @@ import {
   SELF_LOG_MAX_ENTRIES,
 } from '../../../utils/amsgFirePack';
 import { AMSG_CHAT_PRESENCE_KEY } from '../../../utils/amsgChatPresence';
+import { AMSG_CALL_PRESENCE_KEY, AMSG_CALL_PRESENCE_TTL_MS } from '../../../utils/amsgCallPresence';
 import { AMSG_TOOL_CONFIG_KEY, AMSG_TOOL_PACK_KEY } from '../../../utils/amsgToolPack';
 import { buildMcpNameMap, MCP_FIRE_NAME_BUDGET, type McpFireServer } from '../../../utils/mcpFireCore';
 import { AMSG_FIRE_SCHEDULE_TOOL, MAX_FIRE_SCHEDULES } from '../../../utils/amsgFireSchedule';
@@ -718,6 +719,7 @@ describe('离开后云端机会不依赖预约消息开关', () => {
   const awayCtx = (extra: {
     awayEnabled?: boolean;
     sceneLock?: 'date' | 'call';
+    callPresenceAt?: number | null;
   } = {}) => {
     const fourHoursAgo = NOW.getTime() - 240 * 60_000;
     const rows = [
@@ -726,6 +728,13 @@ describe('离开后云端机会不依赖预约消息开关', () => {
         ...(extra.sceneLock ? { awaySceneLock: extra.sceneLock } : {}),
       }) },
       { key: AMSG_TOOL_PACK_KEY, value: toolPackValue },
+      ...(extra.sceneLock === 'call' && extra.callPresenceAt !== null ? [{
+        key: AMSG_CALL_PRESENCE_KEY,
+        value: JSON.stringify({
+          v: 1, charId: CHAR_ID, active: true,
+          at: extra.callPresenceAt ?? NOW.getTime(),
+        }),
+      }] : []),
       limitsRow({ awayEnabled: extra.awayEnabled ?? true, awayDelayMinutes: 240 }, false),
     ];
     const result = makeCtx({
@@ -797,6 +806,23 @@ describe('离开后云端机会不依赖预约消息开关', () => {
     const trace = writeState.mock.calls.flatMap(([, records]) => records.filter((entry: { key: string }) => entry.key === AMSG_AWAY_TRACE_KEY));
     expect(trace).toHaveLength(1);
     expect(JSON.parse(String(trace[0].value)).entries[0]).toMatchObject({ stage: 'skipped', reason: 'away-disabled' });
+  });
+
+  it('昨天被系统杀后台留下的通话锁没有新心跳：照常获得离开后机会', async () => {
+    const { ctx } = awayCtx({
+      sceneLock: 'call',
+      callPresenceAt: NOW.getTime() - AMSG_CALL_PRESENCE_TTL_MS - 60_000,
+    });
+    const outcome = fired(await amsgHooks.onBeforeFire(ctx));
+    expect(outcome.messages[0]?.content).toBeTruthy();
+    expect(ctx.scheduleTask).toHaveBeenCalledOnce();
+  });
+
+  it('旧版云端留下 call=true 但根本没有租约：不会永久跳过下一次机会', async () => {
+    const { ctx } = awayCtx({ sceneLock: 'call', callPresenceAt: null });
+    const outcome = fired(await amsgHooks.onBeforeFire(ctx));
+    expect(outcome.messages[0]?.content).toBeTruthy();
+    expect(ctx.scheduleTask).toHaveBeenCalledOnce();
   });
 
   it.each(['date', 'call'] as const)('预约关闭时离开后仍尊重 %s 锁：只续排、不生成', async (sceneLock) => {
