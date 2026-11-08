@@ -130,7 +130,7 @@ export const syncCloudAwayTask = async (deps: {
     // 前台启动只是补链：不能把已经正常续排的下一节拍改成「打开页面 + 四小时」。
     // 但若用户发言后旧任务排得过早，仍须正常改期，避免在用户刚说话后就催下一条。
     const validExisting = options.seedOnly && existingAt != null && existingAt > now
-      && existingAt >= deps.lastUserAt + delayMs - 10 * 60_000;
+      && existingAt >= deps.lastUserAt + delayMs - 60_000;
     const action = validExisting ? 'keep' : decideAwayTaskAction(existingAt, targetMs, now);
     if (action === 'keep') {
       // 面板里也要看见 Worker 在离线时生成的下一节拍，不要永远显示旧的 UUID。
