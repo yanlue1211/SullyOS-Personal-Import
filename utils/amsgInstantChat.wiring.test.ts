@@ -189,10 +189,12 @@ describe('useChatAI 的分流接缝', () => {
     expect(branch).not.toContain('safeFetchJson');
   });
 
-  it('云端拿到的就是本地要发的那串消息和那份凭据（回执块只附在末尾，不动原消息）', () => {
-    // 基底永远是 fullMessages；有作废回执时单独成块贴在末尾（云端到点自己渲染排程
+  it('云端拿到的仍是本地消息，作废回执插在易变尾段之前且不覆盖人格提示', () => {
+    // 基底永远是 fullMessages；有作废回执时在实时尾段之前插一块（云端到点自己渲染排程
     // 清单和能力简介，chat 段只补回执这一样，别和 timely block 撞车）。
-    expect(branchSrc()).toMatch(/\[\.\.\.fullMessages, \{ role: 'system', content: amsg2NoticesBlock \}\]/);
+    expect(branchSrc()).toMatch(/insertAmsg2TaskContextBlock\(fullMessages, \{ role: 'system', content: amsg2NoticesBlock \}, payload\.volatileTailIndex\)/);
+    expect(branchSrc()).toContain('timelyInsertAt: payload.volatileTailIndex');
+    expect(branchSrc()).not.toContain("[...fullMessages, { role: 'system', content: amsg2NoticesBlock }]");
     expect(branchSrc()).toMatch(/:\s*fullMessages\)/);
     expect(branchSrc()).toMatch(/buildAmsg2NoticesText\(/);
     expect(branchSrc()).toMatch(/baseUrl:\s*effectiveApi\.baseUrl/);
