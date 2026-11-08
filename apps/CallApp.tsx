@@ -13,6 +13,7 @@ import { CALL_RECORDING_GUIDE, VIDEO_NARRATION_GUIDE, VOICE_CALL_NARRATION_GUIDE
 import { audioBlobToPayload, recognizeUserRecording, isAudioApiReady } from '../utils/audioApi';
 import { resolveDialogueApi } from '../utils/characterApi';
 import { setAmsgActiveCall } from '../utils/amsgInteractionGuard';
+import { syncAmsgCallPresence } from '../utils/amsgCallPresenceSync';
 import { ActiveMsgClient } from '../utils/activeMsgClient';
 import { syncCloudAwayTask } from '../utils/awayMessage';
 import { isAmsg2EnabledForChar } from '../utils/amsg2Tasks';
@@ -1762,7 +1763,15 @@ const CallApp: React.FC = () => {
     resetCurrentCall();
     primeCallAudioFromGesture();
     setViewMode('in-call');
-    if (selectedChar?.id) { setAmsgActiveCall(selectedChar.id, true); void (isAmsg2EnabledForChar(selectedChar) ? ActiveMsgClient.putCharLimits(selectedChar) : Promise.resolve()).catch(error => console.warn('[CallApp] 云端通话锁同步失败', error)); markCallTurnDirty(); }
+    if (selectedChar?.id) {
+      setAmsgActiveCall(selectedChar.id, true);
+      // The cloud lease expires if the whole app is killed. No call body/model call.
+      void syncAmsgCallPresence(selectedChar, true).catch(error => console.warn('[CallApp] 云端通话租约同步失败', error));
+      void ((isAmsg2EnabledForChar(selectedChar) || selectedChar.awayMessage?.enabled)
+        ? ActiveMsgClient.putCharLimits(selectedChar) : Promise.resolve())
+        .catch(error => console.warn('[CallApp] 云端通话锁同步失败', error));
+      markCallTurnDirty();
+    }
     setCallStartedAt(Date.now());
     setCallState('listening');
     trackEvent('发起通话');
@@ -1840,7 +1849,8 @@ const CallApp: React.FC = () => {
       // 显式挂断必须解除锁；即便记录保存失败也不得把状态永久留给2.0。
       if (finishingChar) {
         setAmsgActiveCall(finishingChar.id, false);
-        void (isAmsg2EnabledForChar(finishingChar)
+        void syncAmsgCallPresence(finishingChar, false).catch(error => console.warn('[CallApp] 云端挂断租约同步失败', error));
+        void ((isAmsg2EnabledForChar(finishingChar) || finishingChar.awayMessage?.enabled)
           ? ActiveMsgClient.putCharLimits(finishingChar) : Promise.resolve())
           .catch(error => console.warn('[CallApp] 云端挂断状态同步失败', error));
         markCallTurnDirty();
