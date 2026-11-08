@@ -1,0 +1,35 @@
+name: Personal media safety regression
+on:
+  pull_request:
+    paths:
+      - 'utils/assetReferenceLock*'
+      - 'utils/blobGc*'
+      - 'utils/blobRef*'
+      - 'utils/storageOptimize*'
+      - 'utils/maintenanceLock*'
+      - 'utils/blobDedupe*'
+      - '.github/workflows/personal-media-safety-verify.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Guard image references and single-user storage migration
+        run: pnpm exec vitest run utils/assetReferenceLock.test.ts utils/blobRef.test.ts utils/blobGc.test.ts utils/blobDedupe.test.ts utils/storageOptimize.test.ts
+      - name: Verify personal media and backup compatibility
+        run: pnpm exec vitest run utils/personalChatMedia.test.ts utils/photoChoice.test.ts utils/activityBackup.test.ts
+      - name: Verify frontend and Worker build compatibility
+        run: pnpm run build
