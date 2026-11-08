@@ -1,0 +1,35 @@
+name: Temporary build amsg call-lease bundle on isolated branch
+on:
+  push:
+    branches:
+      - personal/amsg2-call-crash-lease-20261108
+    paths:
+      - '.github/workflows/temporary-build-amsg2-call-lease.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Rebuild committed Worker code without touching production
+        run: pnpm run build
+      - name: Commit only bundle and remove temporary workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add worker/amsg/worker.bundle.js
+          git rm .github/workflows/temporary-build-amsg2-call-lease.yml
+          git diff --cached --quiet || git commit -m "build(amsg2): sync call-lease worker bundle .11"
+          git push origin HEAD:personal/amsg2-call-crash-lease-20261108
