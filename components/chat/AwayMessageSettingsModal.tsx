@@ -183,7 +183,7 @@ const AwayMessageSettingsModal: React.FC<AwayMessageSettingsModalProps> = ({ isO
                                       <div key={item.id} className="rounded-lg bg-violet-50/60 p-2 text-slate-700">
                                         {new Date(item.occurrenceMs).toLocaleString()} · {item.stage === 'queued'
                                           ? '已进入推送/收件箱（不能证明手机已收到）'
-                                          : item.stage === 'entered' ? '已到 Worker 生成入口（模型是否真正调用待核实）'
+                                          : item.stage === 'entered' ? 'Worker 已处理并续排下一次（本轮模型是否调用待核实）'
                                           : item.stage === 'deferred' ? '尚未到新的联系时间，本次已推迟'
                                           : item.stage === 'silent' ? '模型执行后没有可发送的正文'
                                           : item.stage === 'failed' ? '本次云端处理失败'
