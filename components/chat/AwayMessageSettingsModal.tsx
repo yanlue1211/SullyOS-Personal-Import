@@ -178,7 +178,7 @@ const AwayMessageSettingsModal: React.FC<AwayMessageSettingsModalProps> = ({ isO
                                           : item.stage === 'silent' ? '模型执行后没有可发送的正文'
                                           : item.stage === 'failed' ? '本次云端处理失败'
                                           : item.stage === 'retrying' ? '本次失败，云端计划重试'
-                                          : 'Worker 在调用模型之前跳过'}
+                                          : '云端跳过本次机会（具体原因待核对）'}
                                         {item.reason && <span className="text-slate-400 ml-1">
                                           （{({
                                             'away-disabled': '关闭离开后消息', 'away-missed-slot': '错过时间',

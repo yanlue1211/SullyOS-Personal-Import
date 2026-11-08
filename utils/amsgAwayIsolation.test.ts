@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   appendSelfLogEntry, countUnansweredSends, countAwayUnansweredSends, createSelfLog,
-  parseSelfLog,
+  parseSelfLog, appendAmsgAwayTrace, parseAmsgAwayTrace, AMSG_AWAY_TRACE_MAX,
 } from './amsgFirePack';
 import { AMSG_DAILY_SENDS_KEY, AMSG_AWAY_DAILY_SENDS_KEY, bumpDailySends } from './amsgLimits';
 import { keepUncancelledTasks } from './amsg2Tasks';
@@ -10,6 +10,38 @@ const userAt = Date.parse('2026-11-08T08:00:00Z');
 const entry = (id: string, away: boolean) => ({
   id, at: userAt + 90_000, startedAt: userAt + 60_000, text: '测试文本',
   ...(away ? { away: true } : {}),
+});
+
+describe('离开后云端机会记录：有界、不重复、不保存私密内容', () => {
+  it('12 次滚动留痕，同一次触发由失败重试更新成已入投递，不扩大次数', () => {
+    let events = [] as ReturnType<typeof parseAmsgAwayTrace>;
+    for (let i = 0; i < AMSG_AWAY_TRACE_MAX + 5; i++) {
+      const row = { id: `away-task-${i}@${userAt+i}`, at: userAt + i, occurrenceMs: userAt + i,
+        stage: 'failed' as const };
+      events = parseAmsgAwayTrace(appendAmsgAwayTrace(events, row));
+    }
+    expect(events).toHaveLength(AMSG_AWAY_TRACE_MAX);
+    expect(events[0].id).toContain('away-task-5@');
+    const last = events.at(-1)!;
+    events = parseAmsgAwayTrace(appendAmsgAwayTrace(events, {
+      ...last, stage: 'queued', at: last.at + 1000, llmCalls: 1,
+    }));
+    expect(events).toHaveLength(AMSG_AWAY_TRACE_MAX);
+    expect(events.filter(e => e.id === last.id)).toHaveLength(1);
+    expect(events.find(e => e.id === last.id)).toMatchObject({ stage: 'queued', llmCalls: 1 });
+    const serialized = appendAmsgAwayTrace(events, last);
+    expect(serialized).not.toContain('apiKey');
+    expect(serialized).not.toContain('聊天正文');
+  });
+
+  it('历史格式损坏或混入任意上下文/秘钥形状的条目时，不渲染不可信记录', () => {
+    expect(parseAmsgAwayTrace('bad-json')).toEqual([]);
+    expect(parseAmsgAwayTrace(JSON.stringify({ v: 1, entries: [
+      { id: 'bad', at: userAt, occurrenceMs: userAt, stage: 'queued', reason: 'sk-secret-key-123' },
+      { id: 'good', at: userAt, occurrenceMs: userAt, stage: 'skipped', reason: 'away-quiet-hours' },
+      { id: 'bad2', at: userAt, occurrenceMs: userAt, stage: 'LLM_OUTPUT', reason: 'declined' },
+    ] }))).toMatchObject([{ id: 'good', stage: 'skipped', reason: 'away-quiet-hours' }]);
+  });
 });
 
 describe('离开后消息与自主预约的额度真正隔离', () => {
