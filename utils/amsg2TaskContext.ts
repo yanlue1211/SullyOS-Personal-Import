@@ -239,7 +239,7 @@ export async function collectAmsg2TaskContext(
   const now = Date.now();
 
   const unnotified = (await ActiveMsgStore.getExpiredNotices(char.id)).filter((r) => !r.notifiedAt);
-  const pending = getPendingTasks(config, now);
+  const pending = getPendingTasks(config, now).filter(task => !task.away);
   return {
     // 时间按角色的钟写：这一段是给角色看的，到点 worker 渲染的那份也是角色时区，
     // 两边对不上的话，纽约角色会在同一轮里读到差一个时差的两个「同一条任务」。
