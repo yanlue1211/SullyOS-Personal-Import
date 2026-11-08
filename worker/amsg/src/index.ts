@@ -2300,6 +2300,12 @@ export const amsgHooks = {
         });
         return { defer: { afterMs: 5 * 60_000 } } as const;
       }
+      // Record the Worker consuming and rearming this opportunity before downstream
+      // tool-pack / prompt building. This never claims an AI call or successful push.
+      await writeAwayTrace(ctx.readState, ctx.writeState, charId, {
+        id: `${String(ctx.task.uuid || 'unknown')}@${occurrenceMs}`,
+        at: ctx.now.getTime(), occurrenceMs, stage: 'entered',
+      });
       if (isStaleAwayTick(occurrenceMs, ctx.now.getTime())) {
         console.log('[amsg:away-skip]', { taskId: ctx.task.id, reason: 'missed-slot' });
         await recordAwaySkip('away-missed-slot');
@@ -2801,10 +2807,6 @@ export const amsgHooks = {
       // 到点的自动续排、禁发零LLM均已在 onBeforeFire 完成；这里绝不额外调用模型。
       mustSpeak: false,
     }), userHoliday) + mcpBlock + scheduleBlock + replyScopeBlock;
-    if (away) await writeAwayTrace(ctx.readState, ctx.writeState, charId, {
-      id: `${String(ctx.task.uuid || 'unknown')}@${occurrenceMs}`,
-      at: ctx.now.getTime(), occurrenceMs, stage: 'entered',
-    });
     return {
       messages: [{ role: 'user' as const, content: prompt }],
       ...common,
