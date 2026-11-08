@@ -62,6 +62,10 @@ import {
   AMSG_FIRE_PACK_KEY,
   AMSG_LAST_SKIP_KEY,
   AMSG_AWAY_LAST_SKIP_KEY,
+  AMSG_AWAY_TRACE_KEY,
+  appendAmsgAwayTrace,
+  parseAmsgAwayTrace,
+  type AmsgAwayTraceEntry,
   AMSG_SELF_LOG_KEY,
   AMSG2_INSTANT_STUB_TEMPLATE,
   type AmsgChatFailRecord,
@@ -496,6 +500,7 @@ interface FireStash {
   /** 两种消息只共用调度器，不共用频率/日计费账本。 */
   dailySendsKey: string;
   away: boolean;
+  awaySilenceReason?: AmsgLastSkip['reason'];
   /** 这次 fire 已经记进每日计数了（收尾 hook 被调两次也只记一回）。 */
   dailyCounted: boolean;
   /** 这次 fire 开始的时刻；日志条目的 startedAt（间隔的锚点）就是它。 */
@@ -842,6 +847,24 @@ export const offloadOversizedPush = async (
  *
  * best-effort：写不进去不能连累这次 skip 本身——闸该拦还是要拦，少一句解释而已。
  */
+/** 仅按实际云端回执记录机会，不读取聊天正文；失败绝不影响消息投递。 */
+const writeAwayTrace = async (
+  readState: FireCtx['readState'] | undefined,
+  writeState: WriteState | undefined,
+  charId: string,
+  event: AmsgAwayTraceEntry,
+): Promise<void> => {
+  if (!readState || !writeState) return;
+  try {
+    const ns = amsgStateNamespace(charId);
+    const rows = await readState(ns, { key: AMSG_AWAY_TRACE_KEY });
+    const stored = parseAmsgAwayTrace(rows.find(row => row.key === AMSG_AWAY_TRACE_KEY)?.value);
+    await writeState(ns, [{ key: AMSG_AWAY_TRACE_KEY, value: appendAmsgAwayTrace(stored, event) }]);
+  } catch (err) {
+    console.warn('[amsg:away-trace] 写入失败', err instanceof Error ? err.name : 'unknown');
+  }
+};
+
 const writeLastSkip = async (
   writeState: WriteState | undefined,
   charId: string,
@@ -1273,6 +1296,20 @@ export const amsgFireSettled = async (
     } catch (error) {
       console.warn('[amsg:self-log] 写入失败（这次照常发送，但下一次到点角色不会知道说过这句，每日计数也少记一次）', error);
     }
+  }
+
+  // 只有已确认的最终结果才归档；outbox 成功不等于手机实际收到。
+  if (stash.away && !cancelled) {
+    const stage: AmsgAwayTraceEntry['stage'] = delivered ? 'queued'
+      : info.status === 'failed' ? (info.willRetry ? 'retrying' : 'failed')
+      : stash.awaySilenceReason ? 'silent' : 'skipped';
+    await writeAwayTrace(stash.readState, info.writeState, stash.charId, {
+      id: `${stash.taskUuid || 'unknown'}@${stash.occurrenceMs}`,
+      at: Date.now(), occurrenceMs: stash.occurrenceMs, stage,
+      ...(stash.awaySilenceReason ? { reason: stash.awaySilenceReason } : {}),
+      ...(typeof info.llmCalls === 'number' && Number.isFinite(info.llmCalls)
+        ? { llmCalls: Math.min(100, Math.max(0, Math.floor(info.llmCalls))) } : {}),
+    });
   }
 
   // 一次性即时对话的独立输入快照（amsg:instant-input）在本轮落定后不会再被任何任务读取：
@@ -2180,6 +2217,10 @@ export const amsgHooks = {
       // 每次实际进入 Worker 后的系统跳过才留痕；没有进入这里绝不能假称角色决定静默。
       // 单次写入只含时刻、原因和任务编号，不记录原文、思考或 API 凭据。
       const recordAwaySkip = async (reason: AmsgLastSkip['reason']): Promise<void> => {
+        await writeAwayTrace(ctx.readState, ctx.writeState, charId, {
+          id: `${String(ctx.task.uuid || 'unknown')}@${occurrenceMs}`,
+          at: ctx.now.getTime(), occurrenceMs, stage: 'skipped', reason,
+        });
         await writeLastSkip(ctx.writeState, charId, {
           v: 1,
           taskUuid: typeof ctx.task.uuid === 'string' ? ctx.task.uuid : null,
@@ -2897,11 +2938,13 @@ export const amsgHooks = {
         },
       });
       stash.actionResultCommitted = true;
+      if (stash.away) stash.awaySilenceReason = 'side-effects-only';
       stash.selfLogTexts = ['（已完成动作：' + decision.sideEffects.directives.map(d => d.type).join('、') + '）'];
       return { decision: 'skip-push' as const };
     }
 
     if (decision.decision === 'skip-push') {
+      if (stash.away) stash.awaySilenceReason = decision.reason;
       // 先把模型这轮回了个什么记一行：last_skip 只有一个 reason，分不清是 content 为 null、
       // 正文全在思考块里、被截断，还是中转站把报错包在了 200 里（见 ./skipDiagnostics）。
       logSkipDiagnostic({

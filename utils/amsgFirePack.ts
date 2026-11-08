@@ -198,6 +198,35 @@ export const AMSG_LAST_SKIP_KEY = 'last_skip';
 /** 离开后消息独立的最近跳过记录，绝不误入预约面板。 */
 export const AMSG_AWAY_LAST_SKIP_KEY = 'away_last_skip';
 
+/** 最近 12 次离开后机会的无隐私诊断；只记录时刻、状态与短原因码。 */
+export const AMSG_AWAY_TRACE_KEY = 'away_trace_v1';
+export const AMSG_AWAY_TRACE_MAX = 12;
+export type AmsgAwayTraceStage = 'skipped' | 'silent' | 'queued' | 'failed' | 'retrying';
+export interface AmsgAwayTraceEntry {
+  id: string;
+  at: number;
+  occurrenceMs: number;
+  stage: AmsgAwayTraceStage;
+  reason?: string;
+  llmCalls?: number;
+}
+export const parseAmsgAwayTrace = (value: string | null | undefined): AmsgAwayTraceEntry[] => {
+  try {
+    const data = JSON.parse(value || 'null');
+    if (!data || data.v !== 1 || !Array.isArray(data.entries)) return [];
+    return data.entries.filter((e: any) => e && typeof e.id === 'string' && e.id.length <= 140
+      && Number.isFinite(e.at) && Number.isFinite(e.occurrenceMs)
+      && ['skipped', 'silent', 'queued', 'failed', 'retrying'].includes(e.stage)
+      && (e.reason === undefined || typeof e.reason === 'string' && /^[a-z-]{1,40}$/.test(e.reason))
+      && (e.llmCalls === undefined || Number.isInteger(e.llmCalls) && e.llmCalls >= 0 && e.llmCalls <= 100)
+    ).slice(-AMSG_AWAY_TRACE_MAX);
+  } catch { return []; }
+};
+export const appendAmsgAwayTrace = (rows: AmsgAwayTraceEntry[], entry: AmsgAwayTraceEntry): string =>
+  JSON.stringify({ v: 1, entries: [...rows.filter(row => row.id !== entry.id), entry]
+    .sort((a, b) => a.at - b.at).slice(-AMSG_AWAY_TRACE_MAX) });
+
+
 /** last_skip 的原因枚举（新增值时 describeLastSkip 的人话文案要一起补）。 */
 export const LAST_SKIP_REASONS = [
   'declined',

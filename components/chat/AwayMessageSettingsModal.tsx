@@ -5,7 +5,7 @@ import { AWAY_DELAY_OPTIONS, resolveAwayDelayMinutes } from '../../utils/awayMes
 import { isAwayCloudRoute, isAwayCloudWorkerCompatible } from '../../utils/awayMessage';
 import { ActiveMsgClient } from '../../utils/activeMsgClient';
 import { dayKeyInZone, type AmsgDailySends } from '../../utils/amsgLimits';
-import { describeLastSkip, type AmsgLastSkip } from '../../utils/amsgFirePack';
+import { describeLastSkip, type AmsgLastSkip, type AmsgAwayTraceEntry } from '../../utils/amsgFirePack';
 import type { RemoteTaskProjection } from '../../utils/amsg2Tasks';
 
 interface AwayMessageSettingsModalProps {
@@ -29,6 +29,7 @@ const AwayMessageSettingsModal: React.FC<AwayMessageSettingsModalProps> = ({ isO
     const [awayTasks, setAwayTasks] = useState<RemoteTaskProjection[]>([]);
     const [awayDailySends, setAwayDailySends] = useState<AmsgDailySends | null>(null);
     const [awayLastSkip, setAwayLastSkip] = useState<AmsgLastSkip | null>(null);
+    const [awayTrace, setAwayTrace] = useState<AmsgAwayTraceEntry[]>([]);
 
     useEffect(() => {
         if (!isOpen) return;
@@ -44,6 +45,7 @@ const AwayMessageSettingsModal: React.FC<AwayMessageSettingsModalProps> = ({ isO
         setAwayTasks([]);
         setAwayDailySends(null);
         setAwayLastSkip(null);
+        setAwayTrace([]);
         void isAwayCloudRoute(char).then(async v => {
             if (cancelled) return;
             setCloud(v);
@@ -65,6 +67,7 @@ const AwayMessageSettingsModal: React.FC<AwayMessageSettingsModalProps> = ({ isO
                     if (status.status === 'fulfilled') {
                         setAwayDailySends(status.value.awayDailySends);
                         setAwayLastSkip(status.value.awayLastSkip);
+                        setAwayTrace(status.value.awayTrace);
                     }
                 }
             }
@@ -162,6 +165,31 @@ const AwayMessageSettingsModal: React.FC<AwayMessageSettingsModalProps> = ({ isO
                                         </div>
                                     ))}
                                     {awayTasks.length > 1 && <div className="text-amber-600">检测到多条离开后任务，自动同步时会尝试整理重复排程。</div>}
+                                </div>
+                                <div className="mt-3 rounded-xl border border-violet-100 bg-white p-3 space-y-2">
+                                  <div className="font-bold text-violet-700">最近离开后联系机会（最多 12 次）</div>
+                                  <p className="text-[11px] text-slate-400">仅统计实际进入 Worker 并留下回执的机会；没有记录不能证明 Cron 未执行，旧版记录不会补造。不保存任何聊天内容。</p>
+                                  {awayTrace.length === 0
+                                    ? <p className="text-slate-500">目前还没有可核实的执行记录。</p>
+                                    : [...awayTrace].reverse().map(item => (
+                                      <div key={item.id} className="rounded-lg bg-violet-50/60 p-2 text-slate-700">
+                                        {new Date(item.occurrenceMs).toLocaleString()} · {item.stage === 'queued'
+                                          ? '已进入推送/收件箱（不能证明手机已收到）'
+                                          : item.stage === 'silent' ? '模型执行后没有可发送的正文'
+                                          : item.stage === 'failed' ? '本次云端处理失败'
+                                          : item.stage === 'retrying' ? '本次失败，云端计划重试'
+                                          : 'Worker 在调用模型之前跳过'}
+                                        {item.reason && <span className="text-slate-400 ml-1">
+                                          （{({
+                                            'away-disabled': '关闭离开后消息', 'away-missed-slot': '错过时间',
+                                            'away-date-lock': '仍在线下见面', 'away-call-lock': '仍在通话',
+                                            'away-quiet-hours': '睡眠禁发', declined: 'Char 决定不说',
+                                            'empty-generation': '没有生成正文', 'side-effects-only': '只执行了动作',
+                                          } as Record<string, string>)[item.reason] || '其他跳过原因'}）
+                                        </span>}
+                                        {item.llmCalls !== undefined && <span className="text-slate-400 ml-1">· 模型请求 {item.llmCalls} 次</span>}
+                                      </div>
+                                    ))}
                                 </div>
                                 {awayLastSkip && (
                                     <p className="mt-2 rounded-xl border border-amber-100 bg-amber-50 p-3 text-amber-700">

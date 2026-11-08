@@ -1111,6 +1111,18 @@ var unpackStateValue = async (value) => {
 };
 var AMSG_LAST_SKIP_KEY = "last_skip";
 var AMSG_AWAY_LAST_SKIP_KEY = "away_last_skip";
+var AMSG_AWAY_TRACE_KEY = "away_trace_v1";
+var AMSG_AWAY_TRACE_MAX = 12;
+var parseAmsgAwayTrace = (value) => {
+  try {
+    const data = JSON.parse(value || "null");
+    if (!data || data.v !== 1 || !Array.isArray(data.entries)) return [];
+    return data.entries.filter((e) => e && typeof e.id === "string" && e.id.length <= 140 && Number.isFinite(e.at) && Number.isFinite(e.occurrenceMs) && ["skipped", "silent", "queued", "failed", "retrying"].includes(e.stage) && (e.reason === void 0 || typeof e.reason === "string" && /^[a-z-]{1,40}$/.test(e.reason)) && (e.llmCalls === void 0 || Number.isInteger(e.llmCalls) && e.llmCalls >= 0 && e.llmCalls <= 100)).slice(-AMSG_AWAY_TRACE_MAX);
+  } catch {
+    return [];
+  }
+};
+var appendAmsgAwayTrace = (rows, entry) => JSON.stringify({ v: 1, entries: [...rows.filter((row) => row.id !== entry.id), entry].sort((a, b) => a.at - b.at).slice(-AMSG_AWAY_TRACE_MAX) });
 var AMSG_SLOT_CURRENT_TIME = "{{AMSG_CURRENT_TIME}}";
 var AMSG_SLOT_TIME_SINCE_USER = "{{AMSG_TIME_SINCE_USER}}";
 var AMSG_SLOT_AWAY_HINT = "{{AMSG_AWAY_HINT}}";
@@ -14425,7 +14437,7 @@ function buildScheduledPush(message, build, extraMeta, bannerBody) {
 }
 
 // utils/amsgBundleVersion.ts
-var AMSG_BUNDLE_VERSION = "2026-11-08.7";
+var AMSG_BUNDLE_VERSION = "2026-11-08.8";
 
 // worker/amsg/src/reproduction.ts
 async function writeDiagnosticStage(writeState, runId, event, fields = {}) {
@@ -19292,6 +19304,17 @@ var offloadOversizedPush = async (payload, writeState, charId, clientTaskId, seg
   }
   return current;
 };
+var writeAwayTrace = async (readState, writeState, charId, event) => {
+  if (!readState || !writeState) return;
+  try {
+    const ns = amsgStateNamespace(charId);
+    const rows = await readState(ns, { key: AMSG_AWAY_TRACE_KEY });
+    const stored = parseAmsgAwayTrace(rows.find((row) => row.key === AMSG_AWAY_TRACE_KEY)?.value);
+    await writeState(ns, [{ key: AMSG_AWAY_TRACE_KEY, value: appendAmsgAwayTrace(stored, event) }]);
+  } catch (err) {
+    console.warn("[amsg:away-trace] \u5199\u5165\u5931\u8d25", err instanceof Error ? err.name : "unknown");
+  }
+};
 var writeLastSkip = async (writeState, charId, skip, away = false) => {
   if (typeof writeState !== "function") return;
   try {
@@ -19524,6 +19547,15 @@ var amsgFireSettled = async (info) => {
     } catch (error) {
       console.warn("[amsg:self-log] \u5199\u5165\u5931\u8D25\uFF08\u8FD9\u6B21\u7167\u5E38\u53D1\u9001\uFF0C\u4F46\u4E0B\u4E00\u6B21\u5230\u70B9\u89D2\u8272\u4E0D\u4F1A\u77E5\u9053\u8BF4\u8FC7\u8FD9\u53E5\uFF0C\u6BCF\u65E5\u8BA1\u6570\u4E5F\u5C11\u8BB0\u4E00\u6B21\uFF09", error);
     }
+  }
+  if (stash.away && !cancelled) {
+    const stage = delivered ? "queued" : info.status === "failed" ? info.willRetry ? "retrying" : "failed" : stash.awaySilenceReason ? "silent" : "skipped";
+    await writeAwayTrace(stash.readState, info.writeState, stash.charId, {
+      id: `${stash.taskUuid || "unknown"}@${stash.occurrenceMs}`,
+      at: Date.now(), occurrenceMs: stash.occurrenceMs, stage,
+      ...stash.awaySilenceReason ? { reason: stash.awaySilenceReason } : {},
+      ...typeof info.llmCalls === "number" && Number.isFinite(info.llmCalls) ? { llmCalls: Math.min(100, Math.max(0, Math.floor(info.llmCalls))) } : {}
+    });
   }
   const instantSettled = stash.instant && (delivered || info.status === "skipped" || cancelled || info.status === "failed" && info.willRetry === false);
   if (instantSettled && stash.instantInputKey) {
@@ -20058,6 +20090,10 @@ var amsgHooks = {
     }
     if (!instant && away) {
       const recordAwaySkip = async (reason) => {
+        await writeAwayTrace(ctx.readState, ctx.writeState, charId, {
+          id: `${String(ctx.task.uuid || "unknown")}@${occurrenceMs}`,
+          at: ctx.now.getTime(), occurrenceMs, stage: "skipped", reason
+        });
         await writeLastSkip(ctx.writeState, charId, {
           v: 1,
           taskUuid: typeof ctx.task.uuid === "string" ? ctx.task.uuid : null,
@@ -20580,10 +20616,12 @@ ${userHoliday}` });
         }
       });
       stash.actionResultCommitted = true;
+      if (stash.away) stash.awaySilenceReason = "side-effects-only";
       stash.selfLogTexts = ["\uFF08\u5DF2\u5B8C\u6210\u52A8\u4F5C\uFF1A" + decision.sideEffects.directives.map((d) => d.type).join("\u3001") + "\uFF09"];
       return { decision: "skip-push" };
     }
     if (decision.decision === "skip-push") {
+      if (stash.away) stash.awaySilenceReason = decision.reason;
       logSkipDiagnostic({
         sessionId: ctx.sessionId,
         reason: decision.reason,
