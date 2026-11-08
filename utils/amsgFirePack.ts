@@ -617,6 +617,8 @@ export interface AmsgSelfLogEntry {
    * 但不算「主动连发」——带这个标记的条目不会让 unansweredSends 加一。
    */
   reply?: boolean;
+  /** 系统自动离开提醒：读入聊天上下文，但不占自主预约的连发额度。 */
+  away?: boolean;
 }
 
 export interface AmsgSelfLog {
@@ -641,6 +643,10 @@ export interface AmsgSelfLog {
    * 为自排链炸屏加的硬闸整个失效。两件事分开记，各自的上限互不干扰。
    */
   unansweredSends: number;
+  /** 离开后消息单独计数，不消耗自主预约额度（旧日志此字段可能不存在）。 */
+  awayUnansweredSends?: number;
+  /** 新版标志：unansweredSends 已经剔除自动离开提醒。 */
+  separatedAwayCounts?: true;
   /**
    * 每天/每周重复的那些任务，在用户没回期间各自响了几次（按任务的 clientTaskId 记）。
    *
@@ -683,6 +689,8 @@ export const createSelfLog = (basePackAt: number, anchorUserMsgAt: number | null
   anchorUserMsgAt,
   entries: [],
   unansweredSends: 0,
+  awayUnansweredSends: 0,
+  separatedAwayCounts: true,
   recurringSends: {},
   tasks: [],
 });
@@ -693,8 +701,18 @@ export const createSelfLog = (basePackAt: number, anchorUserMsgAt: number | null
  * 读的是 unansweredSends 这个独立计数器，不数 entries——entries 只留最近 8 条，
  * 数它的话计数封顶在 8，用户设的 9 / 10 两档就等于「不限」（见 AmsgSelfLog）。
  */
-export const countUnansweredSends = (log: AmsgSelfLog | null): number =>
-  log ? log.unansweredSends : 0;
+export const countUnansweredSends = (log: AmsgSelfLog | null): number => {
+  if (!log) return 0;
+  if (log.separatedAwayCounts === true) return log.unansweredSends;
+  // 从旧 Worker 升级时，旧计数混入了离开后消息。旧摘要只留最近 8 条，
+  // 无法可靠回溯更早的来源；安全地只认仍可辨认的自主消息，不能因为空闲
+  // 提醒先发了三次就永久挡住角色许下的预约。下一次写入变为独立计数。
+  return Math.min(log.unansweredSends, log.entries.filter(e =>
+    !e.reply && !e.away && !e.id.startsWith('away-')).length);
+};
+
+export const countAwayUnansweredSends = (log: AmsgSelfLog | null): number =>
+  log?.awayUnansweredSends ?? log?.entries.filter(e => e.away || e.id.startsWith('away-')).length ?? 0;
 
 /**
  * fire 开场把云端存的自述日志对齐到本次的 fire_pack 与用户发言状态。两段各管各的生死：
@@ -713,7 +731,7 @@ export const reconcileSelfLogWithPack = (
   let log = stored ?? createSelfLog(pack.builtAt, lastUserMessageAt);
   if (lastUserMessageAt != null
     && (log.anchorUserMsgAt == null || lastUserMessageAt > log.anchorUserMsgAt)) {
-    log = { ...log, anchorUserMsgAt: lastUserMessageAt, entries: [], unansweredSends: 0, recurringSends: {} };
+    log = { ...log, anchorUserMsgAt: lastUserMessageAt, entries: [], unansweredSends: 0, awayUnansweredSends: 0, separatedAwayCounts: true, recurringSends: {} };
   }
   if (log.basePackAt !== pack.builtAt) {
     // 只有快照里明确带回的 uuid 才代表客户端已认领；打包时间本身不是回执。
@@ -755,7 +773,9 @@ export const appendSelfLogEntry = (log: AmsgSelfLog, entry: AmsgSelfLogEntry): A
   return {
     ...log,
     entries: [...kept, { ...entry, text }].slice(-SELF_LOG_MAX_ENTRIES),
-    unansweredSends: log.unansweredSends + (entry.reply || alreadyLogged ? 0 : 1),
+    unansweredSends: countUnansweredSends(log) + (entry.reply || entry.away || alreadyLogged ? 0 : 1),
+    awayUnansweredSends: countAwayUnansweredSends(log) + (entry.away && !alreadyLogged ? 1 : 0),
+    separatedAwayCounts: true,
   };
 };
 
