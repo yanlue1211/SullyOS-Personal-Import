@@ -36,6 +36,8 @@ describe('buildAmsg2TaskContextText', () => {
   it('没任务没作废 → 仍有常驻简介，角色始终知道自己能排', () => {
     const text = buildAmsg2TaskContextText([], [], Date.now(), undefined);
     expect(text).toContain('schedule_active_message');
+    expect(text).toContain('旧版本地文本标签不能代替云端工具');
+    expect(text).toContain('收到成功回执才算预约');
     expect(text).toContain('排成真任务'); // 嘴上许了就要排成真任务
     expect(text).toContain('不要只在正文里答应'); // 承诺不能只停在台词里
     expect(text).toContain('会就排');     // 真想联系就排
