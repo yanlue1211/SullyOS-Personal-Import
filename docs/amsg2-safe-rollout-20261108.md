@@ -27,7 +27,13 @@
 - `configurationOk=true`、`missing=[]`、`warningCodes=[]`，表示该公开自检报告配置无缺项（不等于确认 D1 身份或推送实际送达）。
 - `instantTick=true`、`backgroundJobs=true`、`selfUpdateSupported=true`。这只能说明自更新能力存在，**不能证明更新取包 URL 指向个人仓库，也不能代替原位升级权限核验**。
 
-连接器仅能操作 GitHub，不能读取 Cloudflare 账户中的 `AMSG_BUNDLE_URL`、D1 真实绑定 ID、Secret 绑定值或生产任务清单。因此第 3—5 步仍需要在原有 Cloudflare 面板只读核对；**没有核验取包来源之前不触发自更新**。
+**补充：用户已通过 Cloudflare Production → Runtime variables and secrets 的截图核实**，现有 `AMSG_BUNDLE_URL` 的值是：
+
+`https://raw.githubusercontent.com/yanlue1211/SullyOS-Personal-Import/personal/audio-listening/worker/amsg/worker.bundle.js`
+
+这是**个人正式发布分支**，不是作者或其他人的旧仓库，取包来源这一项已通过用户面板截图核实；无需修改该变量、也不要为了确认而点击「Deploy」。此源目前仍指向现有生产分支上的旧 bundle，**PR 未合并之前不能通过自更新获得新代码**。
+
+连接器仍不能直接读取 Cloudflare 账户中的 D1 真实绑定 ID、Secret 绑定值或生产任务清单。此截图不等同于核验这些绑定，后续原位升级依然不能清库、重建任务或重置密钥。
 
 ## 三、最小风险的配套发布顺序
 
