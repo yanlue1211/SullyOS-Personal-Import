@@ -36,6 +36,7 @@ import {
 } from './amsg2Tasks';
 import {
   AMSG_DAILY_SENDS_KEY,
+  AMSG_AWAY_DAILY_SENDS_KEY,
   AMSG_LIMITS_KEY,
   type AmsgDailySends,
   buildAmsgLimitsRecord,
@@ -4181,21 +4182,23 @@ export const ActiveMsgClient = {
   async readPanelStatus(charId: string): Promise<{
     lastSkip: AmsgLastSkip | null;
     dailySends: AmsgDailySends | null;
+    awayDailySends: AmsgDailySends | null;
   }> {
     try {
       const config = await ensureWorkerReady();
       const client = await initializeClient(config);
       const response = await client.getClientState(amsgStateNamespace(charId));
-      if (!response?.success) return { lastSkip: null, dailySends: null };
+      if (!response?.success) return { lastSkip: null, dailySends: null, awayDailySends: null };
       const entries = (response.data?.entries ?? []) as Array<{ key: string; value: string }>;
       const valueOf = (key: string) => entries.find((e) => e?.key === key)?.value || null;
       const skipValue = valueOf(AMSG_LAST_SKIP_KEY);
       return {
         lastSkip: skipValue ? parseLastSkip(skipValue) : null,
         dailySends: parseDailySends(valueOf(AMSG_DAILY_SENDS_KEY)),
+        awayDailySends: parseDailySends(valueOf(AMSG_AWAY_DAILY_SENDS_KEY)),
       };
     } catch {
-      return { lastSkip: null, dailySends: null };
+      return { lastSkip: null, dailySends: null, awayDailySends: null };
     }
   },
 
