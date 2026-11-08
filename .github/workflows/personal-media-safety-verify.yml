@@ -8,6 +8,7 @@ on:
       - 'utils/storageOptimize*'
       - 'utils/maintenanceLock*'
       - 'utils/blobDedupe*'
+      - 'utils/activityBackup.test.ts'
       - '.github/workflows/personal-media-safety-verify.yml'
   workflow_dispatch:
 
