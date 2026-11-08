@@ -267,6 +267,22 @@ describe('cloud away first-task creation and passive repair', () => {
     expect(ActiveMsgClient.scheduleCharacterTask).toHaveBeenCalledOnce();
   });
 
+  it('can retry cancellation of a remote away chain even when local away toggle is already off', async () => {
+    const char = makeChar();
+    char.awayMessage!.enabled = false;
+    vi.mocked(ActiveMsgClient.listRemoteTasksForChar).mockResolvedValue([{
+      uuid: 'orphan-away', clientTaskId: 'away-orphan-away', status: 'pending',
+      nextSendAt: new Date(NOW + HOUR).toISOString(),
+    }, {
+      uuid: 'keep-appointment', clientTaskId: 'user-appointment', status: 'pending',
+      nextSendAt: new Date(NOW + HOUR).toISOString(),
+    }] as any);
+    const updated = vi.fn();
+    await cancelCloudAwayTasks(char, updated);
+    expect(ActiveMsgClient.cancelTask).toHaveBeenCalledOnce();
+    expect(ActiveMsgClient.cancelTask).toHaveBeenCalledWith('orphan-away');
+  });
+
   it('does not create paid activity for a character with no prior real user message', async () => {
     const char = makeChar();
     vi.spyOn(DB, 'getRecentMessagesByCharId').mockResolvedValue([] as any);
