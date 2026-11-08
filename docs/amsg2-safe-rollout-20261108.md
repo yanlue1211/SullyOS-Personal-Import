@@ -19,7 +19,15 @@
 4. 在 Cloudflare 面板的 **现有 Worker** 上确认 `AMSG_BUNDLE_URL` 是否已设置，以及其实际来源。如果不是个人仓库，此项必须先纠正、并同步检查 Worker 自更新开关；**不能让旧 Worker 自行从别处拉包**。
 5. 检查原有密钥、D1 绑定、触发器与推送仍存在即可；不导出任何私密值，不生成新密钥。如果缺关键信息或没有管理权限，停止写操作，先留用旧版。
 
-当前连接器仅能操作 GitHub，不能读取 Cloudflare 账户变量、D1 或凭据。因此**本档不能声称第 2—5 步已完成**。
+### 已实际取得的生产只读证据（2026-11-08）
+
+通过 GitHub Actions 的单次匿名 **GET /config-check**（workflow `42481121249`，job `128733052404`）拿到真实响应，只有白名单状态字段，没有上传聊天、密钥或用户资料：
+
+- 生产 Worker **当前版本为 `2026-11-08.3`**，**不是** PR 需要的 `2026-11-08.10`；所以 PR **不能据此宣布上线**。
+- `configurationOk=true`、`missing=[]`、`warningCodes=[]`，表示该公开自检报告配置无缺项（不等于确认 D1 身份或推送实际送达）。
+- `instantTick=true`、`backgroundJobs=true`、`selfUpdateSupported=true`。这只能说明自更新能力存在，**不能证明更新取包 URL 指向个人仓库，也不能代替原位升级权限核验**。
+
+连接器仅能操作 GitHub，不能读取 Cloudflare 账户中的 `AMSG_BUNDLE_URL`、D1 真实绑定 ID、Secret 绑定值或生产任务清单。因此第 3—5 步仍需要在原有 Cloudflare 面板只读核对；**没有核验取包来源之前不触发自更新**。
 
 ## 三、最小风险的配套发布顺序
 
