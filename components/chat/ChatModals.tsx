@@ -653,7 +653,7 @@ const ChatModals: React.FC<ChatModalsProps> = ({
                             )}
                         </div>
                     </ChatSettingsSection>
-                    <ChatSettingsSection title="扩展功能" summary="稍后联系、表情包识图与 HTML 卡片">
+                    <ChatSettingsSection title="扩展功能" summary="表情包识图、HTML 卡片与历史待发消息管理">
                         {activeCharacter && <LocalScheduledMessages charId={activeCharacter.id} />}
                         <div className="pt-2 border-t border-slate-100">
                             <button type="button" role="switch" aria-checked={!!stickerVisionEnabled} onClick={onToggleStickerVision} className="w-full flex justify-between items-center text-xs font-bold text-slate-500">
