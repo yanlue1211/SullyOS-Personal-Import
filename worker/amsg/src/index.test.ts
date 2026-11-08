@@ -711,6 +711,50 @@ describe('连发上限（到点兜底闸）', () => {
   });
 });
 
+// ─── 离开后消息与预约消息在 Worker 入口的强隔离 ───
+describe('离开后云端机会不依赖预约消息开关', () => {
+  const awayCtx = (extra: {
+    awayEnabled?: boolean;
+    sceneLock?: 'date' | 'call';
+  } = {}) => {
+    const fourHoursAgo = NOW.getTime() - 240 * 60_000;
+    const rows = [
+      { key: AMSG_FIRE_PACK_KEY, value: firePackValue(fourHoursAgo, {
+        selfScheduleEnabled: false,
+        ...(extra.sceneLock ? { awaySceneLock: extra.sceneLock } : {}),
+      }) },
+      { key: AMSG_TOOL_PACK_KEY, value: toolPackValue },
+      limitsRow({ awayEnabled: extra.awayEnabled ?? true, awayDelayMinutes: 240 }, false),
+    ];
+    const result = makeCtx({
+      charRows: rows,
+      metadata: { amsgAwayMessage: true, amsgAwayDelayMinutes: 240, amsgClientTaskId: 'away-test-1' },
+    });
+    result.ctx.scheduleTask = vi.fn(async () => ({ uuid: 'next-away-task' }));
+    return result;
+  };
+
+  it('预约关闭且离开后开启：仍给离开后模型机会、并在云端续排下次节拍', async () => {
+    const { ctx } = awayCtx();
+    const outcome = fired(await amsgHooks.onBeforeFire(ctx));
+    expect(outcome.messages[0]?.content).toBeTruthy();
+    expect(ctx.scheduleTask).toHaveBeenCalledOnce();
+    expect(ctx.scheduleTask.mock.calls[0][0].metadata.amsgAwayMessage).toBe(true);
+  });
+
+  it('预约关闭且离开后也关闭：不调用模型、不续排', async () => {
+    const { ctx } = awayCtx({ awayEnabled: false });
+    await expect(amsgHooks.onBeforeFire(ctx)).resolves.toEqual({ skip: true });
+    expect(ctx.scheduleTask).not.toHaveBeenCalled();
+  });
+
+  it.each(['date', 'call'] as const)('预约关闭时离开后仍尊重 %s 锁：只续排、不生成', async (sceneLock) => {
+    const { ctx } = awayCtx({ sceneLock });
+    await expect(amsgHooks.onBeforeFire(ctx)).resolves.toEqual({ skip: true });
+    expect(ctx.scheduleTask).toHaveBeenCalledOnce();
+  });
+});
+
 // ─── 用户定的「频率与额度」：到点那几道闸 ───
 //
 // 每一项都是用户在面板上定的硬闸（见 utils/amsgLimits）。拦下来的一律 skip、在调模型之前，
