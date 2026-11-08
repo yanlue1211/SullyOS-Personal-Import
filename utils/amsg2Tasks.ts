@@ -658,7 +658,7 @@ export const keepUncancelledTasks = (
 ): ActiveMsg2TaskRecord[] =>
   tasks
     .filter((t) => failedUuids.has(t.taskUuid) || !attemptedUuids.has(t.taskUuid))
-    .map((t) => ({
+    .map((t) => t.away ? t : ({
       ...t,
       lastError: failedUuids.has(t.taskUuid) ? notes.failed : notes.appeared,
     }));

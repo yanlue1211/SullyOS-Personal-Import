@@ -595,7 +595,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
             <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm border ${isDiscordStyle ? 'bg-slate-800 text-indigo-300 border-indigo-400/20' : 'bg-indigo-50 text-indigo-500 border-indigo-100'}`}>
                 <Alarm className="w-6 h-6" weight="bold" />
             </div>)}
-            <span className="text-xs font-bold">主动消息 2.0</span>
+            <span className="text-xs font-bold">预约消息</span>
         </button>,
         <button key="mcd-not-configured"
           onClick={() => {

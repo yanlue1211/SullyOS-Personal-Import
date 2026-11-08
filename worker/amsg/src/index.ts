@@ -2175,8 +2175,7 @@ export const amsgHooks = {
     // 跳过路径必须发生在模型生成之前，不能因为拦截而发生模型请求/重试风暴。
     // 用户自己预约的任务不带 away 标记，完全不经过这个循环。
     if (!instant && away) {
-      if (!pack.selfScheduleEnabled || limitsRecord?.selfScheduleEnabled === false
-          || limitsRecord?.awayEnabled === false) {
+      if (limitsRecord?.awayEnabled === false) {
         console.log('[amsg:away-skip]', { taskId: ctx.task.id, reason: 'away-disabled' });
         return { skip: true } as const;
       }
@@ -2329,7 +2328,7 @@ export const amsgHooks = {
     // 关 2.0 时客户端会先把 limits 写成关、再去取消任务——取消扫完之后才冒出来的
     // （正在跑的那一轮顺手排的）、以及取消失败留下的，都在这里拦住，一个 token 都不花。
     const scheduleOff = !pack.selfScheduleEnabled || limitsRecord?.selfScheduleEnabled === false;
-    if (!instant && (scheduleOff || (selfScheduled && recurring && !limits.allowSelfRecurring))) {
+    if (!instant && ((!away && scheduleOff) || (selfScheduled && recurring && !limits.allowSelfRecurring))) {
       console.log('[amsg:schedule-off-skip]', {
         taskId: ctx.task.id, charId, selfScheduled, recurring, scheduleOff,
       });

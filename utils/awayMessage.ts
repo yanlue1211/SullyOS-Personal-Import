@@ -41,7 +41,7 @@ type UpdateCharacter = (
 
 /** 这个角色走云端（开着 2.0 且配了 Worker）还是本地。 */
 export const isAwayCloudRoute = async (char: CharacterProfile): Promise<boolean> =>
-  isAmsg2EnabledForChar(char) && await isAmsg2GlobalReady();
+  char.awayMessage?.enabled === true && await isAmsg2GlobalReady();
 
 /** Existing scheduled tasks must remain untouched on an older/unknown backend. */
 const AWAY_WORKER_PROBE_TTL_MS = 2 * 60_000;
@@ -97,7 +97,8 @@ export const syncCloudAwayTask = async (deps: {
   const { char } = deps;
   if (!char.awayMessage?.enabled || cloudInFlight.has(char.id)) return false;
   if ((cloudCooldownUntil.get(char.id) ?? 0) > Date.now()) return false;
-  if (!await isAwayCloudRoute(char) || !char.activeMsg2Config) return false;
+  if (!await isAwayCloudRoute(char)) return false;
+  const scheduleConfig = char.activeMsg2Config ?? { enabled: false, tasks: [] };
   // 旧 Worker 不认识 B 模式标记，若提前排程会绕开禁发和下一次续排，必须零副作用停在这里。
   if (!await isAwayCloudWorkerCompatible()) return false;
 
@@ -111,7 +112,7 @@ export const syncCloudAwayTask = async (deps: {
     // B 模式下 Worker 每次 fire 会创建下一节拍，客户端本地列表不一定认领过它。
     // 新用户开口时必须先和远端对账：否则老链在云端继续，我们又凭旧的本地清单
     // 创建一条新链，两个链交错触发会倍增模型调用次数。
-    const localAway = (char.activeMsg2Config.tasks ?? []).filter(t => t.away);
+    const localAway = (scheduleConfig.tasks ?? []).filter(t => t.away);
     const remote = await ActiveMsgClient.listRemoteTasksForChar(char.id);
     const remoteAway = remote.filter(t => t.status === 'pending'
       && (t.clientTaskId?.startsWith('away-') || localAway.some(old => old.taskUuid === t.uuid)));
@@ -135,14 +136,14 @@ export const syncCloudAwayTask = async (deps: {
     if (action === 'keep') {
       // 面板里也要看见 Worker 在离线时生成的下一节拍，不要永远显示旧的 UUID。
       if (record && !localAway.some(old => old.taskUuid === record.taskUuid)) {
-        deps.updateCharacter(char.id, prev => prev.activeMsg2Config ? {
+        deps.updateCharacter(char.id, prev => ({
           activeMsg2Config: {
-            ...prev.activeMsg2Config,
-            tasks: applyScheduledTask((prev.activeMsg2Config.tasks ?? []).filter(t => !t.away), {
+            ...(prev.activeMsg2Config ?? { enabled: false, tasks: [] }),
+            tasks: applyScheduledTask((prev.activeMsg2Config?.tasks ?? []).filter(t => !t.away), {
               ...record, recurrenceType: 'none', expirePolicy: 'force', source: 'user', status: 'scheduled', createdAt: now,
             } as ActiveMsg2TaskRecord, {}, now),
           },
-        } : {});
+        }));
       }
       return true;
     }
@@ -150,15 +151,15 @@ export const syncCloudAwayTask = async (deps: {
     if (action === 'renew' && record) {
       const { updated, failed } = await ActiveMsgClient.updatePendingTasksRemote([record.taskUuid], { nextSendAt: sendAt });
       if (updated > 0) {
-        deps.updateCharacter(char.id, prev => prev.activeMsg2Config ? {
+        deps.updateCharacter(char.id, prev => ({
           activeMsg2Config: {
-            ...prev.activeMsg2Config,
-            tasks: applyScheduledTask((prev.activeMsg2Config.tasks ?? []).filter(t => !t.away), {
+            ...(prev.activeMsg2Config ?? { enabled: false, tasks: [] }),
+            tasks: applyScheduledTask((prev.activeMsg2Config?.tasks ?? []).filter(t => !t.away), {
               ...record, nextSendAt: sendAt, firstSendTime: sendAt,
               recurrenceType: 'none', expirePolicy: 'force', source: 'user', status: 'scheduled', createdAt: now,
             } as ActiveMsg2TaskRecord, {}, now),
           },
-        } : {});
+        }));
         return true;
       }
       if (failed.length) throw new Error('离开后消息改期失败');
@@ -167,7 +168,7 @@ export const syncCloudAwayTask = async (deps: {
 
     const result = await ActiveMsgClient.scheduleCharacterTask({
       char,
-      config: char.activeMsg2Config,
+      config: scheduleConfig,
       task: { mode: 'auto', firstSendTime: sendAt, recurrenceType: 'none', expirePolicy: 'force', away: { delayMinutes } },
       userProfile: deps.userProfile,
       groups: deps.groups,
@@ -186,13 +187,13 @@ export const syncCloudAwayTask = async (deps: {
       createdAt: Date.now(),
       away: true,
     };
-    deps.updateCharacter(char.id, prev => prev.activeMsg2Config ? {
+    deps.updateCharacter(char.id, prev => ({
       activeMsg2Config: {
-        ...prev.activeMsg2Config,
+        ...(prev.activeMsg2Config ?? { enabled: false, tasks: [] }),
         // 旧的那条已经发过或不在了，换成新的；每个角色只留一条。
-        tasks: applyScheduledTask((prev.activeMsg2Config.tasks ?? []).filter(t => !t.away), created, {}, Date.now()),
+        tasks: applyScheduledTask((prev.activeMsg2Config?.tasks ?? []).filter(t => !t.away), created, {}, Date.now()),
       },
-    } : {});
+    }));
     return true;
   } catch (error) {
     console.warn('[AwayMessage] 云端任务同步失败', error);

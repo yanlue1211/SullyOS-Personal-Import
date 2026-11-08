@@ -179,7 +179,8 @@ export const markAmsgStateDirty = (
 ) => {
   const config = snapshot.char.activeMsg2Config;
   // Worker 可在用户离线时续接 away 子任务，本地清单暂时为空不代表云端没有任务。
-  if (!config?.enabled || (!hasActiveAiTask(config) && !snapshot.char.awayMessage?.enabled)) {
+  if ((!config?.enabled && !snapshot.char.awayMessage?.enabled)
+    || (!hasActiveAiTask(config) && !snapshot.char.awayMessage?.enabled)) {
     if (reason === 'invalidate') void invalidateCharCloudState(snapshot.char.id);
     return;
   }
@@ -593,7 +594,7 @@ export const buildCredentialRowsToResync = async (
   const all = characters ?? await DB.getAllCharacters();
   // 备份恢复 / 换设备时可能没有本地凭据底账，仍需覆盖云端旧副 API。
   for (const char of all) {
-    if (char.activeMsg2Config?.enabled && !wanted.some((item) => item.charId === char.id && item.purpose === 'chat')) {
+    if ((char.activeMsg2Config?.enabled || char.awayMessage?.enabled) && !wanted.some((item) => item.charId === char.id && item.purpose === 'chat')) {
       wanted.push({ charId: char.id, purpose: 'chat' });
     }
   }

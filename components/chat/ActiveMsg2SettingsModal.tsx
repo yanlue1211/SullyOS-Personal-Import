@@ -213,7 +213,7 @@ const ActiveMsg2SettingsModal: React.FC<ActiveMsg2SettingsModalProps> = ({
         apiType: secondaryApiType,
       },
     };
-    onSave(prev => ({ ...(prev ?? { enabled: true }), useSecondaryApi: next.useSecondaryApi, secondaryApi: next.secondaryApi }));
+    onSave(prev => ({ ...(prev ?? { enabled: false }), useSecondaryApi: next.useSecondaryApi, secondaryApi: next.secondaryApi }));
     setSavingSecondary(true);
     try {
       // 立刻刷新在云端排着的任务（包括前端尚未认领的自动空闲链条），不是只更新新任务。
@@ -330,6 +330,7 @@ const ActiveMsg2SettingsModal: React.FC<ActiveMsg2SettingsModalProps> = ({
     tasksOf: (prevTasks: ActiveMsg2TaskRecord[]) => ActiveMsg2TaskRecord[],
     extra?: Partial<ActiveMsg2CharacterConfig>,
   ): ActiveMsg2CharacterConfig => ({
+    ...prev, // 保留独立 API：编辑、关闭预约不能擦掉离开后共用的独立生成设置。
     // 开关以已保存的为准：关着 2.0 时任务列表照样列出来、照样能单独取消，取消完落盘
     // 不能顺手把 2.0 又打开。要开 / 要关的地方各自经 extra 显式给。
     enabled: prev ? prev.enabled : true,
@@ -517,7 +518,8 @@ const ActiveMsg2SettingsModal: React.FC<ActiveMsg2SettingsModalProps> = ({
         // 与删角色共用一份）。取消失败的保留在本地清单里，下次重开面板可重试。
         const { targets, failed } = await ActiveMsgClient.cancelAllTasksForChar(
           char.id,
-          tasks.map((t) => t.taskUuid),
+          tasks.filter(t => !t.away).map((t) => t.taskUuid),
+          'appointments',
         );
         const attempted = new Set(targets);
         // 真被取消掉的那些（试过且没失败）要给角色一句交代，否则关掉 2.0 之后它还挂着
@@ -531,10 +533,12 @@ const ActiveMsg2SettingsModal: React.FC<ActiveMsg2SettingsModalProps> = ({
         //
         // 清多少要看还有谁在用：即时对话还生效的话，云端那份上下文每轮聊天都会重写，
         // 这时候清只是白清一次；记忆宫殿的后台活儿走的是另一条路，它那行凭据不能动。
-        const cleanup = await purgeCharCloudState(
-          char,
-          disableScheduleCharPurge(globalInstantChatOn && instantChatOn),
-        );
+        const cleanup = char.awayMessage?.enabled
+          ? { status: 'skipped' as const }
+          : await purgeCharCloudState(
+              char,
+              disableScheduleCharPurge(globalInstantChatOn && instantChatOn),
+            );
         if (cleanup.status === 'failed') {
           console.warn('[ActiveMsg2Settings] 关闭 2.0 时清云端上下文失败', cleanup.error);
           addToast('ta 在云端的聊天上下文没能清掉，可以稍后重开面板再关一次。', 'error');
@@ -548,8 +552,8 @@ const ActiveMsg2SettingsModal: React.FC<ActiveMsg2SettingsModalProps> = ({
           { enabled: false, lastSyncedAt: Date.now() },
         ));
         addToast(failed.size
-          ? `主动消息 2.0 已关闭，但有 ${failed.size} 个任务远端取消失败，请稍后重开面板重试。`
-          : '主动消息 2.0 已关闭，全部任务已取消。', failed.size ? 'error' : 'info');
+          ? `预约消息已关闭，但有 ${failed.size} 个预约远端取消失败，请稍后重开面板重试。`
+          : '预约消息已关闭，已取消预约任务；离开后消息不受影响。', failed.size ? 'error' : 'info');
         onClose();
         return;
       }
@@ -663,7 +667,7 @@ const ActiveMsg2SettingsModal: React.FC<ActiveMsg2SettingsModalProps> = ({
     <>
     <Modal
       isOpen={isOpen}
-      title="主动消息 2.0"
+      title="预约消息"
       onClose={onClose}
       footer={(
         <>
@@ -678,12 +682,12 @@ const ActiveMsg2SettingsModal: React.FC<ActiveMsg2SettingsModalProps> = ({
     >
       <div className="space-y-4 text-sm text-slate-600">
         <p className="text-xs leading-relaxed text-slate-500">
-          这是新的云端主动消息入口。它会把当前角色设定、最近聊天快照和推送订阅一起提交到主动消息标准服务里。长周期循环任务建议在剧情变化后重新保存一次，避免使用过旧的上下文。
+          预约消息与「离开后消息」独立运行。TA 自己预约的未来消息和你手动创建的预约在这里管理；离开后的自动联系排程请前往「离开后消息」设置。
         </p>
 
         <div className="flex items-center justify-between bg-fuchsia-50 border border-fuchsia-100 rounded-2xl p-4">
           <div>
-            <div className="font-bold text-slate-700">启用主动消息 2.0</div>
+            <div className="font-bold text-slate-700">启用预约消息</div>
             <div className="text-xs text-fuchsia-600 mt-1">{pushSummary || '正在检查 Push 状态...'}</div>
           </div>
           <button
@@ -698,7 +702,7 @@ const ActiveMsg2SettingsModal: React.FC<ActiveMsg2SettingsModalProps> = ({
             也不知道打开它能换来什么。 */}
         {!enabled ? (
           <p className="text-xs leading-relaxed text-slate-400 pl-1">
-            主动消息 2.0 按角色单独开启。打开这个开关，TA 才能在聊天里给你排定时消息，到点由云端发出；你也可以在这里手动建任务。
+            预约消息按角色单独开启。关闭只停止预约，不影响离开后自动联系。共用的独立 API 也可以单独设置。
           </p>
         ) : null}
 
@@ -723,14 +727,13 @@ const ActiveMsg2SettingsModal: React.FC<ActiveMsg2SettingsModalProps> = ({
         </div>
 
         {/* 定时任务专属 API 不改变正常聊天/工具执行后的下一轮；独立保存，避免触发新增任务。 */}
-        {enabled && (
-          <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3">
+        <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3">
             <label className="flex items-center justify-between gap-2">
-              <span className="font-bold text-slate-700">主动消息2.0独立 API</span>
+              <span className="font-bold text-slate-700">主动消息独立 API（共用）</span>
               <input type="checkbox" checked={secondaryEnabled} onChange={e => setSecondaryEnabled(e.target.checked)} />
             </label>
             <p className="text-xs text-slate-400 leading-relaxed">
-              仅用于定时消息到点生成与离开后自动提醒。正常聊天、聊天里调用预约工具及工具执行后的后续回复仍用原聊天模型。
+              同时用于主动消息 1.0、预约消息和离开后自动提醒的 AI 生成。正常聊天、预约工具调用和工具执行后的回复仍使用原聊天模型。
               独立 API 不完整时会阻止生成，不偷偷回退到昂贵主模型。
             </p>
             {secondaryEnabled && (
@@ -753,8 +756,7 @@ const ActiveMsg2SettingsModal: React.FC<ActiveMsg2SettingsModalProps> = ({
               className="w-full rounded-xl bg-slate-100 text-slate-700 font-bold py-2 disabled:opacity-50">
               {savingSecondary ? '同步云端凭据中…' : '保存独立API设置'}
             </button>
-          </div>
-        )}
+        </div>
 
         {/* 「主动频率」：几条上限集中在自己那一页改、自己那一页存，这里只放一行摘要。
             今天主动找了几次摆在摘要下面——上限是不是在起作用，用户一眼能看到。 */}
