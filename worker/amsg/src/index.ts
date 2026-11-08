@@ -74,6 +74,7 @@ import {
   bumpRecurringSend,
   countRecurringSends,
   countUnansweredSends,
+  countAwayUnansweredSends,
   formatFireTimeShort,
   describeFirePackVersion,
   parseFirePack,
@@ -87,6 +88,7 @@ import {
 } from '../../../utils/amsgFirePack';
 import {
   AMSG_DAILY_SENDS_KEY,
+  AMSG_AWAY_DAILY_SENDS_KEY,
   AMSG_LIMITS_KEY,
   type AmsgDailySends,
   type AmsgLimits,
@@ -491,6 +493,9 @@ interface FireStash {
   dailyDay: string;
   /** fire 开场读到的每日计数（收尾时在它上面累加再写回）。 */
   dailySends: AmsgDailySends | null;
+  /** 两种消息只共用调度器，不共用频率/日计费账本。 */
+  dailySendsKey: string;
+  away: boolean;
   /** 这次 fire 已经记进每日计数了（收尾 hook 被调两次也只记一回）。 */
   dailyCounted: boolean;
   /** 这次 fire 开始的时刻；日志条目的 startedAt（间隔的锚点）就是它。 */
@@ -1153,7 +1158,7 @@ export const amsgFireSettled = async (
         llmCalls,
         sentId: `${stash.clientTaskId || 'task'}@${stash.occurrenceMs}`,
       });
-      stateWrites.push({ key: AMSG_DAILY_SENDS_KEY, value: JSON.stringify(stash.dailySends) });
+      stateWrites.push({ key: stash.dailySendsKey, value: JSON.stringify(stash.dailySends) });
     }
   }
 
@@ -1234,6 +1239,7 @@ export const amsgFireSettled = async (
       // 即时对话是在答用户刚说的话——列进自述块保持连续性，但不占「主动连发」的额度
       // （带这个标记的条目不会让 selfLog.unansweredSends 加一）。
       ...(stash.instant ? { reply: true } : {}),
+      ...(stash.away ? { away: true } : {}),
     });
     // 整段只有副作用标签（正文为空）时 append 原样返回——没有话可记。
     if (next !== stash.selfLog) {
@@ -1475,7 +1481,7 @@ const countCommittedSelfSends = (stash: FireStash): number => {
     .filter((uuid) => stash.plannedSelfSendUuids.includes(uuid)).length;
   return countUnansweredSends(stash.selfLog)
     + stash.plannedSelfSends - refundedSends + stash.scheduledTasks.length
-    + (stash.instant ? 0 : 1);
+    + (stash.instant || stash.away ? 0 : 1);
 };
 
 /**
@@ -1485,7 +1491,7 @@ const countCommittedSelfSends = (stash: FireStash): number => {
  */
 const selfScheduleBusyTimes = (stash: FireStash, nowMs: number, excludeUuid?: string): number[] => {
   const busy = liveTaskView(stash)
-    .filter(t => t.taskUuid !== excludeUuid)
+    .filter(t => t.taskUuid !== excludeUuid && !t.away)
     .map((t) => currentOccurrenceMs(t, nowMs))
     .filter((ms): ms is number => ms != null);
   if (stash.lastSelfSendAt != null) busy.push(stash.lastSelfSendAt);
@@ -1979,7 +1985,7 @@ export const amsgHooks = {
     const taskPolicy = typeof taskMeta.amsgExpirePolicy === 'string'
       ? taskMeta.amsgExpirePolicy : undefined;
     const selfScheduled = taskMeta.amsgSelfScheduled === true;
-    // 离开后消息：到点必发、计入连发上限，对方又开过口就原地推迟（见 docs/away-message.md）。
+    // 离开后消息：独立的空闲提醒（不占自主预约的连发 / 日额度）；用户再开口就推迟。
     const away = taskMeta[AMSG_AWAY_MESSAGE_META] === true;
     const recurring = ctx.task.recurrenceType === 'daily' || ctx.task.recurrenceType === 'weekly';
 
@@ -2334,7 +2340,7 @@ export const amsgHooks = {
 
     const maxUnansweredSends = limits.maxUnansweredSends;
     // 离开后消息也归它管：它发出去就算一次「没回时找你」，后面角色自排的接着往上数。
-    if (!instant && (selfScheduled || away)
+    if (!instant && selfScheduled
       && countUnansweredSends(selfLog) >= maxUnansweredSends) {
       console.log('[amsg:unanswered-limit-skip]', {
         taskId: ctx.task.id,
@@ -2353,7 +2359,7 @@ export const amsgHooks = {
     // 会平白差出一整次生成的时长。同一次触发重跑时，日志里那条就是它自己，不算。
     const occurrenceEntryId = `${clientTaskId || 'task'}@${occurrenceMs}`;
     const lastSelfSendAt = selfLog.entries
-      .filter((e) => !e.reply && e.id !== occurrenceEntryId)
+      .filter((e) => !e.reply && !e.away && !e.id.startsWith('away-') && e.id !== occurrenceEntryId)
       .map((e) => e.startedAt ?? e.at)
       .reduce<number | null>((latest, at) => (latest == null || at > latest ? at : latest), null);
     if (!instant && selfScheduled && limits.minSendGapMs > 0 && lastSelfSendAt != null
@@ -2380,9 +2386,10 @@ export const amsgHooks = {
     // 每日上限：用户面板排的也算（用户自己选的口径），即时对话不算——那是正常聊天。
     // 「今天」按用户那边的日期：这是用户的钱包闸，跟角色活在哪个时区无关。
     const dailyDay = dayKeyInZone(nowMs, pack.userTzId);
-    const dailySends = parseDailySends(charRows.find((r) => r.key === AMSG_DAILY_SENDS_KEY)?.value);
+    const dailySendsKey = away ? AMSG_AWAY_DAILY_SENDS_KEY : AMSG_DAILY_SENDS_KEY;
+    const dailySends = parseDailySends(charRows.find((r) => r.key === dailySendsKey)?.value);
     const sentToday = sendsOnDay(dailySends, dailyDay);
-    if (!instant && sentToday >= limits.dailySendCap) {
+    if (!instant && !away && sentToday >= limits.dailySendCap) {
       console.log('[amsg:daily-limit-skip]', {
         taskId: ctx.task.id, charId, day: dailyDay, sentToday, cap: limits.dailySendCap,
       });
@@ -2414,6 +2421,7 @@ export const amsgHooks = {
             recurrenceType: (row.recurrenceType || 'none') as ActiveMsg2TaskRecord['recurrenceType'],
             expirePolicy: meta.amsgExpirePolicy === 'force' ? 'force' : old?.expirePolicy || 'expire',
             source: meta.amsgSelfScheduled === true ? 'character' : old?.source || 'user',
+            away: meta[AMSG_AWAY_MESSAGE_META] === true || old?.away === true,
             status: 'scheduled', createdAt: old?.createdAt || Date.parse(row.createdAt || '') || nowMs,
           });
         }
@@ -2446,7 +2454,7 @@ export const amsgHooks = {
     // 连发额度里「先前排了还没响」那一份的快照：条数进 plannedSelfSends，uuid 留一份
     // 给排程闸退额度用（本轮取消掉快照里的任务时按交集抵扣，cancel + 重排额度中性）。
     const plannedSelfSendTasks = otherLiveTasks
-      .filter((t) => t.source === 'character' && (ctx.listTasks || isPendingTask(t, ctx.now.getTime()))
+      .filter((t) => !t.away && t.source === 'character' && (ctx.listTasks || isPendingTask(t, ctx.now.getTime()))
         // 正在触发的这条重复任务，下一次要等下个周期，不算「用户没回期间还要发的」。
         && t.taskUuid !== ctx.task.uuid);
     // 显式标注而不是 satisfies：下面即时对话那一支要往 emotionEvalPromise 上写 promise，
@@ -2476,7 +2484,7 @@ export const amsgHooks = {
       mcpSpentMs: 0,
       // 「还能不能再排」按客户端已知的 + 角色自己排过还没被认领的一起算，
       // 不然角色离线期间连排几次就能绕过每角色的任务上限。
-      pendingTaskCount: otherLiveTasks.length,
+      pendingTaskCount: otherLiveTasks.filter((t) => !t.away).length,
       pendingTasks: livePendingTasks,
       scheduledTasks: [],
       // 序号与 scheduledTasks 一样从空账起步；此后只增不减（取消不回退，见字段注释）。
@@ -2488,6 +2496,8 @@ export const amsgHooks = {
       recurring,
       dailyDay,
       dailySends,
+      dailySendsKey,
+      away,
       dailyCounted: false,
       firedAt: nowMs,
       plannedSelfSends: plannedSelfSendTasks.length,
@@ -2567,7 +2577,7 @@ export const amsgHooks = {
       ? buildLimitsBrief({
         limits,
         committedSends: countCommittedSelfSends(stash),
-        activeTasks: otherLiveTasks.length,
+        activeTasks: otherLiveTasks.filter((t) => !t.away).length,
         earliestText: limits.minSendGapMs > 0
           ? formatFireTimeShort(earliestSlotAfter(
             nowMs + MIN_SCHEDULE_LEAD_MS, limits.minSendGapMs, selfScheduleBusyTimes(stash, nowMs)), tz)
