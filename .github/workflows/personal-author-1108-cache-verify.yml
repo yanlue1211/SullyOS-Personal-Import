@@ -6,7 +6,7 @@ on:
       - 'utils/datePrompts*'
       - 'utils/contextSchedule*'
       - 'utils/chatPrompts.ts'
-      - 'utils/amsgD1Limits.ts'
+      - 'utils/amsgD1Limits*'
       - '.github/workflows/personal-author-1108-cache-verify.yml'
   workflow_dispatch:
 
@@ -32,6 +32,8 @@ jobs:
         run: pnpm exec vitest run utils/contextVolatileSplit.test.ts utils/contextWorldbook.test.ts utils/chatRequestPayload.test.ts utils/anthropicApi.test.ts utils/chatPrompts.test.ts
       - name: Protect collaboration, tools and memory-context routing
         run: pnpm exec vitest run utils/collaborationRouting.test.ts utils/replyScope.test.ts utils/toolCallCompat.test.ts utils/personalInnerVoice.test.ts
+      - name: Verify old mobile browser compatibility
+        run: pnpm exec vitest run utils/amsgD1Limits.test.ts
       - name: Build production frontend and unchanged Cloudflare Worker
         run: pnpm run build
       - name: No unintended Worker code change
