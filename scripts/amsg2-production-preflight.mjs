@@ -86,6 +86,11 @@ try {
         tickStatus: ['idle', 'healthy', 'failing', 'stalled', 'unknown'].includes(tick) ? tick : 'unknown',
         pendingTaskCount: safeCount(storage?.pendingTasks),
         overdueTaskCount: safeCount(storage?.overdueTasks),
+        oldestOverdueMinutes: safeCount(storage?.oldestOverdueMinutes),
+        stuckTaskCount: safeCount(storage?.stuckTasks),
+        retryingTaskCount: safeCount(storage?.retryingTasks),
+        overdueVerdict: ['idle', 'healthy', 'failing', 'stalled', 'unknown'].includes(storage?.overdueVerdict)
+          ? storage.overdueVerdict : null,
         registeredPush: storage?.pushSubscriptionRegistered === true,
         pushDeliveryStatus: storage?.pushDelivery && typeof storage.pushDelivery === 'object'
           ? 'available' : 'unknown',
