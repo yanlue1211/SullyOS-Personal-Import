@@ -1,87 +1,87 @@
-import {expect,it} from "vitest";
-import {habitDefaults,type Post} from "../features/moments/schema";
+import { expect, it } from "vitest";
+import { habitDefaults, type Post } from "../features/moments/schema";
 import {
-  momentsEngagement, momentsOpportunityRoll, momentsCommentDepth,
-  MAX_MOMENTS_AUTO_COMMENTS,
+  momentsEngagement, momentsCommentDepth, momentsAutoBudgetAllows,
+  momentsUserAddressedActor,
+  MAX_MOMENTS_AUTO_COMMENTS, MAX_MOMENTS_USER_REPLY_RESERVE,
 } from "../features/moments/engagement";
 
-const habits=habitDefaults();
-const post=(id="moment"):Post=>({
-  id,kind:"post",owner:"owner",name:"A",at:1,text:"日常",theme:"",
-  visibility:{mode:"all",ids:[]},media:[],likes:[],comments:[],revision:0,
+const habits = habitDefaults();
+const post = (id = "moment", owner = "owner"): Post => ({
+  id, kind: "post", owner, name: owner, at: 1, text: "日常", theme: "",
+  visibility: { mode: "all", ids: [] }, media: [], likes: [], comments: [], revision: 0,
 });
-const add=(p:Post,id:string,authorId:string,replyTo?:string)=>{
-  p.comments.push({id,authorId,name:authorId,text:"聊一句",at:p.comments.length+2,...(replyTo?{replyTo}:{})});
+const add = (p: Post, id: string, authorId: string, replyTo?: string, text = "聊一句") => {
+  p.comments.push({ id, authorId, name: authorId, text, at: p.comments.length + 2,
+    ...(replyTo ? { replyTo } : {}) });
 };
 
-it("makes stable opportunities, rather than rerolling when the page is opened again",()=>{
-  const p=post();
-  const a=momentsEngagement(p,"b",habits,true,[]);
-  const b=momentsEngagement(p,"b",habits,true,[]);
-  expect(a).toEqual(b);
-  expect(momentsOpportunityRoll("same")).toBe(momentsOpportunityRoll("same"));
-  expect(momentsEngagement(p,"b",habits,false,[]).allowRoot).toBe(false);
-});
-
-it("honors each person's actual comment probability without an artificial commenter cap",()=>{
-  const everyoneIsEager=post("crowd");
-  for(let i=0;i<9;i++){
-    const actor="friend-"+i;
-    if(momentsEngagement(everyoneIsEager,actor,{...habits,commentChance:1},true,[]).allowRoot)
-      add(everyoneIsEager,"root-"+i,actor);
+it("restores freedom: every first-time viewer can decide to comment, even a quiet one", () => {
+  const p = post("nine", "user");
+  const veryQuiet = { ...habits, commentChance: 0, joinChance: 0, replyChance: 0 };
+  for (let i = 0; i < 9; i++) {
+    const id = "friend-" + i;
+    expect(momentsEngagement(p, id, veryQuiet, true, []).allowRoot).toBe(true);
+    add(p, "root-" + i, id);
   }
-  // Nine commenters are possible when nine independent chances all pass.
-  expect(everyoneIsEager.comments.length).toBe(9);
+  expect(p.comments).toHaveLength(9);
+  expect(momentsEngagement(p, "friend-0", habits, true, []).allowRoot).toBe(false);
+  expect(momentsEngagement(p, "friend-new", habits, false, []).allowRoot).toBe(false);
+});
 
-  const ordinary=post("crowd");
-  for(let i=0;i<9;i++){
-    const actor="friend-"+i;
-    if(momentsEngagement(ordinary,actor,{...habits,commentChance:.28},true,[]).allowRoot)
-      add(ordinary,"root-"+i,actor);
+it("does not silence a relevant new comment, even if it does not name the singer", () => {
+  const p = post("song-post", "user");
+  add(p, "song", "user", undefined, "《穿帮》好好听！");
+  const interest = momentsEngagement(p, "ma", { ...habits, joinChance: 0 }, false, ["song"]);
+  expect(interest.replyableCommentIds).toEqual(["song"]);
+  // The model knows if this is its own song; code only gates visibility,
+  // not semantic interest. Reopening cannot reroll already-seen comments.
+  expect(momentsEngagement(p, "ma", habits, false, []).replyableCommentIds).toEqual([]);
+  expect(momentsEngagement(p, "ma", habits, false, ["song"]).replyableCommentIds).toEqual(["song"]);
+});
+
+it("prevents one actor continually echoing the same person in the same root thread", () => {
+  const p = post();
+  add(p, "root", "b");
+  add(p, "a-first", "owner", "root");
+  add(p, "c-first", "c", "root");
+  add(p, "a-second", "owner", "c-first");
+  add(p, "c-second", "c", "root");
+  expect(momentsAutoBudgetAllows(p, "owner", "c-second")).toBe(false);
+  expect(momentsEngagement(p, "owner", habits, false, ["c-second"]).replyableCommentIds).toEqual([]);
+});
+
+it("blocks deep automatic chains but still allows another new root topic", () => {
+  const p = post();
+  add(p, "b-root", "b");
+  add(p, "a-one", "owner", "b-root");
+  add(p, "b-two", "b", "a-one");
+  add(p, "a-three", "owner", "b-two");
+  add(p, "b-four", "b", "a-three");
+  add(p, "fresh-root", "c");
+  expect(momentsCommentDepth(p, "a-three")).toBe(3);
+  expect(momentsAutoBudgetAllows(p, "owner", "a-three")).toBe(false);
+  expect(momentsEngagement(p, "owner", habits, false, ["b-four", "fresh-root"]).replyableCommentIds).toEqual(["fresh-root"]);
+});
+
+it("stops ordinary automatic comments at 16 but reserves four user-addressed replies", () => {
+  const p = post("priority", "owner");
+  for (let i = 0; i < MAX_MOMENTS_AUTO_COMMENTS; i++)
+    add(p, "auto-" + i, "other-" + i);
+  expect(momentsEngagement(p, "other-new", habits, true, []).allowRoot).toBe(false);
+  add(p, "me-0", "user");
+  expect(momentsUserAddressedActor(p, "owner", "me-0")).toBe(true);
+  expect(momentsAutoBudgetAllows(p, "owner", "me-0")).toBe(true);
+  for (let i = 0; i < MAX_MOMENTS_USER_REPLY_RESERVE; i++) {
+    const id = "me-" + i;
+    if (i) add(p, id, "user");
+    expect(momentsAutoBudgetAllows(p, "owner", id)).toBe(true);
+    add(p, "owner-reply-" + i, "owner", id);
   }
-  // At ordinary odds the cast is sparse and stable, not a forced group gathering.
-  expect(ordinary.comments.length).toBeGreaterThan(0);
-  expect(ordinary.comments.length).toBeLessThan(9);
-});
-
-it("a post owner usually replies to first comments but does not automatically prolong the chain",()=>{
-  let first=0,second=0,third=0;
-  for(let i=0;i<200;i++){
-    const p=post("sample-"+i);
-    add(p,"b-root","b");
-    const option=momentsEngagement(p,"owner",habits,false,["b-root"]);
-    if(option.replyableCommentIds.includes("b-root")) first++;
-    add(p,"a-reply","owner","b-root");
-    if(momentsEngagement(p,"b",habits,false,["a-reply"]).replyableCommentIds.includes("a-reply")) second++;
-    add(p,"b-reply","b","a-reply");
-    if(momentsEngagement(p,"owner",habits,false,["b-reply"]).replyableCommentIds.includes("b-reply")) third++;
-  }
-  expect(first).toBeGreaterThan(155);
-  expect(first).toBeLessThan(195);
-  expect(second).toBeGreaterThan(30);
-  expect(second).toBeLessThan(70);
-  expect(third).toBeGreaterThan(12);
-  expect(third).toBeLessThan(40);
-});
-
-it("supports rare B-to-C replies on A's post and blocks bottomless replies",()=>{
-  const p=post();
-  add(p,"c","c");
-  const b=momentsEngagement(p,"b",{...habits,joinChance:1},false,["c"]);
-  expect(Array.isArray(b.replyableCommentIds)).toBe(true);
-  add(p,"a","owner","c");
-  add(p,"b","c","a");
-  add(p,"d","owner","b");
-  expect(momentsCommentDepth(p,"d")).toBe(3);
-  expect(momentsEngagement(p,"c",habits,false,["d"]).replyableCommentIds).toEqual([]);
-  for(let i=0;i<MAX_MOMENTS_AUTO_COMMENTS;i++)add(p,"extra-"+i,"someone-"+i);
-  expect(momentsEngagement(p,"new-person",{...habits,commentChance:1},true,[])).toEqual({allowRoot:false,replyableCommentIds:[]});
-});
-
-it("keeps explicit user actions outside the automatic post budget",()=>{
-  const p=post("user");
-  for(let i=0;i<MAX_MOMENTS_AUTO_COMMENTS;i++)add(p,"auto-"+i,"friend-"+i);
-  add(p,"user-extra","user");
+  add(p, "me-last", "user");
+  expect(momentsAutoBudgetAllows(p, "owner", "me-last")).toBe(false);
+  expect(momentsAutoBudgetAllows(p, "other-new", "me-last")).toBe(false);
+  // Manual comments remain unrestricted by automated quotas.
+  add(p, "my-last-comment", "user");
   expect(p.comments.at(-1)?.authorId).toBe("user");
-  expect(momentsEngagement(p,"owner",habits,false,["user-extra"]).replyableCommentIds).toEqual([]);
 });

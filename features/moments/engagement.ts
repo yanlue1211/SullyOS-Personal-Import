@@ -1,37 +1,27 @@
-import type { Habits, Post } from "./schema";
-import { effectiveJoinChance } from "./schema";
+import type { Post } from "./schema";
+import { mayReply, rootComment } from "./threads";
 
+/** These bounds apply only to characters' automatic activity, not user actions. */
 export const MAX_MOMENTS_AUTO_COMMENTS = 16;
+export const MAX_MOMENTS_USER_REPLY_RESERVE = 4;
 export const MAX_MOMENTS_REPLY_DEPTH = 3;
+export const MAX_MOMENTS_REPLIES_PER_ACTOR_THREAD = 2;
 
 export interface MomentsEngagement {
   allowRoot: boolean;
   replyableCommentIds: string[];
 }
 
-/** A single, stable opportunity per person + post / new comment.
- * Never reroll because the page was reopened or another character posted.
- * No extra API call or persistent RNG state is needed. */
-export function momentsOpportunityRoll(key: string): number {
-  let hash = 2166136261;
-  for (let i = 0; i < key.length; i++) {
-    hash ^= key.charCodeAt(i);
-    hash = Math.imul(hash, 16777619);
-  }
-  // FNV alone clusters sequential names/IDs; avalanche before using as a chance.
-  hash ^= hash >>> 16; hash = Math.imul(hash, 0x85ebca6b);
-  hash ^= hash >>> 13; hash = Math.imul(hash, 0xc2b2ae35);
-  hash ^= hash >>> 16;
-  return (hash >>> 0) / 4294967296;
-}
+const liveComments = (post: Post) => post.comments.filter(c => !c.deletedAt);
 
 export function momentsCommentDepth(post: Post, commentId: string): number {
-  const byId = new Map(post.comments.filter(c => !c.deletedAt).map(c => [c.id, c]));
+  const byId = new Map(liveComments(post).map(c => [c.id, c]));
   let current = byId.get(commentId);
   let depth = 0;
   const visited = new Set<string>();
   while (current?.replyTo) {
-    if (visited.has(current.id) || depth >= MAX_MOMENTS_REPLY_DEPTH) return MAX_MOMENTS_REPLY_DEPTH;
+    if (visited.has(current.id) || depth >= MAX_MOMENTS_REPLY_DEPTH)
+      return MAX_MOMENTS_REPLY_DEPTH;
     visited.add(current.id);
     depth++;
     current = byId.get(current.replyTo);
@@ -40,50 +30,60 @@ export function momentsCommentDepth(post: Post, commentId: string): number {
   return depth;
 }
 
-/** Private Moments only: all probabilities are eligibility gates, not obligations.
- * Character personalities still decide WHAT to say or whether to stay silent.
- * User-authored comments are not constrained by the automatic activity budget. */
-export function momentsEngagement(
-  post: Post, actorId: string, habits: Habits, firstView: boolean, newIds: string[],
-): MomentsEngagement {
-  const active = post.comments.filter(c => !c.deletedAt);
-  const own = active.filter(c => c.authorId === actorId);
-  const autoCount = active.filter(c => c.authorId !== "user").length;
-  if (autoCount >= MAX_MOMENTS_AUTO_COMMENTS ||
-      own.length >= (actorId === post.owner ? 10 : 3)) {
-    return {allowRoot: false, replyableCommentIds: []};
-  }
+/** A user explicitly commenting on the actor's own post or replying to
+ * the actor's comment. Mere mentions in text do not impersonate a reply. */
+export function momentsUserAddressedActor(post: Post, actorId: string, commentId: string): boolean {
+  const comments = liveComments(post);
+  const comment = comments.find(c => c.id === commentId);
+  if (!comment || comment.authorId !== "user") return false;
+  if (!comment.replyTo) return post.owner === actorId;
+  return comments.some(c => c.id === comment.replyTo && c.authorId === actorId);
+}
 
-  // Do not cap distinct commenters: even nine friends may comment when their own chances allow it.
-  const allowRoot = firstView && actorId !== post.owner &&
-      !active.some(c => c.authorId === actorId && !c.replyTo) &&
-      momentsOpportunityRoll(`root|${post.id}|${actorId}`) < habits.commentChance;
-
-  const byId = new Map(active.map(c => [c.id, c]));
-  const replyableCommentIds: string[] = [];
-  for (const id of newIds) {
-    const comment = byId.get(id);
-    if (!comment || comment.authorId === actorId ||
-        active.some(c => c.authorId === actorId && c.replyTo === id)) continue;
-    const depth = momentsCommentDepth(post, id);
-    if (depth >= MAX_MOMENTS_REPLY_DEPTH) continue;
-
-    const parent = comment.replyTo ? byId.get(comment.replyTo) : undefined;
-    const addressed = parent?.authorId === actorId ||
-        (!comment.replyTo && post.owner === actorId);
-    let chance: number;
-    // Preserve each character's stored reply habit without turning all replies into obligations.
-    const affinity = Math.max(.7, Math.min(1.05, habits.replyChance / .95));
-    if (addressed) {
-      if (!comment.replyTo) chance = Math.min(.99, (comment.authorId === "user" ? .97 : .90) * affinity);
-      else if (actorId === post.owner) chance = .12 * affinity;
-      else chance = (comment.authorId === "user" ? .90 : depth === 1 ? .25 : .12) * affinity;
-    } else {
-      // B can answer C on A's post, but this is deliberately uncommon.
-      chance = Math.min(.10, effectiveJoinChance(habits)) * (depth >= 2 ? .5 : 1);
+/** Leave a small, bounded reserve for explicit user interactions after the
+ * ordinary 16-comment budget is exhausted. No blanket extra model round. */
+export function momentsAutoBudgetAllows(post: Post, actorId: string, replyTo?: string): boolean {
+  const comments = liveComments(post);
+  const own = comments.filter(c => c.authorId === actorId);
+  if (own.length >= (post.owner === actorId ? 10 : 3)) return false;
+  const autoCount = comments.filter(c => c.authorId !== "user").length;
+  if (autoCount >= MAX_MOMENTS_AUTO_COMMENTS) {
+    if (!replyTo || !momentsUserAddressedActor(post, actorId, replyTo)) return false;
+    let autoIndex = 0;
+    let reservedReplies = 0;
+    for (const comment of comments) {
+      if (comment.authorId === "user") continue;
+      if (autoIndex >= MAX_MOMENTS_AUTO_COMMENTS && comment.replyTo &&
+          comments.some(parent => parent.id === comment.replyTo && parent.authorId === "user"))
+        reservedReplies++;
+      autoIndex++;
     }
-    if (momentsOpportunityRoll(`reply|${post.id}|${actorId}|${id}`) < chance)
-      replyableCommentIds.push(id);
+    if (reservedReplies >= MAX_MOMENTS_USER_REPLY_RESERVE) return false;
   }
-  return {allowRoot, replyableCommentIds};
+  if (!replyTo) {
+    return actorId !== post.owner && !own.some(c => !c.replyTo);
+  }
+  const target = comments.find(c => c.id === replyTo);
+  if (!target || target.authorId === actorId || !mayReply(post, replyTo) ||
+      momentsCommentDepth(post, replyTo) >= MAX_MOMENTS_REPLY_DEPTH ||
+      own.some(c => c.replyTo === replyTo)) return false;
+
+  const root = rootComment(post, replyTo);
+  if (!root) return false;
+  const ownThreadReplies = own.filter(c => c.replyTo && rootComment(post, c.id)?.id === root.id);
+  return ownThreadReplies.length < MAX_MOMENTS_REPLIES_PER_ACTOR_THREAD;
+}
+
+/** This is an opportunity/safety filter, NOT a probability lottery.
+ * A character that really cares about a song or another person's comment
+ * can choose to join after seeing it; the model still may remain silent.
+ * First views create one root-comment opportunity; later views can address
+ * only newly visible comments, never replay already-seen conversations. */
+export function momentsEngagement(
+  post: Post, actorId: string, _habits: unknown, firstView: boolean, newIds: string[],
+): MomentsEngagement {
+  return {
+    allowRoot: firstView && momentsAutoBudgetAllows(post, actorId),
+    replyableCommentIds: [...new Set(newIds)].filter(id => momentsAutoBudgetAllows(post, actorId, id)),
+  };
 }

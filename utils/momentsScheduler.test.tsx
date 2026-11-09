@@ -6,6 +6,7 @@ import MomentsRuntime from "../components/os/MomentsRuntime";
 import { DB } from "./db";
 import { saveConfig } from "../features/moments/storage";
 import { momentsEnabled, setMomentsEnabled } from "../features/moments/gate";
+import { MOMENTS_CHANGED } from "../features/moments/schema";
 import {
   chatMomentsContext,
   prepareMomentsQuery,
@@ -49,14 +50,14 @@ it("mounts no five-minute timer or model tick while disabled, and removes the ti
     clear = vi.spyOn(globalThis, "clearTimeout");
   await act(async () => root.render(<MomentsRuntime />));
   await settle();
-  expect(time.mock.calls.filter((c) => c[1] === 300000)).toHaveLength(0);
+  expect(time.mock.calls.filter((c) => typeof c[1] === "number" && c[1] >= 299000 && c[1] <= 300000)).toHaveLength(0);
   await act(async () => {
     await saveConfig((c) => {
       c.enabled = true;
     });
   });
   await settle();
-  expect(time.mock.calls.filter((c) => c[1] === 300000).length).toBeGreaterThan(
+  expect(time.mock.calls.filter((c) => typeof c[1] === "number" && c[1] >= 299000 && c[1] <= 300000).length).toBeGreaterThan(
     0,
   );
   expect(tick).not.toHaveBeenCalled();
@@ -75,4 +76,26 @@ it("disabled chat context and explicit-view preparation return without any datab
   expect(await chatMomentsContext("a")).toEqual({ stable: "", dynamic: "" });
   await prepareMomentsQuery("a", []);
   expect(db).not.toHaveBeenCalled();
+});
+
+it("runs a due Moments check in a hidden but still-alive browser without extra calls on visibility changes", async () => {
+  await saveConfig(c => { c.enabled = true; });
+  Object.defineProperty(document, "hidden", { configurable: true, value: true });
+  const timerSpy = vi.spyOn(globalThis, "setTimeout");
+  await act(async () => root.render(<MomentsRuntime />));
+  await settle();
+  const scheduled = timerSpy.mock.calls.findIndex(args => typeof args[1] === "number" && args[1] >= 299000 && args[1] <= 300000);
+  expect(scheduled).toBeGreaterThanOrEqual(0);
+  const callback = timerSpy.mock.calls[scheduled][0] as () => void;
+  // Trigger the captured timer without advancing a real five minutes.
+  clearTimeout(timerSpy.mock.results[scheduled].value as ReturnType<typeof setTimeout>);
+  await act(async () => {
+    callback();
+    await new Promise(resolve => setTimeout(resolve, 25));
+  });
+  expect(tick).toHaveBeenCalledTimes(1);
+  document.dispatchEvent(new Event("visibilitychange"));
+  window.dispatchEvent(new Event(MOMENTS_CHANGED));
+  await settle();
+  expect(tick).toHaveBeenCalledTimes(1);
 });
