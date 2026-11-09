@@ -15,6 +15,11 @@ it('preserves actual audio bytes through NetEase download and the real safeFetch
  expect(payload.format).toBe('wav');
  await describeAudioWithAudioApi(payload,{enabled:true,baseUrl:'https://audio.invalid/v1',apiKey:'test',model:'gemini-4-argon'});
  const part=requests[0].messages[1].content.find((p:any)=>p.type==='input_audio');
+ const systemPrompt = String(requests[0].messages[0].content);
+ expect(systemPrompt).toContain('高音、真假声转换');
+ expect(systemPrompt).toContain('不等于嘶吼、撕裂');
+ expect(systemPrompt).toContain('不虚构节拍数、BPM');
+ expect(requests[0].temperature).toBe(0);
  expect(part.input_audio.format).toBe('wav');expect(atob(part.input_audio.data).slice(0,4)).toBe('RIFF');expect(part.input_audio.data).toBe(payload.base64);expect(requests[0].messages[1].content.some((p:any)=>p.type==='image_url')).toBe(false);
 });
 it('imports jsDelivr audio by its remote URL and retains binary content despite generic MIME',async()=>{
