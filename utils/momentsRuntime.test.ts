@@ -366,6 +366,7 @@ it('allows a character to delete only its own submitted historical post during o
 });
 
 it('records ordinary posts and comments in one activity card without another API call',async()=>{
+ await saveConfig(c=>{c.participants.a.habits.commentChance=1;});
  vi.mocked(safeFetchJson).mockImplementation(async(_url,options)=>({choices:[{finish_reason:'stop',message:{content:JSON.stringify({requestId:promptRequest(options).id,browsed:[post.id],actions:[{kind:'comment',postId:post.id,text:'这阵海风真舒服。'}],post:{text:'买到了新鲜的番茄',theme:'买菜',media:[],visibility:{mode:'all',ids:[]}},important:[{postId:post.id,summary:'记下了海边的交流'}]})}}]}));
  await runActivity('a',{api:global,user:{name:'小雨'} as any});
  const cards=(await DB.getMessagesByCharId('a')).filter(m=>m.type==='moments_card');
@@ -496,5 +497,5 @@ it('consumes closed-thread events without forcing the model to answer an unrelat
  expect(p.comments.some(x=>x.text==='新话题回应')).toBe(chanceAllows);
  expect((await getRow<Seen>(`seen:a:${post.id}`))!.projection.comments).toHaveLength(p.comments.length);
  expect((await rows('event','a')).filter(x=>(x as any).status==='pending')).toHaveLength(0);
- expect((await rows('log','a')).map(x=>(x as any).text).join('\n')).toContain('跳过已收束话题1条');
+ expect((await rows('log','a')).map(x=>(x as any).text).join('\n')).toContain('跳过已收束话题'+(chanceAllows?'1':'2')+'条');
 });
