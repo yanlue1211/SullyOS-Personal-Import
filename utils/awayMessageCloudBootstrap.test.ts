@@ -8,6 +8,8 @@ import {
   isLatestCloudAwaySettings, enqueueCloudAwaySettingsUpdate,
 } from './awayMessage';
 import type { CharacterProfile } from '../types';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 vi.mock('./activeMsgClient', () => ({ ActiveMsgClient: {
   probeWorkerVersion: vi.fn(async () => ({ state: 'current' })),
@@ -305,5 +307,23 @@ describe('cloud away first-task creation and passive repair', () => {
       getGroups: () => [], getRealtimeConfig: () => ({} as any), isBusyWith: () => false,
     });
     expect(ActiveMsgClient.scheduleCharacterTask).not.toHaveBeenCalled();
+  });
+});
+
+
+// apps/Chat.tsx has heavy browser dependencies, so guard this save-button wiring
+// directly. The cloud scheduling behavior itself is exercised above with mocked D1/Worker.
+describe('away settings save wiring', () => {
+  it('uses the last real Char reply, not the last user message, when seeding the cloud loop', () => {
+    const source = readFileSync(fileURLToPath(new URL('../apps/Chat.tsx', import.meta.url)), 'utf8');
+    const start = source.indexOf('<AwayMessageSettingsModal');
+    const end = source.indexOf('{/* 思考链设置 Modal', start);
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    const settings = source.slice(start, end);
+    expect(settings).toContain('const lastCharAt = getLastRealCharMessageAt(recent)');
+    expect(settings).toContain('if (lastCharAt == null) return');
+    expect(settings).toMatch(/syncCloudAwayTask\(\{\s*char: updatedChar, lastCharAt,/);
+    expect(settings).not.toMatch(/lastUserAt|getLastRealUserMessageAt/);
   });
 });
