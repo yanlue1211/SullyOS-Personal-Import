@@ -238,6 +238,7 @@ export const LAST_SKIP_REASONS = [
   'min-gap',
   'recurring-unanswered',
   'daily-limit',
+  'chat-overlap',
   'away-disabled',
   'away-missed-slot',
   'away-date-lock',
@@ -261,6 +262,7 @@ export interface AmsgLastSkip {
    * min-gap               角色自排的任务到点时，离它上一条主动消息还没隔够用户设的间隔
    * recurring-unanswered  重复的任务到点时，用户已经连续几次没回它了（回话后恢复）
    * daily-limit           今天主动发的次数已到用户设的每日上限
+   * chat-overlap          写到一半用户开口聊上了，这句没看到新对话，推送前拦下
    */
   reason: (typeof LAST_SKIP_REASONS)[number];
   skippedAt: number;
@@ -327,6 +329,8 @@ export const describeLastSkip = (skip: AmsgLastSkip, formatTime: (ms: number) =>
       return `${when} 那条重复消息这次没发——你已经连续几次没回它了，先停一停；你回一句话，它就照常恢复。`;
     case 'daily-limit':
       return `${when} 那次主动消息没发——今天 ta 主动找你的次数已经到了你设的每日上限，跳过的这次不会补发，明天重新计数。`;
+    case 'chat-overlap':
+      return `${when} 那次主动消息没发——ta 写好的时候你们正好聊上了，那句话没看到你刚说的，就没发出去。`;
     case 'away-disabled':
       return `${when} 离开后消息已关闭，旧任务被系统拦下，没有请求 AI。`;
     case 'away-missed-slot':
