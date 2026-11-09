@@ -15,6 +15,12 @@ describe('recording transcript separation', () => {
     expect(RECORDING_TRANSCRIPT_SYSTEM).toContain('不要使用“男声”“女声”');
     expect(RECORDING_TRANSCRIPT_SYSTEM).toContain('绝不能混进 transcript');
   });
+  it('allows grounded crying-voice observations without assuming the person is actually sad', () => {
+    const result = parseRecordingRecognition('{"transcript":"我没事","analysis":"说话稍有哽咽和哭腔，听起来有些难过。"}');
+    expect(result).toEqual({ transcript: '我没事', analysis: '说话稍有哽咽和哭腔，听起来有些难过。' });
+    expect(RECORDING_TRANSCRIPT_SYSTEM).toContain('只能表示声音给人的印象');
+    expect(RECORDING_TRANSCRIPT_SYSTEM).toContain('不要把文本意思、对话话题或场景当作声学证据');
+  });
   it('does not label a legacy free-form analysis as the user’s words', () => {
     expect(recordingText({ audioDescription: '这是一位声音轻快的用户，背景有键盘声。' })).toEqual({ transcript: '', analysis: '这是一位声音轻快的用户，背景有键盘声。' });
   });
