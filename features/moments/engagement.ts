@@ -74,10 +74,12 @@ export function momentsEngagement(
     const addressed = parent?.authorId === actorId ||
         (!comment.replyTo && post.owner === actorId);
     let chance: number;
+    // Preserve each character's stored reply habit without turning all replies into obligations.
+    const affinity = Math.max(.7, Math.min(1.05, habits.replyChance / .95));
     if (addressed) {
-      if (!comment.replyTo) chance = comment.authorId === "user" ? .97 : .90;
-      else if (actorId === post.owner) chance = .12;
-      else chance = comment.authorId === "user" ? .90 : depth === 1 ? .25 : .12;
+      if (!comment.replyTo) chance = Math.min(.99, (comment.authorId === "user" ? .97 : .90) * affinity);
+      else if (actorId === post.owner) chance = .12 * affinity;
+      else chance = (comment.authorId === "user" ? .90 : depth === 1 ? .25 : .12) * affinity;
     } else {
       // B can answer C on A's post, but this is deliberately uncommon.
       chance = Math.min(.10, effectiveJoinChance(habits)) * (depth >= 2 ? .5 : 1);
