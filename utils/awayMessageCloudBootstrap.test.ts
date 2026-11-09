@@ -327,3 +327,31 @@ describe('away settings save wiring', () => {
     expect(settings).not.toMatch(/lastUserAt|getLastRealUserMessageAt/);
   });
 });
+
+
+describe('reply-complete cloud away rearm wiring', () => {
+  const readSource = (path: string) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8');
+
+  it('does not rearm using stale pre-reply messages at request start', () => {
+    const hook = readSource('../hooks/useChatAI.ts');
+    expect(hook).not.toContain('void syncCloudAwayTask(');
+    expect(hook).toContain('announceChatGen(CHAT_GEN_EVENTS.replyArrived');
+  });
+
+  it('rearms only for successfully persisted local replies or complete instant-chat replies', () => {
+    const os = readSource('../context/OSContext.tsx');
+    expect(os).toContain('rearmAwayAfterReply(charId);');
+    expect(os).toMatch(/if \(instantReplyFinished\) rearmAwayAfterReply\(charId\)/);
+    expect(os).toContain('const lastCharAt = getLastRealCharMessageAt(recent)');
+    expect(os).toMatch(/char, lastCharAt, userProfile: profile/);
+    expect(os).toContain('if (!char?.awayMessage?.enabled || !profile) return');
+    expect(os).not.toMatch(/const handler = \(e: Event\) => \{[\s\S]{0,550}rearmAwayAfterReply\(charId\);\s*\n\s*if \(!instantReplyFinished\)/);
+  });
+
+  it('does not rearm from automatic schedules or each streamed reply bubble', () => {
+    const runtime = readSource('../utils/activeMsgRuntime.ts');
+    expect(runtime).toContain('instantReplyFinished: isInstantReply && isFinalInstantSegment && looksLikeAssistantText');
+    expect(runtime).toContain('if (isFinalInstantSegment && clearInstantChatPending(message.charId))');
+    expect(runtime).toMatch(/const isInstantReply = message.source === 'instant'/);
+  });
+});

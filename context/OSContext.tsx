@@ -96,7 +96,8 @@ import { isScheduleFeatureOn } from '../utils/scheduleGenerator';
 import { evaluateEmotionBackground } from '../hooks/useChatAI';
 import {HOME_SECRETS_UPDATED} from '../utils/homeSecrets';
 import { CHAT_GEN_EVENTS, setChatViewSnapshot, isEmbeddedChatVisible } from '../utils/chatGenEvents';
-import { runLocalAwayMessages } from '../utils/awayMessage';
+import { runLocalAwayMessages, syncCloudAwayTask } from '../utils/awayMessage';
+import { getLastRealCharMessageAt } from '../utils/amsg2ExpireGuard';
 import { isAmsgActiveCall } from '../utils/amsgInteractionGuard';
 import { syncAmsgCallPresence } from '../utils/amsgCallPresenceSync';
 import { AMSG_CALL_HEARTBEAT_MS } from '../utils/amsgCallPresence';
@@ -2122,9 +2123,33 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   useEffect(() => {
       let awayActiveMsgCount = 0;
 
+      // 离开后 B 模式按 Char 最后一次实际聊天回复计时。只在回复全部落库
+      // 后读真实记录并改云端任务；用户单发消息、定时/主动推送不能重置。
+      // 取最新 ref 防止生成期间关闭开关或切换角色后用旧角色配置建幽灵任务。
+      const rearmAwayAfterReply = (charId: string) => {
+          void (async () => {
+              const enabledChar = charactersRef.current.find(c => c.id === charId);
+              if (!enabledChar?.awayMessage?.enabled) return;
+              const recent = await DB.getRecentMessagesByCharId(charId, 50, true);
+              const lastCharAt = getLastRealCharMessageAt(recent);
+              if (lastCharAt == null) return;
+              const char = charactersRef.current.find(c => c.id === charId);
+              const profile = userProfileRef.current;
+              if (!char?.awayMessage?.enabled || !profile) return;
+              await syncCloudAwayTask({
+                  char, lastCharAt, userProfile: profile, groups: groupsRef.current,
+                  realtimeConfig: realtimeConfigRef.current, apiConfig: apiConfigRef.current,
+                  updateCharacter: updateCharacterRef.current,
+              });
+          })().catch(error => console.warn('[AwayMessage] 回复落库后改期失败', charId, error));
+      };
+
       const handler = (e: Event) => {
-          const { charId, charName, body } = (e as CustomEvent).detail as { charId: string; charName: string; body?: string };
+          const { charId, charName, body, instantReplyFinished } = (e as CustomEvent).detail as {
+              charId: string; charName: string; body?: string; instantReplyFinished?: boolean;
+          };
           setLastMsgTimestamp(Date.now());
+          if (instantReplyFinished) rearmAwayAfterReply(charId);
 
           const isChattingWithThisChar = (activeAppRef.current === AppID.Chat && activeCharIdScheduleRef.current === charId) || isEmbeddedChatVisible(charId);
           if (!isChattingWithThisChar) {
@@ -2225,6 +2250,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           const { charId, charName } = ((e as CustomEvent).detail || {}) as { charId?: string; charName?: string };
           if (!charId) return;
           setLastMsgTimestamp(Date.now());
+          rearmAwayAfterReply(charId);
           const isChattingWithThisChar = (activeAppRef.current === AppID.Chat && activeCharIdScheduleRef.current === charId) || isEmbeddedChatVisible(charId);
           if (!isChattingWithThisChar) {
               setUnreadMessages(prev => ({ ...prev, [charId]: (prev[charId] || 0) + 1 }));
@@ -3618,6 +3644,10 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       return updated;
     });
   };
+  // 全局回执监听器只注册一次，却需要最新的更新闭包（世界书/角色状态等）。
+  // 不能在第一次渲染时捕获旧 updateCharacter 再长期拿它写角色数据。
+  const updateCharacterRef = useRef(updateCharacter);
+  updateCharacterRef.current = updateCharacter;
   const deleteCharacter = async (id: string, options?: { force?: boolean }): Promise<DeleteCharacterResult> => {
     const target = characters.find(c => c.id === id);
     const retirement = target ? await retireCloudCharacter(target) : { status: 'skipped' as const };

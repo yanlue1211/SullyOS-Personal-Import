@@ -1603,6 +1603,12 @@ const flushInboxToChatImpl = async (trigger: FlushTrigger, charId?: string): Pro
     const isInstantReply = message.source === 'instant'
       || (message.metadata as any)?.amsgInstantChat === true
       || getInstantChatPending(message.charId)?.uuid === message.taskUuid;
+    // 复用与即时对话销账一致的末段判定。只有完整回复落库后才给
+    // OSContext 一次空闲任务改期信号，不能每个气泡都改一遍。
+    const instantSegmentIndex = Number((message.metadata as any)?.messageIndex);
+    const instantSegmentTotal = Number((message.metadata as any)?.totalMessages);
+    const isFinalInstantSegment = !Number.isFinite(instantSegmentTotal) || instantSegmentTotal <= 1
+      || (Number.isFinite(instantSegmentIndex) && instantSegmentIndex >= instantSegmentTotal);
     const replyRun = isInstantReply && message.taskUuid
       ? createReplyRun(message.charId, message.taskUuid) : undefined;
     const replyStep = <T>(operation: () => Promise<T>) => withReplyCancellation(replyRun, operation);
@@ -1865,6 +1871,9 @@ const flushInboxToChatImpl = async (trigger: FlushTrigger, charId?: string): Pro
           body: message.previewBody || message.body,
           avatarUrl: message.avatarUrl,
           sentAt: eventSentAt,
+          // 只让已落库的云端即时对话末段推动离开后任务改期。
+          // 自主预约、离开后提醒、普通主动消息一律不得重置这条空闲链。
+          instantReplyFinished: isInstantReply && isFinalInstantSegment && looksLikeAssistantText,
         },
       }));
       activeMsgTrace('runtime-active-msg-received-dispatched', {
@@ -1882,11 +1891,7 @@ const flushInboxToChatImpl = async (trigger: FlushTrigger, charId?: string): Pro
       // 旧 worker）当末段处理，保持旧行为。
       const pendingForChar = getInstantChatPending(message.charId);
       if (pendingForChar && message.taskUuid === pendingForChar.uuid) {
-        const segIndex = Number((message.metadata as any)?.messageIndex);
-        const segTotal = Number((message.metadata as any)?.totalMessages);
-        const isLastSegment = !Number.isFinite(segTotal) || segTotal <= 1
-          || (Number.isFinite(segIndex) && segIndex >= segTotal);
-        if (isLastSegment && clearInstantChatPending(message.charId)) {
+        if (isFinalInstantSegment && clearInstantChatPending(message.charId)) {
           scheduleNextInstantChatStatusCheck();
           // 「API 调用记录」里那笔（发出去时记的）在这里补完：用量挂在末条推送上，
           // 而这里正好是认末段的地方。
