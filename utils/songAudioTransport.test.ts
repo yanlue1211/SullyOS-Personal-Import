@@ -18,12 +18,13 @@ it('preserves actual audio bytes through NetEase download and the real safeFetch
  const systemPrompt = String(requests[0].messages[0].content);
  expect(systemPrompt).toContain('高音、真假声转换');
  expect(systemPrompt).toContain('不等于嘶吼、撕裂');
- expect(systemPrompt).toContain('不虚构节拍数、BPM');
- expect(requests[0].temperature).toBe(0.3);
+ expect(systemPrompt).toContain('可写近似 BPM、拍号、分段时间码');
+ expect(systemPrompt).toContain('听清的歌词、乐器编配');
+ expect(requests[0].temperature).toBe(0);
  expect(requests[0].temperature).toBe(AUDIO_RECOGNITION_TEMPERATURE);
  expect(part.input_audio.format).toBe('wav');expect(atob(part.input_audio.data).slice(0,4)).toBe('RIFF');expect(part.input_audio.data).toBe(payload.base64);expect(requests[0].messages[1].content.some((p:any)=>p.type==='image_url')).toBe(false);
 });
-it('sends the same 0.3 to recording ASR regardless of dialogue preset or model choice',async()=>{
+it('sends the same 0 temperature to recording ASR regardless of dialogue preset or model choice',async()=>{
  const requests:any[]=[];
  vi.stubGlobal('fetch',vi.fn(async(_url, options)=>{
    const body=JSON.parse(String(options.body));
@@ -38,7 +39,7 @@ it('sends the same 0.3 to recording ASR regardless of dialogue preset or model c
    expect(result.transcript).toBe('我今天挺精神的');
  }
  expect(requests).toHaveLength(2);
- expect(requests.map(r=>r.temperature)).toEqual([0.3,0.3]);
+ expect(requests.map(r=>r.temperature)).toEqual([0,0]);
  expect(requests.map(r=>r.model)).toEqual(models);
 });
 it('imports jsDelivr audio by its remote URL and retains binary content despite generic MIME',async()=>{
