@@ -2139,7 +2139,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
               await syncCloudAwayTask({
                   char, lastCharAt, userProfile: profile, groups: groupsRef.current,
                   realtimeConfig: realtimeConfigRef.current, apiConfig: apiConfigRef.current,
-                  updateCharacter,
+                  updateCharacter: updateCharacterRef.current,
               });
           })().catch(error => console.warn('[AwayMessage] 回复落库后改期失败', charId, error));
       };
@@ -3644,6 +3644,10 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       return updated;
     });
   };
+  // 全局回执监听器只注册一次，却需要最新的更新闭包（世界书/角色状态等）。
+  // 不能在第一次渲染时捕获旧 updateCharacter 再长期拿它写角色数据。
+  const updateCharacterRef = useRef(updateCharacter);
+  updateCharacterRef.current = updateCharacter;
   const deleteCharacter = async (id: string, options?: { force?: boolean }): Promise<DeleteCharacterResult> => {
     const target = characters.find(c => c.id === id);
     const retirement = target ? await retireCloudCharacter(target) : { status: 'skipped' as const };
