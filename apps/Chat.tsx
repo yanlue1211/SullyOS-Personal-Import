@@ -79,7 +79,7 @@ import {
     isLatestCloudAwaySettings, resumeCloudAwaySyncForSettings, waitForCloudAwaySync,
     enqueueCloudAwaySettingsUpdate,
 } from '../utils/awayMessage';
-import { getLastRealUserMessageAt } from '../utils/amsg2ExpireGuard';
+import { getLastRealCharMessageAt } from '../utils/amsg2ExpireGuard';
 import { isAmsg2GlobalReady } from '../utils/amsg2ToolBridge';
 import { ActiveMsgClient } from '../utils/activeMsgClient';
 import ThinkingChainSettingsModal from '../components/chat/ThinkingChainSettingsModal';
@@ -4733,13 +4733,13 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
                         }
                         if (!isLatestCloudAwaySettings(char.id, settingsEpoch)) return;
                         const recent = await DB.getRecentMessagesByCharId(char.id, 50, true);
-                        const lastUserAt = getLastRealUserMessageAt(recent);
+                        const lastCharAt = getLastRealCharMessageAt(recent);
                         if (!isLatestCloudAwaySettings(char.id, settingsEpoch)) return;
                         // 仅补缺 / 校验已有未来链；成功解除设置锁后才开始新建。
                         resumeCloudAwaySyncForSettings(char.id, settingsEpoch);
-                        if (lastUserAt == null) return;
+                        if (lastCharAt == null) return;
                         await syncCloudAwayTask({
-                            char: updatedChar, lastUserAt, userProfile, groups, realtimeConfig, apiConfig, updateCharacter,
+                            char: updatedChar, lastCharAt, userProfile, groups, realtimeConfig, apiConfig, updateCharacter,
                         }, { seedOnly: true });
                     }).catch(err => {
                         if (!isLatestCloudAwaySettings(char.id, settingsEpoch)) return;
