@@ -2,7 +2,7 @@ import {expect,it} from "vitest";
 import {habitDefaults,type Post} from "../features/moments/schema";
 import {
   momentsEngagement, momentsOpportunityRoll, momentsCommentDepth,
-  MAX_MOMENTS_AUTO_COMMENTS, MAX_MOMENTS_ROOT_COMMENTERS,
+  MAX_MOMENTS_AUTO_COMMENTS,
 } from "../features/moments/engagement";
 
 const habits=habitDefaults();
@@ -23,15 +23,25 @@ it("makes stable opportunities, rather than rerolling when the page is opened ag
   expect(momentsEngagement(p,"b",habits,false,[]).allowRoot).toBe(false);
 });
 
-it("never summons all nine initial commenters, even if everyone loves commenting",()=>{
-  const p=post("crowd");
-  const mostSocial={...habits,commentChance:1};
+it("honors each person's actual comment probability without an artificial commenter cap",()=>{
+  const everyoneIsEager=post("crowd");
   for(let i=0;i<9;i++){
     const actor="friend-"+i;
-    if(momentsEngagement(p,actor,mostSocial,true,[]).allowRoot)add(p,"root-"+i,actor);
+    if(momentsEngagement(everyoneIsEager,actor,{...habits,commentChance:1},true,[]).allowRoot)
+      add(everyoneIsEager,"root-"+i,actor);
   }
-  expect(p.comments.length).toBe(MAX_MOMENTS_ROOT_COMMENTERS);
-  expect(p.comments.length).toBeLessThan(9);
+  // Nine commenters are possible when nine independent chances all pass.
+  expect(everyoneIsEager.comments.length).toBe(9);
+
+  const ordinary=post("crowd");
+  for(let i=0;i<9;i++){
+    const actor="friend-"+i;
+    if(momentsEngagement(ordinary,actor,{...habits,commentChance:.28},true,[]).allowRoot)
+      add(ordinary,"root-"+i,actor);
+  }
+  // At ordinary odds the cast is sparse and stable, not a forced group gathering.
+  expect(ordinary.comments.length).toBeGreaterThan(0);
+  expect(ordinary.comments.length).toBeLessThan(9);
 });
 
 it("a post owner usually replies to first comments but does not automatically prolong the chain",()=>{

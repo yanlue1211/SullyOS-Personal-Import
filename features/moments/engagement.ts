@@ -2,7 +2,6 @@ import type { Habits, Post } from "./schema";
 import { effectiveJoinChance } from "./schema";
 
 export const MAX_MOMENTS_AUTO_COMMENTS = 16;
-export const MAX_MOMENTS_ROOT_COMMENTERS = 4;
 export const MAX_MOMENTS_REPLY_DEPTH = 3;
 
 export interface MomentsEngagement {
@@ -55,10 +54,9 @@ export function momentsEngagement(
     return {allowRoot: false, replyableCommentIds: []};
   }
 
-  const roots = new Set(active.filter(c => !c.replyTo && c.authorId !== "user").map(c => c.authorId));
+  // Do not cap distinct commenters: even nine friends may comment when their own chances allow it.
   const allowRoot = firstView && actorId !== post.owner &&
       !active.some(c => c.authorId === actorId && !c.replyTo) &&
-      roots.size < MAX_MOMENTS_ROOT_COMMENTERS &&
       momentsOpportunityRoll(`root|${post.id}|${actorId}`) < habits.commentChance;
 
   const byId = new Map(active.map(c => [c.id, c]));
