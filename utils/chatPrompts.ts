@@ -8,7 +8,7 @@ import { buildInnerVoiceSystem, innerVoiceContext } from '../features/personal/i
 import { VIRTUAL_MEDIA_GUIDE, RECORDING_HISTORY_GUIDE } from '../features/personal/chatMedia/format';
 import {weatherForCharacter} from './characterWeather';
 import {secretNoteContext} from './secretNote';
-import { usesHumanStyle, usesInnerVoice, usesInnerVoiceContext, PERSONAL_CHAT_SUPPLEMENT, ANTI_CONTRAST_PROMPT, ANTI_EMPTY_GRATITUDE_PROMPT, MINIMAL_THINKING_PROMPT, buildNaturalChatMemoryContext } from './chatPromptPreferences';
+import { usesHumanStyle, usesInnerVoice, usesInnerVoiceContext, PERSONAL_CHAT_SUPPLEMENT, ANTI_CONTRAST_PROMPT, ANTI_EMPTY_GRATITUDE_PROMPT, MINIMAL_THINKING_PROMPT, IM_FRAGMENTED_CHAT_RULES, IM_FRAGMENTED_CHAT_TAIL, buildNaturalChatMemoryContext } from './chatPromptPreferences';
 import { buildCharacterResponsePrinciples } from './characterResponsePrinciples';
 import { expandHomeContextHistory } from './homeContextSegments';
 import { hasReliableMessageTimestamp, protectPendingChatTurn } from './storyTheaterTimeline';
@@ -687,6 +687,7 @@ ${uname} 的化身正挂在《彼方》的【${roomName}】${act ? `，状态写
 ${humanStyle ? `**TOP 1｜ChatApp 格式（本节最高优先级）**：你是发消息的真实存在，以自然短句、短气泡为主；一个气泡一行，气泡间直接另起一行（使用真实换行，不要用反斜杠和字母 n 代替换行）。
             **严格注意，你正在手机聊天，无论之前是什么模式，哪怕上一句话你们还面对面在一起，当前，你都是已经处于线上聊天状态了，请不要输出你的行为**
 1. **沉浸感**: 保持角色扮演。使用适合即时通讯(IM)的口语化风格。
+${IM_FRAGMENTED_CHAT_RULES}
 2. **行为模式**: 不要总是围绕用户转。分享你自己的生活、想法或随意的观察。有时候要”任性”或”以自我为中心”一点，这更像真人，具体的程度视你的性格而定。
 2.5 **对话质量 (极其重要)**:
    - **拒绝空话**: 不要说”我会一直在”、”我不会离开你”这类万能安慰句。这些话谁都能说，毫无信息量。
@@ -1099,7 +1100,7 @@ ${voiceActingGuide()}`;
         // Short delivery reminder stays in the existing uncached tail. Keep shared/stable
         // prompt bytes, worldbook ordering and cache breakpoints unchanged.
         const emojiNameReminder = promptOptions?.appRules === undefined && emojis.length > 0 ? buildEmojiNameReminder() : '';
-        const recencyTail = emojiNameReminder + (humanStyle ? buildCharacterResponsePrinciples(char.name, userProfile.name) : '');
+        const recencyTail = emojiNameReminder + (humanStyle ? (promptOptions?.appRules === undefined ? IM_FRAGMENTED_CHAT_TAIL : '') + buildCharacterResponsePrinciples(char.name, userProfile.name) : '');
 
         if (!humanStyle && char.memoryPalaceEnabled && char.memoryPalaceInjection) volatileState += '\n' + char.memoryPalaceInjection;
 
