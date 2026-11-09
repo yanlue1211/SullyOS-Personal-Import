@@ -7,7 +7,7 @@ import { DB } from './db';
 import { ActiveMsgClient } from './activeMsgClient';
 import { applyScheduledTask, isAmsg2EnabledForChar } from './amsg2Tasks';
 import { isAmsg2GlobalReady } from './amsg2ToolBridge';
-import { getLastRealUserMessageAt } from './amsg2ExpireGuard';
+import { getLastRealUserMessageAt, getLastRealCharMessageAt } from './amsg2ExpireGuard';
 import { ActiveMsgStore } from './activeMsgStore';
 import {
   decideAwayTaskAction,
@@ -76,7 +76,7 @@ const cloudCooldownUntil = new Map<string, number>();
 // 的网络等待吞掉新互动，也不能让两个同步并发创建两条空闲链。
 type CloudAwaySyncDeps = {
   char: CharacterProfile;
-  lastUserAt: number;
+  lastCharAt: number;
   userProfile: UserProfile;
   groups: GroupProfile[];
   realtimeConfig: RealtimeConfig;
@@ -144,7 +144,7 @@ export const syncCloudAwayTask = async (deps: CloudAwaySyncDeps, options: { seed
     // 前台补建（seedOnly）不抢排程；真实用户新互动必须排队，旧任务稍后会按新时间改期。
     if (!options.seedOnly) {
       const previous = cloudPendingRearm.get(char.id);
-      if (!previous || deps.lastUserAt >= previous.lastUserAt) cloudPendingRearm.set(char.id, deps);
+      if (!previous || deps.lastCharAt >= previous.lastCharAt) cloudPendingRearm.set(char.id, deps);
     }
     return false;
   }
@@ -163,7 +163,7 @@ export const syncCloudAwayTask = async (deps: CloudAwaySyncDeps, options: { seed
     const delayMinutes = resolveAwayDelayMinutes(char);
     const now = Date.now();
     const delayMs = delayMinutes * 60_000;
-    const targetMs = Math.max(deps.lastUserAt + delayMs, now + (options.seedOnly ? delayMs : 60_000));
+    const targetMs = Math.max(deps.lastCharAt + delayMs, now + (options.seedOnly ? delayMs : 60_000));
     const sendAt = new Date(targetMs).toISOString();
     // B 模式下 Worker 每次 fire 会创建下一节拍，客户端本地列表不一定认领过它。
     // 新用户开口时必须先和远端对账：否则老链在云端继续，我们又凭旧的本地清单
@@ -190,7 +190,7 @@ export const syncCloudAwayTask = async (deps: CloudAwaySyncDeps, options: { seed
     // 前台启动只是补链：不能把已经正常续排的下一节拍改成「打开页面 + 四小时」。
     // 但若用户发言后旧任务排得过早，仍须正常改期，避免在用户刚说话后就催下一条。
     const validExisting = options.seedOnly && existingAt != null && existingAt > now
-      && existingAt >= deps.lastUserAt + delayMs - 60_000;
+      && existingAt >= deps.lastCharAt + delayMs - 60_000;
     const action = validExisting ? 'keep' : decideAwayTaskAction(existingAt, targetMs, now);
     if (action === 'keep') {
       // 面板里也要看见 Worker 在离线时生成的下一节拍，不要永远显示旧的 UUID。
@@ -346,12 +346,12 @@ export const runLocalAwayMessages = async (deps: LocalAwayDeps): Promise<void> =
           const userProfile = deps.getUserProfile();
           if (!userProfile) continue;
           const recent = await DB.getRecentMessagesByCharId(char.id, 50, true);
-          const lastUserAt = getLastRealUserMessageAt(recent);
-          if (lastUserAt == null) continue;
+          const lastCharAt = getLastRealCharMessageAt(recent);
+          if (lastCharAt == null) continue;
           // 以前只在发送聊天消息时才会建空闲循环：启用后不聊天就永远没有第一条任务。
           // 现在进前台时只读远端清单并补缺，已有未来任务不改期，不调用模型。
           const ready = await syncCloudAwayTask({
-            char, lastUserAt, userProfile, groups: deps.getGroups(),
+            char, lastCharAt, userProfile, groups: deps.getGroups(),
             realtimeConfig: deps.getRealtimeConfig(), apiConfig: deps.getApiConfig(),
             updateCharacter: deps.updateCharacter,
           }, { seedOnly: true });
@@ -382,12 +382,13 @@ const generateLocalAwayMessages = async (char: CharacterProfile, deps: LocalAway
   const recent = await DB.getRecentMessagesByCharId(char.id, 50, true);
   // B 方案：消息历史里即便已经有上一条 away，也不能停止未来节拍。
   // 一次上线只处理最新有效节拍，漏掉的所有旧节拍不补发。
-  const lastUser = [...recent].reverse().find(m => m.role === 'user' && !m.metadata?.proactiveHint);
-  if (!lastUser) return;
-  const lastUserAt = lastUser.timestamp;
+  const lastCharAt = getLastRealCharMessageAt(recent);
+  if (lastCharAt == null) return;
+  // 聊天事实仍保留用户最后发言时刻，只有离开后节拍以 Char 消息计时。
+  const lastUserAt = getLastRealUserMessageAt(recent) ?? lastCharAt;
   // 线下期间不能算作「用户失联」；从本次见面结束时间重新计时。
-  // lastUserAt 仍为真实发言时间，不伪造用户新消息。
-  const awayAnchor = Math.max(lastUserAt, getAmsgDateEndedAt(char.id) ?? 0);
+  // lastCharAt 仍为真实发言时间，不伪造用户新消息。
+  const awayAnchor = Math.max(lastCharAt, getAmsgDateEndedAt(char.id) ?? 0);
   const tick = latestAwayTickMs(awayAnchor, delayMs, now);
   if (tick == null) return;
   if (wasLocalAwayTickChecked(char.id, awayAnchor, tick)) return;
@@ -440,8 +441,8 @@ const generateLocalAwayMessages = async (char: CharacterProfile, deps: LocalAway
 
   // 生成期间对方回来说了话：这段离开已经结束，补的消息作废。
   const refreshed = await DB.getRecentMessagesByCharId(char.id, 50, true);
-  const latestUser = [...refreshed].reverse().find(m => m.role === 'user' && !m.metadata?.proactiveHint);
-  if (latestUser?.timestamp !== lastUserAt || deps.isBusyWith(char.id)
+  if (getLastRealUserMessageAt(refreshed) !== lastUserAt
+      || getLastRealCharMessageAt(refreshed) !== lastCharAt || deps.isBusyWith(char.id)
       || resolveAmsgInteractionLock(refreshed, isAmsgActiveCall(char.id), isAmsgActiveDate(char.id))
       || [...refreshed].reverse().some(m => m.metadata?.awayMessage && m.timestamp >= tick)) return;
 

@@ -44,7 +44,7 @@ import {
 } from '../utils/streamPreview';
 import { ActiveMsgStore } from '../utils/activeMsgStore';
 import { markAmsgStateDirty, startAmsgChatPresence, stopAmsgChatPresence } from '../utils/amsgStateSync';
-import { getLastRealUserMessageAt } from '../utils/amsg2ExpireGuard';
+import { getLastRealUserMessageAt, getLastRealCharMessageAt } from '../utils/amsg2ExpireGuard';
 import { syncCloudAwayTask } from '../utils/awayMessage';
 import { getPendingTasks, hasActiveAiTask, isAmsg2EnabledForChar } from '../utils/amsg2Tasks';
 import { buildAmsg2NoticesText, buildAmsg2TaskContextText, collectAmsg2TaskContext, insertAmsg2TaskContextBlock } from '../utils/amsg2TaskContext';
@@ -790,15 +790,15 @@ export const useChatAI = ({
             }
             const fullHistory = contextRange?.messages || null;
             const contextMsgs = fullHistory || currentMsgs;
-            // 离开后消息（云端）：对方刚开过口，把那条任务往后推。不等它，失败只影响这一条。
-            // DB 上下文范围可能只包含上一轮；刚发送的消息先进入 React state。
-            // 取两份的较新真实用户时间，避免以旧锚点推算，导致下一次离开提醒不改期。
-            const awayFromContext = getLastRealUserMessageAt(contextMsgs);
-            const awayFromCurrent = getLastRealUserMessageAt(currentMsgs);
-            const awayLastUserAt = Math.max(awayFromContext ?? 0, awayFromCurrent ?? 0) || null;
-            if (char.awayMessage?.enabled && awayLastUserAt != null) {
+            // 2.0 离开后提醒以 Char 最后一次回复为锚点；用户单独补发消息不延后提醒。
+            // DB 上下文范围可能只含上一轮，所以同样检查当前 React 消息。
+            // 原有用户最后发言时间仍用于预约连发重置、在场租约与用户回复判断。
+            const awayFromContext = getLastRealCharMessageAt(contextMsgs);
+            const awayFromCurrent = getLastRealCharMessageAt(currentMsgs);
+            const awayLastCharAt = Math.max(awayFromContext ?? 0, awayFromCurrent ?? 0) || null;
+            if (char.awayMessage?.enabled && awayLastCharAt != null) {
                 void syncCloudAwayTask({
-                    char, lastUserAt: awayLastUserAt, userProfile, groups, realtimeConfig, apiConfig, updateCharacter,
+                    char, lastCharAt: awayLastCharAt, userProfile, groups, realtimeConfig, apiConfig, updateCharacter,
                 });
             }
             // 空范围先报可操作的本地错误，避免继续识图/召回和发送 system-only 请求。

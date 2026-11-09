@@ -721,10 +721,15 @@ describe('离开后云端机会不依赖预约消息开关', () => {
     sceneLock?: 'date' | 'call';
     callPresenceAt?: number | null;
     missingToolPack?: boolean;
+    lastUserAt?: number;
+    lastCharAt?: number | null;
+    quietHours?: { enabled: boolean; startTime: string; endTime: string };
+    atMs?: number;
   } = {}) => {
     const fourHoursAgo = NOW.getTime() - 240 * 60_000;
     const rows = [
-      { key: AMSG_FIRE_PACK_KEY, value: firePackValue(fourHoursAgo, {
+      { key: AMSG_FIRE_PACK_KEY, value: firePackValue(extra.lastUserAt ?? fourHoursAgo, {
+        ...(extra.lastCharAt !== undefined ? { lastCharMessageAt: extra.lastCharAt } : {}),
         selfScheduleEnabled: false,
         ...(extra.sceneLock ? { awaySceneLock: extra.sceneLock } : {}),
       }) },
@@ -736,13 +741,19 @@ describe('离开后云端机会不依赖预约消息开关', () => {
           at: extra.callPresenceAt ?? NOW.getTime(),
         }),
       }] : []),
-      limitsRow({ awayEnabled: extra.awayEnabled ?? true, awayDelayMinutes: 240 }, false),
+      limitsRow({ awayEnabled: extra.awayEnabled ?? true, awayDelayMinutes: 240,
+        ...(extra.quietHours ? { awayQuietHours: extra.quietHours } : {}),
+      }, false),
     ];
     const result = makeCtx({
       charRows: rows,
       metadata: { amsgAwayMessage: true, amsgAwayDelayMinutes: 240, amsgClientTaskId: 'away-test-1' },
     });
     result.ctx.scheduleTask = vi.fn(async () => ({ uuid: 'next-away-task' }));
+    if (extra.atMs !== undefined) {
+      result.ctx.now = new Date(extra.atMs);
+      result.ctx.task.nextSendAt = new Date(extra.atMs).toISOString();
+    }
     return result;
   };
 
@@ -755,6 +766,34 @@ describe('离开后云端机会不依赖预约消息开关', () => {
     const trace = writeState.mock.calls.flatMap(([, entries]) =>
       entries.filter((e: { key: string }) => e.key === AMSG_AWAY_TRACE_KEY));
     expect(JSON.parse(String(trace[0].value)).entries[0].stage).toBe('entered');
+  });
+
+  it('用户 13:00 单独发言，Char 12:00 后两小时 14:00 仍能正常进入', async () => {
+    const at = NOW.getTime(); // 名义到点 14:00
+    const { ctx } = awayCtx({ lastUserAt: at - 60 * 60_000, lastCharAt: at - 240 * 60_000 });
+    const outcome = fired(await amsgHooks.onBeforeFire(ctx));
+    expect(outcome.messages.length).toBeGreaterThan(0);
+    expect(ctx.scheduleTask).toHaveBeenCalledOnce();
+  });
+
+  it('07:50 命中禁发先 defer，08:00 获得首次机会且下一次 12:00', async () => {
+    const sevenFifty = Date.parse('2026-11-08T23:50:00Z'); // 上海 11/09 07:50
+    const end = Date.parse('2026-11-09T00:00:00Z'); // 上海 08:00
+    const quietHours = { enabled: true, startTime: '23:00', endTime: '08:00' };
+    const make = (atMs: number) => awayCtx({
+      atMs, quietHours, lastCharAt: sevenFifty - 240 * 60_000,
+    });
+    const before = make(sevenFifty);
+    await expect(amsgHooks.onBeforeFire(before.ctx)).resolves.toMatchObject({
+      defer: { afterMs: 10 * 60_000 },
+    });
+    expect(before.ctx.scheduleTask).not.toHaveBeenCalled(); // 禁发不续排，也不烧模型
+    const morning = make(end);
+    const outcome = fired(await amsgHooks.onBeforeFire(morning.ctx));
+    expect(outcome.messages.length).toBeGreaterThan(0);
+    expect(morning.ctx.scheduleTask).toHaveBeenCalledOnce();
+    expect(morning.ctx.scheduleTask.mock.calls[0][0].firstSendTime)
+      .toBe('2026-11-09T04:00:00.000Z'); // 上海 12:00
   });
 
   it('Worker 完成下一节拍排程、但 tool_pack 缺失时仍有进入记录，不冒充 AI 静默', async () => {
