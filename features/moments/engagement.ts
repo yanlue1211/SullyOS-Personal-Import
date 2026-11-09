@@ -49,9 +49,16 @@ export function momentsAutoBudgetAllows(post: Post, actorId: string, replyTo?: s
   const autoCount = comments.filter(c => c.authorId !== "user").length;
   if (autoCount >= MAX_MOMENTS_AUTO_COMMENTS) {
     if (!replyTo || !momentsUserAddressedActor(post, actorId, replyTo)) return false;
-    const toUser = comments.filter(c => c.authorId !== "user" && c.replyTo &&
-      comments.some(parent => parent.id === c.replyTo && parent.authorId === "user")).length;
-    if (toUser >= MAX_MOMENTS_USER_REPLY_RESERVE) return false;
+    let autoIndex = 0;
+    let reservedReplies = 0;
+    for (const comment of comments) {
+      if (comment.authorId === "user") continue;
+      if (autoIndex >= MAX_MOMENTS_AUTO_COMMENTS && comment.replyTo &&
+          comments.some(parent => parent.id === comment.replyTo && parent.authorId === "user"))
+        reservedReplies++;
+      autoIndex++;
+    }
+    if (reservedReplies >= MAX_MOMENTS_USER_REPLY_RESERVE) return false;
   }
   if (!replyTo) {
     return actorId !== post.owner && !own.some(c => !c.replyTo);
