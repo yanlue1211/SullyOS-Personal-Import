@@ -44,8 +44,7 @@ import {
 } from '../utils/streamPreview';
 import { ActiveMsgStore } from '../utils/activeMsgStore';
 import { markAmsgStateDirty, startAmsgChatPresence, stopAmsgChatPresence } from '../utils/amsgStateSync';
-import { getLastRealUserMessageAt, getLastRealCharMessageAt } from '../utils/amsg2ExpireGuard';
-import { syncCloudAwayTask } from '../utils/awayMessage';
+import { getLastRealUserMessageAt } from '../utils/amsg2ExpireGuard';
 import { getPendingTasks, hasActiveAiTask, isAmsg2EnabledForChar } from '../utils/amsg2Tasks';
 import { buildAmsg2NoticesText, buildAmsg2TaskContextText, collectAmsg2TaskContext, insertAmsg2TaskContextBlock } from '../utils/amsg2TaskContext';
 import { resolveCharTimeZone } from '../utils/timezone';
@@ -790,17 +789,10 @@ export const useChatAI = ({
             }
             const fullHistory = contextRange?.messages || null;
             const contextMsgs = fullHistory || currentMsgs;
-            // 2.0 离开后提醒以 Char 最后一次回复为锚点；用户单独补发消息不延后提醒。
-            // DB 上下文范围可能只含上一轮，所以同样检查当前 React 消息。
-            // 原有用户最后发言时间仍用于预约连发重置、在场租约与用户回复判断。
-            const awayFromContext = getLastRealCharMessageAt(contextMsgs);
-            const awayFromCurrent = getLastRealCharMessageAt(currentMsgs);
-            const awayLastCharAt = Math.max(awayFromContext ?? 0, awayFromCurrent ?? 0) || null;
-            if (char.awayMessage?.enabled && awayLastCharAt != null) {
-                void syncCloudAwayTask({
-                    char, lastCharAt: awayLastCharAt, userProfile, groups, realtimeConfig, apiConfig, updateCharacter,
-                });
-            }
+            // 空闲提醒的改期由 OSContext 在本轮 Char 回复真正落库后触发
+            // (replyArrived / 云端即时回复末段)。这里不能拿上一轮回复抢先改期：
+            // 既会显示旧时间，也会和收尾时的改期产生两次远端 API 调用。
+            // 用户独自发言但 Char 没成功回复时，原有空闲节拍保持不变。
             // 空范围先报可操作的本地错误，避免继续识图/召回和发送 system-only 请求。
             // 原始消息可能是无文字图片或卡片，此处只判角色；正文有效性在格式化后校验。
             assertChatHasDialogue(contextMsgs.map(message => ({
