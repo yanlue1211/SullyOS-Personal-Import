@@ -63,7 +63,7 @@ beforeEach(() => { vi.spyOn(Date, 'now').mockReturnValue(now); });
 afterEach(() => { vi.restoreAllMocks(); });
 
 describe('amsg2 audit regressions', () => {
-  it('B-mode cloud idle task schedules one future tick and quiet hours skip before LLM', async () => {
+  it('B-mode quiet slot waits until the quiet end and schedules the next tick at that time', async () => {
     const task = {
       id: 30, uuid: '33333333-3333-4333-8333-333333333333',
       contactName: '角色', nextSendAt: new Date(now).toISOString(), recurrenceType: 'none',
@@ -76,13 +76,20 @@ describe('amsg2 audit regressions', () => {
       task, limits: { awayEnabled: true, awayDelayMinutes: 120,
         awayQuietHours: { enabled: true, startTime: '18:00', endTime: '20:00' } },
     });
-    expect(result.plan).toEqual({ skip: true });
-    expect(result.scheduleTask).toHaveBeenCalledTimes(1);
-    const next = result.scheduleTask.mock.calls[0][0];
+    expect(result.plan).toEqual({ defer: { afterMs: 60 * 60_000 } });
+    expect(result.scheduleTask).not.toHaveBeenCalled();
+    const afterQuiet = await start({
+      task, nowMs: now + 60 * 60_000,
+      limits: { awayEnabled: true, awayDelayMinutes: 120,
+        awayQuietHours: { enabled: true, startTime: '18:00', endTime: '20:00' } },
+    });
+    expect(afterQuiet.plan.skip).toBeUndefined();
+    expect(afterQuiet.scheduleTask).toHaveBeenCalledTimes(1);
+    const next = afterQuiet.scheduleTask.mock.calls[0][0];
     expect(next.messageSubtype).toBe('chat');
     expect(next.metadata?.amsgAwayMessage).toBe(true);
     expect(next.metadata?.amsgSelfScheduled).toBeUndefined();
-    expect(Date.parse(next.firstSendTime)).toBe(now + 120 * 60_000);
+    expect(Date.parse(next.firstSendTime)).toBe(now + 3 * 60 * 60_000);
   });
 
   it('同一个 B 空闲节拍被 Worker 重试时只会请求同一个下一节拍 UUID', async () => {

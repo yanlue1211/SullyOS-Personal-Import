@@ -2252,11 +2252,12 @@ export const amsgHooks = {
       const lastCharMessageAt = pack.lastCharMessageAt === undefined
         ? lastUserMessageAt : pack.lastCharMessageAt;
       const awayAnchor = laterOf(lastCharMessageAt, endAt);
-      if (awayAnchor == null) {
-        // 只有用户消息而没有 Char 回复，不虚构「离开后」已过了一个周期。
+      if (awayAnchor == null && pack.lastCharMessageAt !== undefined) {
+        // 新版快照明确没有 Char 发言时不生成空闲提醒；旧快照缺此字段，
+        // 保留原有 null 锚点兼容行为，不让老的已排任务永久陷入 defer。
         return { defer: { afterMs: delayMs } } as const;
       }
-      const dueAt = awayAnchor + delayMs;
+      const dueAt = awayAnchor == null ? null : awayAnchor + delayMs;
       const waitMs = dueAt == null ? 0 : dueAt - ctx.now.getTime();
       if (waitMs > AWAY_DUE_TOLERANCE_MS) {
         console.log('[amsg:defer]', { taskId: ctx.task.id, reason: 'away-not-due', dueAt });
