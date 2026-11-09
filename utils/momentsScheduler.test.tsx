@@ -6,6 +6,7 @@ import MomentsRuntime from "../components/os/MomentsRuntime";
 import { DB } from "./db";
 import { saveConfig } from "../features/moments/storage";
 import { momentsEnabled, setMomentsEnabled } from "../features/moments/gate";
+import { MOMENTS_CHANGED } from "../features/moments/schema";
 import {
   chatMomentsContext,
   prepareMomentsQuery,
@@ -75,4 +76,26 @@ it("disabled chat context and explicit-view preparation return without any datab
   expect(await chatMomentsContext("a")).toEqual({ stable: "", dynamic: "" });
   await prepareMomentsQuery("a", []);
   expect(db).not.toHaveBeenCalled();
+});
+
+it("runs a due Moments check in a hidden but still-alive browser without extra calls on visibility changes", async () => {
+  await saveConfig(c => { c.enabled = true; });
+  Object.defineProperty(document, "hidden", { configurable: true, value: true });
+  const timerSpy = vi.spyOn(globalThis, "setTimeout");
+  await act(async () => root.render(<MomentsRuntime />));
+  await settle();
+  const scheduled = timerSpy.mock.calls.findIndex(args => args[1] === 300000);
+  expect(scheduled).toBeGreaterThanOrEqual(0);
+  const callback = timerSpy.mock.calls[scheduled][0] as () => void;
+  // Trigger the captured timer without advancing a real five minutes.
+  clearTimeout(timerSpy.mock.results[scheduled].value as ReturnType<typeof setTimeout>);
+  await act(async () => {
+    callback();
+    await new Promise(resolve => setTimeout(resolve, 25));
+  });
+  expect(tick).toHaveBeenCalledTimes(1);
+  document.dispatchEvent(new Event("visibilitychange"));
+  window.dispatchEvent(new Event(MOMENTS_CHANGED));
+  await settle();
+  expect(tick).toHaveBeenCalledTimes(1);
 });
