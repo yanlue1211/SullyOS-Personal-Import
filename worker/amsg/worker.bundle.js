@@ -1024,16 +1024,17 @@ var buildLimitsBrief = (input) => {
   const { limits } = input;
   const lines = [];
   if (Number.isFinite(limits.maxUnansweredSends)) {
-    const left = Math.max(0, limits.maxUnansweredSends - input.committedSends);
-    lines.push(`- \u5BF9\u65B9\u6CA1\u56DE\u7684\u65F6\u5019\uFF0C\u4F60\u6700\u591A\u8FDE\u7740\u4E3B\u52A8\u627E\u5BF9\u65B9 ${limits.maxUnansweredSends} \u6B21\uFF08\u4E00\u6B21\u53EF\u4EE5\u8BF4\u597D\u51E0\u53E5\uFF1B\u6392\u597D\u8FD8\u6CA1\u53D1\u7684\u4E5F\u7B97\uFF09\uFF0C` + (left > 0 ? `\u73B0\u5728\u8FD8\u80FD\u518D\u6392 ${left} \u6B21\u3002` : "\u73B0\u5728\u4E00\u6B21\u90FD\u4E0D\u80FD\u518D\u6392\u4E86\uFF0C\u7B49\u5BF9\u65B9\u56DE\u590D\u3002"));
+    const used = Math.min(limits.maxUnansweredSends, Math.max(0, input.committedSends));
+    lines.push(`- \u5BF9\u65B9\u6CA1\u56DE\u671F\u95F4\u7684\u4E3B\u52A8\u8054\u7CFB\uFF1A\u5DF2\u7528 ${used}/${limits.maxUnansweredSends} \u6B21\uFF08\u4E00\u6B21\u53EF\u4EE5\u8BF4\u597D\u51E0\u53E5\uFF1B\u6392\u597D\u8FD8\u6CA1\u53D1\u7684\u4E5F\u7B97\uFF09` + (used < limits.maxUnansweredSends ? "\u3002" : "\uFF0C\u5DF2\u6EE1\uFF0C\u7B49\u5BF9\u65B9\u56DE\u590D\u540E\u624D\u80FD\u518D\u6392\u3002"));
   }
   if (limits.minSendGapMs > 0) {
     lines.push(`- \u4E24\u6B21\u4E3B\u52A8\u627E\u5BF9\u65B9\u4E4B\u95F4\u81F3\u5C11\u9694 ${describeMinutes(Math.round(limits.minSendGapMs / 6e4))}` + (input.earliestText ? `\uFF0C\u8FD9\u6B21\u6700\u65E9\u6392\u5230 ${input.earliestText}\u3002` : "\u3002"));
   }
   if (input.dailyRemaining !== void 0 && Number.isFinite(limits.dailySendCap)) {
-    lines.push(input.dailyRemaining > 0 ? `- \u4ECA\u5929\u8FD8\u80FD\u518D\u4E3B\u52A8\u627E\u5BF9\u65B9 ${input.dailyRemaining} \u6B21\u3002` : "- \u4ECA\u5929\u4E3B\u52A8\u627E\u5BF9\u65B9\u7684\u6B21\u6570\u5DF2\u7ECF\u7528\u5B8C\u4E86\uFF0C\u8981\u6392\u5C31\u6392\u5230\u660E\u5929\u3002");
+    const remaining = Math.min(limits.dailySendCap, Math.max(0, input.dailyRemaining));
+    lines.push(`- \u4ECA\u5929\u7684\u4E3B\u52A8\u8054\u7CFB\uFF1A\u5DF2\u7528 ${limits.dailySendCap - remaining}/${limits.dailySendCap} \u6B21` + (remaining > 0 ? "\u3002" : "\uFF0C\u5DF2\u6EE1\uFF0C\u8981\u6392\u5C31\u6392\u5230\u660E\u5929\u3002"));
   }
-  lines.push(`- \u540C\u65F6\u6700\u591A\u6302 ${limits.maxActiveTasks} \u4E2A\u6392\u7A0B\u4EFB\u52A1\uFF0C\u73B0\u5728\u6302\u7740 ${input.activeTasks} \u4E2A\u3002`);
+  lines.push(`- \u6392\u7A0B\u4EFB\u52A1\uFF1A\u6302\u7740 ${input.activeTasks}/${limits.maxActiveTasks} \u4E2A\u3002`);
   if (!limits.allowSelfRecurring) lines.push("- \u53EA\u80FD\u6392\u4E00\u6B21\u6027\u7684\uFF0C\u4E0D\u80FD\u6392\u6BCF\u5929/\u6BCF\u5468\u91CD\u590D\u7684\u3002");
   if (!limits.allowSelfForce) lines.push("- \u6392\u7684\u6D88\u606F\u5230\u70B9\u78B0\u4E0A\u5BF9\u65B9\u6B63\u5728\u804A\u5929\u4F1A\u81EA\u52A8\u4F5C\u7F62\uFF08\u8F6C\u6210\u4F60\u5728\u804A\u5929\u91CC\u81EA\u7136\u5E26\u51FA\uFF09\uFF0C\u6CA1\u6709\u300C\u5230\u70B9\u5FC5\u53D1\u300D\u3002");
   return ["\u7528\u6237\u7ED9\u4F60\u5B9A\u7684\u89C4\u77E9\uFF08\u7CFB\u7EDF\u7167\u7740\u6267\u884C\uFF1A\u8D85\u51FA\u7684\u6392\u4E0D\u4E0A\uFF0C\u6392\u4E0A\u4E86\u5230\u70B9\u4E5F\u4E0D\u53D1\uFF09\uFF1A", ...lines].join("\n");
@@ -14439,7 +14440,7 @@ function buildScheduledPush(message, build, extraMeta, bannerBody) {
 }
 
 // utils/amsgBundleVersion.ts
-var AMSG_BUNDLE_VERSION = "2026-11-09.12";
+var AMSG_BUNDLE_VERSION = "2026-11-09.13";
 
 // worker/amsg/src/reproduction.ts
 async function writeDiagnosticStage(writeState, runId, event, fields = {}) {
