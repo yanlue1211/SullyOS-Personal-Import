@@ -890,42 +890,61 @@ it('proactive deliveries suppress read but retain busy, while instant chat retai
  }
 },20000);
 
-it.each(['read','busy'])('keeps %s status alongside local schedules in ordinary and 2.0 instant chat',async kind=>{
- const save=vi.spyOn(DB,'saveScheduledMessage').mockResolvedValue(undefined);
- try{for(const route of ['ordinary','instant']){
- const id=`status-schedule-${kind}-${route}-${crypto.randomUUID()}`,ctx=makeCtx(id,[]);
- if(route==='instant')ctx.mcdInheritMeta={source:'active_msg_2',activeMsg2:{messageType:'instant'}};
- ctx.directives=[{type:'schedule_message',time:'2099-01-01 08:00:00',text:'稍后联系'}];
- await applyAssistantPostProcessing(`<回应状态>${JSON.stringify({kind,reason:'他打算稍后再联系。'})}</回应状态>\n[schedule_message | 2099-01-01 08:00:00 | fixed | 稍后联系][[POKE]]`,{...ctx,instantRender:true});
- const rows=await DB.getRecentMessagesByCharId(id,20);expect(rows).toHaveLength(1);expect(rows[0].metadata?.responseStatus.kind).toBe(kind);
- expect(save.mock.calls.filter(([task])=>task.charId===id)).toHaveLength(1);
- expect(ctx.hooks.addToast).toHaveBeenCalledWith(expect.stringContaining('本地定时消息'), 'info');
- }}finally{save.mockRestore();}
-});
-it('retains the current status when scheduling fails and reports failure',async()=>{
- const save=vi.spyOn(DB,'saveScheduledMessage').mockRejectedValue(Error('write failed'));
- try{const id='schedule-failure-'+crypto.randomUUID(),ctx=makeCtx(id,[]);
- await applyAssistantPostProcessing('<回应状态>{"kind":"busy","reason":"他眼下不方便回复。"}</回应状态>\n[schedule_message | 2099-01-01 08:00:00 | fixed | 稍后联系]',ctx);
- expect((await DB.getRecentMessagesByCharId(id,20))[0].metadata?.responseStatus.kind).toBe('busy');
- expect(ctx.hooks.addToast).toHaveBeenCalledWith(expect.stringContaining('未能保存'),'error');
- }finally{save.mockRestore();}
-});
-it.each(['read','busy'])('outreach never delivers read status while preserving independent scheduling (%s)',async kind=>{
- const save=vi.spyOn(DB,'saveScheduledMessage').mockResolvedValue(undefined);
- try{const id='outreach-schedule-'+kind+crypto.randomUUID(),ctx=makeCtx(id,[]);ctx.isProactive=true;
- await applyAssistantPostProcessing(`<回应状态>${JSON.stringify({kind,reason:'他暂时忙着手头的事。'})}</回应状态>\n[schedule_message | 2099-01-01 08:00:00 | fixed | 稍后联系]`,{...ctx,instantRender:true});
- const rows=await DB.getRecentMessagesByCharId(id,20);expect(rows.filter(m=>m.metadata?.responseStatus?.kind==='read')).toHaveLength(0);
- expect(rows.filter(m=>m.metadata?.responseStatus?.kind==='busy')).toHaveLength(kind==='busy'?1:0);expect(save).toHaveBeenCalledTimes(1);
- }finally{save.mockRestore();}
+it.each(['read','busy'])('keeps %s response-status cards but retires old local scheduling in ordinary and instant chat', async kind => {
+  const save = vi.spyOn(DB, 'saveScheduledMessage');
+  try {
+    for (const route of ['ordinary', 'instant']) {
+      const id = `status-legacy-${kind}-${route}-${crypto.randomUUID()}`, ctx = makeCtx(id, []);
+      if (route === 'instant') ctx.mcdInheritMeta = { source: 'active_msg_2', activeMsg2: { messageType: 'instant' } };
+      ctx.directives = [{ type: 'schedule_message', time: '2099-01-01 08:00:00', text: '稍后联系' }];
+      await applyAssistantPostProcessing(`<回应状态>${JSON.stringify({kind,reason:'他打算稍后再联系。'})}</回应状态>\n[schedule_message | 2099-01-01 08:00:00 | fixed | 稍后联系][[POKE]]`,
+        { ...ctx, instantRender: true });
+      const rows = await DB.getRecentMessagesByCharId(id, 20);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].metadata?.responseStatus.kind).toBe(kind);
+      expect(save).not.toHaveBeenCalled();
+      expect(ctx.hooks.addToast).toHaveBeenCalledWith(expect.stringContaining('已停用'), 'info');
+    }
+  } finally { save.mockRestore(); }
 });
 
-it('scheduling-only ordinary replies leave a neutral status instead of a blank turn, but outreach never does',async()=>{
- const save=vi.spyOn(DB,'saveScheduledMessage').mockResolvedValue(undefined);
- try{for(const proactive of [false,true]){
- const id='schedule-only-'+crypto.randomUUID(),ctx=makeCtx(id,[{id:1,role:'user',content:'一会儿找我'}]);ctx.isProactive=proactive;
- await applyAssistantPostProcessing('[schedule_message | 2099-01-01 08:00:00 | fixed | 稍后联系]',{...ctx,instantRender:true});
- const rows=await DB.getRecentMessagesByCharId(id,20);expect(rows.filter(m=>m.metadata?.responseStatus?.kind==='read')).toHaveLength(proactive?0:1);
- }}finally{save.mockRestore();}
+it('does not attempt old local scheduling writes even if the storage method would fail', async () => {
+  const save = vi.spyOn(DB, 'saveScheduledMessage').mockRejectedValue(Error('write failed'));
+  try {
+    const id = 'schedule-deprecated-' + crypto.randomUUID(), ctx = makeCtx(id, []);
+    await applyAssistantPostProcessing('<回应状态>{"kind":"busy","reason":"他眼下不方便回复。"}</回应状态>\n[schedule_message | 2099-01-01 08:00:00 | fixed | 稍后联系]', ctx);
+    expect((await DB.getRecentMessagesByCharId(id, 20))[0].metadata?.responseStatus.kind).toBe('busy');
+    expect(save).not.toHaveBeenCalled();
+    expect(ctx.hooks.addToast).toHaveBeenCalledWith(expect.stringContaining('已停用'), 'info');
+  } finally { save.mockRestore(); }
+});
+
+it.each(['read','busy'])('outreach preserves %s status filtering without creating old local tasks', async kind => {
+  const save = vi.spyOn(DB, 'saveScheduledMessage');
+  try {
+    const id = 'outreach-deprecated-' + kind + crypto.randomUUID(), ctx = makeCtx(id, []);
+    ctx.isProactive = true;
+    await applyAssistantPostProcessing(`<回应状态>${JSON.stringify({kind,reason:'他暂时忙着手头的事。'})}</回应状态>\n[schedule_message | 2099-01-01 08:00:00 | fixed | 稍后联系]`,
+      { ...ctx, instantRender: true });
+    const rows = await DB.getRecentMessagesByCharId(id, 20);
+    expect(rows.filter(m => m.metadata?.responseStatus?.kind === 'read')).toHaveLength(0);
+    expect(rows.filter(m => m.metadata?.responseStatus?.kind === 'busy')).toHaveLength(kind === 'busy' ? 1 : 0);
+    expect(save).not.toHaveBeenCalled();
+  } finally { save.mockRestore(); }
+});
+
+it('retired-tag-only ordinary replies keep neutral status but never store another local task', async () => {
+  const save = vi.spyOn(DB, 'saveScheduledMessage');
+  try {
+    for (const proactive of [false, true]) {
+      const id = 'deprecated-only-' + crypto.randomUUID(), ctx = makeCtx(id, [{ id: 1, role: 'user', content: '一会儿找我' }]);
+      ctx.isProactive = proactive;
+      await applyAssistantPostProcessing('[schedule_message | 2099-01-01 08:00:00 | fixed | 稍后联系]', { ...ctx, instantRender: true });
+      const rows = await DB.getRecentMessagesByCharId(id, 20);
+      expect(rows.filter(m => m.metadata?.responseStatus?.kind === 'read')).toHaveLength(proactive ? 0 : 1);
+      expect(save).not.toHaveBeenCalled();
+    }
+  } finally { save.mockRestore(); }
 });
 
 it('reports malformed status instead of silently clearing it or fabricating a read card', async () => {

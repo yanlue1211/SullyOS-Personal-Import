@@ -44,7 +44,7 @@ import {
 } from '../utils/streamPreview';
 import { ActiveMsgStore } from '../utils/activeMsgStore';
 import { markAmsgStateDirty, startAmsgChatPresence, stopAmsgChatPresence } from '../utils/amsgStateSync';
-import { getLastRealUserMessageAt } from '../utils/amsg2ExpireGuard';
+import { getLastRealUserMessageAt, getLastRealCharMessageAt } from '../utils/amsg2ExpireGuard';
 import { syncCloudAwayTask } from '../utils/awayMessage';
 import { getPendingTasks, hasActiveAiTask, isAmsg2EnabledForChar } from '../utils/amsg2Tasks';
 import { buildAmsg2NoticesText, buildAmsg2TaskContextText, collectAmsg2TaskContext, insertAmsg2TaskContextBlock } from '../utils/amsg2TaskContext';
@@ -790,15 +790,15 @@ export const useChatAI = ({
             }
             const fullHistory = contextRange?.messages || null;
             const contextMsgs = fullHistory || currentMsgs;
-            // 离开后消息（云端）：对方刚开过口，把那条任务往后推。不等它，失败只影响这一条。
-            // DB 上下文范围可能只包含上一轮；刚发送的消息先进入 React state。
-            // 取两份的较新真实用户时间，避免以旧锚点推算，导致下一次离开提醒不改期。
-            const awayFromContext = getLastRealUserMessageAt(contextMsgs);
-            const awayFromCurrent = getLastRealUserMessageAt(currentMsgs);
-            const awayLastUserAt = Math.max(awayFromContext ?? 0, awayFromCurrent ?? 0) || null;
-            if (char.awayMessage?.enabled && awayLastUserAt != null) {
+            // 2.0 离开后提醒以 Char 最后一次回复为锚点；用户单独补发消息不延后提醒。
+            // DB 上下文范围可能只含上一轮，所以同样检查当前 React 消息。
+            // 原有用户最后发言时间仍用于预约连发重置、在场租约与用户回复判断。
+            const awayFromContext = getLastRealCharMessageAt(contextMsgs);
+            const awayFromCurrent = getLastRealCharMessageAt(currentMsgs);
+            const awayLastCharAt = Math.max(awayFromContext ?? 0, awayFromCurrent ?? 0) || null;
+            if (char.awayMessage?.enabled && awayLastCharAt != null) {
                 void syncCloudAwayTask({
-                    char, lastUserAt: awayLastUserAt, userProfile, groups, realtimeConfig, apiConfig, updateCharacter,
+                    char, lastCharAt: awayLastCharAt, userProfile, groups, realtimeConfig, apiConfig, updateCharacter,
                 });
             }
             // 空范围先报可操作的本地错误，避免继续识图/召回和发送 system-only 请求。
@@ -1433,6 +1433,24 @@ export const useChatAI = ({
                 },
             } : undefined;
 
+            // 主动消息 2.0 前台自排的分流诊断：只有布尔值和工具数量，绝不记 API Key、
+            // 用户聊天内容或排程参数。没有调用工具时也记录，便于区分「未注入」与
+            // 「模型看见工具但没有调用」；不额外触发任何 API 或 Worker 请求。
+            appendInstantTraceEntry({
+                ts: new Date().toISOString(),
+                event: 'amsg2-local-capability',
+                charId: char.id,
+                charEnabled: isAmsg2EnabledForChar(char),
+                toolGatePassed: amsg2ToolsInjected,
+                scheduleDeclared: Array.isArray(baseReqBody.tools) && baseReqBody.tools.some(
+                    (tool: any) => tool?.function?.name === 'schedule_active_message'),
+                mcpChatActive: payload.flags.mcpChatActive,
+                mcpNativePreferred: getMcpUseNativeTools(),
+                toolChoice: baseReqBody.tool_choice ?? 'none',
+                totalTools: Array.isArray(baseReqBody.tools) ? baseReqBody.tools.length : 0,
+                streaming: !!userStream,
+            });
+
             // 主请求即将发出 → 立即并行发射情绪评估（错峰延迟已按用户要求取消，见定义处注释）。
             fireLocalEmotionEval?.();
 
@@ -1488,6 +1506,15 @@ export const useChatAI = ({
                 const mcpOnly = payload.flags.mcpChatActive
                     && !payload.flags.luckinChatActive && !payload.flags.mcdActive && !payload.flags.luckinActive;
                 if (!mcpOnly || !baseReqBody.tools?.length || !shouldRetryMcpWithoutTools(requestError)) throw requestError;
+                if (amsg2ToolsInjected) appendInstantTraceEntry({
+                    ts: new Date().toISOString(),
+                    event: 'amsg2-local-tools-rejected-fallback',
+                    charId: char.id,
+                    scheduleWasDeclared: baseReqBody.tools?.some((tool: any) => tool?.function?.name === 'schedule_active_message') === true,
+                    // 工具拒绝后现有 MCP 文本回退会删除所有工具，但不会执行预约文本协议；
+                    // 留明确诊断，不能把用户看到的「我会预约」当作已创建任务。
+                    bookingToolUnavailableInFallback: true,
+                });
                 console.warn('🔌 [MCP] 当前中转拒绝 tools 请求，降级为正文工具调用兼容模式');
                 // 这条路把 tools 全删了，角色排不了新任务；排程现状照样要带——它得知道
                 // 自己名下已经有哪些承诺，否则又会在正文里许一遍。
@@ -1504,6 +1531,23 @@ export const useChatAI = ({
                 // 又退回原 messages，会让模型忘掉工具签名和「每步只输出一行」的约定。
                 baseReqBody.messages = fallbackBody.messages;
                 }
+            }
+            if (isAmsg2EnabledForChar(char)) {
+                const firstMessage = data?.choices?.[0]?.message;
+                appendInstantTraceEntry({
+                    ts: new Date().toISOString(),
+                    event: 'amsg2-local-first-response',
+                    charId: char.id,
+                    scheduleDeclared: Array.isArray(baseReqBody.tools) && baseReqBody.tools.some(
+                        (tool: any) => tool?.function?.name === 'schedule_active_message'),
+                    nativeCalls: Array.isArray(firstMessage?.tool_calls) ? firstMessage.tool_calls.length : 0,
+                    scheduleCalled: Array.isArray(firstMessage?.tool_calls) && firstMessage.tool_calls.some(
+                        (tool: any) => tool?.function?.name === 'schedule_active_message'),
+                    legacyFunctionCall: !!firstMessage?.function_call?.name,
+                    finishReason: typeof data?.choices?.[0]?.finish_reason === 'string'
+                        ? data.choices[0].finish_reason.slice(0, 30) : null,
+                    mcpCompatibilityMessages: payload.flags.mcpChatActive && !getMcpUseNativeTools(),
+                });
             }
             console.log(`⏱ [API call] ${Math.round(performance.now() - apiT0)}ms`);
             updateTokenUsage(data, historyMsgCount, 'initial');

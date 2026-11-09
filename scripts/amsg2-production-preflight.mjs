@@ -5,7 +5,12 @@
  * This script is intentionally informational and non-blocking for PR CI.
  */
 const WORKER_CONFIG_CHECK = 'https://sullyos-amsg.yanlue.workers.dev/config-check';
-const EXPECTED_VERSION = '2026-11-08.10';
+// 同一份版本常量供前后端使用；只读本仓库文件，不额外请求生产 API。
+import { readFileSync } from 'node:fs';
+const versionSource = readFileSync(new URL('../utils/amsgBundleVersion.ts', import.meta.url), 'utf8');
+const versionMatch = versionSource.match(/AMSG_BUNDLE_VERSION\s*=\s*'([^']+)'/);
+if (!versionMatch) throw new Error('Cannot parse the bundled Worker version');
+const EXPECTED_VERSION = versionMatch[1];
 
 const report = (message, data = {}) => {
   console.log('[amsg2:production-readonly] ' + JSON.stringify({ message, ...data }));
@@ -40,6 +45,9 @@ try {
         warningCodes,
         instantTick: data.instantTick === true,
         selfUpdateSupported: data.selfUpdate?.supported === true,
+        lastSelfUpdateOutcome: typeof data.selfUpdate?.state?.lastOutcome === 'string' ? data.selfUpdate.state.lastOutcome : null,
+        lastSelfUpdateCheckAt: typeof data.selfUpdate?.state?.lastCheckAt === 'string' ? data.selfUpdate.state.lastCheckAt : null,
+        lastSelfUpdateErrorCode: typeof data.selfUpdate?.state?.lastError?.code === 'string' ? data.selfUpdate.state.lastError.code : null,
         backgroundJobs: data.backgroundJobs === true,
       });
     }
@@ -78,6 +86,11 @@ try {
         tickStatus: ['idle', 'healthy', 'failing', 'stalled', 'unknown'].includes(tick) ? tick : 'unknown',
         pendingTaskCount: safeCount(storage?.pendingTasks),
         overdueTaskCount: safeCount(storage?.overdueTasks),
+        oldestOverdueMinutes: safeCount(storage?.oldestOverdueMinutes),
+        stuckTaskCount: safeCount(storage?.stuckTasks),
+        retryingTaskCount: safeCount(storage?.retryingTasks),
+        overdueVerdict: ['idle', 'healthy', 'failing', 'stalled', 'unknown'].includes(storage?.overdueVerdict)
+          ? storage.overdueVerdict : null,
         registeredPush: storage?.pushSubscriptionRegistered === true,
         pushDeliveryStatus: storage?.pushDelivery && typeof storage.pushDelivery === 'object'
           ? 'available' : 'unknown',

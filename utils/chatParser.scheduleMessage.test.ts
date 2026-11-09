@@ -2,63 +2,49 @@ import { describe, expect, it, vi, afterEach } from 'vitest';
 import { ChatParser } from './chatParser';
 import { DB } from './db';
 
-// `[schedule_message | 时间 | fixed | 内容]` 排不上的两种情况：时间解析不出来、时间已经
-// 过去。角色在正文里往往已经把话说出去了（「我到点叫你」），排不上就是一句空头承诺。
-//
-// 离线补收时这条路特别常走：消息是凌晨两点发的，人第二天早上九点才打开 App，重放到这里
-// 时约定的八点已经过去。以前这种情况一行日志都没有，排查时只能看到「角色说了但什么都
-// 没发生」。现在会留一行 warn 说清是哪条、晚了多久。
-
+// 旧本地定时消息已退役：不再从任何聊天内容创建新的 IndexedDB 任务。
+// 已存在的队列不迁移、不删除，继续沿用原有定时投递及用户手动取消途径。
 const noop = () => {};
-
 afterEach(() => { vi.restoreAllMocks(); });
+const run = (content: string, toast: (message: string, type: 'info' | 'success' | 'error') => void = noop) =>
+    ChatParser.parseAndExecuteActions(content, `c-sched-${Date.now()}`, '阿一', toast);
 
-const run = (content: string, charTz?: string) =>
-    ChatParser.parseAndExecuteActions(content, `c-sched-${Date.now()}`, '阿一', noop, undefined, charTz);
-
-describe('[schedule_message] 排不上时留痕', () => {
-    it('时间已经过去 → warn 一行 + 不落库', async () => {
-        const warn = vi.spyOn(console, 'warn').mockImplementation(noop);
+describe('旧 [schedule_message] 退役但保护存量数据', () => {
+    it('过去/未来的旧文本都不新建任务，且剥掉不应显示的指令', async () => {
         const save = vi.spyOn(DB, 'saveScheduledMessage');
-
-        const out = await run('睡吧\n[schedule_message | 2020-01-01 08:00:00 | fixed | 早安，起床啦]');
-
-        expect(out).toBe('睡吧');
-        expect(save).not.toHaveBeenCalled();
-        expect(warn).toHaveBeenCalledTimes(1);
-        const line = warn.mock.calls[0].join(' ');
-        expect(line).toContain('时间已经过去');
-        expect(line).toContain('2020-01-01 08:00:00');
-        expect(line).toContain('早安，起床啦');
-    });
-
-    it('时间解析不出来 → warn 一行 + 不落库', async () => {
-        const warn = vi.spyOn(console, 'warn').mockImplementation(noop);
-        const save = vi.spyOn(DB, 'saveScheduledMessage');
-
-        const out = await run('好\n[schedule_message | 明天早上 | fixed | 起床啦]');
-
+        const toast = vi.fn();
+        const farFuture = new Date(Date.now() + 86400_000);
+        const date = `${farFuture.getFullYear()}-${String(farFuture.getMonth() + 1).padStart(2, '0')}-${String(farFuture.getDate()).padStart(2, '0')} 12:00:00`;
+        const out = await run(`好\n[schedule_message | ${date} | fixed | 到时来找你]\n[schedule_message | 2020-01-01 08:00:00 | fixed | 早安]`, toast);
         expect(out).toBe('好');
         expect(save).not.toHaveBeenCalled();
-        expect(warn).toHaveBeenCalledTimes(1);
-        expect(warn.mock.calls[0].join(' ')).toContain('时间解析不了');
+        expect(toast).toHaveBeenCalledWith(expect.stringContaining('已停用'), 'info');
     });
 
-    it('时间还没到 → 照常落库, 不 warn', async () => {
-        const warn = vi.spyOn(console, 'warn').mockImplementation(noop);
-        const save = vi.spyOn(DB, 'saveScheduledMessage').mockResolvedValue(undefined as any);
+    it('仍然保留正常文本和其他动作的处理', async () => {
+        const save = vi.spyOn(DB, 'saveScheduledMessage');
+        const out = await run('早安\n[schedule_message | 2027-01-01 08:00:00 | fixed | 久等啦]');
+        expect(out).toBe('早安');
+        expect(save).not.toHaveBeenCalled();
+    });
 
-        const future = new Date(Date.now() + 3600_000);
-        const stamp = `${future.getFullYear()}-${String(future.getMonth() + 1).padStart(2, '0')}-${
-            String(future.getDate()).padStart(2, '0')} ${String(future.getHours()).padStart(2, '0')}:${
-            String(future.getMinutes()).padStart(2, '0')}:00`;
-
-        const out = await run(`好\n[schedule_message | ${stamp} | fixed | 该出门了]`);
-
-        expect(out).toBe('好');
-        expect(save).toHaveBeenCalledTimes(1);
-        expect(save.mock.calls[0][0]).toMatchObject({ content: '该出门了' });
-        expect(warn).not.toHaveBeenCalled();
+    it('已有本地队列依然原样保留，不对存量做删除/迁移', async () => {
+        const charId = `legacy-keep-${Date.now()}`;
+        const id = `sched-keep-${Date.now()}`;
+        const row = { notificationId: 1234, id, charId, content: '老任务的约定要保留', dueAt: Date.now() + 86400_000, createdAt: Date.now() };
+        await DB.saveScheduledMessage(row);
+        try {
+            const del = vi.spyOn(DB, 'deleteScheduledMessage');
+            await ChatParser.parseAndExecuteActions(
+                '照常聊天\n[schedule_message | 2030-02-03 04:05:06 | fixed | 新任务禁止创建]',
+                charId, '阿一', noop,
+            );
+            const tasks = await DB.getScheduledMessages(charId);
+            expect(tasks).toEqual(expect.arrayContaining([expect.objectContaining({ id, content: row.content })]));
+            expect(del).not.toHaveBeenCalled();
+        } finally {
+            await DB.deleteScheduledMessage(id);
+        }
     });
 });
 

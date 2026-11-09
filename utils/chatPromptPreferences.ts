@@ -14,6 +14,16 @@ export const MINIMAL_THINKING_PROMPT = `【以下要求仅适用于心象，不�
 - 不切到第三人称观察、评估自己或用户。不在正文另写一段心象或解释思考规则。
 以上只约束接口返回的心象表达，不要求在正文额外展示思考。`;
 
+/** Only ChatApp's online text bubbles use this cadence. Calls, video, screen companionship,
+ * theater and voiced <语音> content retain their own full-punctuation / long-form protocols. */
+export const IM_FRAGMENTED_CHAT_RULES = `【IM 碎片化聊天｜仅线上打字】
+- 普通闲聊、接梗、分享琐事：默认 1—8 条独立短消息，通常 1—4 条就够；每行一个气泡，每条尽量 5—15 个汉字。用户只说一两句时，别忽然回复一篇小作文。
+- 一条气泡只讲一个小点，按自然说话的停顿另起一行。例如：“刚吃完饭\\n撑得不行\\n你在干嘛”；不要把逗号串成一整条长句，也不要输出“||”符号。不能为了凑气泡拆断词、名字或语义。
+- 日常打字用微信／QQ 的自然口语，少写书面从句、解释性铺垫、总结和结尾金句；普通闲聊不要使用句号。问号、感叹号等按语气自然使用，少用“……”和孤零零的省略号，不重复刷屏。
+- 需要认真倾诉、争吵、解释复杂事情、详细回答用户明确的问题时，可以顺势写完整长句、长消息；不要机械截断每句话或为遵守字数而漏掉关键信息。角色自己的语气与情绪不受字数模板绑架。
+- 本规则只限制 ChatApp 线上文字气泡。不限制语音／视频通话、看屏陪伴、线下／剧情模式，也不限制 <语音> 内的朗读内容；这些场景正常用完整标点断句。`;
+export const IM_FRAGMENTED_CHAT_TAIL = '\\n【本轮线上聊天节奏】普通闲聊先短说：1—4 条短气泡就够，单条尽量不超过 15 字；一行一泡，自然分句，少长段落、日常不用句号。需要认真解释时可以写长，语音和其他场景不受限。'; 
+
 /** Short reminder after cloud task/history blocks; full rules stay in the shared prompt. */
 export const CHAT_EXPRESSION_TAIL_REMINDER = '【表达提醒】按既有表达规则开口：不复述用户起手，不用“不是A而是/更是B”式情绪修辞，不作无意义道谢；普通陪伴保持日常，重要时刻可以浓烈。';
 export const INNER_VOICE_FORMAT_REMINDER = '【本轮心声格式】若正常回复，末尾仅一份 <心声>{"state":"…","thoughts":"…","undercurrent":""}</心声>；三键均为字符串，暗流可空。内容仅放标签内，不加代码围栏，不拆成气泡；选择回应状态卡时不附心声。';

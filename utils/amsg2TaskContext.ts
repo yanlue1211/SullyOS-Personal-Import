@@ -167,7 +167,13 @@ export function buildAmsg2TaskContextText(
   const target = targetName?.trim() || '对方';
   const isNewThisTurn = (taskUuid: string) => !!createdThisTurn?.has(taskUuid);
   const hasNewThisTurn = pending.some((t) => isNewThisTurn(t.taskUuid));
-  const parts: string[] = ['【你的主动消息排程·仅你可见】', buildAmsg2ChatScheduleBrief(target)];
+  const parts: string[] = [
+    '【你的主动消息排程·仅你可见】',
+    buildAmsg2ChatScheduleBrief(target),
+    // 本块只在云端 2.0 工具可用时加入，放在历史后的实时状态尾段，不破坏缓存前缀。
+    // 旧聊天历史可能带本地文本标签，额外明确它与云端预约不是同一个动作。
+    '- 这里使用云端预约：必须真正调用 schedule_active_message 工具，并收到成功回执才算预约；旧版本地文本标签不能代替云端工具，也不要在聊天正文输出预约语法。',
+  ];
   if (limitsBrief) parts.push(limitsBrief);
 
   if (pending.length) {

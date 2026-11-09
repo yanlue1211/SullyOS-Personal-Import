@@ -34,7 +34,7 @@ const makeChar = () => ({
 }) as unknown as CharacterProfile;
 
 const createDeps = (char: CharacterProfile) => ({
-  char, lastUserAt: NOW - 12 * HOUR,
+  char, lastCharAt: NOW - 12 * HOUR,
   userProfile: { name: '用户' } as any,
   groups: [], realtimeConfig: {} as any, apiConfig: {} as any,
   updateCharacter: vi.fn(),
@@ -88,10 +88,10 @@ describe('cloud away first-task creation and passive repair', () => {
     expect(ActiveMsgClient.updatePendingTasksRemote).not.toHaveBeenCalled();
   });
 
-  it('foreground one-shot check builds a missing cloud loop from real user message history', async () => {
+  it('foreground one-shot check builds a missing cloud loop from last Char reply', async () => {
     const char = makeChar();
     vi.spyOn(DB, 'getRecentMessagesByCharId').mockResolvedValue([{
-      id: 1, charId: char.id, role: 'user', type: 'text', content: '早安', timestamp: NOW - 5 * HOUR,
+      id: 1, charId: char.id, role: 'assistant', type: 'text', content: '早安', timestamp: NOW - 5 * HOUR,
     }] as any);
     const updateCharacter = vi.fn();
     const deps = {
@@ -111,7 +111,7 @@ describe('cloud away first-task creation and passive repair', () => {
   it('later foreground resumes recheck and repair a cloud chain missing after initial success', async () => {
     const char = makeChar();
     vi.spyOn(DB, 'getRecentMessagesByCharId').mockResolvedValue([{
-      id: 1, charId: char.id, role: 'user', type: 'text', content: '在吗', timestamp: NOW - 5 * HOUR,
+      id: 1, charId: char.id, role: 'assistant', type: 'text', content: '在吗', timestamp: NOW - 5 * HOUR,
     }] as any);
     const deps = {
       getCharacters: () => [char], updateCharacter: vi.fn(),
@@ -136,7 +136,7 @@ describe('cloud away first-task creation and passive repair', () => {
   it('later foreground inspection keeps the existing future Worker task, without rearming or paying for AI', async () => {
     const char = makeChar();
     vi.spyOn(DB, 'getRecentMessagesByCharId').mockResolvedValue([{
-      id: 1, charId: char.id, role: 'user', type: 'text', content: '晚安', timestamp: NOW - 5 * HOUR,
+      id: 1, charId: char.id, role: 'assistant', type: 'text', content: '晚安', timestamp: NOW - 5 * HOUR,
     }] as any);
     vi.mocked(ActiveMsgClient.listRemoteTasksForChar)
       .mockResolvedValueOnce([] as any)
@@ -166,7 +166,20 @@ describe('cloud away first-task creation and passive repair', () => {
     expect(ActiveMsgClient.scheduleCharacterTask).toHaveBeenCalledOnce();
   });
 
-  it('rapid real-user messages coalesce to latest activity instead of losing the rearm', async () => {
+  it('Char 12:00 回复、用户 13:00 单独留言时下一次仍是 14:00', async () => {
+    const char = makeChar();
+    char.awayMessage!.delayMinutes = 120;
+    const deps = { ...createDeps(char), lastCharAt: NOW - 40 * 60_000 };
+    vi.mocked(ActiveMsgClient.listRemoteTasksForChar).mockResolvedValue([{
+      uuid: 'away-keep', clientTaskId: 'away-away-keep', status: 'pending',
+      nextSendAt: new Date(NOW + 80 * 60_000).toISOString(),
+    }] as any);
+    await syncCloudAwayTask(deps);
+    expect(ActiveMsgClient.updatePendingTasksRemote).not.toHaveBeenCalled();
+    expect(ActiveMsgClient.scheduleCharacterTask).not.toHaveBeenCalled();
+  });
+
+  it('rapid Char reply anchors coalesce to latest activity instead of losing the rearm', async () => {
     const deps = createDeps(makeChar());
     // 第一次只会创建一条，随后最新的用户消息会重新读取那条并推迟。
     vi.mocked(ActiveMsgClient.listRemoteTasksForChar)
@@ -175,8 +188,8 @@ describe('cloud away first-task creation and passive repair', () => {
         uuid: 'new-away-uuid', clientTaskId: 'away-new-away-uuid', status: 'pending',
         nextSendAt: new Date(NOW + 60_000).toISOString(),
       }] as any);
-    const first = syncCloudAwayTask({ ...deps, lastUserAt: NOW - 5 * HOUR });
-    const latest = syncCloudAwayTask({ ...deps, lastUserAt: NOW });
+    const first = syncCloudAwayTask({ ...deps, lastCharAt: NOW - 5 * HOUR });
+    const latest = syncCloudAwayTask({ ...deps, lastCharAt: NOW });
     expect(await latest).toBe(false); // 在前一轮网络读写中，先登记最新发言。
     expect(await first).toBe(true);
     await vi.waitFor(() => expect(ActiveMsgClient.updatePendingTasksRemote).toHaveBeenCalledOnce());
@@ -227,9 +240,9 @@ describe('cloud away first-task creation and passive repair', () => {
     vi.mocked(ActiveMsgClient.scheduleCharacterTask).mockImplementationOnce(
       () => new Promise(resolve => { finishSchedule = resolve; }),
     );
-    const start = syncCloudAwayTask({ ...deps, lastUserAt: NOW - 5 * HOUR });
+    const start = syncCloudAwayTask({ ...deps, lastCharAt: NOW - 5 * HOUR });
     await vi.waitFor(() => expect(ActiveMsgClient.scheduleCharacterTask).toHaveBeenCalledOnce());
-    await syncCloudAwayTask({ ...deps, lastUserAt: NOW });
+    await syncCloudAwayTask({ ...deps, lastCharAt: NOW });
     const epoch = pauseCloudAwaySyncForSettings(char.id);
     finishSchedule({ uuid: 'old-away', clientTaskId: 'away-old-away', firstSendAt: new Date(NOW + 4 * HOUR).toISOString() });
     expect(await start).toBe(false);
