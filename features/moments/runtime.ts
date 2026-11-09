@@ -671,7 +671,7 @@ export async function assessHabits(
 let ticking = false;
 /** Lightweight indexed polling. One model request at most per tick; no offline replay. */
 export async function tick(input: RuntimeInput) {
-  if (ticking || (typeof document !== "undefined" && document.hidden)) return;
+  if (ticking) return; // Background tabs may continue when their browser process is alive.
   ticking = true;
   try {
     const c = await getConfig();
