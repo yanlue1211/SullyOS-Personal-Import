@@ -156,7 +156,7 @@ describe('checkSelfScheduleRules', () => {
 });
 
 describe('buildLimitsBrief', () => {
-  it('把额度说成事实：还能排几条、最早几点、今天还剩几条', () => {
+  it('作者 #809：用已用/上限陈述额度，不催角色把名额用掉', () => {
     const text = buildLimitsBrief({
       limits: resolveAmsgLimits({ dailySendCap: 5 }),
       committedSends: 1,
@@ -164,16 +164,18 @@ describe('buildLimitsBrief', () => {
       earliestText: '21:40',
       dailyRemaining: 3,
     });
-    expect(text).toContain('现在还能再排 2 次');
+    expect(text).toContain('已用 1/3 次');
     expect(text).toContain('最早排到 21:40');
-    expect(text).toContain('今天还能再主动找对方 3 次');
-    expect(text).toContain('现在挂着 2 个');
+    expect(text).toContain('今天的主动联系：已用 2/5 次');
+    expect(text).toContain('排程任务：挂着 2/5 个');
+    expect(text).not.toContain('还能再排');
     expect(text).toContain('只能排一次性的');
   });
 
   it('额度用完了直说；不限的项不出现', () => {
     const full = buildLimitsBrief({ limits: resolveAmsgLimits(undefined), committedSends: 3, activeTasks: 0 });
-    expect(full).toContain('一次都不能再排了');
+    expect(full).toContain('已用 3/3 次');
+    expect(full).toContain('已满，等对方回复后才能再排');
     const loose = buildLimitsBrief({
       limits: resolveAmsgLimits({ maxUnansweredSends: 0, minSendGapMinutes: 0, allowSelfRecurring: true, allowSelfForce: true }),
       committedSends: 9,
