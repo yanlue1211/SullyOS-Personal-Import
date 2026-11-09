@@ -1,5 +1,5 @@
 import {beforeEach,afterEach,expect,it,vi} from 'vitest';
-import {audioBlobToPayload,buildTestToneWav,fetchSongAudio,describeAudioWithAudioApi,normalizeSongAudio,assertAudioDescription} from './audioApi';
+import {audioBlobToPayload,buildTestToneWav,fetchSongAudio,describeAudioWithAudioApi,recognizeUserRecording,AUDIO_RECOGNITION_TEMPERATURE,normalizeSongAudio,assertAudioDescription} from './audioApi';
 import {musicApi} from '../context/MusicContext';
 const cfg={workerUrl:'https://music.invalid',cookie:'',quality:'standard' as const};
 beforeEach(()=>vi.restoreAllMocks());afterEach(()=>{vi.restoreAllMocks();vi.unstubAllGlobals();});
@@ -19,8 +19,27 @@ it('preserves actual audio bytes through NetEase download and the real safeFetch
  expect(systemPrompt).toContain('高音、真假声转换');
  expect(systemPrompt).toContain('不等于嘶吼、撕裂');
  expect(systemPrompt).toContain('不虚构节拍数、BPM');
- expect(requests[0].temperature).toBe(0);
+ expect(requests[0].temperature).toBe(0.3);
+ expect(requests[0].temperature).toBe(AUDIO_RECOGNITION_TEMPERATURE);
  expect(part.input_audio.format).toBe('wav');expect(atob(part.input_audio.data).slice(0,4)).toBe('RIFF');expect(part.input_audio.data).toBe(payload.base64);expect(requests[0].messages[1].content.some((p:any)=>p.type==='image_url')).toBe(false);
+});
+it('sends the same 0.3 to recording ASR regardless of dialogue preset or model choice',async()=>{
+ const requests:any[]=[];
+ vi.stubGlobal('fetch',vi.fn(async(_url, options)=>{
+   const body=JSON.parse(String(options.body));
+   requests.push(body);
+   return Response.json({choices:[{message:{content:JSON.stringify({transcript:'我今天挺精神的',analysis:'语速明快，声音清亮。'})}}]});
+ }));
+ const wav=buildTestToneWav();
+ const payload=await audioBlobToPayload(wav);
+ const models=['gemini-audio-first','gemini-audio-second'];
+ for(const model of models){
+   const result=await recognizeUserRecording(payload,{enabled:true,baseUrl:'https://audio.invalid/v1',apiKey:'test',model});
+   expect(result.transcript).toBe('我今天挺精神的');
+ }
+ expect(requests).toHaveLength(2);
+ expect(requests.map(r=>r.temperature)).toEqual([0.3,0.3]);
+ expect(requests.map(r=>r.model)).toEqual(models);
 });
 it('imports jsDelivr audio by its remote URL and retains binary content despite generic MIME',async()=>{
  vi.spyOn(musicApi,'_raw');const mp3=new Blob(['ID3',new Uint8Array(200)],{type:'application/octet-stream'});
