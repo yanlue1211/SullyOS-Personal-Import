@@ -167,7 +167,7 @@ describe('buildLimitsBrief', () => {
     expect(text).toContain('已用 1/3 次');
     expect(text).toContain('最早排到 21:40');
     expect(text).toContain('今天的主动联系：已用 2/5 次');
-    expect(text).toContain('排程任务：挂着 2/3 个');
+    expect(text).toContain('排程任务：挂着 2/5 个');
     expect(text).not.toContain('还能再排');
     expect(text).toContain('只能排一次性的');
   });
