@@ -4,6 +4,7 @@ import {
   isQuietClockMinute,
   parseQuietClockMinutes,
   shouldSkipAwayForQuietHours,
+  nextAwayAllowedTimeMs,
 } from './awayMessageQuietHours';
 
 const q = { enabled: true, startTime: '23:00', endTime: '08:00' };
@@ -44,6 +45,22 @@ describe('离开后消息禁发时段', () => {
     const dueMs = Date.parse('2026-11-08T01:30:00Z'); // 东京 10:30
     const nowMs = Date.parse('2026-11-08T02:30:00Z'); // 东京 11:30
     expect(shouldSkipAwayForQuietHours({ quietHours: q, dueMs, nowMs, userTimeZone: 'Asia/Tokyo' })).toBe(false);
+  });
+
+  it('07:50 禁发到点 -> 08:00 是当天第一次允许时刻', () => {
+    const due = Date.parse('2026-11-08T22:50:00Z'); // 东京 11/09 07:50
+    const allowed = Date.parse('2026-11-08T23:00:00Z'); // 东京 08:00
+    expect(nextAwayAllowedTimeMs(q, due, 'Asia/Tokyo')).toBe(allowed);
+    expect(nextAwayAllowedTimeMs(q, allowed, 'Asia/Tokyo')).toBe(allowed);
+    expect(nextAwayAllowedTimeMs(q, due, 'America/Los_Angeles')).toBe(due);
+  });
+
+  it('全天禁发不尝试无限续排；夏令时边界正确', () => {
+    const allDay = { ...q, startTime: '08:00', endTime: '08:00' };
+    expect(nextAwayAllowedTimeMs(allDay, Date.now(), 'Asia/Tokyo')).toBeNull();
+    const beforeDst = Date.parse('2026-03-08T09:50:00Z'); // LA 当地 01:50
+    expect(nextAwayAllowedTimeMs(q, beforeDst, 'America/Los_Angeles'))
+      .toBe(Date.parse('2026-03-08T15:00:00Z')); // 08:00 PDT
   });
 
   it('配置关闭、格式错误或未知时区不会误丢消息', () => {

@@ -109,7 +109,7 @@ import {
   sendsOnDay,
 } from '../../../utils/amsgLimits';
 import { resolveFireSceneSong } from '../../../utils/amsgFireScene';
-import { shouldSkipAwayForQuietHours } from '../../../utils/awayMessageQuietHours';
+import { nextAwayAllowedTimeMs } from '../../../utils/awayMessageQuietHours';
 import { nextAwayTickMs, isStaleAwayTick } from '../../../utils/awayMessageCore';
 import {
   type AmsgFireSkipTaskBrief, buildFireSkipResult, shouldReportFireSkip,
@@ -2247,7 +2247,16 @@ export const amsgHooks = {
       // 自动空闲节拍不能把线下期间当成单纯失联：从上次用户发言或见面结束中较晚者计时。
       const endAt = typeof limitsRecord?.awayDateEndedAt === 'number' && Number.isFinite(limitsRecord.awayDateEndedAt)
         ? limitsRecord.awayDateEndedAt : null;
-      const awayAnchor = laterOf(lastUserMessageAt, endAt);
+      // 新包显式传入角色最后一次发言时刻；旧版 fire_pack 缺此字段时才
+      // 临时沿用用户锚点。不要改变 lastUserMessageAt 在预约连发账本里的语义。
+      const lastCharMessageAt = pack.lastCharMessageAt === undefined
+        ? lastUserMessageAt : pack.lastCharMessageAt;
+      const awayAnchor = laterOf(lastCharMessageAt, endAt);
+      if (awayAnchor == null && pack.lastCharMessageAt !== undefined) {
+        // 新版快照明确没有 Char 发言时不生成空闲提醒；旧快照缺此字段，
+        // 保留原有 null 锚点兼容行为，不让老的已排任务永久陷入 defer。
+        return { defer: { afterMs: delayMs } } as const;
+      }
       const dueAt = awayAnchor == null ? null : awayAnchor + delayMs;
       const waitMs = dueAt == null ? 0 : dueAt - ctx.now.getTime();
       if (waitMs > AWAY_DUE_TOLERANCE_MS) {
@@ -2259,10 +2268,35 @@ export const amsgHooks = {
         return { defer: { afterMs: Math.min(waitMs, AWAY_MAX_DEFER_MS) } } as const;
       }
 
+      // 禁发期间到点不消费机会：07:50 到点、08:00 解禁，就改在 08:00
+      // 获得当天第一次主动联系机会，下一周期从解禁点计（12:00 而非 11:50）。
+      const allowedAt = nextAwayAllowedTimeMs(limitsRecord?.awayQuietHours, occurrenceMs, pack.userTzId);
+      if (allowedAt == null) {
+        await recordAwaySkip('away-quiet-hours'); // 全天禁发，零模型调用
+        return { skip: true } as const;
+      }
+      if (allowedAt > ctx.now.getTime() + AWAY_DUE_TOLERANCE_MS) {
+        await writeAwayTrace(ctx.readState, ctx.writeState, charId, {
+          id: `${String(ctx.task.uuid || 'unknown')}@${occurrenceMs}`,
+          at: ctx.now.getTime(), occurrenceMs, stage: 'deferred', reason: 'away-quiet-hours',
+        });
+        return { defer: { afterMs: Math.min(allowedAt - ctx.now.getTime(), AWAY_MAX_DEFER_MS) } } as const;
+      }
+      // 假如任务比禁发边界略早执行，不得在睡眠时间提前联系。
+      const nowAllowedAt = nextAwayAllowedTimeMs(limitsRecord?.awayQuietHours, ctx.now.getTime(), pack.userTzId);
+      if (nowAllowedAt == null) {
+        await recordAwaySkip('away-quiet-hours');
+        return { skip: true } as const;
+      }
+      if (nowAllowedAt > ctx.now.getTime()) {
+        return { defer: { afterMs: Math.min(nowAllowedAt - ctx.now.getTime(), AWAY_MAX_DEFER_MS) } } as const;
+      }
+
       // 本次 fire 的名义时间可能因 Worker 停摆而严重过期，不补烧旧次数。
       // 新任务跳过已错过的节拍，一次仅安排未来一个触发。
       if (typeof ctx.scheduleTask !== 'function') throw fail('Worker 不支持空闲提醒循环排程，请更新云端版本');
-      const nextMs = nextAwayTickMs(occurrenceMs, delayMs, ctx.now.getTime());
+      const effectiveDueMs = Math.max(occurrenceMs, allowedAt);
+      const nextMs = nextAwayTickMs(effectiveDueMs, delayMs, ctx.now.getTime());
       const nextUuid = buildSelfScheduleUuid(`away:${charId}`, nextMs, 0);
       const nextMetadata = {
         charId,
@@ -2306,7 +2340,7 @@ export const amsgHooks = {
         id: `${String(ctx.task.uuid || 'unknown')}@${occurrenceMs}`,
         at: ctx.now.getTime(), occurrenceMs, stage: 'entered',
       });
-      if (isStaleAwayTick(occurrenceMs, ctx.now.getTime())) {
+      if (isStaleAwayTick(effectiveDueMs, ctx.now.getTime())) {
         console.log('[amsg:away-skip]', { taskId: ctx.task.id, reason: 'missed-slot' });
         await recordAwaySkip('away-missed-slot');
         return { skip: true } as const;
@@ -2327,16 +2361,8 @@ export const amsgHooks = {
         await recordAwaySkip(liveAwayLock === 'date' ? 'away-date-lock' : 'away-call-lock');
         return { skip: true } as const;
       }
-      if (shouldSkipAwayForQuietHours({
-        quietHours: limitsRecord?.awayQuietHours,
-        nowMs: ctx.now.getTime(),
-        dueMs: occurrenceMs,
-        userTimeZone: pack.userTzId,
-      })) {
-        console.log('[amsg:away-skip]', { taskId: ctx.task.id, reason: 'user-quiet-hours' });
-        await recordAwaySkip('away-quiet-hours');
-        return { skip: true } as const;
-      }
+      // 安静时段校验已在续排前执行，不能再因为原触发时刻曾落在禁发期
+      // 而把已经解禁的首次机会二次跳过。
     }
 
     // 任务指令缺失（开发期旧格式任务）：不能用默认 auto 指令凑一个渲染——那会把

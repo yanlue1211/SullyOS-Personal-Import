@@ -1395,7 +1395,7 @@ var chatFieldOk = (chat) => {
 var parseFirePack = (value) => {
   try {
     const parsed = JSON.parse(value);
-    if (parsed && typeof parsed === "object" && parsed.v === FIRE_PACK_VERSION && chatFieldOk(parsed.chat) && typeof parsed.template === "string" && parsed.template.length > 0 && (parsed.lastUserMessageAt === null || typeof parsed.lastUserMessageAt === "number") && typeof parsed.tzId === "string" && parsed.tzId.length > 0 && typeof parsed.userTzId === "string" && parsed.userTzId.length > 0 && typeof parsed.targetName === "string" && typeof parsed.builtAt === "number" && Array.isArray(parsed.pendingTasks) && (parsed.scene === null || typeof parsed.scene === "object") && typeof parsed.selfScheduleEnabled === "boolean") {
+    if (parsed && typeof parsed === "object" && parsed.v === FIRE_PACK_VERSION && chatFieldOk(parsed.chat) && typeof parsed.template === "string" && parsed.template.length > 0 && (parsed.lastUserMessageAt === null || typeof parsed.lastUserMessageAt === "number") && (parsed.lastCharMessageAt === void 0 || parsed.lastCharMessageAt === null || typeof parsed.lastCharMessageAt === "number") && typeof parsed.tzId === "string" && parsed.tzId.length > 0 && typeof parsed.userTzId === "string" && parsed.userTzId.length > 0 && typeof parsed.targetName === "string" && typeof parsed.builtAt === "number" && Array.isArray(parsed.pendingTasks) && (parsed.scene === null || typeof parsed.scene === "object") && typeof parsed.selfScheduleEnabled === "boolean") {
       return parsed;
     }
   } catch {
@@ -14439,7 +14439,7 @@ function buildScheduledPush(message, build, extraMeta, bannerBody) {
 }
 
 // utils/amsgBundleVersion.ts
-var AMSG_BUNDLE_VERSION = "2026-11-08.11";
+var AMSG_BUNDLE_VERSION = "2026-11-09.12";
 
 // worker/amsg/src/reproduction.ts
 async function writeDiagnosticStage(writeState, runId, event, fields = {}) {
@@ -14798,8 +14798,24 @@ function isAwayQuietTime(config, atMs, userTimeZone) {
   const at = localMinutesAt(atMs, userTimeZone);
   return at !== null && isQuietClockMinute(at, start, end);
 }
-function shouldSkipAwayForQuietHours(args) {
-  return isAwayQuietTime(args.quietHours, args.nowMs, args.userTimeZone) || isAwayQuietTime(args.quietHours, args.dueMs, args.userTimeZone);
+function nextAwayAllowedTimeMs(quietHours, atMs, userTimeZone) {
+  if (!Number.isFinite(atMs)) return null;
+  if (!isAwayQuietTime(quietHours, atMs, userTimeZone)) return atMs;
+  const start = parseQuietClockMinutes(quietHours?.startTime);
+  const end = parseQuietClockMinutes(quietHours?.endTime);
+  if (start === null || end === null || start === end) return null;
+  const origin = Math.ceil(atMs / 6e4) * 6e4;
+  const stride = 30 * 6e4;
+  let upper = origin;
+  for (let k = 0; k < 96 && isAwayQuietTime(quietHours, upper, userTimeZone); k++) upper += stride;
+  if (isAwayQuietTime(quietHours, upper, userTimeZone)) return null;
+  let lo = origin, hi = upper;
+  while (hi - lo > 6e4) {
+    const mid = lo + Math.floor((hi - lo) / 12e4) * 6e4;
+    if (isAwayQuietTime(quietHours, mid, userTimeZone)) lo = mid;
+    else hi = mid;
+  }
+  return isAwayQuietTime(quietHours, lo, userTimeZone) ? hi : lo;
 }
 
 // utils/awayMessageCore.ts
@@ -20135,7 +20151,11 @@ var amsgHooks = {
       if (!Number.isFinite(minutes) || minutes <= 0) throw fail3("\u79BB\u5F00\u540E\u6D88\u606F\u7B49\u5F85\u95F4\u9694\u65E0\u6548");
       const delayMs = minutes * 6e4;
       const endAt = typeof limitsRecord?.awayDateEndedAt === "number" && Number.isFinite(limitsRecord.awayDateEndedAt) ? limitsRecord.awayDateEndedAt : null;
-      const awayAnchor = laterOf(lastUserMessageAt, endAt);
+      const lastCharMessageAt = pack.lastCharMessageAt === void 0 ? lastUserMessageAt : pack.lastCharMessageAt;
+      const awayAnchor = laterOf(lastCharMessageAt, endAt);
+      if (awayAnchor == null && pack.lastCharMessageAt !== void 0) {
+        return { defer: { afterMs: delayMs } };
+      }
       const dueAt = awayAnchor == null ? null : awayAnchor + delayMs;
       const waitMs = dueAt == null ? 0 : dueAt - ctx.now.getTime();
       if (waitMs > AWAY_DUE_TOLERANCE_MS) {
@@ -20149,8 +20169,32 @@ var amsgHooks = {
         });
         return { defer: { afterMs: Math.min(waitMs, AWAY_MAX_DEFER_MS) } };
       }
+      const allowedAt = nextAwayAllowedTimeMs(limitsRecord?.awayQuietHours, occurrenceMs, pack.userTzId);
+      if (allowedAt == null) {
+        await recordAwaySkip("away-quiet-hours");
+        return { skip: true };
+      }
+      if (allowedAt > ctx.now.getTime() + AWAY_DUE_TOLERANCE_MS) {
+        await writeAwayTrace(ctx.readState, ctx.writeState, charId, {
+          id: `${String(ctx.task.uuid || "unknown")}@${occurrenceMs}`,
+          at: ctx.now.getTime(),
+          occurrenceMs,
+          stage: "deferred",
+          reason: "away-quiet-hours"
+        });
+        return { defer: { afterMs: Math.min(allowedAt - ctx.now.getTime(), AWAY_MAX_DEFER_MS) } };
+      }
+      const nowAllowedAt = nextAwayAllowedTimeMs(limitsRecord?.awayQuietHours, ctx.now.getTime(), pack.userTzId);
+      if (nowAllowedAt == null) {
+        await recordAwaySkip("away-quiet-hours");
+        return { skip: true };
+      }
+      if (nowAllowedAt > ctx.now.getTime()) {
+        return { defer: { afterMs: Math.min(nowAllowedAt - ctx.now.getTime(), AWAY_MAX_DEFER_MS) } };
+      }
       if (typeof ctx.scheduleTask !== "function") throw fail3("Worker \u4E0D\u652F\u6301\u7A7A\u95F2\u63D0\u9192\u5FAA\u73AF\u6392\u7A0B\uFF0C\u8BF7\u66F4\u65B0\u4E91\u7AEF\u7248\u672C");
-      const nextMs = nextAwayTickMs(occurrenceMs, delayMs, ctx.now.getTime());
+      const effectiveDueMs = Math.max(occurrenceMs, allowedAt);
+      const nextMs = nextAwayTickMs(effectiveDueMs, delayMs, ctx.now.getTime());
       const nextUuid = buildSelfScheduleUuid(`away:${charId}`, nextMs, 0);
       const nextMetadata = {
         charId,
@@ -20193,7 +20237,7 @@ var amsgHooks = {
         occurrenceMs,
         stage: "entered"
       });
-      if (isStaleAwayTick(occurrenceMs, ctx.now.getTime())) {
+      if (isStaleAwayTick(effectiveDueMs, ctx.now.getTime())) {
         console.log("[amsg:away-skip]", { taskId: ctx.task.id, reason: "missed-slot" });
         await recordAwaySkip("away-missed-slot");
         return { skip: true };
@@ -20209,16 +20253,6 @@ var amsgHooks = {
       if (liveAwayLock) {
         console.log("[amsg:away-skip]", { taskId: ctx.task.id, reason: "interaction-still-open", mode: liveAwayLock });
         await recordAwaySkip(liveAwayLock === "date" ? "away-date-lock" : "away-call-lock");
-        return { skip: true };
-      }
-      if (shouldSkipAwayForQuietHours({
-        quietHours: limitsRecord?.awayQuietHours,
-        nowMs: ctx.now.getTime(),
-        dueMs: occurrenceMs,
-        userTimeZone: pack.userTzId
-      })) {
-        console.log("[amsg:away-skip]", { taskId: ctx.task.id, reason: "user-quiet-hours" });
-        await recordAwaySkip("away-quiet-hours");
         return { skip: true };
       }
     }

@@ -83,3 +83,32 @@ export function shouldSkipAwayForQuietHours(args: {
   return isAwayQuietTime(args.quietHours, args.nowMs, args.userTimeZone)
     || isAwayQuietTime(args.quietHours, args.dueMs, args.userTimeZone);
 }
+
+/**
+ * 2.0 云端离开后消息在禁发期到点，保留当前机会至当地解禁时刻。
+ * 时间戳按用户时区判定（包括 DST）；全天禁发则返回 null。
+ * 这里只计算时间、不触发任何模型或后台网络请求。
+ */
+export function nextAwayAllowedTimeMs(
+  quietHours: AwayMessageQuietHours | null | undefined,
+  atMs: number,
+  userTimeZone: string,
+): number | null {
+  if (!Number.isFinite(atMs)) return null;
+  if (!isAwayQuietTime(quietHours, atMs, userTimeZone)) return atMs;
+  const start = parseQuietClockMinutes(quietHours?.startTime);
+  const end = parseQuietClockMinutes(quietHours?.endTime);
+  if (start === null || end === null || start === end) return null;
+  const origin = Math.ceil(atMs / 60_000) * 60_000;
+  const stride = 30 * 60_000;
+  let upper = origin;
+  for (let k = 0; k < 96 && isAwayQuietTime(quietHours, upper, userTimeZone); k++) upper += stride;
+  if (isAwayQuietTime(quietHours, upper, userTimeZone)) return null;
+  let lo = origin, hi = upper;
+  while (hi - lo > 60_000) {
+    const mid = lo + Math.floor((hi - lo) / 120_000) * 60_000;
+    if (isAwayQuietTime(quietHours, mid, userTimeZone)) lo = mid;
+    else hi = mid;
+  }
+  return isAwayQuietTime(quietHours, lo, userTimeZone) ? hi : lo;
+}
