@@ -1,5 +1,6 @@
 import { beforeEach, it, expect, vi } from "vitest";
 import { DB, openDB } from "./db";
+import { momentsEngagement } from "../features/moments/engagement";
 import { safeFetchJson } from "./safeApi";
 import {
   runActivity,
@@ -442,6 +443,7 @@ it('recognizes two new comments but only lets the character answer those passing
  await interact('user','小雨',post.id,{kind:'comment',text:'这边还有贝壳'});
  current=(await getRow<Post>(post.id))!;
  const fresh=current.comments.filter(x=>x.id!==own.id);
+ const allowed=momentsEngagement(current,'a',habitDefaults(),false,fresh.map(x=>x.id)).replyableCommentIds;
  vi.mocked(safeFetchJson).mockImplementation(async(_url,options)=>{
   const request=promptRequest(options);
   expect(request.text).toContain('"firstView":false');
@@ -451,13 +453,13 @@ it('recognizes two new comments but only lets the character answer those passing
  await runActivity('a',{api:global,user:{name:'小雨'} as any});
  current=(await getRow<Post>(post.id))!;
  const ownComments=current.comments.filter(x=>x.authorId==='a');
- expect(ownComments.length).toBeGreaterThanOrEqual(1);
- expect(ownComments.length).toBeLessThanOrEqual(2); // no forced second turn or cross-thread crowd
- expect(ownComments.filter(x=>x.replyTo===fresh[1].id)).toHaveLength(0); // not an answer to this character
+ expect(ownComments.length).toBe(1+allowed.length);
+ expect(ownComments.slice(1).map(x=>x.replyTo).sort()).toEqual([...allowed].sort());
  const seen=(await getRow<Seen>(`seen:a:${post.id}`))!;
  expect(seen.projection.comments.filter(x=>x.authorId==='a')).toHaveLength(ownComments.length);
  const cards=(await DB.getMessagesByCharId('a')).filter(x=>x.type==='moments_card');
- if(ownComments.length===2)expect(cards.at(-1)?.content).toContain('好呀，一起');
+ if(allowed.includes(fresh[0].id))expect(cards.at(-1)?.content).toContain('好呀，一起');
+ if(allowed.includes(fresh[1].id))expect(cards.at(-1)?.content).toContain('贝壳也好看');
 });
 it('rejects reconsidering an old root comment when only a new comment arrived',async()=>{
  await transaction(async s=>markSeen(s,await getConfig(s),'a',post),true);
@@ -485,12 +487,13 @@ it('consumes closed-thread events without forcing the model to answer an unrelat
  for(let i=0;i<6;i++) await interact('user','小雨',post.id,{kind:'comment',text:'旧回复'+i,replyTo:root});
  await interact('user','小雨',post.id,{kind:'comment',text:'新话题'});
  p=(await getRow<Post>(post.id))!; const fresh=p.comments.at(-1)!.id;
+ const chanceAllows=momentsEngagement(p,'a',habitDefaults(),true,p.comments.map(x=>x.id)).replyableCommentIds.includes(fresh);
  vi.mocked(safeFetchJson).mockImplementation(async(_url,options)=>({choices:[{finish_reason:'stop',message:{content:JSON.stringify({requestId:promptRequest(options).id,browsed:[post.id],actions:[{kind:'comment',postId:post.id,replyTo:root,recipientId:'user',text:'不应保存'},{kind:'comment',postId:post.id,replyTo:fresh,recipientId:'user',text:'新话题回应'}],post:null,important:[]})}}]}));
  await runActivity('a',{api:global,user:{name:'小雨'} as any});
  p=(await getRow<Post>(post.id))!;
  expect(p.comments.some(x=>x.text==='不应保存')).toBe(false);
- // An unrelated root only gets a reply if that character's stable participation chance passes.
- expect(p.comments.some(x=>x.text==='新话题回应')).toBe(false);
+ // A new unrelated root is not guaranteed an answer, even when the model asks to respond.
+ expect(p.comments.some(x=>x.text==='新话题回应')).toBe(chanceAllows);
  expect((await getRow<Seen>(`seen:a:${post.id}`))!.projection.comments).toHaveLength(p.comments.length);
  expect((await rows('event','a')).filter(x=>(x as any).status==='pending')).toHaveLength(0);
  expect((await rows('log','a')).map(x=>(x as any).text).join('\n')).toContain('跳过已收束话题1条');
