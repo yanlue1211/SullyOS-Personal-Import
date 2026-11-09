@@ -20153,10 +20153,10 @@ var amsgHooks = {
       const endAt = typeof limitsRecord?.awayDateEndedAt === "number" && Number.isFinite(limitsRecord.awayDateEndedAt) ? limitsRecord.awayDateEndedAt : null;
       const lastCharMessageAt = pack.lastCharMessageAt === void 0 ? lastUserMessageAt : pack.lastCharMessageAt;
       const awayAnchor = laterOf(lastCharMessageAt, endAt);
-      if (awayAnchor == null) {
+      if (awayAnchor == null && pack.lastCharMessageAt !== void 0) {
         return { defer: { afterMs: delayMs } };
       }
-      const dueAt = awayAnchor + delayMs;
+      const dueAt = awayAnchor == null ? null : awayAnchor + delayMs;
       const waitMs = dueAt == null ? 0 : dueAt - ctx.now.getTime();
       if (waitMs > AWAY_DUE_TOLERANCE_MS) {
         console.log("[amsg:defer]", { taskId: ctx.task.id, reason: "away-not-due", dueAt });
