@@ -48,6 +48,24 @@ describe('independent per-character chat prompt preferences', () => {
  });
 });
 
+it('online IM cadence is stronger, scoped and remains before the final return-to-character tail', async () => {
+ const human = {id:'im-cadence',name:'小夏',humanStyleEnabled:true,innerVoiceEnabled:false} as any;
+ const user = {name:'用户'} as any;
+ const parts = await ChatPrompts.buildSystemPromptParts(human,user,[],[],[],[],undefined,undefined,undefined,undefined,undefined,undefined,{});
+ expect(parts.stable).toContain('IM 碎片化聊天｜仅线上打字');
+ expect(parts.stable).toContain('每条尽量 5—15 个汉字');
+ expect(parts.stable).toContain('普通闲聊不要使用句号');
+ expect(parts.stable).toContain('不限制语音／视频通话、看屏陪伴');
+ expect(parts.recencyTail).toContain('本轮线上聊天节奏');
+ expect(parts.recencyTail.indexOf('本轮线上聊天节奏')).toBeLessThan(parts.recencyTail.indexOf('最后，回到你自己'));
+ const nonHuman = await ChatPrompts.buildSystemPromptParts({...human,humanStyleEnabled:false},user,[],[],[],[],undefined,undefined,undefined,undefined,undefined,undefined,{});
+ expect(nonHuman.stable).not.toContain('IM 碎片化聊天');
+ expect(nonHuman.recencyTail).not.toContain('本轮线上聊天节奏');
+ const otherApp = await ChatPrompts.buildSystemPromptParts(human,user,[],[],[],[],undefined,undefined,undefined,undefined,undefined,undefined,{appRules:'这是通话或其他模式的独立输出协议'});
+ expect(otherApp.stable).not.toContain('IM 碎片化聊天');
+ expect(otherApp.recencyTail).not.toContain('本轮线上聊天节奏');
+});
+
 it('preserves authored worldbook slots and places expression rules after the character context', async () => {
  const fixed=[0,1,2,3,5,6].map(position=>({id:`order-${position}`,title:`位置${position}`,content:`FIXED_WB_${position}`,constant:true,position,order:100}));
  const char={id:'prefs-order',name:'角色',systemPrompt:'ORDER_PERSONA',memories:[],mountedWorldbooks:[...fixed,
