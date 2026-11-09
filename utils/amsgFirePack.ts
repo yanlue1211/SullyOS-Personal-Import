@@ -467,6 +467,8 @@ export interface AmsgFirePack {
   template: string;
   /** 用户上次真实主动发消息的时间（epoch ms）；没有聊天记录时为 null。 */
   lastUserMessageAt: number | null;
+  /** 2.0 离开后消息的 Char 发言锚点（旧包可缺省，不影响原用户互动逻辑）。 */
+  lastCharMessageAt?: number | null;
   /** 此刻是否仍处于线上私聊之外的交互，只用于“离开后消息”的云端拦截。 */
   awaySceneLock?: 'date' | 'call' | null;
   /**
@@ -1089,6 +1091,7 @@ export const parseFirePack = (value: string): AmsgFirePack | null => {
       chatFieldOk(parsed.chat) &&
       typeof parsed.template === 'string' && parsed.template.length > 0 &&
       (parsed.lastUserMessageAt === null || typeof parsed.lastUserMessageAt === 'number') &&
+      (parsed.lastCharMessageAt === undefined || parsed.lastCharMessageAt === null || typeof parsed.lastCharMessageAt === 'number') &&
       typeof parsed.tzId === 'string' && parsed.tzId.length > 0 &&
       typeof parsed.userTzId === 'string' && parsed.userTzId.length > 0 &&
       typeof parsed.targetName === 'string' &&
