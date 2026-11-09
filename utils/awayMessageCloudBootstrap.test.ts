@@ -88,10 +88,10 @@ describe('cloud away first-task creation and passive repair', () => {
     expect(ActiveMsgClient.updatePendingTasksRemote).not.toHaveBeenCalled();
   });
 
-  it('foreground one-shot check builds a missing cloud loop from real user message history', async () => {
+  it('foreground one-shot check builds a missing cloud loop from last Char reply', async () => {
     const char = makeChar();
     vi.spyOn(DB, 'getRecentMessagesByCharId').mockResolvedValue([{
-      id: 1, charId: char.id, role: 'user', type: 'text', content: '早安', timestamp: NOW - 5 * HOUR,
+      id: 1, charId: char.id, role: 'assistant', type: 'text', content: '早安', timestamp: NOW - 5 * HOUR,
     }] as any);
     const updateCharacter = vi.fn();
     const deps = {
@@ -111,7 +111,7 @@ describe('cloud away first-task creation and passive repair', () => {
   it('later foreground resumes recheck and repair a cloud chain missing after initial success', async () => {
     const char = makeChar();
     vi.spyOn(DB, 'getRecentMessagesByCharId').mockResolvedValue([{
-      id: 1, charId: char.id, role: 'user', type: 'text', content: '在吗', timestamp: NOW - 5 * HOUR,
+      id: 1, charId: char.id, role: 'assistant', type: 'text', content: '在吗', timestamp: NOW - 5 * HOUR,
     }] as any);
     const deps = {
       getCharacters: () => [char], updateCharacter: vi.fn(),
@@ -136,7 +136,7 @@ describe('cloud away first-task creation and passive repair', () => {
   it('later foreground inspection keeps the existing future Worker task, without rearming or paying for AI', async () => {
     const char = makeChar();
     vi.spyOn(DB, 'getRecentMessagesByCharId').mockResolvedValue([{
-      id: 1, charId: char.id, role: 'user', type: 'text', content: '晚安', timestamp: NOW - 5 * HOUR,
+      id: 1, charId: char.id, role: 'assistant', type: 'text', content: '晚安', timestamp: NOW - 5 * HOUR,
     }] as any);
     vi.mocked(ActiveMsgClient.listRemoteTasksForChar)
       .mockResolvedValueOnce([] as any)
