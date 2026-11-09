@@ -1,5 +1,6 @@
 import { beforeEach, it, expect, vi } from "vitest";
 import { DB, openDB } from "./db";
+import { momentsEngagement } from "../features/moments/engagement";
 import { safeFetchJson } from "./safeApi";
 import {
   runActivity,
@@ -365,6 +366,7 @@ it('allows a character to delete only its own submitted historical post during o
 });
 
 it('records ordinary posts and comments in one activity card without another API call',async()=>{
+ await saveConfig(c=>{c.participants.a.habits.commentChance=1;});
  vi.mocked(safeFetchJson).mockImplementation(async(_url,options)=>({choices:[{finish_reason:'stop',message:{content:JSON.stringify({requestId:promptRequest(options).id,browsed:[post.id],actions:[{kind:'comment',postId:post.id,text:'这阵海风真舒服。'}],post:{text:'买到了新鲜的番茄',theme:'买菜',media:[],visibility:{mode:'all',ids:[]}},important:[{postId:post.id,summary:'记下了海边的交流'}]})}}]}));
  await runActivity('a',{api:global,user:{name:'小雨'} as any});
  const cards=(await DB.getMessagesByCharId('a')).filter(m=>m.type==='moments_card');
@@ -433,7 +435,7 @@ it('consumes a first read without interaction and does not retry it or a later l
  expect((await getRow<any>('legacy-like')).status).toBe('done');
  expect(safeFetchJson).toHaveBeenCalledTimes(1);
 });
-it('allows replies to two distinct new comments in one read and identifies direct replies on another person post',async()=>{
+it('recognizes two new comments but only lets the character answer those passing its stable chance',async()=>{
  await interact('a','阿青',post.id,{kind:'comment',text:'我也喜欢海风'});
  let current=(await getRow<Post>(post.id))!;
  const own=current.comments[0];
@@ -442,6 +444,7 @@ it('allows replies to two distinct new comments in one read and identifies direc
  await interact('user','小雨',post.id,{kind:'comment',text:'这边还有贝壳'});
  current=(await getRow<Post>(post.id))!;
  const fresh=current.comments.filter(x=>x.id!==own.id);
+ const allowed=momentsEngagement(current,'a',habitDefaults(),false,fresh.map(x=>x.id)).replyableCommentIds;
  vi.mocked(safeFetchJson).mockImplementation(async(_url,options)=>{
   const request=promptRequest(options);
   expect(request.text).toContain('"firstView":false');
@@ -450,12 +453,14 @@ it('allows replies to two distinct new comments in one read and identifies direc
  });
  await runActivity('a',{api:global,user:{name:'小雨'} as any});
  current=(await getRow<Post>(post.id))!;
- expect(current.comments.filter(x=>x.authorId==='a')).toHaveLength(3);
+ const ownComments=current.comments.filter(x=>x.authorId==='a');
+ expect(ownComments.length).toBe(1+allowed.length);
+ expect(ownComments.slice(1).map(x=>x.replyTo).sort()).toEqual([...allowed].sort());
  const seen=(await getRow<Seen>(`seen:a:${post.id}`))!;
- expect(seen.projection.comments.filter(x=>x.authorId==='a')).toHaveLength(3);
+ expect(seen.projection.comments.filter(x=>x.authorId==='a')).toHaveLength(ownComments.length);
  const cards=(await DB.getMessagesByCharId('a')).filter(x=>x.type==='moments_card');
- expect(cards.at(-1)?.content).toContain('贝壳也好看');
- expect(cards.at(-1)?.content).toContain('好呀，一起');
+ if(allowed.includes(fresh[0].id))expect(cards.at(-1)?.content).toContain('好呀，一起');
+ if(allowed.includes(fresh[1].id))expect(cards.at(-1)?.content).toContain('贝壳也好看');
 });
 it('rejects reconsidering an old root comment when only a new comment arrived',async()=>{
  await transaction(async s=>markSeen(s,await getConfig(s),'a',post),true);
@@ -472,21 +477,25 @@ it('preserves the shared thread cap when multiple new replies are submitted',asy
  const targets=p.comments.slice(-2);
  vi.mocked(safeFetchJson).mockImplementation(async(_url,options)=>({choices:[{finish_reason:'stop',message:{content:JSON.stringify({requestId:promptRequest(options).id,browsed:[post.id],actions:targets.map(x=>({kind:'comment',postId:post.id,replyTo:x.id,recipientId:'user',text:'继续'})),post:null,important:[]})}}]}));
  await runActivity('a',{api:global,user:{name:'小雨'} as any});
- expect((await getRow<Post>(post.id))!.comments).toHaveLength(7);
- expect((await getRow<Seen>(`seen:a:${post.id}`))!.projection.comments).toHaveLength(7);
+ const current=(await getRow<Post>(post.id))!;
+ expect(current.comments.length).toBeGreaterThanOrEqual(6);
+ expect(current.comments.length).toBeLessThanOrEqual(7); // six user replies may exhaust the topic
+ expect((await getRow<Seen>(`seen:a:${post.id}`))!.projection.comments).toHaveLength(current.comments.length);
 });
-it('consumes closed-thread events while preserving another valid reply',async()=>{
+it('consumes closed-thread events without forcing the model to answer an unrelated root',async()=>{
  await interact('user','小雨',post.id,{kind:'comment',text:'旧话题'});
  let p=(await getRow<Post>(post.id))!; const root=p.comments[0].id;
  for(let i=0;i<6;i++) await interact('user','小雨',post.id,{kind:'comment',text:'旧回复'+i,replyTo:root});
  await interact('user','小雨',post.id,{kind:'comment',text:'新话题'});
  p=(await getRow<Post>(post.id))!; const fresh=p.comments.at(-1)!.id;
+ const chanceAllows=momentsEngagement(p,'a',habitDefaults(),true,p.comments.map(x=>x.id)).replyableCommentIds.includes(fresh);
  vi.mocked(safeFetchJson).mockImplementation(async(_url,options)=>({choices:[{finish_reason:'stop',message:{content:JSON.stringify({requestId:promptRequest(options).id,browsed:[post.id],actions:[{kind:'comment',postId:post.id,replyTo:root,recipientId:'user',text:'不应保存'},{kind:'comment',postId:post.id,replyTo:fresh,recipientId:'user',text:'新话题回应'}],post:null,important:[]})}}]}));
  await runActivity('a',{api:global,user:{name:'小雨'} as any});
  p=(await getRow<Post>(post.id))!;
  expect(p.comments.some(x=>x.text==='不应保存')).toBe(false);
- expect(p.comments.some(x=>x.text==='新话题回应')).toBe(true);
+ // A new unrelated root is not guaranteed an answer, even when the model asks to respond.
+ expect(p.comments.some(x=>x.text==='新话题回应')).toBe(chanceAllows);
  expect((await getRow<Seen>(`seen:a:${post.id}`))!.projection.comments).toHaveLength(p.comments.length);
  expect((await rows('event','a')).filter(x=>(x as any).status==='pending')).toHaveLength(0);
- expect((await rows('log','a')).map(x=>(x as any).text).join('\n')).toContain('跳过已收束话题1条');
+ expect((await rows('log','a')).map(x=>(x as any).text).join('\n')).toContain('跳过已收束话题'+(chanceAllows?'1':'2')+'条');
 });
