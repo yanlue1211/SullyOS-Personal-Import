@@ -23,7 +23,7 @@ import {
   RealtimeConfig,
   UserProfile,
 } from '../types';
-import { getLastRealUserMessageAt } from './amsg2ExpireGuard';
+import { getLastRealUserMessageAt, getLastRealCharMessageAt } from './amsg2ExpireGuard';
 import { resolveAmsgInteractionLock, isAmsgActiveCall, isAmsgActiveDate, getAmsgActiveDateEncounterId, getAmsgDateEndedAt } from './amsgInteractionGuard';
 import { AMSG_BUNDLE_VERSION } from './amsgBundleVersion';
 import { describeD1LimitCode } from './amsgD1Limits';
@@ -732,6 +732,7 @@ const buildTimeGapHint = async (charId: string) => {
     // 满血链路会把它放进 fire_pack，worker 到点用「fire 时刻」重算，不吃排程时的陈旧值。
     // 「真实用户消息」判定与防穿帮闸共用同一叶子 helper（见 amsg2ExpireGuard）。
     lastUserMessageAt: getLastRealUserMessageAt(recentMessages),
+    lastCharMessageAt: getLastRealCharMessageAt(recentMessages),
     recentMessages,
   };
 };
@@ -793,7 +794,7 @@ export const buildFirePack = async (
     const { buildRoomPlatesInjection } = await import('./memoryPalace/roomPlates');
     char.roomPlatesInjection = await buildRoomPlatesInjection(char.id, userProfile.name);
   }
-  const [{ lastUserMessageAt, recentMessages: activityMessages }, recentMessages, library, schedule] = await Promise.all([
+  const [{ lastUserMessageAt, lastCharMessageAt, recentMessages: activityMessages }, recentMessages, library, schedule] = await Promise.all([
     buildTimeGapHint(char.id),
     templateStub ? Promise.resolve([]) : loadCharacterContextMessages(char),
     // 表情库只喂系统提示词/近史渲染：占位模板路径整库都不用读（表情记录带图片数据，
@@ -964,6 +965,7 @@ export const buildFirePack = async (
     template,
     thinkingChainEnabled: outputStyle.thinkingActive,
     lastUserMessageAt,
+    lastCharMessageAt,
     awaySceneLock: resolveAmsgInteractionLock(activityMessages, isAmsgActiveCall(char.id), isAmsgActiveDate(char.id)),
     // 角色的时间参照系（见上面的 tzId / userTzId）：前者是角色自己的钟，后者是用户那边的，
     // worker 渲染时两者各管各的一行，绝不混用。

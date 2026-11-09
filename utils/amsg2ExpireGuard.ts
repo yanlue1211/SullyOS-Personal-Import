@@ -41,3 +41,13 @@ export function getLastRealUserMessageAt(messages: RealUserMessageLike[]): numbe
   }
   return null;
 }
+
+/** 2.0 空闲计时专属：角色最后一次聊天发言。用户只发消息不重置它。 */
+export function getLastRealCharMessageAt(messages: RealUserMessageLike[]): number | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === 'assistant' && Number.isFinite(messages[i].timestamp)) {
+      return messages[i].timestamp;
+    }
+  }
+  return null;
+}
