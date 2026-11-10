@@ -16,6 +16,7 @@ import { DB } from '../utils/db';
 import { getProxyWorkerUrl, DEFAULT_PROXY_WORKER, PROXY_WORKER_CHANGED_EVENT, isLegacyProxyWorkerUrl } from '../utils/proxyWorker';
 import type { PostProcessMusicHooks } from '../utils/applyAssistantPostProcessing';
 import { resolveRefToDataUrl } from '../utils/blobRef';
+import { makeDebugLogger } from '../utils/devDebug';
 
 /* ───────────── 类型 ───────────── */
 export type MusicQuality = 'standard' | 'higher' | 'exhigh' | 'lossless' | 'hires';
@@ -247,6 +248,8 @@ export const toHttps = (url: string): string => {
 // and the proxy's 180-second edge cache. The proxy forwards only ids/level to
 // NetEase; the unique marker changes only its cache key, never the upstream args.
 let songUrlRefreshSerial = 0;
+// Logs only structured request outcomes; never the audio URL, login cookie or API secret.
+const musicTrace = makeDebugLogger('music', 'MusicPlayback');
 /* ───────────── API ───────────── */
 export const musicApi = {
   // 内部：真正打网络（不走缓存）
@@ -255,8 +258,34 @@ export const musicApi = {
     const cookie = normalizeCookie(cfg.cookie);
     if (cookie) headers['X-Netease-Cookie'] = cookie;
     const url = `${resolveMusicWorkerUrl(cfg)}/netease${path.startsWith('/') ? path : '/' + path}`;
-    const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body || {}) });
+    const isSongUrl = path === '/song/url';
+    const songId = Number(Array.isArray(body?.ids) ? body.ids[0] : body?.id);
+    const started = Date.now();
+    let res: Response;
+    try {
+      res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body || {}) });
+    } catch (error: any) {
+      if (isSongUrl) musicTrace.warn('song-url-proxy-fetch-failed', {
+        songId: Number.isFinite(songId) ? songId : null, stage: 'proxy-fetch',
+        errorName: String(error?.name || 'unknown').slice(0, 60),
+        elapsedMs: Date.now() - started,
+        online: typeof navigator !== 'undefined' ? navigator.onLine : null,
+      });
+      throw error;
+    }
     const j = await res.json().catch(() => ({}));
+    if (isSongUrl) {
+      let audioHost = '';
+      try { audioHost = j?.data?.[0]?.url ? new URL(j.data[0].url).hostname : ''; } catch {}
+      musicTrace.info('song-url-proxy-result', {
+        songId: Number.isFinite(songId) ? songId : null,
+        httpStatus: res.status, apiCode: typeof j?.code === 'number' ? j.code : null,
+        hasAudioUrl: typeof j?.data?.[0]?.url === 'string' && !!j.data[0].url.trim(),
+        audioHost: audioHost || null,
+        quality: body?.level || null, refresh: !!body?.playbackRefreshNonce,
+        elapsedMs: Date.now() - started,
+      });
+    }
     if (!res.ok) throw new Error(j?.error || j?.message || `HTTP ${res.status}`);
     return j;
   },
@@ -730,10 +759,20 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const audioNetworkFailure=code===2;
       const urlExpiredOrUnsupported=code===4 || error?.name==='NotSupportedError';
       const emptyUrl=error?.missingSongUrl===true;
+      musicTrace.warn('track-failed', {
+        songId: song.id,
+        stage: !song.local && !activeAudioSourceRef.current ? 'address-fetch' : 'audio-load',
+        mediaCode: Number.isFinite(code) ? code : null,
+        errorName: String(error?.name || 'unknown').slice(0, 60),
+        emptyUrl, serviceFailure, audioNetworkFailure, urlExpiredOrUnsupported,
+        freshRetry: !!opts.freshUrl, local: !!song.local,
+        online: typeof navigator !== 'undefined' ? navigator.onLine : null,
+      });
       // Revalidate THIS song once with a fresh URL before blaming the entire playlist.
       // Keep the existing automatic skip for genuinely missing/undecodable tracks.
       if(!song.local && !opts.freshUrl && (emptyUrl || audioNetworkFailure || urlExpiredOrUnsupported || serviceFailure)){
         setPlaying(false);setLoadingSong(true);
+        musicTrace.info('track-retry-address', { songId:song.id, reason:emptyUrl?'empty-url':audioNetworkFailure?'audio-network':serviceFailure?'proxy-network':'audio-unsupported' });
         toast('这首歌正在重新获取播放地址','info');
         void playSong(song,{alsoSetQueue:false,recovering:true,freshUrl:true,requestedByCharId:opts.requestedByCharId});
         return;
@@ -742,6 +781,10 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         // A failing CDN/proxy affects multiple tracks. Do not rapid-skip an entire playlist
         // after one song's fresh retry has also failed.
         setPlaying(false);setLoadingSong(false);
+        musicTrace.warn('queue-paused-for-network', {
+          songId:song.id, source:audioNetworkFailure?'audio-cdn-network':'proxy-or-fetch',
+          freshRetry:!!opts.freshUrl,
+        });
         toast('音乐网络暂时不可用，已暂停连续跳歌，可重新播放重试','error');
         return;
       }
@@ -751,6 +794,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const q=queueRef.current,cur=q.findIndex(s=>s.id===song.id);
       const next=Array.from({length:q.length},(_,i)=>(Math.max(0,cur)+i+1)%q.length).find(i=>!failedSongsRef.current.has(q[i].id));
       if(next===undefined){toast('当前队列歌曲均无法播放，已暂停','error');return;}
+      musicTrace.info('track-auto-skipped', { songId:song.id, nextSongId:q[next].id, mediaCode:Number.isFinite(code)?code:null });
       toast('播放失败，已跳过这首歌','info');idxRef.current=next;setIdx(next);
       void playSong(q[next],{alsoSetQueue:false,recovering:true});
     };
