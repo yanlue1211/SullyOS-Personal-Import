@@ -6,6 +6,10 @@ export const MAX_MOMENTS_AUTO_COMMENTS = 16;
 export const MAX_MOMENTS_USER_REPLY_RESERVE = 4;
 export const MAX_MOMENTS_REPLY_DEPTH = 3;
 export const MAX_MOMENTS_REPLIES_PER_ACTOR_THREAD = 2;
+/** Unprompted social chatter: at most two follow-ups to other characters' replies
+ * across one post. Initial comments stay unlimited by participant count. */
+export const MAX_MOMENTS_AUTO_FOLLOWUPS_PER_POST = 2;
+export const MAX_MOMENTS_AUTO_REPLIES_PER_ROOT = 2;
 
 export interface MomentsEngagement {
   allowRoot: boolean;
@@ -70,6 +74,26 @@ export function momentsAutoBudgetAllows(post: Post, actorId: string, replyTo?: s
 
   const root = rootComment(post, replyTo);
   if (!root) return false;
+  const userAddressed = momentsUserAddressedActor(post, actorId, replyTo);
+
+  // A creator answering B's first comment is ordinary, valuable interaction.
+  // The repeated B -> A -> B acknowledgement loop is what crowds the feed:
+  // keep only two automatic replies per ordinary root, and at most two
+  // secondary auto follow-ups across the entire post. User-directed new
+  // messages have a separate, bounded reply budget and bypass these chatter caps.
+  if (!userAddressed) {
+    const automaticRootReplies = comments.filter(c => c.authorId !== "user" && c.replyTo &&
+      rootComment(post, c.id)?.id === root.id).length;
+    if (automaticRootReplies >= MAX_MOMENTS_AUTO_REPLIES_PER_ROOT) return false;
+    if (target.replyTo && target.authorId !== "user") {
+      const followups = comments.filter(c => {
+        if (c.authorId === "user" || !c.replyTo) return false;
+        const parent = comments.find(p => p.id === c.replyTo);
+        return !!(parent?.replyTo && parent.authorId !== "user");
+      }).length;
+      if (followups >= MAX_MOMENTS_AUTO_FOLLOWUPS_PER_POST) return false;
+    }
+  }
   const ownThreadReplies = own.filter(c => c.replyTo && rootComment(post, c.id)?.id === root.id);
   return ownThreadReplies.length < MAX_MOMENTS_REPLIES_PER_ACTOR_THREAD;
 }
