@@ -4,6 +4,7 @@ import {createRoot} from 'react-dom/client';
 import {beforeEach,afterEach,it,expect,vi} from 'vitest';
 vi.mock('./db',()=>({DB:{getAssetRaw:vi.fn(async()=>null)}}));
 import {MusicProvider,useMusic,musicApi,type Song} from '../context/MusicContext';
+import {cachedCall,clearAll} from './musicCache';
 class AudioMock extends EventTarget {
  src='';paused=true;preload='';currentTime=0;duration=100;error:any=null;
  play=vi.fn(async()=>{this.paused=false;this.dispatchEvent(new Event('play'));});
@@ -14,6 +15,19 @@ function Probe(){music=useMusic();return null;}
 const songs:Song[]=[1,2,3].map(id=>({id,name:'歌'+id,artists:'歌手',album:'',albumPic:'',duration:1,fee:0}));
 beforeEach(async()=>{(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;localStorage.clear();vi.stubGlobal('Audio',class extends AudioMock{constructor(){super();audio=this;}});vi.spyOn(musicApi,'lyric').mockResolvedValue({});vi.spyOn(musicApi,'songUrl').mockImplementation(async(_cfg,id)=>({data:[{url:'https://cdn.test/'+id}]}));vi.spyOn(musicApi,'songUrlFresh').mockResolvedValue({data:[]});host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root.render(<MusicProvider><Probe/></MusicProvider>));});
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.restoreAllMocks();vi.unstubAllGlobals();});
+it('does not store empty song/url results in the browser cache',async()=>{
+ clearAll();let requests=0;
+ const fetcher=async()=>{
+   requests++;
+   return requests===1?{data:[{url:null}]}:{data:[{url:'https://cdn.test/recovered'}]};
+ };
+ const first=await cachedCall('/song/url',{ids:[741],level:'exhigh'},'',fetcher);
+ const second=await cachedCall('/song/url',{ids:[741],level:'exhigh'},'',fetcher);
+ expect(first.data[0].url).toBeNull();
+ expect(second.data[0].url).toBe('https://cdn.test/recovered');
+ expect(requests).toBe(2);
+ clearAll();
+});
 it('missing URLs skip to the next track and stop after exhausting the queue',async()=>{
  vi.mocked(musicApi.songUrl).mockResolvedValue({data:[]});
  await act(async()=>{await music.playSong(songs[0],{replaceQueue:songs,startIdx:0});});
