@@ -277,12 +277,20 @@ export const musicApi = {
     if (isSongUrl) {
       let audioHost = '';
       try { audioHost = j?.data?.[0]?.url ? new URL(j.data[0].url).hostname : ''; } catch {}
+      // Worker responds 502 for *all* failed upstreams, including upstream HTTP 5xx
+      // and timeouts. Only extract safe status/classification, never raw upstream
+      // detail (it may include request URLs or a user's cookie in edge cases).
+      const upstreamDetail = typeof j?.detail === 'string' ? j.detail : '';
+      const upstreamStatusMatch = /\bHTTP\s+(\d{3})\b/i.exec(upstreamDetail);
       musicTrace.info('song-url-proxy-result', {
         songId: Number.isFinite(songId) ? songId : null,
         httpStatus: res.status, apiCode: typeof j?.code === 'number' ? j.code : null,
         hasAudioUrl: typeof j?.data?.[0]?.url === 'string' && !!j.data[0].url.trim(),
         audioHost: audioHost || null,
         quality: body?.level || null, refresh: !!body?.playbackRefreshNonce,
+        upstreamHttpStatus: upstreamStatusMatch ? Number(upstreamStatusMatch[1]) : null,
+        upstreamTimedOut: /\btimeout\b/i.test(upstreamDetail),
+        upstreamFailure: res.status===502 && j?.error==='netease upstream fetch failed (all sources)',
         elapsedMs: Date.now() - started,
       });
     }
