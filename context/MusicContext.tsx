@@ -777,15 +777,19 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         void playSong(song,{alsoSetQueue:false,recovering:true,freshUrl:true,requestedByCharId:opts.requestedByCharId});
         return;
       }
-      if(audioNetworkFailure || serviceFailure){
-        // A failing CDN/proxy affects multiple tracks. Do not rapid-skip an entire playlist
-        // after one song's fresh retry has also failed.
+      // A single song's /song/url upstream 502 is not proof the whole service is down.
+      // Preserve auto-skip for isolated failures, but after two consecutive songs
+      // fail at the proxy, pause instead of stampeding ten+ entries in the queue.
+      const proxyOutageThresholdReached = serviceFailure && !audioNetworkFailure
+        && opts.freshUrl && failedSongsRef.current.size >= 2;
+      if(audioNetworkFailure || (serviceFailure && (!opts.freshUrl || proxyOutageThresholdReached))){
         setPlaying(false);setLoadingSong(false);
         musicTrace.warn('queue-paused-for-network', {
           songId:song.id, source:audioNetworkFailure?'audio-cdn-network':'proxy-or-fetch',
           freshRetry:!!opts.freshUrl,
+          priorFailedTracks:failedSongsRef.current.size,
         });
-        toast('音乐网络暂时不可用，已暂停连续跳歌，可重新播放重试','error');
+        toast('连续多首歌曲的播放地址获取失败，已暂停跳歌，可稍后重试','error');
         return;
       }
       if(failedSongsRef.current.has(song.id))return;
@@ -794,7 +798,10 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const q=queueRef.current,cur=q.findIndex(s=>s.id===song.id);
       const next=Array.from({length:q.length},(_,i)=>(Math.max(0,cur)+i+1)%q.length).find(i=>!failedSongsRef.current.has(q[i].id));
       if(next===undefined){toast('当前队列歌曲均无法播放，已暂停','error');return;}
-      musicTrace.info('track-auto-skipped', { songId:song.id, nextSongId:q[next].id, mediaCode:Number.isFinite(code)?code:null });
+      musicTrace.info('track-auto-skipped', { songId:song.id, nextSongId:q[next].id, mediaCode:Number.isFinite(code)?code:null,
+        cause:serviceFailure?'proxy-upstream-failure':urlExpiredOrUnsupported?'media-unsupported':emptyUrl?'empty-url':'media-error',
+        consecutiveFailedTracks:failedSongsRef.current.size,
+      });
       toast('播放失败，已跳过这首歌','info');idxRef.current=next;setIdx(next);
       void playSong(q[next],{alsoSetQueue:false,recovering:true});
     };
