@@ -4442,7 +4442,7 @@ describe('onBeforeFire — 即时对话分支', () => {
     expect(result.messages[0]).toEqual(original[0]);
     expect(result.messages[1]).toEqual(original[1]);
     expect(result.messages[2].content).toContain('现在是');
-    expect(result.messages[3]).toEqual(original[2]);
+    expect(result.messages[3]).toEqual({...original[2], name: 'sully_live_context'});
     expect(result.messages[4]).toEqual(original[3]);
   });
 
