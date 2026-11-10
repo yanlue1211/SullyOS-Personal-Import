@@ -119,10 +119,12 @@ export function geminiUsage(metadata: any = {}): any {
     const prompt = openai?.prompt_tokens ?? gemini?.promptTokenCount ?? metadata.promptTokenCount ?? 0;
     const thoughts = gemini?.thoughtsTokenCount ?? metadata.thoughtsTokenCount ?? 0;
     const completion = openai?.completion_tokens ?? ((gemini?.candidatesTokenCount ?? metadata.candidatesTokenCount ?? 0) + thoughts);
-    const cached = openai?.prompt_tokens_details?.cached_tokens ?? gemini?.cachedContentTokenCount ?? metadata.cachedContentTokenCount ?? 0;
+    // Missing usage is unknown, not evidence of a cache miss. Some relays omit
+    // this field on otherwise successful responses; preserve that distinction.
+    const cached = openai?.prompt_tokens_details?.cached_tokens ?? gemini?.cachedContentTokenCount ?? metadata.cachedContentTokenCount;
     return { ...metadata, prompt_tokens: prompt, completion_tokens: completion,
         total_tokens: openai?.total_tokens ?? gemini?.totalTokenCount ?? metadata.totalTokenCount ?? prompt + completion,
-        prompt_tokens_details: { cached_tokens: cached }, completion_tokens_details: { reasoning_tokens: openai?.completion_tokens_details?.reasoning_tokens ?? thoughts } };
+        prompt_tokens_details: { ...(cached != null ? { cached_tokens: cached } : {}) }, completion_tokens_details: { reasoning_tokens: openai?.completion_tokens_details?.reasoning_tokens ?? thoughts } };
 }
 
 const finishReason = (reason: string, calls: boolean) => reason === 'MAX_TOKENS' ? 'length' : calls ? 'tool_calls' : 'stop';

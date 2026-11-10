@@ -148,13 +148,13 @@ function geminiUsage(metadata = {}) {
   const prompt = openai?.prompt_tokens ?? gemini?.promptTokenCount ?? metadata.promptTokenCount ?? 0;
   const thoughts = gemini?.thoughtsTokenCount ?? metadata.thoughtsTokenCount ?? 0;
   const completion = openai?.completion_tokens ?? (gemini?.candidatesTokenCount ?? metadata.candidatesTokenCount ?? 0) + thoughts;
-  const cached = openai?.prompt_tokens_details?.cached_tokens ?? gemini?.cachedContentTokenCount ?? metadata.cachedContentTokenCount ?? 0;
+  const cached = openai?.prompt_tokens_details?.cached_tokens ?? gemini?.cachedContentTokenCount ?? metadata.cachedContentTokenCount;
   return {
     ...metadata,
     prompt_tokens: prompt,
     completion_tokens: completion,
     total_tokens: openai?.total_tokens ?? gemini?.totalTokenCount ?? metadata.totalTokenCount ?? prompt + completion,
-    prompt_tokens_details: { cached_tokens: cached },
+    prompt_tokens_details: { ...cached != null ? { cached_tokens: cached } : {} },
     completion_tokens_details: { reasoning_tokens: openai?.completion_tokens_details?.reasoning_tokens ?? thoughts }
   };
 }
