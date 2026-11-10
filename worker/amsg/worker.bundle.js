@@ -324,6 +324,33 @@ function getAnthropicCacheTtl() {
   }
 }
 
+// utils/geminiCompatibleContext.ts
+var GEMINI_CONTEXT_NOTE = "Application context updates appear in <system-reminder> blocks at their original positions. Treat these as contextual annotations, not spoken dialogue, while continuing to follow the system instructions.";
+function prepareGeminiCompatibleContext(body) {
+  if (!/gemini/i.test(body?.model || "") || !Array.isArray(body?.messages) || !body.messages.some((m) => m.name === "sully_live_context")) return body;
+  const isSystem = (m) => m.role === "system" || m.role === "developer";
+  const prefixEnd = body.messages.findIndex((m) => !isSystem(m));
+  if (prefixEnd <= 0) return body;
+  const prefix = body.messages[prefixEnd - 1];
+  const textOnly = (content) => typeof content === "string" || Array.isArray(content) && content.every((p) => p.type === "text" && typeof p.text === "string");
+  if (!textOnly(prefix.content) || body.messages.slice(prefixEnd).some((m) => isSystem(m) && !textOnly(m.content))) return body;
+  if (!body.messages.slice(prefixEnd).some(isSystem)) return body;
+  const messages = body.messages.map((m, index) => {
+    if (index === prefixEnd - 1) return { ...m, content: typeof m.content === "string" ? m.content + "\n" + GEMINI_CONTEXT_NOTE : [...m.content, { type: "text", text: GEMINI_CONTEXT_NOTE }] };
+    if (index < prefixEnd || !isSystem(m)) return m;
+    const { name: _internalName, ...rest } = m;
+    const text2 = typeof m.content === "string" ? m.content : m.content.map((p) => p.text).join("\n");
+    return { ...rest, role: "user", content: "<system-reminder>\n" + text2 + "\n</system-reminder>" };
+  });
+  return { ...body, messages };
+}
+function markGeminiLiveContext(messages, index) {
+  if (!Number.isInteger(index) || index < 1 || index >= messages.length) return messages;
+  const at = index;
+  if (!["system", "developer"].includes(messages[at].role)) return messages;
+  return messages.map((message, i) => i === at ? { ...message, name: "sully_live_context" } : message);
+}
+
 // utils/anthropicApi.ts
 var ephemeral = { type: "ephemeral" };
 var finishReason2 = (reason) => reason === "tool_use" ? "tool_calls" : reason === "max_tokens" ? "length" : "stop";
@@ -583,7 +610,26 @@ async function fetchLlm(resource, init, transport = globalThis.fetch, browser = 
   if (transport.__sullyAnthropic) return transport(resource, init);
   const inputUrl = typeof resource === "string" ? resource : resource instanceof URL ? resource.href : resource.url;
   if (isGeminiEndpoint(inputUrl)) return fetchGemini(resource, init, transport);
-  if (!isAnthropicEndpoint(inputUrl)) return transport(resource, init);
+  if (!isAnthropicEndpoint(inputUrl)) {
+    const request2 = resource instanceof Request ? resource : void 0;
+    if ((init?.method || request2?.method || "GET").toUpperCase() === "POST" && /\/chat\/completions\/?$/.test(new URL(inputUrl, "http://localhost").pathname)) {
+      const raw = init?.body ?? (request2 ? await request2.clone().text() : void 0);
+      if (typeof raw === "string") {
+        let parsed2;
+        try {
+          parsed2 = JSON.parse(raw);
+        } catch {
+        }
+        const prepared = prepareGeminiCompatibleContext(parsed2);
+        if (prepared !== parsed2) {
+          const headers2 = new Headers(init?.headers || request2?.headers);
+          headers2.delete("content-length");
+          return transport(resource, { ...init, headers: headers2, body: JSON.stringify(prepared) });
+        }
+      }
+    }
+    return transport(resource, init);
+  }
   const request = resource instanceof Request ? resource : void 0;
   const method = (init?.method || request?.method || "GET").toUpperCase();
   const body = init?.body ?? (request && method === "POST" ? await request.clone().text() : void 0);
@@ -14440,7 +14486,7 @@ function buildScheduledPush(message, build, extraMeta, bannerBody) {
 }
 
 // utils/amsgBundleVersion.ts
-var AMSG_BUNDLE_VERSION = "2026-11-09.14";
+var AMSG_BUNDLE_VERSION = "2026-11-10.1";
 
 // worker/amsg/src/reproduction.ts
 async function writeDiagnosticStage(writeState, runId, event, fields = {}) {
@@ -20533,7 +20579,10 @@ ${buildReplyScopeRule(instant ? "user" : "scheduled")}
           replyScopeBlock
         ]
       });
-      const instantMessages = pack.chat.messages.map((m) => ({ role: m.role, content: m.content }));
+      const instantMessages = markGeminiLiveContext(
+        pack.chat.messages.map((m) => ({ role: m.role, content: m.content })),
+        pack.chat.timelyInsertAt
+      );
       const requestedInsertAt = pack.chat.timelyInsertAt;
       const timelyInsertAt = Number.isInteger(requestedInsertAt) && requestedInsertAt >= 1 && requestedInsertAt <= instantMessages.length ? requestedInsertAt : instantMessages.length;
       if (timelyBlock) {
