@@ -718,10 +718,12 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     let handled=false;
     const failed=(error?:any)=>{
       if(attempt!==playAttemptRef.current || handled)return;
-      if(error?.name==='AbortError')return;
+      // MEDIA_ERR_ABORTED (code 1) is an expected result of switching tracks,
+      // not evidence that the replacement track cannot play.
+      const code=Number(error?.code);
+      if(error?.name==='AbortError' || code===1)return;
       if(error?.name==='NotAllowedError'){setPlaying(false);setLoadingSong(false);toast('请点击播放以继续音乐','info');return;}
       handled=true;
-      const code=Number(error?.code);
       const reason=String(error?.message || '');
       const serviceFailure = error?.name==='TypeError'
         || /(?:Failed to fetch|NetworkError|network error|timed? ?out|timeout|HTTP 5[0-9][0-9]|HTTP 429|upstream fetch failed|all sources)/i.test(reason);
