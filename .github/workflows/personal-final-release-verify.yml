@@ -34,7 +34,7 @@ jobs:
       - name: Cross-feature and transactional persistence regression
         run: pnpm exec vitest run utils/fourwayPersonalIntegration.test.ts utils/phoneGeneration.test.ts utils/storyTheaterManualArchive.test.ts utils/homeRomance.test.ts utils/blobRef.test.ts utils/blobGc.test.ts
       - name: Verify music playback recovery without losing automatic skip
-        run: pnpm exec vitest run utils/musicPlaybackRecovery.test.tsx utils/musicWorkerUrl.test.ts
+        run: pnpm exec vitest run utils/musicPlaybackRecovery.test.tsx utils/musicWorkerUrl.test.ts utils/devDebug.test.ts
       - name: Production frontend and Worker build
         run: pnpm run build
       - name: Verify committed Worker bundle matches regenerated output
