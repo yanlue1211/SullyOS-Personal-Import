@@ -1,0 +1,23 @@
+name: Verify conversational expression
+on:
+  push:
+    branches: [personal/natural-chat-style-20261110]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm vitest run utils/chatPromptPreferences.test.ts utils/chatPrompts.test.ts utils/chatPrompts.firePack.test.ts utils/chatRequestPayload.test.ts utils/personalPromptOrder.test.ts utils/contextWorldbook.test.ts utils/contextVolatileSplit.test.ts utils/personalInnerVoice.test.ts utils/personalCallMedia.test.ts utils/anthropicApi.test.ts utils/geminiApi.test.ts
+      - run: pnpm run build
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
