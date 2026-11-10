@@ -81,6 +81,7 @@ it('network playback media errors refresh the current URL instead of skipping',a
  expect(musicApi.songUrlFresh).toHaveBeenCalledTimes(1);
 });
 it('a fresh URL request uses a unique cache key and preserves the chosen quality',async()=>{
+ vi.mocked(musicApi.songUrlFresh).mockRestore();
  const raw=vi.spyOn(musicApi,'_raw').mockResolvedValue({data:[{url:'https://cdn.test/1'}]});
  await musicApi.songUrlFresh({...music.cfg,quality:'lossless'},1);
  await musicApi.songUrlFresh({...music.cfg,quality:'lossless'},1);
