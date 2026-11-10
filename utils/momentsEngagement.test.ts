@@ -85,3 +85,43 @@ it("stops ordinary automatic comments at 16 but reserves four user-addressed rep
   add(p, "my-last-comment", "user");
   expect(p.comments.at(-1)?.authorId).toBe("user");
 });
+ 
+
+it("a busy thread can have many different first commenters without endless courtesy replies", () => {
+  // A post with five root comments resembles the reported 14-comment crowd:
+  // initial participants keep their autonomy, but only two ordinary follow-ups
+  // to previously-written replies are allowed across the post.
+  const p = post("busy", "owner");
+  for (const name of ["ding", "he", "yan", "zhang", "yuan"])
+    add(p, name + "-root", name);
+  for (const name of ["ding", "he", "zhang", "yuan"]) {
+    expect(momentsAutoBudgetAllows(p, "owner", name + "-root")).toBe(true);
+    add(p, "owner-to-" + name, "owner", name + "-root");
+  }
+  expect(momentsAutoBudgetAllows(p, "ding", "owner-to-ding")).toBe(true);
+  add(p, "ding-followup", "ding", "owner-to-ding");
+  expect(momentsAutoBudgetAllows(p, "he", "owner-to-he")).toBe(true);
+  add(p, "he-followup", "he", "owner-to-he");
+  // Five people can join independently; the fourth, fifth, sixth rounds
+  // of automatic ping-pong across the post cannot all happen.
+  expect(momentsAutoBudgetAllows(p, "yuan", "owner-to-yuan")).toBe(false);
+  expect(momentsAutoBudgetAllows(p, "zhang", "owner-to-zhang")).toBe(false);
+  expect(momentsAutoBudgetAllows(p, "owner", "ding-followup")).toBe(false);
+  expect(p.comments).toHaveLength(11);
+  expect(momentsEngagement(p, "new-friend", habits, true, []).allowRoot).toBe(true);
+});
+
+it("does not let the ordinary follow-up cap swallow a fresh user reply", () => {
+  const p = post("user-priority", "owner");
+  add(p, "b-root", "b");
+  add(p, "owner-first", "owner", "b-root");
+  add(p, "b-followup", "b", "owner-first");
+  add(p, "c-root", "c");
+  add(p, "owner-second", "owner", "c-root");
+  add(p, "c-followup", "c", "owner-second");
+  add(p, "user-question", "user", "owner-second");
+  expect(momentsUserAddressedActor(p, "owner", "user-question")).toBe(true);
+  expect(momentsAutoBudgetAllows(p, "owner", "user-question")).toBe(true);
+  expect(momentsEngagement(p, "owner", habits, false, ["user-question"]).replyableCommentIds)
+    .toContain("user-question");
+});

@@ -500,3 +500,28 @@ it('consumes closed-thread events without forcing the model to answer an unrelat
  expect((await rows('event','a')).filter(x=>(x as any).status==='pending')).toHaveLength(0);
  expect((await rows('log','a')).map(x=>(x as any).text).join('\n')).toContain('跳过已收束话题'+(newTopicAllowed?'1':'2')+'条');
 });
+
+it("a post owner may select only two replies from a busy new-comment batch", async () => {
+  await saveConfig(c => { c.friends.push(["a", "b"]); });
+  const ownPost = await publish("a", "阿青", {
+    text: "刚下班，今天有点忙", theme: "晚间",
+    media: [], visibility: { mode: "all", ids: [] },
+  });
+  for (let i=0;i<3;i++)
+    await interact("b", "乙", ownPost.id, {kind:"comment",text:"我有件不同的事想聊"+i});
+  const roots = (await getRow<Post>(ownPost.id))!.comments;
+  vi.mocked(safeFetchJson).mockImplementation(async (_url, options) => ({
+    choices: [{finish_reason:"stop",message:{content:JSON.stringify({
+      requestId:promptRequest(options).id,
+      browsed:[ownPost.id],
+      actions:roots.map((row,i)=>({kind:"comment",postId:ownPost.id,
+        replyTo:row.id,recipientId:"b",text:"第"+i+"件我听见了"})),
+      post:null,important:[],
+    })}}],
+  }));
+  await runActivity("a",{api:global,user:{name:"小雨"} as any});
+  const actual=(await getRow<Post>(ownPost.id))!.comments;
+  expect(actual.filter(c=>c.authorId==="a")).toHaveLength(2);
+  expect(actual.filter(c=>c.authorId==="a").map(c=>c.replyTo)).toEqual([roots[0].id,roots[1].id]);
+  expect(safeFetchJson).toHaveBeenCalledTimes(1);
+});
