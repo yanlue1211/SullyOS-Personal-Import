@@ -28,7 +28,7 @@ class MoonPlayer {
   let s=this.session!;const wasEnded=s.status==='ended';s={...s,status:'preparing'};this.session=s;await this.persist();
   if(s.mode==='story'){
    const parts=s.plannedParts||Math.max(1,Math.ceil(s.targetMinutes/5));
-   if(!s.plan){s={...s,plannedParts:parts,plan:await generate(s,this.env!,`为一篇${s.kind}规划${parts}个编号明确、情节互不重叠的连续部分的简短提纲，每部分写明起点、推进的新事件与停笔位置。不要把同一次问答或同一场景分配给多个部分。最后再列出全篇关键事件顺序。，主题：${s.theme||'由你决定'}。整篇朗读目标${s.targetMinutes}分钟。仅输出提纲，不开始正文。故事最后一段必须收束；碎碎念区分真实经历与想象。`,signal)};this.session=s;await this.persist();}
+   if(!s.plan){s={...s,plannedParts:parts,plan:await generate(s,this.env!,`为一篇${s.kind}规划${parts}个编号明确、情节互不重叠的连续部分的简短提纲，每部分写明起点、推进的新事件与停笔位置。不要把同一次问答或同一场景分配给多个部分。最后再列出全篇关键事件顺序。，主题：${s.theme||'由你决定'}。整篇朗读目标${s.targetMinutes}分钟。仅输出提纲，不开始正文。故事最后一段必须收束；碎碎念区分真实经历与想象。`,signal,'plain')};this.session=s;await this.persist();}
    for(let part=s.turns.filter(t=>t.source==='story').length;part<parts;part++){
     const prompt=`根据这个完整提纲继续创作第${part+1}/${parts}部分：${s.plan}。类型${s.kind}；本段约${Math.round(s.targetMinutes/parts*210*s.speed)}汉字。仅输出可以朗读的正文，不输出标题、章节编号和解释。前面${part}部分已经讲完，仅完成提纲中第${part+1}部分的新内容；从已生成正文最后的时间与动作继续，不回顾、不换说法重演已经发生的问答、入睡或告别。提纲与已生成正文有出入时，以正文已经发生的事实为准，跳过已讲过的情节。允许短于目标字数，不能靠重复凑字数。上一部分的停笔位置（仅用于衔接，不要复述）：${s.turns.filter(t=>t.source==='story').at(-1)?.text.slice(-500)||'尚未开篇'}。承接前文，不重复，${part===parts-1?'本段结束整篇内容，温柔收束。':'不要提前结束整篇内容。'}`;
     const text=await generate(s,this.env!,prompt,signal);signal.throwIfAborted();s=addReply(s,text,'story');this.session=s;await this.persist();

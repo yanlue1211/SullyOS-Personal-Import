@@ -24,7 +24,12 @@ export class SpeechTurnGate {
   if (now - this.calibrationStart < 500) { this.calibration.push(rms); return 'calibrating'; }
   if (this.calibration.length) {
    const sorted = this.calibration.sort((a,b) => a-b);
-   this.noise = Math.max(.0002, sorted[Math.floor((sorted.length - 1) * .2)]);
+   const low=sorted[Math.floor((sorted.length-1)*.2)],high=sorted[Math.floor((sorted.length-1)*.8)];
+   const modulated=high>Math.max(.0018,low*1.8)&&high-low>.0008;
+   // Initial speech must not become the noise floor. A single opening click is
+   // excluded by the percentile and sustained-frame requirements.
+   this.noise=Math.max(.00005,modulated?low*.35:low);
+   if(modulated&&sorted.filter(value=>value>Math.max(.0018,low*1.5)).length>=2){this.active=true;this.voicedMs=180;this.lastVoice=now;this.peak=high;}
    this.calibration = [];
   }
   this.recent.push({rms, at: now});
@@ -36,9 +41,13 @@ export class SpeechTurnGate {
    const low=levels[Math.floor(levels.length*.1)],high=levels[Math.floor(levels.length*.9)];
    if(low>this.noise*1.5 && high<=low*1.2 && high<Math.min(.03,this.peak*.3))this.noise=low;
   }
+  if(!this.hasSpeech&&this.recent.length>=6&&now-this.recent[0].at>=500){
+   const levels=this.recent.map(frame=>frame.rms).sort((a,b)=>a-b),low=levels[Math.floor(levels.length*.2)],high=levels[Math.floor(levels.length*.8)];
+   if(high>Math.max(.0018,low*1.8)&&high-low>.0008)this.noise=Math.min(this.noise,Math.max(.00005,low*.4));
+  }
   const threshold = this.active
-   ? Math.max(.0035, this.noise * 1.8 + .001)
-   : Math.max(.005, this.noise * 2.5 + .002);
+   ? Math.max(.0012, this.noise * 1.6 + .0002)
+   : Math.max(.0018, this.noise * 2.2 + .0003);
   if (rms >= threshold) {
    this.candidateMs += delta;
    // Reject one-off clicks/breath spikes; a resuming voice must persist briefly.

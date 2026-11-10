@@ -98,3 +98,20 @@ it('allows a resuming voice at the countdown boundary to confirm before sending'
  for(let t=1400;t<=5200;t+=100)gate.update(.001,t);
  expect(gate.update(.02,5300)).not.toBe('complete');expect(gate.update(.02,5400)).toBe('speaking');
 });
+
+it('does not calibrate an opening speaking voice as permanent noise',()=>{
+ const gate=new SpeechTurnGate(),levels=[.02,.065,.03,.08,.025];
+ levels.forEach((value,index)=>gate.update(value,index*100));
+ for(let t=500;t<=1500;t+=100)gate.update(t%300?.025:.07,t);
+ expect(gate.hasSpeech).toBe(true);expect(gate.update(.001,5500)).toBe('complete');
+});
+it('detects a low-level voice that was below the old absolute floor',()=>{
+ const gate=new SpeechTurnGate();for(let t=0;t<=500;t+=100)gate.update(.0001,t);
+ for(let t=600;t<=1300;t+=100)gate.update(.0025,t);
+ expect(gate.hasSpeech).toBe(true);expect(gate.update(.0001,5300)).toBe('complete');
+});
+it('recovers if a stationary startup sample was too high but subsequent speech is modulated',()=>{
+ const gate=new SpeechTurnGate();for(let t=0;t<=500;t+=100)gate.update(.025,t);
+ for(let t=600;t<=2600;t+=100)gate.update(t%300?.01:.055,t);
+ expect(gate.hasSpeech).toBe(true);
+});

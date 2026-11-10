@@ -16,7 +16,16 @@ export function splitSpeech(text:string,max=600):string[] {
  const result:string[]=[]; let chunk='';
  for(const sentence of text.match(/[^。！？\n]+[。！？\n]*|[。！？\n]+/g)||[text]) {
   if(chunk.length+sentence.length>max&&chunk.trim()){result.push(chunk.trim());chunk='';}
-  for(let i=0;i<sentence.length;i+=max){const part=sentence.slice(i,i+max);if(part.length===max){if(chunk.trim())result.push(chunk.trim());result.push(part);chunk='';}else chunk+=part;}
+  for(let i=0;i<sentence.length;){
+   let end=Math.min(sentence.length,i+max);
+   for(const match of sentence.matchAll(/<#[\d.]+#>|\(breath\)/g)){
+    const start=match.index!,stop=start+match[0].length;
+    if(start<end&&stop>end)end=start>i?start:stop;
+   }
+   const part=sentence.slice(i,end);i=end;
+   if(chunk.length+part.length>max&&chunk.trim()){result.push(chunk.trim());chunk='';}
+   chunk+=part;if(chunk.length>=max){result.push(chunk.trim());chunk='';}
+  }
  }
  if(chunk.trim())result.push(chunk.trim());return result;
 }
