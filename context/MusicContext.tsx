@@ -715,7 +715,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const mediaCode=Number(error?.code);
       const networkMediaError=mediaCode===2; // MEDIA_ERR_NETWORK; retry the SAME song, not the next.
       const detail=String(error?.message || '');
-      const serviceNetworkError=/(?:failed to fetch|networkerror|network error|timeout|timed out|HTTP 5\\d\\d|HTTP 429)/i.test(detail);
+      const serviceNetworkError=/(?:failed to fetch|networkerror|network error|timeout|timed out|HTTP 5[0-9][0-9]|HTTP 429)/i.test(detail);
       console.warn('[Music] playback failed', { songId:song.id, attempt, mediaCode:Number.isFinite(mediaCode)?mediaCode:null, errorName:error?.name || '' });
       if(networkMediaError && !opts.retriedNetwork){
         setPlaying(false);setLoadingSong(true);
