@@ -72,6 +72,13 @@ it('does not call load() with an empty source when changing songs on mobile',asy
  expect(loadSpy).not.toHaveBeenCalled();
  expect(audio.src).toBe('https://cdn.test/2');
 });
+it('aborted media loading while changing tracks does not count as a failed song',async()=>{
+ await act(async()=>{await music.playSong(songs[0],{replaceQueue:songs,startIdx:0});});
+ await act(async()=>{audio.error={code:1};audio.dispatchEvent(new Event('error'));});
+ expect(music.current?.id).toBe(1);
+ expect(musicApi.songUrlFresh).not.toHaveBeenCalled();
+ expect(vi.mocked(musicApi.songUrl).mock.calls.map(c=>c[1])).toEqual([1]);
+});
 it('network playback media errors refresh the current URL instead of skipping',async()=>{
  vi.mocked(musicApi.songUrlFresh).mockResolvedValueOnce({data:[{url:'https://cdn.test/1-fresh'}]});
  await act(async()=>{await music.playSong(songs[0],{replaceQueue:songs,startIdx:0});});
