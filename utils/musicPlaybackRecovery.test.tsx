@@ -12,12 +12,69 @@ class AudioMock extends EventTarget {
 let music:ReturnType<typeof useMusic>,audio:AudioMock,root:ReturnType<typeof createRoot>,host:HTMLDivElement;
 function Probe(){music=useMusic();return null;}
 const songs:Song[]=[1,2,3].map(id=>({id,name:'歌'+id,artists:'歌手',album:'',albumPic:'',duration:1,fee:0}));
-beforeEach(async()=>{(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;localStorage.clear();vi.stubGlobal('Audio',class extends AudioMock{constructor(){super();audio=this;}});vi.spyOn(musicApi,'lyric').mockResolvedValue({});vi.spyOn(musicApi,'songUrl').mockImplementation(async(_cfg,id)=>({data:[{url:'https://cdn.test/'+id}]}));host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root.render(<MusicProvider><Probe/></MusicProvider>));});
+beforeEach(async()=>{(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;localStorage.clear();vi.stubGlobal('Audio',class extends AudioMock{constructor(){super();audio=this;}});vi.spyOn(musicApi,'lyric').mockResolvedValue({});vi.spyOn(musicApi,'songUrl').mockImplementation(async(_cfg,id)=>({data:[{url:'https://cdn.test/'+id}]}));vi.spyOn(musicApi,'songUrlFresh').mockResolvedValue({data:[]});host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root.render(<MusicProvider><Probe/></MusicProvider>));});
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.restoreAllMocks();vi.unstubAllGlobals();});
 it('missing URLs skip to the next track and stop after exhausting the queue',async()=>{
  vi.mocked(musicApi.songUrl).mockResolvedValue({data:[]});
  await act(async()=>{await music.playSong(songs[0],{replaceQueue:songs,startIdx:0});});
  expect(vi.mocked(musicApi.songUrl).mock.calls.map(c=>c[1])).toEqual([1,2,3]);expect(music.current?.id).toBe(3);expect(music.playing).toBe(false);
+});
+it('empty cached play URLs fetch a fresh address for the SAME song before any skip',async()=>{
+ vi.mocked(musicApi.songUrl).mockResolvedValueOnce({data:[]});
+ vi.mocked(musicApi.songUrlFresh).mockResolvedValueOnce({data:[{url:'https://cdn.test/recovered-1'}]});
+ await act(async()=>{await music.playSong(songs[0],{replaceQueue:songs,startIdx:0});});
+ expect(music.current?.id).toBe(1);
+ expect(audio.src).toBe('https://cdn.test/recovered-1');
+ expect(musicApi.songUrlFresh).toHaveBeenCalledTimes(1);
+ expect(vi.mocked(musicApi.songUrl).mock.calls.map(c=>c[1])).toEqual([1]);
+});
+it('network outages do not skip the entire playlist; retry only this track once',async()=>{
+ vi.mocked(musicApi.songUrl).mockRejectedValueOnce(new Error('HTTP 502'));
+ vi.mocked(musicApi.songUrlFresh).mockRejectedValueOnce(new Error('netease upstream fetch failed (all sources)'));
+ await act(async()=>{await music.playSong(songs[0],{replaceQueue:songs,startIdx:0});});
+ expect(music.current?.id).toBe(1);
+ expect(music.playing).toBe(false);
+ expect(musicApi.songUrlFresh).toHaveBeenCalledTimes(1);
+ expect(vi.mocked(musicApi.songUrl).mock.calls.map(c=>c[1])).toEqual([1]);
+});
+it('stale media errors while the next song has no attached source cannot trigger another skip',async()=>{
+ let release!:(result:any)=>void;
+ vi.mocked(musicApi.songUrl).mockImplementationOnce(()=>new Promise(resolve=>{release=resolve;}));
+ let requested!:Promise<void>;
+ await act(async()=>{requested=music.playSong(songs[0],{replaceQueue:songs,startIdx:0});});
+ expect(audio.src).toBe('');
+ audio.error={code:4};
+ await act(async()=>{audio.dispatchEvent(new Event('error'));});
+ expect(music.current?.id).toBe(1);
+ expect(musicApi.songUrlFresh).not.toHaveBeenCalled();
+ await act(async()=>{release({data:[{url:'https://cdn.test/1'}]});await requested;});
+ expect(audio.src).toBe('https://cdn.test/1');
+ expect(music.current?.id).toBe(1);
+});
+it('does not call load() with an empty source when changing songs on mobile',async()=>{
+ const loadSpy=vi.spyOn(audio,'load');
+ await act(async()=>{await music.playSong(songs[0],{replaceQueue:songs,startIdx:0});});
+ await act(async()=>{await music.playSong(songs[1]);});
+ expect(loadSpy).not.toHaveBeenCalled();
+ expect(audio.src).toBe('https://cdn.test/2');
+});
+it('network playback media errors refresh the current URL instead of skipping',async()=>{
+ vi.mocked(musicApi.songUrlFresh).mockResolvedValueOnce({data:[{url:'https://cdn.test/1-fresh'}]});
+ await act(async()=>{await music.playSong(songs[0],{replaceQueue:songs,startIdx:0});});
+ await act(async()=>{audio.error={code:2};audio.dispatchEvent(new Event('error'));});
+ expect(audio.src).toBe('https://cdn.test/1-fresh');
+ expect(music.current?.id).toBe(1);
+ expect(musicApi.songUrlFresh).toHaveBeenCalledTimes(1);
+});
+it('a fresh URL request uses a unique cache key and preserves the chosen quality',async()=>{
+ const raw=vi.spyOn(musicApi,'_raw').mockResolvedValue({data:[{url:'https://cdn.test/1'}]});
+ await musicApi.songUrlFresh({...music.cfg,quality:'lossless'},1);
+ await musicApi.songUrlFresh({...music.cfg,quality:'lossless'},1);
+ expect(raw).toHaveBeenCalledTimes(2);
+ const first=raw.mock.calls[0],second=raw.mock.calls[1];
+ expect(first[1]).toBe('/song/url');
+ expect(first[2]).toMatchObject({ids:[1],level:'lossless'});
+ expect(first[2].playbackRefreshNonce).not.toBe(second[2].playbackRefreshNonce);
 });
 it('decode errors skip even in single-repeat mode and do not retry the failed song',async()=>{
  await act(async()=>{music.setPlayMode('single');await music.playSong(songs[0],{replaceQueue:songs,startIdx:0});});
