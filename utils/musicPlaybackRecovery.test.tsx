@@ -14,7 +14,7 @@ let music:ReturnType<typeof useMusic>,audio:AudioMock,root:ReturnType<typeof cre
 function Probe(){music=useMusic();return null;}
 const songs:Song[]=[1,2,3].map(id=>({id,name:'歌'+id,artists:'歌手',album:'',albumPic:'',duration:1,fee:0}));
 beforeEach(async()=>{(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;localStorage.clear();vi.stubGlobal('Audio',class extends AudioMock{constructor(){super();audio=this;}});vi.spyOn(musicApi,'lyric').mockResolvedValue({});vi.spyOn(musicApi,'songUrl').mockImplementation(async(_cfg,id)=>({data:[{url:'https://cdn.test/'+id}]}));vi.spyOn(musicApi,'songUrlFresh').mockResolvedValue({data:[]});host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root.render(<MusicProvider><Probe/></MusicProvider>));});
-afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.restoreAllMocks();vi.unstubAllGlobals();});
+afterEach(async()=>{vi.useRealTimers();await act(async()=>root.unmount());host.remove();vi.restoreAllMocks();vi.unstubAllGlobals();});
 it('does not store empty song/url results in the browser cache',async()=>{
  clearAll();let requests=0;
  const fetcher=async()=>{
@@ -42,14 +42,57 @@ it('empty cached play URLs fetch a fresh address for the SAME song before any sk
  expect(musicApi.songUrlFresh).toHaveBeenCalledTimes(1);
  expect(vi.mocked(musicApi.songUrl).mock.calls.map(c=>c[1])).toEqual([1]);
 });
-it('network outages do not skip the entire playlist; retry only this track once',async()=>{
+it('waits 3 seconds between three network retries, then auto-skips to the next song',async()=>{
+ vi.useFakeTimers();
  vi.mocked(musicApi.songUrl).mockRejectedValueOnce(new Error('HTTP 502'));
- vi.mocked(musicApi.songUrlFresh).mockRejectedValueOnce(new Error('netease upstream fetch failed (all sources)'));
+ vi.mocked(musicApi.songUrlFresh)
+   .mockRejectedValueOnce(new Error('HTTP 502'))
+   .mockRejectedValueOnce(new Error('HTTP 502'))
+   .mockRejectedValueOnce(new Error('HTTP 502'));
  await act(async()=>{await music.playSong(songs[0],{replaceQueue:songs,startIdx:0});});
  expect(music.current?.id).toBe(1);
- expect(music.playing).toBe(false);
+ expect(musicApi.songUrlFresh).not.toHaveBeenCalled();
+ await act(async()=>{await vi.advanceTimersByTimeAsync(2999);});
+ expect(musicApi.songUrlFresh).not.toHaveBeenCalled();
+ await act(async()=>{await vi.advanceTimersByTimeAsync(1);});
  expect(musicApi.songUrlFresh).toHaveBeenCalledTimes(1);
- expect(vi.mocked(musicApi.songUrl).mock.calls.map(c=>c[1])).toEqual([1]);
+ expect(music.current?.id).toBe(1);
+ for(let i=2;i<=3;i++){
+   await act(async()=>{await vi.advanceTimersByTimeAsync(3000);});
+   expect(musicApi.songUrlFresh).toHaveBeenCalledTimes(i);
+   if(i<3)expect(music.current?.id).toBe(1);
+ }
+ expect(music.current?.id).toBe(2);
+ expect(audio.src).toBe('https://cdn.test/2');
+ expect(vi.mocked(musicApi.songUrl).mock.calls.map(c=>c[1])).toEqual([1,2]);
+});
+it('recovers on the second delayed retry without skipping songs',async()=>{
+ vi.useFakeTimers();
+ vi.mocked(musicApi.songUrl).mockRejectedValueOnce(new Error('HTTP 502'));
+ vi.mocked(musicApi.songUrlFresh)
+   .mockRejectedValueOnce(new Error('HTTP 502'))
+   .mockResolvedValueOnce({data:[{url:'https://cdn.test/1-recovered'}]});
+ await act(async()=>{await music.playSong(songs[0],{replaceQueue:songs,startIdx:0});});
+ await act(async()=>{await vi.advanceTimersByTimeAsync(3000);});
+ expect(music.current?.id).toBe(1);
+ expect(musicApi.songUrlFresh).toHaveBeenCalledTimes(1);
+ await act(async()=>{await vi.advanceTimersByTimeAsync(3000);});
+ expect(music.current?.id).toBe(1);
+ expect(audio.src).toBe('https://cdn.test/1-recovered');
+ expect(musicApi.songUrlFresh).toHaveBeenCalledTimes(2);
+ await act(async()=>{await vi.advanceTimersByTimeAsync(15000);});
+ expect(musicApi.songUrlFresh).toHaveBeenCalledTimes(2);
+});
+it('manual next-track action cancels the old song pending retry timer',async()=>{
+ vi.useFakeTimers();
+ vi.mocked(musicApi.songUrl).mockRejectedValueOnce(new Error('HTTP 502'));
+ await act(async()=>{await music.playSong(songs[0],{replaceQueue:songs,startIdx:0});});
+ await act(async()=>{music.nextSong();await Promise.resolve();});
+ expect(music.current?.id).toBe(2);
+ await act(async()=>{await vi.advanceTimersByTimeAsync(12000);});
+ expect(musicApi.songUrlFresh).not.toHaveBeenCalled();
+ expect(music.current?.id).toBe(2);
+ expect(audio.src).toBe('https://cdn.test/2');
 });
 it('stale media errors while the next song has no attached source cannot trigger another skip',async()=>{
  let release!:(result:any)=>void;
@@ -79,10 +122,13 @@ it('aborted media loading while changing tracks does not count as a failed song'
  expect(musicApi.songUrlFresh).not.toHaveBeenCalled();
  expect(vi.mocked(musicApi.songUrl).mock.calls.map(c=>c[1])).toEqual([1]);
 });
-it('network playback media errors refresh the current URL instead of skipping',async()=>{
+it('network playback media errors retry after 3 seconds instead of skipping',async()=>{
+ vi.useFakeTimers();
  vi.mocked(musicApi.songUrlFresh).mockResolvedValueOnce({data:[{url:'https://cdn.test/1-fresh'}]});
  await act(async()=>{await music.playSong(songs[0],{replaceQueue:songs,startIdx:0});});
  await act(async()=>{audio.error={code:2};audio.dispatchEvent(new Event('error'));});
+ expect(musicApi.songUrlFresh).not.toHaveBeenCalled();
+ await act(async()=>{await vi.advanceTimersByTimeAsync(3000);});
  expect(audio.src).toBe('https://cdn.test/1-fresh');
  expect(music.current?.id).toBe(1);
  expect(musicApi.songUrlFresh).toHaveBeenCalledTimes(1);

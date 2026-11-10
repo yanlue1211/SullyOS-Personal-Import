@@ -698,6 +698,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const failedHandlerRef = useRef<(error?:any) => void>(() => {});
   const activeAudioSourceRef = useRef<string | null>(null);
   const playAttemptRef = useRef(0);
+  const networkRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const failedSongsRef = useRef(new Set<number>());
 
   // 初始化 audio（仅 Provider 生命周期创建一次）
@@ -727,6 +728,11 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     a.addEventListener('ended', onEnd);
 
     return () => {
+      playAttemptRef.current += 1;
+      if (networkRetryTimerRef.current !== null) {
+        clearTimeout(networkRetryTimerRef.current);
+        networkRetryTimerRef.current = null;
+      }
       a.removeEventListener('play', onPlay);
       a.removeEventListener('pause', onPause);
       a.removeEventListener('timeupdate', onTime);
@@ -738,13 +744,23 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Audio URL proxy failures are transient. Wait rather than hammering the same upstream.
+  const NETWORK_RETRY_DELAY_MS = 3000;
+  const MAX_NETWORK_RETRIES = 3;
+
   // 播放单曲
-  const playSong = useCallback(async (song: Song, opts: { alsoSetQueue?: boolean; replaceQueue?: Song[]; startIdx?: number; recovering?:boolean; freshUrl?:boolean; requestedByCharId?: string } = {}):Promise<void> => {
+  const playSong = useCallback(async (song: Song, opts: { alsoSetQueue?: boolean; replaceQueue?: Song[]; startIdx?: number; recovering?:boolean; freshUrl?:boolean; networkRetryCount?:number; requestedByCharId?: string } = {}):Promise<void> => {
     const { alsoSetQueue = true, replaceQueue, startIdx } = opts;
     setRequestedByCharId(opts.requestedByCharId);
     const attempt=++playAttemptRef.current;
+    // A manual song change, queue navigation or a fresh retry invalidates earlier timers.
+    if (networkRetryTimerRef.current !== null) {
+      clearTimeout(networkRetryTimerRef.current);
+      networkRetryTimerRef.current = null;
+    }
     if(!opts.recovering)failedSongsRef.current.clear();
     let handled=false;
+    let retryScheduled=false;
     const failed=(error?:any)=>{
       if(attempt!==playAttemptRef.current || handled)return;
       // MEDIA_ERR_ABORTED (code 1) is an expected result of switching tracks,
@@ -765,29 +781,41 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         mediaCode: Number.isFinite(code) ? code : null,
         errorName: String(error?.name || 'unknown').slice(0, 60),
         emptyUrl, serviceFailure, audioNetworkFailure, urlExpiredOrUnsupported,
-        freshRetry: !!opts.freshUrl, local: !!song.local,
+        freshRetry: !!opts.freshUrl, networkRetryCount: opts.networkRetryCount || 0, local: !!song.local,
         online: typeof navigator !== 'undefined' ? navigator.onLine : null,
       });
-      // Revalidate THIS song once with a fresh URL before blaming the entire playlist.
-      // Keep the existing automatic skip for genuinely missing/undecodable tracks.
-      if(!song.local && !opts.freshUrl && (emptyUrl || audioNetworkFailure || urlExpiredOrUnsupported || serviceFailure)){
+      // Keep the user's original automatic skip, but let transient network / 502
+      // failures recover first: 3 retries, spaced 3s apart (4 requests total).
+      // Other bad/expired URLs retain the existing single immediate refresh.
+      const networkFailure = !song.local && (audioNetworkFailure || serviceFailure);
+      const retriesDone = Math.max(0, opts.networkRetryCount || 0);
+      if (networkFailure && retriesDone < MAX_NETWORK_RETRIES) {
+        retryScheduled=true;
         setPlaying(false);setLoadingSong(true);
-        musicTrace.info('track-retry-address', { songId:song.id, reason:emptyUrl?'empty-url':audioNetworkFailure?'audio-network':serviceFailure?'proxy-network':'audio-unsupported' });
-        toast('这首歌正在重新获取播放地址','info');
+        musicTrace.info('track-retry-address', {
+          songId:song.id, reason:audioNetworkFailure?'audio-network':'proxy-network',
+          retryNumber:retriesDone+1, maxRetries:MAX_NETWORK_RETRIES, delayMs:NETWORK_RETRY_DELAY_MS,
+        });
+        if (retriesDone === 0) toast('音乐网络波动，正在间隔 3 秒重试这首歌','info');
+        networkRetryTimerRef.current=setTimeout(()=>{
+          networkRetryTimerRef.current=null;
+          if(attempt!==playAttemptRef.current)return; // User changed tracks or provider unmounted.
+          void playSong(song,{alsoSetQueue:false,recovering:true,freshUrl:true,
+            networkRetryCount:retriesDone+1,requestedByCharId:opts.requestedByCharId});
+        },NETWORK_RETRY_DELAY_MS);
+        return;
+      }
+      if(!song.local && !opts.freshUrl && (emptyUrl || urlExpiredOrUnsupported)){
+        setPlaying(false);setLoadingSong(true);
+        musicTrace.info('track-retry-address', {
+          songId:song.id, reason:emptyUrl?'empty-url':'audio-unsupported', retryNumber:1, delayMs:0,
+        });
         void playSong(song,{alsoSetQueue:false,recovering:true,freshUrl:true,requestedByCharId:opts.requestedByCharId});
         return;
       }
-      if(audioNetworkFailure || serviceFailure){
-        // A failing CDN/proxy affects multiple tracks. Do not rapid-skip an entire playlist
-        // after one song's fresh retry has also failed.
-        setPlaying(false);setLoadingSong(false);
-        musicTrace.warn('queue-paused-for-network', {
-          songId:song.id, source:audioNetworkFailure?'audio-cdn-network':'proxy-or-fetch',
-          freshRetry:!!opts.freshUrl,
-        });
-        toast('音乐网络暂时不可用，已暂停连续跳歌，可重新播放重试','error');
-        return;
-      }
+      if(networkFailure)musicTrace.warn('network-retries-exhausted', {
+        songId:song.id, retries:retriesDone, nextAction:'auto-skip',
+      });
       if(failedSongsRef.current.has(song.id))return;
       failedSongsRef.current.add(song.id);
       setPlaying(false);setLoadingSong(false);setListeningTogetherWith([]);
@@ -958,7 +986,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     } catch (e: any) {
       failed(e);
     } finally {
-      if(attempt===playAttemptRef.current)setLoadingSong(false);
+      if(attempt===playAttemptRef.current && !retryScheduled)setLoadingSong(false);
     }
   }, [toast]);
 
