@@ -2,6 +2,7 @@ import { isAnthropicEndpoint, isGeminiEndpoint, nativeRequestUrl } from './llmEn
 import { fetchGemini, geminiContinuation } from './geminiApi';
 import { modelRejectsSamplingParams } from './samplingParamCompat';
 import { getAnthropicCacheTtl } from './anthropicCacheTtl';
+import { prepareGeminiCompatibleContext } from './geminiCompatibleContext';
 
 type Block = Record<string, any>;
 type FetchTransport = typeof fetch & { __sullyAnthropic?: boolean };
@@ -243,7 +244,25 @@ export async function fetchLlm(resource: RequestInfo | URL, init?: RequestInit, 
     if ((transport as FetchTransport).__sullyAnthropic) return transport(resource,init);
     const inputUrl = typeof resource === 'string' ? resource : resource instanceof URL ? resource.href : resource.url;
     if (isGeminiEndpoint(inputUrl)) return fetchGemini(resource, init, transport);
-    if (!isAnthropicEndpoint(inputUrl)) return transport(resource,init);
+    if (!isAnthropicEndpoint(inputUrl)) {
+        // Only tagged ChatApp requests opt in; Lite and unrelated APIs keep their original bodies.
+        const request = resource instanceof Request ? resource : undefined;
+        if ((init?.method || request?.method || 'GET').toUpperCase() === 'POST'
+            && /\/chat\/completions\/?$/.test(new URL(inputUrl, 'http://localhost').pathname)) {
+            const raw = init?.body ?? (request ? await request.clone().text() : undefined);
+            if (typeof raw === 'string') {
+                let parsed: any;
+                try { parsed = JSON.parse(raw); } catch { /* Forward non-JSON unchanged. */ }
+                const prepared = prepareGeminiCompatibleContext(parsed);
+                if (prepared !== parsed) {
+                    const headers = new Headers(init?.headers || request?.headers);
+                    headers.delete('content-length');
+                    return transport(resource, { ...init, headers, body: JSON.stringify(prepared) });
+                }
+            }
+        }
+        return transport(resource,init);
+    }
     const request = resource instanceof Request ? resource : undefined;
     const method=(init?.method || request?.method || 'GET').toUpperCase();
     const body=init?.body ?? (request && method==='POST' ? await request.clone().text() : undefined);

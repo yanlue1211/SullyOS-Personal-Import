@@ -59,6 +59,7 @@ it('marks archived system records by provenance and caches all later history bef
         {id:4,charId:input.char.id,role:'user',type:'text',content:'latest input',timestamp:4},
     ] as any;
     const payload=await buildChatRequestPayload(input);
+    expect(payload.fullMessages[payload.volatileTailIndex]).toMatchObject({role:'system',name:'sully_live_context'});
     const archived=payload.fullMessages.find(m=>String(m.content).includes('archived Moments event'));
     expect(archived).toMatchObject({role:'system',name:'sully_history_context',content:'archived Moments event'});
     expect(input.historyMsgs[1]).not.toHaveProperty('name');

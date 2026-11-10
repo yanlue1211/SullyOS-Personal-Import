@@ -1,5 +1,6 @@
 import { INSTANT_INPUT_NAMESPACE, INSTANT_INPUT_TTL_DAYS, parseInstantInputEnvelope, parseInstantInputRef } from './instantInput';
 import { installAnthropicFetch } from '../../../utils/anthropicApi';
+import { markGeminiLiveContext } from '../../../utils/geminiCompatibleContext';
 
 // Stateless endpoint adapter also covers the upstream SDK's private LLM transport.
 // No request/tenant credentials are retained in the isolate.
@@ -2769,7 +2770,10 @@ export const amsgHooks = {
       // content 原样透传：图片仍然是结构化分段，绝不能 String() 变成 [object Object]。
       // 排程、时钟等时效块放在本地标记的易变尾段之前，最后仍由原生「回到你自己」收束。
       // 旧 fire_pack 没传下标时兼容旧版的末尾追加。
-      const instantMessages = pack.chat!.messages.map((m) => ({ role: m.role, content: m.content }));
+      const instantMessages = markGeminiLiveContext(
+        pack.chat!.messages.map((m) => ({ role: m.role, content: m.content })),
+        pack.chat!.timelyInsertAt,
+      );
       const requestedInsertAt = pack.chat!.timelyInsertAt;
       const timelyInsertAt = Number.isInteger(requestedInsertAt)
         && requestedInsertAt! >= 1 && requestedInsertAt! <= instantMessages.length

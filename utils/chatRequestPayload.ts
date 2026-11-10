@@ -564,7 +564,7 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
     let fullMessages: Array<{ role: string; content: any; name?:string }> = [
         ...stableMessages,
         ...messagesWithWorldbookDepth,
-        { role: 'system', content: volatileTail },
+        { role: 'system', name: 'sully_live_context', content: volatileTail },
     ];
     if (bilingualActive) {
         fullMessages.push({
