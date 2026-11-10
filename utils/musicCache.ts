@@ -149,6 +149,12 @@ if (typeof window !== 'undefined') {
 const makeKey = (path: string, body: any, cookie?: string) =>
   `${cookieSalt(cookie)}|${path}|${stableStringify(body ?? {})}`;
 
+/** A successful HTTP response is not necessarily a playable song URL. */
+const isUsableSongUrlResponse = (path: string, result: any): boolean =>
+  path !== '/song/url' || (
+    typeof result?.data?.[0]?.url === 'string' && result.data[0].url.trim().length > 0
+  );
+
 /**
  * 包装实际请求。不在缓存规则里的 path → 直接打网络。
  */
@@ -166,16 +172,26 @@ export async function cachedCall<T = any>(
   const now = Date.now();
 
   const hit = MEM.get(key);
-  if (hit && hit.expires > now) return hit.data as T;
+  // A 200 response from song/url can still contain an unusable null URL.
+  // Never replay such negative results from persisted cache after the source recovers.
+  if (hit && hit.expires > now) {
+    if (isUsableSongUrlResponse(path, hit.data)) return hit.data as T;
+    MEM.delete(key);
+    schedulePersist();
+  }
 
   const pending = INFLIGHT.get(key);
   if (pending) return pending as Promise<T>;
 
   const p = doCall().then(
     (res) => {
-      MEM.set(key, { data: res, expires: Date.now() + ttl });
+      // Don't cache an empty/unplayable song URL (possibly caused by a temporary
+      // upstream failure). Other endpoint cache behavior is unchanged.
+      if (isUsableSongUrlResponse(path, res)) {
+        MEM.set(key, { data: res, expires: Date.now() + ttl });
+        schedulePersist();
+      }
       INFLIGHT.delete(key);
-      schedulePersist();
       return res;
     },
     (err) => {
