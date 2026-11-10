@@ -656,6 +656,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const cfgRef = useRef(cfg); cfgRef.current = cfg;
   const endedHandlerRef = useRef<() => void>(() => {});
   const failedHandlerRef = useRef<(error?:any) => void>(() => {});
+  const activeAudioSourceRef = useRef('');
   const playAttemptRef = useRef(0);
   const failedSongsRef = useRef(new Set<number>());
 
@@ -671,7 +672,13 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const onTime = () => setProgress(a.currentTime);
     const onMeta = () => setDuration(a.duration || 0);
     // 播放出错 → 清掉 playing 状态 + 清掉"一起听"伙伴（防止 UI 卡在残留状态）
-    const onErr = () => { if(a.error)failedHandlerRef.current(a.error); };
+    const onErr = () => {
+      // Some mobile players report an old media error while source teardown is still pending.
+      // Never attribute it to the next track before its source has been attached.
+      if (a.error && activeAudioSourceRef.current && a.src === activeAudioSourceRef.current) {
+        failedHandlerRef.current(a.error);
+      }
+    };
     const onEnd = () => { endedHandlerRef.current(); };
 
     a.addEventListener('play', onPlay);
@@ -694,15 +701,34 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, []);
 
   // 播放单曲
-  const playSong = useCallback(async (song: Song, opts: { alsoSetQueue?: boolean; replaceQueue?: Song[]; startIdx?: number; recovering?:boolean; requestedByCharId?: string } = {}):Promise<void> => {
+  const playSong = useCallback(async (song: Song, opts: { alsoSetQueue?: boolean; replaceQueue?: Song[]; startIdx?: number; recovering?:boolean; retriedNetwork?:boolean; requestedByCharId?: string } = {}):Promise<void> => {
     const { alsoSetQueue = true, replaceQueue, startIdx } = opts;
     setRequestedByCharId(opts.requestedByCharId);
     const attempt=++playAttemptRef.current;
     if(!opts.recovering)failedSongsRef.current.clear();
+    let failureHandled=false;
     const failed=(error?:any)=>{
-      if(attempt!==playAttemptRef.current)return;
+      if(attempt!==playAttemptRef.current || failureHandled)return;
       if(error?.name==='AbortError')return;
       if(error?.name==='NotAllowedError'){setPlaying(false);setLoadingSong(false);toast('请点击播放以继续音乐','info');return;}
+      failureHandled=true;
+      const mediaCode=Number(error?.code);
+      const networkMediaError=mediaCode===2; // MEDIA_ERR_NETWORK; retry the SAME song, not the next.
+      const detail=String(error?.message || '');
+      const serviceNetworkError=/(?:failed to fetch|networkerror|network error|timeout|timed out|HTTP 5\\d\\d|HTTP 429)/i.test(detail);
+      console.warn('[Music] playback failed', { songId:song.id, attempt, mediaCode:Number.isFinite(mediaCode)?mediaCode:null, errorName:error?.name || '' });
+      if(networkMediaError && !opts.retriedNetwork){
+        setPlaying(false);setLoadingSong(true);
+        toast('音乐加载遇到网络波动，正在重取播放地址','info');
+        void playSong(song,{ alsoSetQueue:false, recovering:true, retriedNetwork:true, requestedByCharId:opts.requestedByCharId });
+        return;
+      }
+      if(networkMediaError || serviceNetworkError){
+        setPlaying(false);setLoadingSong(false);setListeningTogetherWith([]);
+        // An unavailable proxy / CDN affects the whole queue. Don't stampede every track.
+        toast('音乐服务或网络暂时不可用，已暂停自动跳歌，可稍后重试','error');
+        return;
+      }
       if(failedSongsRef.current.has(song.id))return;
       failedSongsRef.current.add(song.id);
       setPlaying(false);setLoadingSong(false);setListeningTogetherWith([]);
@@ -713,7 +739,10 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       void playSong(q[next],{alsoSetQueue:false,recovering:true});
     };
     failedHandlerRef.current=failed;
-    if(audioRef.current){const a=audioRef.current;const previous=a.src;a.pause();a.removeAttribute('src');a.load();if(previous.startsWith('blob:'))URL.revokeObjectURL(previous);}
+    if(audioRef.current){
+      activeAudioSourceRef.current = '';
+      const a=audioRef.current;const previous=a.src;a.pause();a.removeAttribute('src');a.load();if(previous.startsWith('blob:'))URL.revokeObjectURL(previous);
+    }
 
     if (replaceQueue) {
       queueRef.current=replaceQueue;
@@ -749,6 +778,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         if (prevSrc.startsWith('blob:')) URL.revokeObjectURL(prevSrc);
         if(song.remoteAudioUrl && new URL(song.remoteAudioUrl).protocol!=='https:')throw Error('歌曲链接需要使用 HTTPS');
         a.src = song.remoteAudioUrl || URL.createObjectURL(blob!);
+        activeAudioSourceRef.current = a.src;
         a.play().catch(failed);
 
         // ── 本地歌词时间分布 ──
@@ -818,7 +848,10 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
 
       const [urlRes, lyricRes] = await Promise.all([
-        musicApi.songUrl(cfgRef.current, song.id),
+        // A retry must bypass the 90-second cache; that cached CDN URL may have failed.
+        opts.retriedNetwork
+          ? musicApi._raw(cfgRef.current, '/song/url', { ids: [song.id], level: cfgRef.current.quality })
+          : musicApi.songUrl(cfgRef.current, song.id),
         musicApi.lyric(cfgRef.current, song.id).catch(() => null),
       ]);
       if(attempt!==playAttemptRef.current)return;
@@ -828,6 +861,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
       const a = audioRef.current!;
       a.src = url.replace(/^http:\/\//i, 'https://');
+      activeAudioSourceRef.current = a.src;
       a.play().catch(failed);
       if (lyricRes) {
         setLyric(parseLyric(lyricRes?.lrc?.lyric || ''));
