@@ -1,7 +1,7 @@
 name: Yueqi verification
 on:
   push:
-    branches: [personal/yueqi, personal/yueqi-music, personal/yueqi-audio-input]
+    branches: [personal/yueqi, personal/yueqi-music, personal/yueqi-audio-input, personal/yueqi-speech-and-mic-20261110]
   pull_request:
     branches: [personal/audio-listening]
     paths: ['features/yueqi/**', 'features/personal/audio/**', 'features/personal/calls/**', 'utils/personalHandsFree*', 'utils/personalCallCapture*', 'utils/personalCallAutoRecording*', 'test/fixtures/handsfree-browser*', 'scripts/handsfree-browser-check.mjs', 'apps/YueqiApp*', 'components/chat/YueqiCard.tsx', 'utils/yueqi*', 'scripts/yueqi-browser-check.mjs', 'test/fixtures/yueqi-browser*', '.github/workflows/yueqi-verify.yml']
