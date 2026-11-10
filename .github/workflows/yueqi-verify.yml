@@ -1,7 +1,7 @@
 name: Yueqi verification
 on:
   push:
-    branches: [personal/yueqi, personal/yueqi-music, personal/yueqi-audio-input]
+    branches: [personal/yueqi, personal/yueqi-music, personal/yueqi-audio-input, personal/yueqi-speech-and-mic-20261110]
   pull_request:
     branches: [personal/audio-listening]
     paths: ['features/yueqi/**', 'features/personal/audio/**', 'features/personal/calls/**', 'utils/personalHandsFree*', 'utils/personalCallCapture*', 'utils/personalCallAutoRecording*', 'test/fixtures/handsfree-browser*', 'scripts/handsfree-browser-check.mjs', 'apps/YueqiApp*', 'components/chat/YueqiCard.tsx', 'utils/yueqi*', 'scripts/yueqi-browser-check.mjs', 'test/fixtures/yueqi-browser*', '.github/workflows/yueqi-verify.yml']
@@ -24,7 +24,7 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm vitest run utils/personalHandsFree.test.ts utils/personalHandsFreeUI.test.tsx utils/personalCallCapture.test.ts utils/personalCallAutoRecording.test.tsx utils/personalCallReadiness.test.ts utils/yueqiRecording.test.ts utils/yueqiAudioInput.test.ts utils/yueqi.test.ts utils/yueqiRuntime.test.ts utils/yueqiContext.test.ts utils/yueqiUI.test.tsx utils/contextPipeline.test.ts utils/contextWorldbook.test.ts utils/experience.test.ts utils/chatInputInteraction.test.ts --maxWorkers=2 --minWorkers=1
+      - run: pnpm vitest run utils/yueqiText.test.ts utils/yueqiTts.test.ts utils/minimaxTts.params.test.ts utils/minimaxTts.voice.test.ts utils/personalHandsFree.test.ts utils/personalHandsFreeUI.test.tsx utils/personalCallCapture.test.ts utils/personalCallAutoRecording.test.tsx utils/personalCallReadiness.test.ts utils/yueqiRecording.test.ts utils/yueqiAudioInput.test.ts utils/yueqi.test.ts utils/yueqiRuntime.test.ts utils/yueqiContext.test.ts utils/yueqiUI.test.tsx utils/contextPipeline.test.ts utils/contextWorldbook.test.ts utils/experience.test.ts utils/chatInputInteraction.test.ts --maxWorkers=2 --minWorkers=1
       - run: pnpm build
       - name: Install isolated browser test runtime
         run: |

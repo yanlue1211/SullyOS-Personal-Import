@@ -30,6 +30,16 @@ try{
   await page.evaluate(()=>window.__hfQA.unblock());
   await page.getByRole('button',{name:'关闭免手持'}).waitFor();
   if(errors.length)throw Error(errors.join('\n'));
+  await page.getByRole('button',{name:'关闭免手持'}).click();
+  // Quiet, modulated voice starts before calibration. The old fixed floor and
+  // opening noise estimate could leave this stuck at "waiting" forever.
+  await page.evaluate(()=>{const q=window.__hfQA;let index=0;const levels=[.004,.012,.005,.01,.006];q.lowSpeechTimer=setInterval(()=>q.level(levels[index++%levels.length]),100);});
+  await page.getByRole('button',{name:'开启免手持'}).click();
+  await page.getByRole('status').filter({hasText:'听到你在说话'}).waitFor();
+  await page.screenshot({path:`test-results/yueqi/${width}-handsfree-soft-voice.png`});
+  await page.waitForTimeout(500);
+  await page.evaluate(()=>{clearInterval(window.__hfQA.lowSpeechTimer);return window.__hfQA.level(0);});
+  await page.waitForFunction(()=>window.__hfQA.sent===3);
   await page.getByRole('button',{name:'关闭免手持'}).click();await page.close();
  }
 }finally{await browser.close();}

@@ -40,6 +40,9 @@ it('round trips item templates, active effects, frame refs and original video by
  const value=item();await saveOracleItems(owner,[value]);await give(value);
  const media={kind:'video',name:'clip.webm',originalRef:original,inPerson:true,frames:[{timeSeconds:1,image}]};await DB.saveMessage({charId:owner,role:'user',type:'text',content:mediaText(media as any),metadata:{realMedia:media}});
  const data=await DB.exportFullData(),zip=new JSZip(),refs=new Set<string>();await writeV2Backup(zip as any,data,{onSerialized:text=>collectBlobRefs(text,refs)});expect(refs.has(original)).toBe(true);expect(refs.has(image)).toBe(true);await writeBlobsToZip(zip as any,refs,getBlobForRef);const reader=await JSZip.loadAsync(await zip.generateAsync({type:'uint8array'}));const restored=await assembleV2Backup(reader as any,JSON.parse(await reader.file('manifest.json')!.async('string')));
+ // Simulate restoring onto an empty device. Referenced media is intentionally
+ // protected from physical deletion, including in this in-memory test database.
+ const emptyDb=await openDB();await new Promise<void>((resolve,reject)=>{const tx=emptyDb.transaction('messages','readwrite');tx.objectStore('messages').clear();tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);});
  await deleteBlobRef(original);await deleteBlobRef(image);expect(await getBlobForRef(original)).toBeNull();await restoreBlobsFromZip(reader as any,await readBlobsIndex(reader as any),restoreBlobRef);await DB.importFullData(restored as any);expect(await listOracleItems(owner)).toEqual([value]);expect(await oracleContext(owner)).toContain('桂花糖');
  const row=(await DB.getMessagesByCharId(owner,true)).find(m=>m.metadata?.realMedia)!;expect(row.metadata!.realMedia.frames[0].image).toBe(image);expect(await (await getBlobForRef(original))!.text()).toBe('video-bytes');
  await deleteBlobRef(original);await deleteBlobRef(image);
