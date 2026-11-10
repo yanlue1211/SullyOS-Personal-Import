@@ -6,7 +6,7 @@
 // 其余存储 / 脱敏 / 限容 / 导出逻辑全部通用，不用改。
 // 分类按「来源通道」切：api = 普通聊天直发模型；amsg = 主动消息 2.0 的收发链路（推送落库、云端回合 trace）；
 // lifecycle = 页面前后台/网络状态变化（排查「请求等着等着就 NetworkError」时跟 api 类对时间线）。
-export type DevDebugCaptureCategory = 'api' | 'amsg' | 'lifecycle' | 'memory-palace';
+export type DevDebugCaptureCategory = 'api' | 'amsg' | 'lifecycle' | 'memory-palace' | 'music';
 
 export interface DevDebugCaptureCategoryMeta {
     key: DevDebugCaptureCategory;
@@ -26,6 +26,11 @@ export const DEV_DEBUG_CAPTURE_CATEGORIES: DevDebugCaptureCategoryMeta[] = [
         key: 'amsg',
         title: '主动消息',
         detail: '主动消息 2.0 的收发链路：收件箱冲刷、推送落库、即时对话回合的 trace。',
+    },
+    {
+        key: 'music',
+        title: '音乐',
+        detail: '音乐播放地址请求和 HTMLAudioElement 错误类型；仅记录歌曲 ID、HTTP 状态与音频域名，不包含 cookie、完整播放链接或密钥。',
     },
     {
         key: 'lifecycle',
