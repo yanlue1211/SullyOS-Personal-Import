@@ -42,14 +42,23 @@ it('empty cached play URLs fetch a fresh address for the SAME song before any sk
  expect(musicApi.songUrlFresh).toHaveBeenCalledTimes(1);
  expect(vi.mocked(musicApi.songUrl).mock.calls.map(c=>c[1])).toEqual([1]);
 });
-it('network outages do not skip the entire playlist; retry only this track once',async()=>{
- vi.mocked(musicApi.songUrl).mockRejectedValueOnce(new Error('HTTP 502'));
+it('one song upstream 502 retries itself once, then auto-skips to a playable track',async()=>{
+ vi.mocked(musicApi.songUrl).mockRejectedValueOnce(new Error('netease upstream fetch failed (all sources)'));
  vi.mocked(musicApi.songUrlFresh).mockRejectedValueOnce(new Error('netease upstream fetch failed (all sources)'));
  await act(async()=>{await music.playSong(songs[0],{replaceQueue:songs,startIdx:0});});
- expect(music.current?.id).toBe(1);
- expect(music.playing).toBe(false);
+ expect(music.current?.id).toBe(2);
+ expect(music.playing).toBe(true);
  expect(musicApi.songUrlFresh).toHaveBeenCalledTimes(1);
- expect(vi.mocked(musicApi.songUrl).mock.calls.map(c=>c[1])).toEqual([1]);
+ expect(vi.mocked(musicApi.songUrl).mock.calls.map(c=>c[1])).toEqual([1,2]);
+});
+it('three consecutively failed upstream song URLs pause before wiping the playlist',async()=>{
+ vi.mocked(musicApi.songUrl).mockRejectedValue(new Error('netease upstream fetch failed (all sources)'));
+ vi.mocked(musicApi.songUrlFresh).mockRejectedValue(new Error('netease upstream fetch failed (all sources)'));
+ await act(async()=>{await music.playSong(songs[0],{replaceQueue:songs,startIdx:0});});
+ expect(music.current?.id).toBe(3);
+ expect(music.playing).toBe(false);
+ expect(vi.mocked(musicApi.songUrl).mock.calls.map(c=>c[1])).toEqual([1,2,3]);
+ expect(musicApi.songUrlFresh).toHaveBeenCalledTimes(3);
 });
 it('stale media errors while the next song has no attached source cannot trigger another skip',async()=>{
  let release!:(result:any)=>void;
