@@ -79,6 +79,12 @@ describe('Gemini native transport', () => {
         expect(out).not.toHaveProperty('thinking');
     });
 
+    it('distinguishes absent cache usage from a reported zero', () => {
+        expect(geminiUsage({ promptTokenCount: 100 }).prompt_tokens_details).not.toHaveProperty('cached_tokens');
+        expect(geminiUsage({ promptTokenCount: 100, cachedContentTokenCount: 0 }).prompt_tokens_details.cached_tokens).toBe(0);
+        expect(geminiUsage({ billing_usage: { source: 'oai_chat', openai_usage: { prompt_tokens: 100 } } }).prompt_tokens_details).not.toHaveProperty('cached_tokens');
+    });
+
     it('uses real relay billing counts even when outer cache count is zero, counting thoughts once', () => {
         const usage = geminiUsage({ promptTokenCount: 32786, candidatesTokenCount: 84, totalTokenCount: 32870, cachedContentTokenCount: 0,
             billing_usage: { source: 'oai_chat', openai_usage: { prompt_tokens: 32786, completion_tokens: 84, total_tokens: 32870, prompt_tokens_details: { cached_tokens: 30727 } } } });
