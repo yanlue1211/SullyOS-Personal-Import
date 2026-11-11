@@ -1,6 +1,7 @@
 import { ActiveMsgClient } from '../../utils/activeMsgClient';
 import {meetingAppearance} from '../../utils/meetingAppearance';
 import MeetingAppearanceControl from './MeetingAppearanceControl';
+import { getDateSuspendBannerVisible, setDateSuspendBannerVisible, subscribeDateSuspendBannerVisibility } from '../../utils/dateSuspendBannerPreference';
 
 import React, { useState, useRef, useEffect } from 'react';
 import { useOS } from '../../context/OSContext';
@@ -36,6 +37,38 @@ const Section: React.FC<{ title: string; defaultOpen?: boolean; children: React.
         <div className="px-4 pb-4 pt-1">{children}</div>
     </details>
 );
+
+/** 全局、本机的显示偏好：只隐藏顶层横条，不修改任何见面状态。 */
+const SuspendedDateBannerSetting: React.FC = () => {
+    const visible = React.useSyncExternalStore(
+        subscribeDateSuspendBannerVisibility,
+        getDateSuspendBannerVisible,
+        () => false,
+    );
+    return (
+        <section className="bg-white px-5 py-4 border-b border-slate-100">
+            <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                    <div className="text-sm font-semibold text-slate-700">显示见面返回横条</div>
+                    <div className="text-[11px] text-slate-400 mt-1">顶部粉色「见面中 · 点击返回」横条</div>
+                </div>
+                <button
+                    type="button"
+                    role="switch"
+                    aria-label="显示见面返回横条"
+                    aria-checked={visible}
+                    onClick={() => setDateSuspendBannerVisible(!visible)}
+                    className={`relative w-12 h-7 shrink-0 rounded-full transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-500 ${visible ? 'bg-emerald-500' : 'bg-slate-300'}`}
+                >
+                    <span aria-hidden="true" className={`absolute top-1 left-1 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${visible ? 'translate-x-5' : ''}`} />
+                </button>
+            </div>
+            <p className="text-[11px] text-slate-500 leading-relaxed mt-2">
+                默认关闭，避免遮挡其他页面。关掉只隐藏横条，见面不会结束，见面锁、暂离和预约照常运行。打开「见面」App仍可返回原见面（刷新页面后的恢复限制不变）。
+            </p>
+        </section>
+    );
+};
 
 /** 见面离开提醒：见面对话中途走开多久，角色在私聊里找对方（见 docs/date-leave-reminder.md）。 */
 const LeaveReminderSection: React.FC<{ char: CharacterProfile }> = ({ char }) => {
@@ -357,6 +390,7 @@ const DateSettings: React.FC<DateSettingsProps> = ({ char, onBack }) => {
             
             <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto overscroll-contain" data-testid="date-settings-scroll">
             <MeetingAppearanceControl surface="date" characterId={char.id} />
+            <SuspendedDateBannerSetting />
             <button type="button" onClick={() => setPreviewOpen(open => !open)} aria-expanded={previewOpen}
                 className="w-full px-5 py-3 text-left text-xs font-bold text-slate-500 bg-white border-b border-slate-100">
                 {previewOpen ? '收起场景预览' : '展开场景预览'}
