@@ -48,7 +48,7 @@ ${peek === 'invite' ? '此刻由角色主动靠近用户：用第三人称开场
 ` + buildCharacterResponsePrinciples(charName, userName);
 }
 
-export type ApiMessage = { role: string; content: any };
+export type ApiMessage = { role: string; content: any; name?: string };
 
 /**
  * 见面（DateApp）专用的「语音情绪」格式规则（VN 模式下、char.dateVoiceEnabled 时注入）。
@@ -658,7 +658,8 @@ const buildDateHistory = (
         undefined,
         { useVisionDescriptions, timeAwarenessEnabled: isDateTimeAwarenessOn(char) },
     );
-    return apiMessages;
+    return apiMessages.map(message => message.role === 'system' || message.role === 'developer'
+        ? {...message, name: 'sully_history_context'} : message);
 };
 
 export const DatePrompts = {
@@ -704,7 +705,8 @@ export const DatePrompts = {
         // 语境框定说的是「对方还在跟你说话」，跟这里的框定正好相反（见下面的 peekInstructions）。
         const context = (await ContextBuilder.buildCharacterContext({
             char, user: userProfile,
-            history: apiMessages.map(message => ({ ...message, content: typeof message.content === 'string'
+            history: apiMessages.map(message => ({ ...message,
+                ...(['system', 'developer'].includes(message.role) ? {name: 'sully_history_context'} : {}), content: typeof message.content === 'string'
                 ? message.content : message.content.filter((part: any) => part?.type === 'text').map((part: any) => part.text).join(' ') })),
             includeDetailedMemories: false,
             timeOptions: { skipTimeAwareness: !dateTimeOn, skipUserHoliday: true },
@@ -828,3 +830,4 @@ ${extraBlock ? `\n${extraBlock}` : ''}${isObserveOn(char) ? `\n${buildObserveBlo
         };
     },
 };
+

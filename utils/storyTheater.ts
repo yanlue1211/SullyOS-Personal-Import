@@ -25,7 +25,7 @@ export function hasStoryTheaterParticipant(entry: StoryTheaterEntry, characters:
     return characters.some(char => entry.characterIds.includes(char.id)
         || (!entry.writesToCharacterMemory && entry.mask?.type === 'character' && entry.mask.id === char.id));
 }
-export interface StoryApiMessage { role: StoryApiRole; content: string; }
+export interface StoryApiMessage { role: StoryApiRole; content: string; name?: string; }
 
 export interface StoryPromptSlots {
     actors: string;
@@ -1019,6 +1019,8 @@ const pushPromptMessage = (messages: StoryApiMessage[], role: StoryApiRole, cont
 export const compileStoryPreset = (input: {
     preset?: StoryTheaterPreset | null;
     slots: StoryPromptSlots;
+    /** Per-turn context follows actual history, without changing the authored stable preset order. */
+    liveSlots?: Partial<StoryPromptSlots>;
     historyMessages?: StoryApiMessage[];
     userName: string;
     characterNames: string[];
@@ -1026,6 +1028,10 @@ export const compileStoryPreset = (input: {
     const { preset, slots, userName, characterNames } = input;
     const document = (preset || BUILTIN_NIGHT_SCREENING_PRESET).document;
     const messages: StoryApiMessage[] = [];
+    const liveMessages: StoryApiMessage[] = [];
+    const liveSlots: StoryPromptSlots = {actors: '', persona: '', scenario: '', worldBefore: '', worldAfter: '', ...input.liveSlots};
+    const deferLive = input.historyMessages?.some(message => message.role === 'user' || message.role === 'assistant')
+        && document.prompts.some(prompt => prompt.enabled && !prompt.section && prompt.marker === 'history');
 
     const worldBeforePrompts = document.prompts.filter(prompt => prompt.marker === 'world_before');
     const enabledWorldBeforePrompt = worldBeforePrompts.find(prompt => prompt.enabled);
@@ -1060,10 +1066,20 @@ export const compileStoryPreset = (input: {
             if (injectedMarkers.has(prompt.marker)) continue;
             injectedMarkers.add(prompt.marker);
             if (prompt.marker === 'history' && input.historyMessages) {
+                // Authored system instructions may follow preset user/assistant examples.
+                // They belong to the stable prelude, not to this turn's live reminders.
+                if (deferLive) {
+                    for (const message of messages) {
+                        if (message.role === 'system') message.name = 'sully_history_context';
+                    }
+                }
                 messages.push(...input.historyMessages);
                 continue;
             }
             raw = slotForMarker(prompt.marker, slots);
+            const live = slotForMarker(prompt.marker, liveSlots);
+            if (deferLive) pushPromptMessage(liveMessages, prompt.role, macroReplace(live, userName, characterNames));
+            else raw = [raw, live].filter(text => text.trim()).join('\n\n');
         }
         if (!raw.trim()) continue;
         pushPromptMessage(messages, prompt.role, macroReplace(raw, userName, characterNames));
@@ -1071,7 +1087,14 @@ export const compileStoryPreset = (input: {
 
     // 兼容没有任何原生槽位的旧自定义预设，确保角色设定前世界书不会静默丢失。
     if (shouldBackfillWorldBefore && firstEnabledCharacterIndex < 0 && !injectedMarkers.has('world_before')) {
-        messages.unshift({ role: 'system', content: macroReplace(slots.worldBefore, userName, characterNames).trim() });
+        messages.unshift({ role: 'system', content: macroReplace(slots.worldBefore, userName, characterNames).trim(),
+            ...(deferLive ? {name: 'sully_history_context'} : {}),
+        });
+    }
+
+    if (liveMessages.length) {
+        messages.push({role: 'system', content: '[System: 本轮剧情上下文]\n以下为本轮状态、携带原文及召回材料，不是新增的已发生剧情；继续遵守角色与记忆归属规则。'});
+        messages.push(...liveMessages);
     }
 
     const prefill = String(document.assistantPrefill || '').trim();
@@ -1521,3 +1544,4 @@ export const downloadStoryPreset = async (preset: StoryTheaterPreset): Promise<'
         shareTitle: `剧情预设：${preset.name || '未命名'}`,
     })
 );
+
