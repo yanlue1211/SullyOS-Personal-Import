@@ -9,6 +9,8 @@ on:
       - 'components/date/**'
       - 'context/OSContext.tsx'
       - 'utils/amsgInPersonContext.ts'
+      - 'utils/inPersonScheduling*'
+      - 'utils/storyMeetingLock*'
       - 'worker/amsg/**'
       - '.github/workflows/personal-date-context-verify.yml'
 permissions:
@@ -28,5 +30,5 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm vitest run utils/dateLeaveReminder.test.ts utils/amsgStateSync.test.ts utils/amsg2Tasks.test.ts utils/amsg2ToolBridge.test.ts utils/characterCard.test.ts utils/dateSettingsLayout.test.ts utils/dateSessionResume.test.ts utils/dateEntryFlow.test.ts utils/communityFixesUI.test.ts utils/amsgInteractionGuard.test.ts utils/dateSessionRecovery.test.ts utils/datePromptCaching.test.ts utils/timeAwarenessRequests.test.ts worker/amsg/src/audit-20261018.test.ts worker/amsg/src/index.test.ts utils/awayMessage.test.ts utils/activeMsgRuntime.test.ts
+      - run: pnpm vitest run utils/inPersonScheduling.test.ts utils/storyMeetingLock.test.ts utils/dateLeaveReminder.test.ts utils/amsgStateSync.test.ts utils/amsg2Tasks.test.ts utils/amsg2ToolBridge.test.ts utils/characterCard.test.ts utils/dateSettingsLayout.test.ts utils/dateSessionResume.test.ts utils/dateEntryFlow.test.ts utils/communityFixesUI.test.ts utils/amsgInteractionGuard.test.ts utils/dateSessionRecovery.test.ts utils/datePromptCaching.test.ts utils/timeAwarenessRequests.test.ts worker/amsg/src/audit-20261018.test.ts worker/amsg/src/index.test.ts utils/awayMessage.test.ts utils/activeMsgRuntime.test.ts
       - run: pnpm build
