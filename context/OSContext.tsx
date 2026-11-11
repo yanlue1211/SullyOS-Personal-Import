@@ -45,6 +45,7 @@ import { isBlobRef, getBlobForRef, restoreBlobRef, migrateDataUrlToRef, migrateA
 import { resolveBlobRefsInRequestBody } from '../utils/apiBlobRefs';
 import { collectBlobRefs, writeBlobsToZip, readBlobsIndex, restoreBlobsFromZip } from '../utils/backupBlobs';
 import { recordMissingBackupAsset, writeMissingBackupAssets, type BackupMissingAsset } from '../utils/backupMissingAssets';
+import { readBackupPreferences } from '../utils/backupPreferences';
 import { initPwaIcon, clearPwaIcon } from '../utils/appIcon';
 import { LEGACY_DEFAULT_WALLPAPER, isLegacyDefaultWallpaper, shouldPreserveLegacyDefaultWallpaper } from '../utils/wallpaperCompat';
 import { migrateSharkpanAssets } from '../utils/sharkpanAssetMigration';
@@ -502,7 +503,7 @@ interface OSContextType {
   cloudBackupConfig: CloudBackupConfig;
   updateCloudBackupConfig: (updates: Partial<CloudBackupConfig>) => void;
   cloudBackupToWebDAV: (mode: 'text_only' | 'media_only' | 'full') => Promise<void>;
-  cloudRestoreFromWebDAV: (file: CloudBackupFile) => Promise<void>;
+  cloudRestoreFromWebDAV: (file: CloudBackupFile, options?: ImportSystemOptions) => Promise<void>;
   listCloudBackups: () => Promise<CloudBackupFile[]>;
 
   // System
@@ -2998,15 +2999,16 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           });
           addToast(`${char.name} 连续 ${streak} 次没能调通模型，已暂停 ta 在彼方的自主登入`, 'error');
       };
-      VRScheduler.onTrigger((charId: string, room?: string, letterId?: string, manual?: boolean, sarActivity?: VRSARActivity) => { void runVR(charId, room, letterId, manual, sarActivity); });
 
       // 以角色 vrState 为准对账调度表：调度表存 localStorage、不随备份迁移，
       // 导入备份后角色虽 enabled 但调度表为空，这里补建/清理使其按时触发。
       VRScheduler.reconcile(
           charactersRef.current
               .filter(c => allowsAutomaticVR(c.vrState))
-              .map(c => ({ charId: c.id, intervalMinutes: c.vrState?.intervalMinutes || VR_DEFAULT_INTERVAL_MIN }))
+              .map(c => ({ charId: c.id, intervalMinutes: c.vrState?.intervalMinutes || VR_DEFAULT_INTERVAL_MIN, lastActiveAt: c.vrState?.lastActiveAt }))
       );
+      // 先用角色的最新间隔和活动时间校准，再允许启动补火，避免旧计划抢先调用模型。
+      VRScheduler.onTrigger((charId: string, room?: string, letterId?: string, manual?: boolean, sarActivity?: VRSARActivity) => { void runVR(charId, room, letterId, manual, sarActivity); });
 
       // 「家园」演绎 —— 引擎跑在全局：用户不在家园界面（可能正在和别人私聊）时，
       // 观测/离线 tick 触发的一轮链式演绎照样完成并注入 world_card。
@@ -3502,7 +3504,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       }
   };
 
-  const cloudRestoreFromWebDAV = async (file: CloudBackupFile) => {
+  const cloudRestoreFromWebDAV = async (file: CloudBackupFile, importOptions?: ImportSystemOptions) => {
       const { downloadBackup } = await loadBackupProvider();
       try {
           setSysOperation({ status: 'processing', message: '正在从云端下载...', progress: 0 });
@@ -3514,7 +3516,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
           setSysOperation({ status: 'processing', message: '正在恢复数据...', progress: 50 });
           const zipFile = new File([blob], file.name, { type: 'application/zip' });
-          await importSystem(zipFile);
+          await importSystem(zipFile, importOptions);
       } catch (e: any) {
           setSysOperation({ status: 'idle', message: '', progress: 0 });
           addToast(`云端恢复失败: ${e.message}`, 'error');
@@ -4235,7 +4237,8 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   ): Promise<Blob> => {
       try {
           setSysOperation({ status: 'processing', message: '正在初始化打包引擎...', progress: 0 });
-          
+          // 本地导出与云端备份共用偏好；保留旧调用方显式选项的兼容。
+          const includeBackendConnection = exportOptions.includeBackendConnection ?? readBackupPreferences().includeBackendConnection;
           const zip = createBackupArchive();
           const assetsFolder = zip.folder("assets");
           let assetCount = 0;
@@ -4596,7 +4599,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           // ActiveMsg 库里，不在上面那份 store 清单内，所以单独取一次；异步，故在字面量外。
           // 纯配置无媒体，跟着 text_only / full 走。
           if (mode === 'text_only' || mode === 'full') {
-              backupData.amsg2GlobalConfig = await exportAmsg2GlobalConfig(exportOptions);
+              backupData.amsg2GlobalConfig = await exportAmsg2GlobalConfig({ includeBackendConnection });
           }
 
           // 桌面皮肤偏好（电子宠物/手游风的界面配色 + 看板 banner）——异步（看板图令牌需解析为

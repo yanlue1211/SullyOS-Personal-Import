@@ -110,14 +110,13 @@ const genId = (p: string) => `${p}_${Date.now().toString(36)}_${Math.random().to
 const running = new Set<string>();
 
 /**
- * 自动登入的最小间隔闸 —— 一个角色两次真实的模型调用之间，至少要隔够设定间隔的一半。
+ * 自动登入的最小间隔闸 —— 自动活动不能早于用户设定的完整间隔。
  *
  * 为什么要有它：熔断只认「一直失败」，可要是调用一直成功、只是被谁催着一分钟跑两趟，
  * 那是安安静静地烧钱，没有任何东西会喊停。这道闸跟成败无关，只看「上一次是什么时候」。
  *
- * 为什么记在内存里而不落存储：它兜的正是「调度状态本身出了问题」——上游的首火时刻写丢了、
- * 或者哪条路绕过了到期判断，靠的都是存储；把闸也存进去，就会跟着一起失效。页面一刷新
- * 计数就归零，而失控循环本来就活在单个页面实例里，内存态足够拦住。
+ * 内存保留真实调用时刻以拦住页面内的失控循环，同时参考角色持久化的 lastActiveAt，
+ * 避免刷新或恢复时丢失最近一次成功活动的时间。调度表与这份角色状态分开校验。
  *
  * 用户手动点「让 ta 现在去逛一次」不受这道闸限制。
  */
@@ -130,14 +129,14 @@ const MIN_AUTO_GAP_FLOOR_MS = 5 * 60_000;
 /**
  * 按角色的设定间隔算出「这一轮最早什么时候才允许再来」。
  *
- * 取设定间隔的一半，是想留出余量：调度本身会被后台节流推迟，掐得跟设定值一样紧
- * 会把正常的补火也误伤掉。设定值缺失或是脏数据（NaN、0、负数）时退回默认间隔，
+ * 自动活动必须等满用户设定的间隔；后台节流只会延后，不应缩短此间隔。
+ * 设定值缺失或是脏数据（NaN、0、负数）时退回默认间隔，
  * 再由下限兜一道——不这么写的话 NaN 会让所有比较恒为 false，整道闸静悄悄失效。
  */
 export function vrAutoGapMs(intervalMinutes?: number): number {
     const raw = Number(intervalMinutes);
     const minutes = Number.isFinite(raw) && raw > 0 ? raw : VR_DEFAULT_INTERVAL_MIN;
-    return Math.max((minutes * 60_000) / 2, MIN_AUTO_GAP_FLOOR_MS);
+    return Math.max(minutes * 60_000, MIN_AUTO_GAP_FLOOR_MS);
 }
 
 /** 各角色当前被最小间隔闸拦下的累计次数，给诊断导出用。 */
@@ -284,7 +283,10 @@ async function runVRSessionUnlocked(deps: VRSessionDeps): Promise<VRSessionResul
     // 最小间隔闸（见 lastAutoCallAt）。走到这里说明有东西在催，正常调度不会这么密。
     if (!manual) {
         const minGap = vrAutoGapMs(char.vrState?.intervalMinutes);
-        const since = Date.now() - (lastAutoCallAt.get(char.id) || 0);
+        // 持久化的成功活动时间跨刷新保留，手动活动也纳入下一轮自动活动的间隔。
+        const lastActiveAt = Number(char.vrState?.lastActiveAt);
+        const since = Date.now() - Math.max(lastAutoCallAt.get(char.id) || 0,
+            Number.isFinite(lastActiveAt) && lastActiveAt > 0 ? lastActiveAt : 0);
         if (since < minGap) {
             const times = (throttledCount.get(char.id) || 0) + 1;
             throttledCount.set(char.id, times);

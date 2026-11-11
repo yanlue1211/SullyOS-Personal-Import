@@ -42,6 +42,8 @@
 
 ## 实现与兼容
 
+自动活动间隔按角色保存的设置执行（12h 为 720 分钟），不是固定 2h。启动时先以角色设置和 `lastActiveAt` 校准调度表，再检查到期活动；成功活动结束后重新计算下一次自动活动。执行前还会核对完整间隔及持久化的最近活动时间，避免刷新后只剩内存计时。手动邀请不受自动间隔限制，但会推迟下一次自动活动。默认 120 分钟仅用于设置缺失的情况。
+
 - `utils/vrWorld/activityChoices.ts`：可执行子玩法目录、SAR 权重和过滤规则，UI 与执行器共用 ID。
 - `VRWorldCharState.excludedAutoRooms` / `excludedAutoSARActivities`：每个角色的排除项，缺省或空数组表示不限制；随角色备份保存。`VRSARActivity` 集中定义五种子玩法。
 - `VRActivityPicker.tsx`：两级手动菜单与高级选项。高级选项使用函数式角色更新，避免快速连续勾选覆盖上一项。

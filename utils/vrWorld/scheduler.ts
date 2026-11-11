@@ -217,6 +217,8 @@ export const VRScheduler = {
         if (outcome === 'skipped') return { tripped: false, streak: loadFailStreak()[charId] || 0 };
         if (outcome === 'ok') {
             removeFailStreak(charId);
+            setLastFire(charId, Date.now());
+            schedulePreciseTimer();
             return { tripped: false, streak: 0 };
         }
         const m = loadFailStreak();
@@ -250,11 +252,11 @@ export const VRScheduler = {
      * 导入到新设备 / 新浏览器档案后，角色明明是 enabled 但调度表为空，resume() 直接
      * 早退 → 角色永远不会自主登入。数据加载完成后调用本方法对账即可修复。
      *
-     * - 启用但缺调度 → 补建（首火从现在起算，避免导入瞬间爆触发一堆 LLM 调用）
+     * - 缺调度 → 补建；有角色活动时间时恢复基准，否则从现在起算
      * - 间隔被改过 → 跟随最新设定
      * - 已删除 / 已关闭的角色 → 清掉残留调度
      */
-    reconcile(active: { charId: string; intervalMinutes: number }[]) {
+    reconcile(active: { charId: string; intervalMinutes: number; lastActiveAt?: number }[]) {
         const schedules = loadSchedules();
         const activeIds = new Set(active.map(a => a.charId));
         let changed = false;
@@ -265,7 +267,10 @@ export const VRScheduler = {
             const existing = schedules[a.charId];
             // 调度可能被镜像恢复，但触发时间已丢失；旧计划也要补齐首火基准。
             // 只补缺失值，不推迟已有计划，也不在恢复瞬间集中调用模型。
-            if (getLastFire(a.charId) === 0) setLastFire(a.charId, Date.now());
+            const lastFire = getLastFire(a.charId);
+            const lastActive = Number(a.lastActiveAt);
+            if (Number.isFinite(lastActive) && lastActive > lastFire) setLastFire(a.charId, lastActive);
+            else if (lastFire === 0) setLastFire(a.charId, Date.now());
             if (!existing) {
                 schedules[a.charId] = { charId: a.charId, intervalMs };
                 changed = true;
