@@ -30,6 +30,7 @@ import { ActiveMsgClient } from '../utils/activeMsgClient';
 import { syncCloudAwayTask } from '../utils/awayMessage';
 import { isAmsg2EnabledForChar } from '../utils/amsg2Tasks';
 import { prepareInPersonScheduling, applyInPersonSchedules } from '../utils/inPersonScheduling';
+import { insertInPersonScheduleContext } from '../utils/inPersonPromptContext';
 import StoryTheater from '../components/date/story/StoryTheater';
 import { dateLaunch } from '../utils/dateLaunch';
 import { getLocalDateKey } from '../utils/localDate';
@@ -505,7 +506,7 @@ const DateApp: React.FC = () => {
         });
         // 线下会话也可让角色自行预约未来的 2.0 主动联系，和离开后自动消息分开。
         const scheduling = await prepareInPersonScheduling([char], true, true, new Map([[char.id, currentEncounterId]]));
-        if (scheduling.prompt) messages.splice(1, 0, { role: 'system', content: scheduling.prompt });
+        insertInPersonScheduleContext(messages, scheduling.prompt);
         const rawContent = await callLLM(messages, resolveDialogueApi(apiConfig, char).temperature ?? 0.85);
         const cleanDateContent = await applyInPersonSchedules(rawContent, scheduling, {
             userProfile, groups, realtimeConfig, apiConfig, updateCharacter,
@@ -1357,3 +1358,4 @@ const DateApp: React.FC = () => {
 export default DateApp;
 import { useAppShortcut } from '../utils/appShortcutLaunch';
 import { AppID as ShortcutAppID } from '../types';
+

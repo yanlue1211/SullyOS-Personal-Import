@@ -170,3 +170,27 @@ describe('见面稳定前缀与原生缓存边界', () => {
         expect(text(b)).toContain('还剩 9/10 次');
     });
 });
+
+
+describe('actual DateApp scheduling assembly', () => {
+    it('keeps the changing scheduling example after the cached history and before final principles', async () => {
+        const {insertInPersonScheduleContext} = await import('./inPersonPromptContext');
+        const first = await build('send'), second = await build('send');
+        const final = first.messages.at(-1);
+        insertInPersonScheduleContext(first.messages, '未来排程示例 08:01');
+        insertInPersonScheduleContext(second.messages, '未来排程示例 08:02');
+        expect(first.messages.at(-1)).toBe(final);
+        expect(first.messages.at(-2)?.content).toBe('未来排程示例 08:01');
+        expect(native(first).system).toEqual(native(second).system);
+        expect(cachedHistory(native(first))).toEqual(cachedHistory(native(second)));
+        expect(JSON.stringify(cachedHistory(native(first)))).toContain('历史原文-79');
+        expect(JSON.stringify(native(first))).toContain('未来排程示例 08:01');
+    });
+    it('retains immutable archived system provenance without treating live state as history', async () => {
+        const rows=history(); rows.splice(3,0,{id:999,charId:'date-cache',role:'system',type:'moments_card',content:'不可变朋友圈原记录',timestamp:start-90000} as any);
+        const a=await build('send',makeChar(),rows);
+        expect(a.messages.some((m:any)=>m.name==='sully_history_context' && String(m.content).includes('不可变朋友圈原记录'))).toBe(true);
+        expect(JSON.stringify(cachedHistory(native(a)))).toContain('历史原文-79');
+        expect(JSON.stringify(cachedHistory(native(a)))).not.toContain('见面实时状态');
+    });
+});
