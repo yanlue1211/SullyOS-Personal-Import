@@ -24,7 +24,7 @@ export async function reviseCommentIn(s:IDBObjectStore,tx:IDBTransaction,actor:s
   const messages=tx.objectStore('messages'),cursor=messages.openCursor();
   await new Promise<void>((resolve,reject)=>{cursor.onerror=()=>reject(cursor.error);cursor.onsuccess=()=>{const row=cursor.result;if(!row){resolve();return;}const m=row.value,meta=m.metadata;
    if(Array.isArray(meta?.momentsActivityParts)&&meta.momentsActivityParts.some((part:ActivityCardPart)=>part.postId===postId)){
-    const parts=meta.momentsActivityParts.map((part:ActivityCardPart)=>part.postId!==postId?part:part.post?(part.post.comments.some(x=>removed.has(x.id))?renderActivityPart(rewrite(part.post),['朋友圈经历（已按用户修订更新）']):part):{...part,text:replaceLegacy(part.text)===part.text?part.text:'朋友圈经历（已按用户修订更新）\n'+replaceLegacy(part.text).split('\n').slice(1).join('\n')});
+    const parts=meta.momentsActivityParts.map((part:ActivityCardPart)=>part.postId!==postId?part:part.post?(part.post.comments.some(x=>removed.has(x.id))?renderActivityPart(rewrite(part.post),['朋友圈经历（已按用户修订更新）'],part.commentIds):part):{...part,text:replaceLegacy(part.text)===part.text?part.text:'朋友圈经历（已按用户修订更新）\n'+replaceLegacy(part.text).split('\n').slice(1).join('\n')});
     row.update({...m,content:activityCardText(parts,meta.momentsActivityAt),metadata:{...meta,momentsActivityParts:parts}});
    }else if(meta?.momentsPostId===postId){const revised=replaceLegacy(m.content);if(revised!==m.content)row.update({...m,content:'[私人朋友圈记录（已按用户修订更新）]\n'+revised.split('\n').slice(m.content.startsWith('[私人朋友圈重要事件')?2:1).join('\n')});}
    row.continue();};});

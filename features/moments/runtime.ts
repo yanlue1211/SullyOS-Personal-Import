@@ -419,8 +419,8 @@ export async function applyActivity(
     )
       throw Error("活动已过期或设置变化");
     const reactions=new Map<string,string>();
-    const cardEntries=new Map<string,{post:Post;events:string[]}>();
-    const record=(post:Post,event:string)=>{const old=cardEntries.get(post.id);cardEntries.set(post.id,{post,events:[...(old?.events||[]),event]});};
+    const cardEntries=new Map<string,{post:Post;events:string[];commentIds:string[]}>();
+    const record=(post:Post,event:string,commentIds:string[]=[])=>{const old=cardEntries.get(post.id);cardEntries.set(post.id,{post,events:[...(old?.events||[]),event],commentIds:[...new Set([...(old?.commentIds||[]),...commentIds])]});};
     const actual = new Map<string, Post>();
     for (const post of task.posts) {
       const p = await getRow<Post>(post.id, s),
@@ -439,7 +439,7 @@ export async function applyActivity(
       const acted=response.actions.some((x:any)=>x.kind==='comment'&&x.postId===id&&(!x.replyTo||mayReply(material,x.replyTo)));
       const state=acted?'本轮新增了评论或回复':'本轮未新增评论或回复';
       if(received.length||newLikes.length)reactions.set(id,[newLikes.length?'实际看到新点赞：'+newLikes.map(x=>x.name).join('、'):'',received.length?'实际看到针对自己的评论/回复：'+received.map(x=>x.name).join('、'):'',state].filter(Boolean).join('；'));
-      if(received.length)record({...material,comments:material.comments},'实际读到别人对自己的评论或回复：'+[...new Set(received.map(x=>x.name))].join('、')+'；'+state);
+      if(received.length)record({...material,comments:material.comments},'实际读到别人对自己的评论或回复：'+[...new Set(received.map(x=>x.name))].join('、')+'；'+state,received.map(x=>x.id));
       await markSeen(s,c,char.id,material,reactions.get(id));
     }
     const dedup = new Set<string>();
@@ -511,7 +511,7 @@ export async function applyActivity(
         const material=task.posts.find(p=>p.id===action.postId)!;
         const updated=(await getRow<Post>(action.postId,s))!;
         const own=updated.comments.filter(x=>x.authorId===char.id&&!material.comments.some(old=>old.id===x.id));
-        record({...material,comments:[...material.comments,...own]},action.replyTo?'本人回复了这条朋友圈中的评论':'本人评论了这条朋友圈');
+        record({...material,comments:[...material.comments,...own]},action.replyTo?'本人回复了这条朋友圈中的评论':'本人评论了这条朋友圈',[`${call.id}:${key}`]);
       }
     }
     let published: Post | undefined;

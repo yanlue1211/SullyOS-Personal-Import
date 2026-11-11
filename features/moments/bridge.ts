@@ -99,7 +99,7 @@ export async function prepareMomentsQuery(
   }
   let wroteCard=false;
   await transaction(async (s,tx) => {
-    const receipts:{post:Post;events:string[]}[]=[];
+    const receipts:{post:Post;events:string[];commentIds:string[]}[]=[];
     const live = await getConfig(s);
     if (live.revision !== c.revision)
       throw Error("朋友圈权限在读取时变化，请重新查看");
@@ -112,7 +112,7 @@ export async function prepareMomentsQuery(
         const seen=await getRow<Seen>(`seen:${charId}:${p.id}`,s);
         const old=new Set(seen?.projection.comments.map(x=>x.id)||[]);
         const received=view.comments.filter(x=>x.authorId!==charId&&!old.has(x.id)&&(x.replyTo?view.comments.some(parent=>parent.id===x.replyTo&&parent.authorId===charId):view.owner===charId));
-        if(received.length)receipts.push({post:view,events:['聊天中实际读到别人对自己的评论或回复']});
+        if(received.length)receipts.push({post:view,events:['聊天中实际读到别人对自己的评论或回复'],commentIds:received.map(x=>x.id)});
         await markSeen(s, live, charId, actual);
       }
     }
