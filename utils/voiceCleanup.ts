@@ -1,7 +1,6 @@
 import {DB,openDB} from './db';
-import {BLOBREF_PREFIX,deleteBlobRef} from './blobRef';
-import {REF_SOURCE_STORES} from './blobGc';
-import {WORKROOM_STORES} from '../features/workroom/schema';
+import {BLOBREF_PREFIX} from './blobRef';
+import {reclaimUnreferencedVoiceBlobs} from './voiceBlobBatchCleanup';
 import {listUserRecordings,clearUserRecordings,type UserRecording} from '../features/personal/chatMedia/cleanup';
 import {currentMaintenanceHolder,tryAcquireMaintenanceLock,releaseMaintenanceLock} from './maintenanceLock';
 
@@ -30,22 +29,43 @@ export async function inspectAllVoices():Promise<VoiceCleanupPlan>{
  // Loose audio is reclaimed only after the complete reference check; do not overpromise its size.
  return result;
 }
-export async function clearAllVoices(plan:VoiceCleanupPlan){
+export async function clearAllVoices(plan:VoiceCleanupPlan,onProgress?:(label:string)=>void){
  if(!tryAcquireMaintenanceLock('全部语音清理'))throw Error(`请等待「${currentMaintenanceHolder()}」完成后重试`);
  let freedBytes=0,files=0;
  try{
   const db=await openDB();
-  // Small transactions avoid retaining every audio Blob until a giant commit.
-  for(const candidate of plan.assets){
-   await new Promise<void>((resolve,reject)=>{
-    const tx=db.transaction(candidate.store,'readwrite'),store=tx.objectStore(candidate.store),req=store.get(candidate.id);
-    let removedBytes=0,removed=false;
-    req.onsuccess=()=>{if(!req.result||!voiceId(candidate.id))return;removedBytes=bytes(candidate.store==='assets'?req.result.data:req.result.blob);if(candidate.store==='assets'&&candidate.id.startsWith('voice_msg_')){
-      const {blob,remoteUrl,url,audio,...text}=req.result.data||{};store.put({...req.result,data:text});
-     }else store.delete(candidate.id);removed=true;};
-    tx.oncomplete=()=>{freedBytes+=removedBytes;if(removed)files++;resolve();};tx.onerror=tx.onabort=()=>reject(tx.error||Error('语音文件清理失败'));
-   });
+  // 24 records per transaction instead of one transaction per clip. This
+  // prevents both long-running single transactions and thousands of commits.
+  const BATCH_SIZE=24;
+  let done=0;
+  for(const storeName of ['assets','blob_assets'] as const){
+   const candidates=plan.assets.filter(item=>item.store===storeName);
+   for(let i=0;i<candidates.length;i+=BATCH_SIZE){
+    const batch=candidates.slice(i,i+BATCH_SIZE);
+    await new Promise<void>((resolve,reject)=>{
+     const tx=db.transaction(storeName,'readwrite'),store=tx.objectStore(storeName);
+     let batchBytes=0,batchFiles=0;
+     for(const candidate of batch){
+      const req=store.get(candidate.id);
+      req.onsuccess=()=>{
+       if(!req.result||!voiceId(candidate.id))return;
+       const row=req.result;
+       const removedBytes=bytes(storeName==='assets'?row.data:row.blob);
+       if(storeName==='assets'&&candidate.id.startsWith('voice_msg_')){
+        const {blob,remoteUrl,url,audio,...text}=row.data||{};
+        store.put({...row,data:text});
+       }else store.delete(candidate.id);
+       batchBytes+=removedBytes;batchFiles++;
+      };
+     }
+     tx.oncomplete=()=>{freedBytes+=batchBytes;files+=batchFiles;resolve();};
+     tx.onerror=tx.onabort=()=>reject(tx.error||Error('语音文件清理失败'));
+    });
+    done+=batch.length;
+    onProgress?.(`正在清理语音缓存（${done}/${plan.assets.length}）`);
+   }
   }
+  let sessionDone=0;
   for(const id of plan.inlineSessions){
    await new Promise<void>((resolve,reject)=>{
     const tx=db.transaction('assets','readwrite'),store=tx.objectStore('assets'),req=store.get(id);let removedBytes=0;
@@ -55,24 +75,23 @@ export async function clearAllVoices(plan:VoiceCleanupPlan){
     };
     tx.oncomplete=()=>{freedBytes+=removedBytes;resolve();};tx.onerror=tx.onabort=()=>reject(tx.error||Error('月栖语音清理失败'));
    });
+   onProgress?.(`正在清理月栖语音（${++sessionDone}/${plan.inlineSessions.length}）`);
   }
  }finally{releaseMaintenanceLock();}
- const recordings=await clearUserRecordings(plan.recordings,true);
+
+ // Chat messages remain intact; only attached audio is detached.
+ const recordings=await clearUserRecordings(plan.recordings,true,onProgress);
  let retainedLoose=0;
  if(plan.looseAudio.length){
   if(!tryAcquireMaintenanceLock('未引用录音清理'))throw Error(`请等待「${currentMaintenanceHolder()}」完成后重试`);
   try{
-   const candidates=new Map(plan.looseAudio.map(row=>[row.ref,row]));
-   const inspect=(text:string)=>{for(const match of text.matchAll(/blobref:[a-zA-Z0-9_-]+/g))candidates.delete(match[0]);};
-   for(const store of [...REF_SOURCE_STORES,...WORKROOM_STORES]){let after:IDBValidKey|null=null;for(;;){const page=await DB.getStoreRowsPage(store,after,20);for(const row of page.rows)inspect(JSON.stringify(row)||'');if(page.lastKey===null||page.rows.length<20)break;after=page.lastKey;}}
-   for(let i=0;i<localStorage.length;i++)inspect(localStorage.getItem(localStorage.key(i)!)||'');
-   // Referenced music/BGM or any unknown consumer wins over reclamation.
-   retainedLoose=plan.looseAudio.length-candidates.size;
-   for(const row of candidates.values()){
-    const blob=await DB.getBlobAsset(row.id);if(!blob)continue;
-    await deleteBlobRef(row.ref);freedBytes+=blob.size;files++;
+   const deleted=await reclaimUnreferencedVoiceBlobs(plan.looseAudio.map(row=>row.ref),onProgress);
+   for(const row of plan.looseAudio){
+    if(deleted.has(row.ref)){freedBytes+=row.bytes;files++;}
    }
+   retainedLoose=plan.looseAudio.length-deleted.size;
   }finally{releaseMaintenanceLock();}
  }
+ onProgress?.('语音清理完成，正在更新存储信息…');
  return {files:files+recordings.cleared,freedBytes:freedBytes+recordings.freedBytes,retainedFiles:recordings.retainedFiles+retainedLoose};
 }
