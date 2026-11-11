@@ -39,9 +39,12 @@ it.each([false,true])('splits the original core context without another retrieva
  const char:any={id:'a',name:'角色甲',systemPrompt:'固定角色甲',memoryPalaceEnabled:true,memories:[],customTimezoneEnabled:true,customTimezone:'UTC'};
  const input:any={char,user:{name:'小明'},recalled:'角色甲的召回一',recent:[{id:1,charId:'a',role:'user',type:'text',content:'携带的原文一',timestamp:1}],identityName:'面具',header:'[剧情角色：角色甲]',skipWorldbookIds:new Set(),realTime};
  const a=await buildStoryCharacterContextParts(input);vi.setSystemTime(new Date('2026-11-11T12:02:00Z'));
- const b=await buildStoryCharacterContextParts({...input,recalled:'角色甲的召回二',recent:[{...input.recent[0],content:'携带的原文二'}]});
+ const b=await buildStoryCharacterContextParts({...input,recalled:'角色甲的召回二'});
  expect(a.stable).toBe(b.stable);expect(a.stable).not.toContain('召回一');expect(a.stable).not.toContain('当前时间 (Now)');
- expect(a.live).toContain('角色甲的召回一');expect(b.live).toContain('携带的原文二');
+ expect(a.live).toContain('角色甲的召回一');expect(b.stable).toContain('携带的原文一');
+ expect(b.live).not.toContain('携带的原文一');
+ const changed=await buildStoryCharacterContextParts({...input,recent:[{...input.recent[0],content:'携带的原文二'}]});
+ expect(changed.stable).toContain('携带的原文二');expect(changed.stable).not.toContain('携带的原文一');
  expect(a.live.includes('当前时间 (Now)')).toBe(realTime);
  expect(char).not.toHaveProperty('memoryPalaceInjection');
 });
@@ -58,4 +61,17 @@ it('caches real history after fixed preset user/assistant examples and system sl
     expect(JSON.stringify(prefix(a))).not.toContain('本轮召回');
     expect(a.messages.find(message => message.content === '固定角色')?.name).toBe('sully_history_context');
     expect(a.messages.find(message => message.content.includes('本轮剧情上下文'))?.name).toBeUndefined();
+});
+
+it('preserves the previous cached history prefix when the scene gains another dialogue pair', () => {
+    const a = native(compile(1));
+    const b = native(compile(2, preset(), [...history,
+        {role: 'user', content: '下一轮推进'},
+        {role: 'assistant', content: '下一轮正文'},
+    ]));
+    const flatten = (request: any) => request.messages.flatMap((message: any) => message.content.map((block: any) => ({role: message.role, ...block})));
+    const oldBlocks = flatten(a);
+    const end = oldBlocks.findLastIndex((block: any) => block.cache_control);
+    const strip = ({cache_control: _cache, ...block}: any) => block;
+    expect(flatten(b).slice(0, end + 1).map(strip)).toEqual(oldBlocks.slice(0, end + 1).map(strip));
 });

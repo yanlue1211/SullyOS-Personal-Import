@@ -10,13 +10,15 @@ export async function buildStoryCharacterContextParts(input: {
     const {char, user, recalled, recent, identityName, header, skipWorldbookIds, realTime} = input;
     const actor = {...char, memoryPalaceInjection: recalled};
     const timeOptions = {skipTimeAwareness: !realTime || char.timeAwarenessEnabled === false};
-    const stable = await ContextBuilder.buildCoreContext(actor, user, true, recalled, {
+    const core = await ContextBuilder.buildCoreContext(actor, user, true, recalled, {
         skipUserProfile: true, skipWorldbookIds, headerOverride: header,
     }, timeOptions, {deferVolatile: true});
     const state = await ContextBuilder.buildVolatileCoreState(actor, {memoryPalaceContext: recalled, timeOptions});
     const carried = formatActorRecentMessages(char, recent, user.name, identityName, {
         includeTimestamps: realTime, preserveFullText: realTime,
     });
-    const live = [state, carried].filter(text => text.trim()).join('\n');
-    return {stable, live: live ? `${header}\n${live}` : ''};
+    // The carried transcript excludes this theater's mirrors. It changes when the
+    // shared transcript changes, rather than on every scene turn like recall/time.
+    const stable = [core, carried].filter(text => text.trim()).join('\n');
+    return {stable, live: state.trim() ? `${header}\n${state}` : ''};
 }
