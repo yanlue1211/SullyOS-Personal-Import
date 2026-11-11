@@ -482,6 +482,7 @@ export interface ActiveMsg2TaskRecord {
   lastError?: string;
   /** 「离开后消息」的云端任务：每个角色最多一条，对方开口后往后推，见 docs/away-message.md。 */
   away?: boolean;
+  dateLeave?: boolean;
 }
 
 export interface ActiveMsg2CharacterConfig {
@@ -2258,6 +2259,25 @@ export interface DateState {
     peekStatus: string;
     /** 当前批次解析出的观测数据（开了 OBSERVE 才有），用于恢复会话时回填 HUD */
     observation?: DateObservation;
+    /** 挂起那一刻最后一条 AI 回复的正文：恢复后据此判断离开期间有没有新回复要接着播。 */
+    lastAssistantContent?: string;
+    /** 还停在开场白上（用户没开过口）：恢复后照旧不给开场白配音。 */
+    showingOpening?: boolean;
+    /** 没发出去的输入框草稿。 */
+    draftInput?: string;
+}
+
+/** 见面对话中途走开时挂起的见面，只存在内存里（见 docs/personal/date-context-suspension-20261111.md）。 */
+export interface SuspendedDate {
+    charId: string;
+    charName: string;
+    encounterId: string;
+    peekStatus: string;
+    cameFromChat: boolean;
+    state: DateState | null;
+    suspendedAt: number;
+    /** 切走时还没回来的那次回复；恢复后据此显示「正在输入」，落定后刷新记录。 */
+    pendingTurn?: Promise<unknown>;
 }
 
 // ─── 见面 · 剧情剧场 ────────────────────────────────────────────────
@@ -3163,6 +3183,8 @@ export interface CharacterProfile {
     /** 仅对“离开后消息”生效，绝不拦自主排程、约定提醒或即时回复。 */
     quietHours?: { enabled: boolean; startTime: string; endTime: string };
   };
+  /** 可选见面离开提醒，默认关闭。 */
+  dateLeaveReminder?: { enabled: boolean; delayMinutes?: number };
   activeBuffs?: CharacterBuff[];
   buffInjection?: string;   // 注入到systemPrompt的叙事型情绪底色描述
   emotionIndependent?: boolean;

@@ -6,7 +6,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
     toast: vi.fn(), updateCharacter: vi.fn(), fetch: vi.fn(),
-    session: null as any, rows: [] as any[],
+    session: null as any, rows: [] as any[], suspended: null as any, suspend: vi.fn(),
     characters: [{ id: 'c', name: '测试角色', avatar: '', savedDateState: { currentText: '旧快照' } }],
 }));
 vi.mock('../context/OSContext', async () => {
@@ -15,6 +15,7 @@ vi.mock('../context/OSContext', async () => {
         const [activeCharacterId, setActiveCharacterId] = React.useState('c');
         return {
             activeCharacterId, setActiveCharacterId,
+            suspendedDate: mocks.suspended, suspendDate: mocks.suspend, takeSuspendedDate: vi.fn(),
             characters: mocks.characters,
             closeApp: vi.fn(), openApp: vi.fn(), addToast: mocks.toast, updateCharacter: mocks.updateCharacter,
             updateUserProfile: vi.fn(), userProfile: { name: '用户' }, groups: [], characterGroups: [],
@@ -51,6 +52,7 @@ beforeEach(() => {
     localStorage.setItem('sully-date-entry-guide-v1', 'seen');
     mocks.rows = [];
     mocks.session = null;
+    mocks.suspended = null;
     mocks.fetch.mockResolvedValue({ ok: true });
     vi.stubGlobal('fetch', mocks.fetch);
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
@@ -126,4 +128,37 @@ it('有旧快照仍显示三个入口；直接见面不请求开场，退出无�
     await clickText('直接见面');
     expect(mocks.session.encounterId).not.toBe(firstId);
     expect(mocks.session.messages.map((message: any) => message.content)).toEqual(['上一场']);
+});
+
+it('切换应用挂起原场次，不解除持久见面锁；显式结束不挂起', async () => {
+    const { isAmsgActiveDate } = await import('./amsgInteractionGuard');
+    await act(async () => root.render(React.createElement(DateApp)));
+    await clickText('测试角色');
+    await clickText('直接见面');
+    const encounter = mocks.session.encounterId;
+    expect(isAmsgActiveDate('c')).toBe(true);
+    await act(async () => root.unmount());
+    expect(mocks.suspend).toHaveBeenCalledWith(expect.objectContaining({charId:'c', encounterId:encounter}));
+    expect(isAmsgActiveDate('c')).toBe(true);
+    mocks.suspended = mocks.suspend.mock.calls.at(-1)![0];
+    mocks.suspend.mockClear();
+    root = createRoot(container);
+    await act(async () => root.render(React.createElement(DateApp)));
+    expect(mocks.session.encounterId).toBe(encounter);
+    await clickText('退出见面');
+    expect(isAmsgActiveDate('c')).toBe(false);
+    await act(async () => root.unmount());
+    expect(mocks.suspend).not.toHaveBeenCalled();
+    root = createRoot(container);
+});
+
+it('线上消息已结束见面后不恢复旧的挂起场次', async () => {
+    const {setAmsgActiveDate} = await import('./amsgInteractionGuard');
+    setAmsgActiveDate('c', true, 'old-encounter');
+    mocks.suspended = {charId:'c',charName:'测试角色',encounterId:'old-encounter',peekStatus:'',
+      cameFromChat:false,state:null,suspendedAt:1};
+    setAmsgActiveDate('c', false);
+    await act(async () => root.render(React.createElement(DateApp)));
+    expect(container.textContent).toContain('选择见面对象');
+    expect(mocks.session).toBeNull();
 });

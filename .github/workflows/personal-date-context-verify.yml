@@ -1,0 +1,32 @@
+name: Personal date context and suspension
+on:
+  push:
+    branches: [personal/date-context-suspend-20261111]
+  pull_request:
+    branches: [personal/audio-listening]
+    paths:
+      - 'apps/DateApp.tsx'
+      - 'components/date/**'
+      - 'context/OSContext.tsx'
+      - 'utils/amsgInPersonContext.ts'
+      - 'worker/amsg/**'
+      - '.github/workflows/personal-date-context-verify.yml'
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      NODE_OPTIONS: '--max-old-space-size=4096'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm vitest run utils/dateLeaveReminder.test.ts utils/amsgStateSync.test.ts utils/amsg2Tasks.test.ts utils/amsg2ToolBridge.test.ts utils/characterCard.test.ts utils/dateSettingsLayout.test.ts utils/dateSessionResume.test.ts utils/dateEntryFlow.test.ts utils/communityFixesUI.test.ts utils/amsgInteractionGuard.test.ts utils/dateSessionRecovery.test.ts utils/datePromptCaching.test.ts utils/timeAwarenessRequests.test.ts worker/amsg/src/audit-20261018.test.ts worker/amsg/src/index.test.ts utils/awayMessage.test.ts utils/activeMsgRuntime.test.ts
+      - run: pnpm build

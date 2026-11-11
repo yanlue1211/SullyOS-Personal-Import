@@ -21,7 +21,7 @@ const makeTask = (index: number, at: number) => ({
 
 async function start(over: {
   enabled?: boolean; config?: any; pending?: any[]; selfLog?: any; sharedValue?: string; awaySceneLock?: 'date' | 'call';
-  builtAt?: number; limits?: Record<string, unknown>; chatMessages?: any[]; nowMs?: number; task?: any; remote?: any[]; template?: string; failNextSchedule?: boolean;
+  presence?: any; builtAt?: number; limits?: Record<string, unknown>; chatMessages?: any[]; nowMs?: number; task?: any; remote?: any[]; template?: string; failNextSchedule?: boolean;
 } = {}) {
   const nowMs = over.nowMs ?? now;
   const pack = {
@@ -33,6 +33,7 @@ async function start(over: {
     chat: { builtAt: now, messages: over.chatMessages ?? [{ role: 'user', content: '你好' }] },
   };
   const rows = [
+    ...(over.presence ? [{key:"chat_presence",value:JSON.stringify(over.presence)}] : []),
     { key: AMSG_FIRE_PACK_KEY, value: over.sharedValue ?? JSON.stringify(pack) },
     { key: AMSG_TOOL_PACK_KEY, value: JSON.stringify(buildToolPack({ id: charId, name: '角色' } as any)) },
     { key: AMSG_LIMITS_KEY, value: JSON.stringify({ v: 1, selfScheduleEnabled: over.enabled ?? true, maxUnansweredSends: 0, minSendGapMinutes: 0, ...over.limits }) },
@@ -63,6 +64,79 @@ beforeEach(() => { vi.spyOn(Date, 'now').mockReturnValue(now); });
 afterEach(() => { vi.restoreAllMocks(); });
 
 describe('amsg2 audit regressions', () => {
+  it('date presence does not defer or discard ordinary scheduled contact', async () => {
+    const task = {id:60,uuid,contactName:'角色',nextSendAt:new Date(now).toISOString(),recurrenceType:'none',
+      metadata:{charId,amsgMode:'auto',amsgClientTaskId:'ordinary',amsgTaskInstruction:'出门后报备',amsgExpirePolicy:'expire'}};
+    const result = await start({task,presence:{v:1,charId,scene:'date',activeAt:now,lastUserMessageAt:null},
+      limits:{awaySceneLock:'date',awayDateEncounterId:'e'}});
+    expect(result.plan.defer).toBeUndefined();
+    expect(result.plan.skip).toBeUndefined();
+    const output:any = await amsgHooks.onLLMOutput({...result.ctx,taskId:60,sessionId:'date-ordinary',
+      iteration:0,metadata:task.metadata,llmOutputText:'我出门啦。'});
+    expect(output.decision).toBe('finish');
+  });
+
+  it('optional date reminder defers while present; after leaving sends once without scheduling tools or ending the date', async () => {
+    const task = {id:61,uuid,contactName:'角色',nextSendAt:new Date(now).toISOString(),recurrenceType:'none',
+      metadata:{charId,amsgMode:'auto',amsgClientTaskId:'reminder',amsgDateLeave:true,amsgDateLeaveDelayMinutes:5,
+        amsgTaskInstruction:'见面离开提醒',amsgExpirePolicy:'force'}};
+    const limits={dateLeaveEnabled:true,awaySceneLock:'date',awayDateEncounterId:'e',dailySendCap:1};
+    const present=await start({task,limits,presence:{v:1,charId,scene:'date',activeAt:now,lastUserMessageAt:null}});
+    expect(present.plan).toEqual({defer:{afterMs:5*60_000}});
+    const left=await start({task,limits,presence:{v:1,charId,scene:'date',activeAt:now-5*60_000,lastUserMessageAt:null},
+      template:BEFORE_SPEAK_LINES.join('\n')+'\n{{AMSG_TASK_INSTRUCTION}}'});
+    expect(left.plan.skip).toBeUndefined();
+    expect(JSON.stringify(left.plan.tools ?? [])).not.toContain('schedule_active_message');
+    expect(JSON.stringify(left.plan.messages)).not.toContain('【开口之前】');
+    expect(left.stash.dateExitEncounterId).toBeNull();
+    expect(left.scheduleTask).not.toHaveBeenCalled();
+    // Returned to the date while generating: suppress the stale reminder.
+    left.ctx.readState.mockResolvedValue([
+      {key:AMSG_LIMITS_KEY,value:JSON.stringify({v:1,selfScheduleEnabled:true,...limits})},
+      {key:'chat_presence',value:JSON.stringify({v:1,charId,scene:'date',activeAt:now,lastUserMessageAt:null})},
+    ]);
+    const returned:any = await amsgHooks.onLLMOutput({...left.ctx,taskId:61,sessionId:'reminder-return',iteration:0,
+      metadata:task.metadata,llmOutputText:'我还在这儿。'});
+    expect(returned.decision).toBe('skip-push');
+  });
+
+  it('date reminder disabled or ended is skipped before generation', async () => {
+    const task={id:62,uuid,nextSendAt:new Date(now).toISOString(),recurrenceType:'none',
+      metadata:{charId,amsgMode:'auto',amsgClientTaskId:'off-reminder',amsgDateLeave:true,amsgDateLeaveDelayMinutes:5,
+        amsgTaskInstruction:'见面离开提醒',amsgExpirePolicy:'force'}};
+    for (const limits of [{dateLeaveEnabled:false,awaySceneLock:'date'},{dateLeaveEnabled:true,awaySceneLock:null}]) {
+      const result=await start({task,limits,presence:{v:1,charId,scene:'date',activeAt:now-5*60_000,lastUserMessageAt:null}});
+      expect(result.plan).toEqual({skip:true});
+      expect(result.stash).toBeUndefined();
+    }
+  });
+
+  it('ordinary scheduled contact sees meeting context and can choose silence or depart without a hard lock', async () => {
+    const task = { id: 51, uuid: '99999999-9999-4999-8999-999999999999', contactName: '角色',
+      nextSendAt: new Date(now).toISOString(), recurrenceType: 'none',
+      metadata: {charId, amsgMode: 'auto', amsgClientTaskId: 'ordinary-before-date',
+        amsgTaskInstruction: '六点半起床轻手轻脚出门后报备', amsgExpirePolicy: 'expire'} };
+    const result = await start({task, limits:{awaySceneLock:'date', awayDateEncounterId:'meet-current'}});
+    expect(result.plan.skip).toBeUndefined();
+    expect(JSON.stringify(result.plan.messages)).toContain('六点半起床');
+    expect(JSON.stringify(result.plan.messages)).toContain('切换应用、锁屏');
+    expect(JSON.stringify(result.plan.messages)).toContain('线下见面尚未明确结束');
+    expect(result.scheduleTask).not.toHaveBeenCalled();
+    const silent: any = await amsgHooks.onLLMOutput({...result.ctx, taskId:51, sessionId:'date-silent',
+      iteration:0, metadata:task.metadata, contactName:'角色', llmOutputText:AMSG_SILENT_MARK});
+    expect(silent.decision).toBe('skip-push');
+    expect(result.stash.dateExitHadVisibleMessage).not.toBe(true);
+
+    const departing = await start({task, limits:{awaySceneLock:'date', awayDateEncounterId:'meet-current'}});
+    const speech: any = await amsgHooks.onLLMOutput({...departing.ctx, taskId:51, sessionId:'date-depart',
+      iteration:0, metadata:task.metadata, contactName:'角色', llmOutputText:'我出门啦，你接着睡。'});
+    expect(speech.decision).toBe('finish');
+    expect(speech.pushPayloads[0].metadata.amsgDateEndedEncounterId).toBe('meet-current');
+    await amsgFireSettled({status:'sent',sentCount:1,scratch:departing.ctx.scratch,writeState:departing.ctx.writeState} as any);
+    const entries = vi.mocked(departing.ctx.writeState).mock.calls.flatMap(([, values]:any[])=>values);
+    expect(JSON.parse(entries.find((e:any)=>e.key===AMSG_LIMITS_KEY).value)).toMatchObject({awaySceneLock:null});
+  });
+
   it('B-mode quiet slot waits until the quiet end and schedules the next tick at that time', async () => {
     const task = {
       id: 30, uuid: '33333333-3333-4333-8333-333333333333',

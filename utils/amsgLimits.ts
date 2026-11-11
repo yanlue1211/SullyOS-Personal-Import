@@ -143,6 +143,8 @@ export interface AmsgLimitsRecord extends AmsgPacingSettings {
   awayQuietHours?: { enabled: boolean; startTime: string; endTime: string };
   /** 自动空闲提醒开关；独立于自主排程，false 时旧的链式任务也立即停止。 */
   awayEnabled?: boolean;
+  /** 可选见面离开提醒的取消兜底；缺省关闭。 */
+  dateLeaveEnabled?: boolean;
   /** 只有自动空闲提醒读取的节拍间隔。 */
   awayDelayMinutes?: number;
   /** 见面/通话即时锁使用小型限制行快速同步，不等待较大的 fire_pack 上传。 */

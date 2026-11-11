@@ -45,6 +45,8 @@ import {
 import { ActiveMsgStore } from '../utils/activeMsgStore';
 import { markAmsgStateDirty, startAmsgChatPresence, stopAmsgChatPresence } from '../utils/amsgStateSync';
 import { getLastRealUserMessageAt } from '../utils/amsg2ExpireGuard';
+import { disarmDateLeaveReminder } from '../utils/dateLeaveReminder';
+
 import { getPendingTasks, hasActiveAiTask, isAmsg2EnabledForChar } from '../utils/amsg2Tasks';
 import { buildAmsg2NoticesText, buildAmsg2TaskContextText, collectAmsg2TaskContext, insertAmsg2TaskContextBlock } from '../utils/amsg2TaskContext';
 import { resolveCharTimeZone } from '../utils/timezone';
@@ -793,6 +795,8 @@ export const useChatAI = ({
             // (replyArrived / 云端即时回复末段)。这里不能拿上一轮回复抢先改期：
             // 既会显示旧时间，也会和收尾时的改期产生两次远端 API 调用。
             // 用户独自发言但 Char 没成功回复时，原有空闲节拍保持不变。
+            void disarmDateLeaveReminder({ char, updateCharacter });
+
             // 空范围先报可操作的本地错误，避免继续识图/召回和发送 system-only 请求。
             // 原始消息可能是无文字图片或卡片，此处只判角色；正文有效性在格式化后校验。
             assertChatHasDialogue(contextMsgs.map(message => ({

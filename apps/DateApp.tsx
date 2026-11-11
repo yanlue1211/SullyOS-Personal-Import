@@ -1,3 +1,4 @@
+import { armDateLeaveReminder, disarmDateLeaveReminder, startLocalDateLeaveTimer, isDateLeaveCloudReady } from '../utils/dateLeaveReminder';
 import {resolveBlobRefsInRequestBody} from '../utils/apiBlobRefs';
 import type {ExperienceMessage} from '../features/experience/media';
 import { resolveDialogueApi } from '../utils/characterApi';
@@ -7,7 +8,7 @@ import { loadCharacterContextMessages } from '../utils/chatContextRange';
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useOS } from '../context/OSContext';
 import { DB } from '../utils/db';
-import { CharacterProfile, Message, AppID } from '../types';
+import { CharacterProfile, Message, AppID, DateState } from '../types';
 import { DatePrompts, ApiMessage } from '../utils/datePrompts';
 import { processNewMessagesWithAutoArchive } from '../utils/memoryPalace/autoArchive';
 import type { PipelineResult } from '../utils/memoryPalace/pipeline';
@@ -23,8 +24,8 @@ import { BookOpen, Sparkle, CaretLeft, GearSix } from '@phosphor-icons/react';
 import { CharacterGroupFilterBar, filterCharactersByGroup, GROUP_FILTER_ALL } from '../components/character/CharacterGroupFilter';
 import { trimHistoryThrough } from '../utils/dateSessionHistory';
 import { trackEvent } from '../utils/analytics';
-import { markAmsgStateDirty } from '../utils/amsgStateSync';
-import { setAmsgActiveDate } from '../utils/amsgInteractionGuard';
+import { markAmsgStateDirty, startAmsgChatPresence, stopAmsgChatPresence } from '../utils/amsgStateSync';
+import { setAmsgActiveDate, getAmsgActiveDateEncounterId } from '../utils/amsgInteractionGuard';
 import { ActiveMsgClient } from '../utils/activeMsgClient';
 import { syncCloudAwayTask } from '../utils/awayMessage';
 import { isAmsg2EnabledForChar } from '../utils/amsg2Tasks';
@@ -56,12 +57,17 @@ import {
 } from '../utils/dateHistory';
 
 const DateApp: React.FC = () => {
-    const { closeApp, openApp, characters, activeCharacterId, setActiveCharacterId, apiConfig, addToast, updateCharacter, updateUserProfile, virtualTime, userProfile, memoryPalaceConfig, dateAutoStartCharId, consumeDateAutoStart, characterGroups, groups, realtimeConfig } = useOS();
+    const { closeApp, openApp, characters, activeCharacterId, setActiveCharacterId, apiConfig, addToast, updateCharacter, updateUserProfile, virtualTime, userProfile, memoryPalaceConfig, dateAutoStartCharId, consumeDateAutoStart, characterGroups, groups, realtimeConfig, suspendedDate, suspendDate, takeSuspendedDate } = useOS();
+
+    // 从挂起恢复：对话中途走开时见面留在了内存里，打开见面就回到原来的画面（见 docs/personal/date-context-suspension-20261111.md）。
+    // 打开见面的入口会把当前角色一起切回去，所以角色对不上的只能是别处另开了一场见面，那就不恢复。
+    const [resumed] = useState(() => suspendedDate && suspendedDate.charId === activeCharacterId
+        && getAmsgActiveDateEncounterId(suspendedDate.charId) === suspendedDate.encounterId ? suspendedDate : null);
 
     // 是否由聊天「见面」按钮进入：为真时，退出见面流程回到聊天而非见面选择页/桌面。
     // 用本地 state（而非 context）承载：DateApp 切走即卸载，标记随之消失，不会泄漏到
     // 之后从桌面直接打开的见面会话里。
-    const [cameFromChat, setCameFromChat] = useState(false);
+    const [cameFromChat, setCameFromChat] = useState(resumed?.cameFromChat ?? false);
     const [meetSurface, setMeetSurface] = useState<'companion' | 'story'>(() => dateLaunch.peek()?.surface ?? 'companion');
 
     // 记忆宫殿（与聊天侧共用同一套上下文：同 charId、同高水位线）
@@ -77,7 +83,7 @@ const DateApp: React.FC = () => {
     charactersRef.current = characters;
     
     // Modes: 'select' -> 'peek' -> 'session' | 'settings' | 'history'
-    const [mode, setMode] = useState<'select' | 'entry' | 'peek' | 'session' | 'settings' | 'history'>('select');
+    const [mode, setMode] = useState<'select' | 'entry' | 'peek' | 'session' | 'settings' | 'history'>(resumed ? 'session' : 'select');
     // Track previous mode for Settings back navigation
     const [previousMode, setPreviousMode] = useState<'select' | 'peek'>('select');
 
@@ -116,7 +122,7 @@ const DateApp: React.FC = () => {
         el.scrollTo({ left: pi * el.clientWidth, behavior: 'smooth' });
     };
 
-    const [peekStatus, setPeekStatus] = useState<string>('');
+    const [peekStatus, setPeekStatus] = useState<string>(resumed?.peekStatus ?? '');
     const [peekLoading, setPeekLoading] = useState(false);
     
     // History State
@@ -137,7 +143,7 @@ const DateApp: React.FC = () => {
     const [historyEditMsg, setHistoryEditMsg] = useState<Message | null>(null);
     const [historyEditContent, setHistoryEditContent] = useState('');
     
-    const encounterIdRef = useRef('');
+    const encounterIdRef = useRef(resumed?.encounterId ?? '');
     const [openingMode, setOpeningMode] = useState<'approach' | 'invite'>('approach');
     const [showEntryNotice, setShowEntryNotice] = useState(() => {
         try { return localStorage.getItem('sully-date-entry-guide-v1') !== 'seen'; }
@@ -155,7 +161,7 @@ const DateApp: React.FC = () => {
         loadOlder: handleLoadMoreDateHistory, reachedEnd: dateHistoryReachedEnd,
         loading: dateHistoryLoading, error: dateHistoryError } = useDateMessageHistory(
             activeCharacterId || undefined, encounterIdRef.current, mode === 'session');
-    const [hasSavedOpening, setHasSavedOpening] = useState(false);
+    const [hasSavedOpening, setHasSavedOpening] = useState(!!resumed);
 
     // Edit Modal State
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -180,6 +186,54 @@ const DateApp: React.FC = () => {
         if (!target) return;
         markAmsgStateDirty({ char: target, userProfile, groups, realtimeConfig });
     };
+
+    const [pageVisible, setPageVisible] = useState(() => document.visibilityState === 'visible');
+    useEffect(() => {
+        const onVisibility = () => setPageVisible(document.visibilityState === 'visible');
+        document.addEventListener('visibilitychange', onVisibility);
+        return () => document.removeEventListener('visibilitychange', onVisibility);
+    }, []);
+    const reminderKey = mode === 'session' && pageVisible && char?.dateLeaveReminder?.enabled
+        ? `${char.id}:${char.dateLeaveReminder.delayMinutes ?? 5}:${!!char.activeMsg2Config?.enabled}` : '';
+    useEffect(() => {
+        if (!reminderKey || !char) return;
+        const deps = {char, apiConfig, userProfile, groups, realtimeConfig, updateCharacter};
+        let alive = true;
+        void isDateLeaveCloudReady(char).then(cloud => {
+            if (alive && cloud) startAmsgChatPresence(char.id, null, 'date');
+        }).catch(() => {});
+        void armDateLeaveReminder(deps);
+        return () => { alive = false; stopAmsgChatPresence(char.id, 'date'); };
+    }, [reminderKey]);
+
+    // 切换应用只挂起画面，不代表剧情中分开；只有显式打开离开提醒时才建立计时。
+    const snapshotRef = useRef<DateState | null>(null);
+    const pendingTurnRef = useRef<Promise<unknown> | undefined>(undefined);
+    const explicitExitRef = useRef(false);
+    useEffect(() => { if (mode === 'session') explicitExitRef.current = false; }, [mode]);
+    const trackTurn = <T,>(turn: Promise<T>): Promise<T> => {
+        pendingTurnRef.current = turn;
+        turn.finally(() => { if (pendingTurnRef.current === turn) pendingTurnRef.current = undefined; }).catch(() => {});
+        return turn;
+    };
+    const suspendOnUnmountRef = useRef<() => void>(() => {});
+    suspendOnUnmountRef.current = () => {
+        if (mode !== 'session' || explicitExitRef.current || !char || !encounterIdRef.current) return;
+        suspendDate({
+            charId: char.id, charName: char.name, encounterId: encounterIdRef.current,
+            peekStatus, cameFromChat, state: snapshotRef.current, suspendedAt: Date.now(),
+            pendingTurn: pendingTurnRef.current,
+        });
+        void startLocalDateLeaveTimer({char, apiConfig, userProfile, groups, realtimeConfig, updateCharacter});
+    };
+    useEffect(() => () => suspendOnUnmountRef.current(), []);
+    const refreshDateMessagesRef = useRef(loadDateMessages);
+    refreshDateMessagesRef.current = loadDateMessages;
+    useEffect(() => {
+        takeSuspendedDate();
+        const pending = resumed?.pendingTurn;
+        if (pending) trackTurn(pending).finally(() => { void refreshDateMessagesRef.current(); }).catch(() => {});
+    }, []);
 
     const loadRecentDateMessages = async (charId: string, limit = DATE_SESSION_MESSAGE_LIMIT) => {
         return (await DB.getRecentMessagesByCharIdAndSource(charId, 'date', limit))
@@ -695,6 +749,8 @@ const DateApp: React.FC = () => {
     };
 
     const onExitSession = () => {
+        explicitExitRef.current = true;
+        if (char) void disarmDateLeaveReminder({char, updateCharacter});
         // 明确结束线下见面：不同于锁屏/切后台，退出必须解除持久化线下锁。
         if (char) { setAmsgActiveDate(char.id, false); void (isAmsg2EnabledForChar(char) ? ActiveMsgClient.putCharLimits(char) : Promise.resolve()).catch(error => console.warn('[DateApp] 结束见面锁同步失败', error)); markDateTurnDirty(char); }
         clearDateResumeAttempt();
@@ -1165,11 +1221,15 @@ const DateApp: React.FC = () => {
                     userProfile={userProfile}
                     messages={dateMessages}
                     peekStatus={peekStatus}
+                    initialState={resumed?.encounterId === encounterIdRef.current ? resumed.state ?? undefined : undefined}
+                    snapshotRef={snapshotRef}
+                    pendingTurn={resumed?.encounterId === encounterIdRef.current ? resumed.pendingTurn : undefined}
                     encounterId={encounterIdRef.current}
-                    onExperienceSend={message=>handleSendMessage(message.content,undefined,message.metadata)}
-                    onSendMessage={handleSendMessage}
-                    onReroll={handleReroll}
+                    onExperienceSend={message=>trackTurn(handleSendMessage(message.content,undefined,message.metadata))}
+                    onSendMessage={(text, kind) => trackTurn(handleSendMessage(text, kind))}
+                    onReroll={() => trackTurn(handleReroll())}
                     onExit={onExitSession}
+                    onSuspend={closeApp}
                     onEditMessage={(msg) => { setEditTargetMsg(msg); setEditContent(msg.content); setIsEditModalOpen(true); }}
                     onDeleteMessage={handleDeleteMessage}
                     onDeleteMessages={handleDeleteMessages}

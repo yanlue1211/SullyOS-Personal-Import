@@ -123,11 +123,16 @@ interface DateSessionProps {
     messages: Message[]; // The DB messages for history/novel mode
     peekStatus: string;  // Initial text from the Peek phase
     initialState?: DateState; // Resume state
+    /** 每次渲染写入当前画面状态，挂起时父组件从这里取（见 docs/personal/date-context-suspension-20261111.md）。 */
+    snapshotRef?: React.MutableRefObject<DateState | null>;
+    /** 挂起时还没回来的那次回复：恢复后显示「正在输入」，落定前不让重试。 */
+    pendingTurn?: Promise<unknown>;
     encounterId?: string;
     onExperienceSend?: (message:ExperienceMessage)=>Promise<string>;
     onSendMessage: (text: string, kind?: 'continue') => Promise<string>; // Returns AI content
     onReroll: () => Promise<string>;
     onExit: () => void;
+    onSuspend?: () => void;
     onEditMessage: (msg: Message) => void;
     onDeleteMessage: (msg: Message) => void;
     onDeleteMessages: (ids: number[]) => Promise<void>;
@@ -193,10 +198,13 @@ const DateSession: React.FC<DateSessionProps> = ({
     messages: historyMessages,
     peekStatus, 
     initialState,
+    snapshotRef,
+    pendingTurn,
     encounterId,
     onSendMessage, onExperienceSend,
     onReroll, 
     onExit,
+    onSuspend,
     onEditMessage,
     onDeleteMessage,
     onDeleteMessages,
@@ -230,10 +238,10 @@ const DateSession: React.FC<DateSessionProps> = ({
     
     // Interaction State
     const messages = React.useMemo(() => encounterId ? historyMessages.filter(message => message.metadata?.dateEncounterId === encounterId) : historyMessages, [historyMessages, encounterId]);
-    const [input, setInput] = useState('');
-    const [showInputBox, setShowInputBox] = useState(!peekStatus && !initialState);
-    const [isTyping, setIsTyping] = useState(false); // Waiting for API
-    const [isShowingOpening, setIsShowingOpening] = useState(!!peekStatus && !initialState); // True until first user interaction
+    const [input, setInput] = useState(initialState?.draftInput ?? '');
+    const [showInputBox, setShowInputBox] = useState(initialState ? !!initialState.draftInput : !peekStatus);
+    const [isTyping, setIsTyping] = useState(!!pendingTurn); // Waiting for API
+    const [isShowingOpening, setIsShowingOpening] = useState(initialState ? !!initialState.showingOpening : !!peekStatus); // True until first user interaction
     // API 失败时本地记住本轮输入，不依赖父组件的 DB 刷新是否已经完成；用户可直接点重试。
     const [pendingRetryText, setPendingRetryText] = useState('');
     const [mediaDraft,setMediaDraft]=useState<ExperienceMessage|null>(null),[mediaPreparing,setMediaPreparing]=useState(false);
@@ -581,12 +589,12 @@ const DateSession: React.FC<DateSessionProps> = ({
                 setShowVoiceLangPicker(false);
                 return true;
             }
-            // 系统返回不能误作「明确结束见面」：展开已有的加号菜单让用户自行选择。
-            setShowMenu(true);
-            return true;
+            // 返回默认暂离，只有加号菜单的结束按钮明确结束。
+            if (onSuspend) { onSuspend(); return true; }
+            return false;
         });
         return unregister;
-    }, [voiceFavoriteTarget, voiceFavoriteBusy, showSettings, showMenu, registerBackHandler]);
+    }, [voiceFavoriteTarget, voiceFavoriteBusy, showSettings, showMenu, registerBackHandler, onSuspend]);
 
     const dateEmotionKeys = [...REQUIRED_EMOTIONS_SET, ...(char.customDateSprites || [])];
 
@@ -751,8 +759,15 @@ const DateSession: React.FC<DateSessionProps> = ({
         return '';
     }, [messages]);
     const dialogueSyncMountRef = useRef(false);
+    // 从挂起恢复：记录是挂载后才异步读回来的，读回来的还是挂起时那条就别重播（会把播放位置
+    // 拉回批次开头）；不一样说明离开期间回复到了，照常接着播。
+    const restoredAssistantRef = useRef(initialState ? initialState.lastAssistantContent ?? '' : undefined);
     useEffect(() => {
-        if (!dialogueSyncMountRef.current) { dialogueSyncMountRef.current = true; return; }
+        if (restoredAssistantRef.current !== undefined) {
+            if (!lastAssistantContent || lastAssistantContent === restoredAssistantRef.current) return;
+            restoredAssistantRef.current = undefined;
+            dialogueSyncMountRef.current = true;
+        } else if (!dialogueSyncMountRef.current) { dialogueSyncMountRef.current = true; return; }
         if (isTyping || !lastAssistantContent) return;
         const { rest } = extractObservation(lastAssistantContent, { lenient: observeEnabled, custom: char.dateObserve?.custom });
         const items = parseDialogue(rest, 'normal');
@@ -863,7 +878,21 @@ const DateSession: React.FC<DateSessionProps> = ({
         }
     };
 
-    // Messages are persisted per turn; leaving ends this encounter. No resume snapshot.
+    // 挂起：父组件卸载时从 snapshotRef 取走这一份，回来时作为 initialState 交回。
+    if (snapshotRef) snapshotRef.current = {
+        dialogueQueue, dialogueBatch, currentText, currentSpriteKey,
+        activeSkinSetId: char.activeSkinSetId, isNovelMode, timestamp: Date.now(), peekStatus,
+        ...(observation ? { observation } : {}),
+        lastAssistantContent, showingOpening: isShowingOpening, draftInput: input,
+    };
+
+    // 挂起前发出去的那次回复还在路上：等它落定再放开输入（父组件会刷新记录，新回复由上面的同步接着播）。
+    useEffect(() => {
+        if (!pendingTurn) return;
+        let alive = true;
+        pendingTurn.finally(() => { if (alive) setIsTyping(false); }).catch(() => {});
+        return () => { alive = false; };
+    }, [pendingTurn]);
 
     // Message Touch Logic (Robust version for scrollable lists)
     const handleMsgTouchStart = (e: React.TouchEvent | React.MouseEvent, msg: Message) => {
@@ -1050,6 +1079,10 @@ const DateSession: React.FC<DateSessionProps> = ({
                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 0 1 0 2.555c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.212 1.281c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 0 1 0-2.555c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281Z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" /></svg>
                             布置场景
                         </button>
+
+                        {onSuspend && <button onClick={() => { setShowMenu(false); setShowVoiceLangPicker(false); onSuspend(); }} className="h-9 px-3.5 rounded-full flex items-center gap-2 text-xs font-bold border shadow-lg bg-emerald-600/70 backdrop-blur-md border-white/20 text-white active:scale-95">
+                            暂离 · 保留见面
+                        </button>}
 
                         <button onClick={() => { setShowMenu(false); setShowVoiceLangPicker(false); onExit(); }} className="h-9 px-3.5 rounded-full flex items-center gap-2 text-xs font-bold border shadow-lg active:scale-95 transition-all bg-red-500/70 backdrop-blur-md border-white/20 text-white hover:bg-red-600">
                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15M12 9l-3 3m0 0 3 3m-3-3h12.75" /></svg>
