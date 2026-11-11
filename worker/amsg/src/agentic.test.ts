@@ -38,6 +38,23 @@ const build: PushBuildInput = {
 };
 
 describe('processLLMRound — 纯文本 finish', () => {
+  it('keeps multiline private voice out of bubbles/banners and attaches it only to the final bubble', () => {
+    const voice = { state: '候机', thoughts: '困了\n落地再聊', undercurrent: '' };
+    const out = processLLMRound(createFireSessionState(), `刚过安检\n落地找你\n<心声>\n${JSON.stringify(voice, null, 2)}\n</心声>`, build);
+    expect(out.decision).toBe('finish');
+    if (out.decision !== 'finish') return;
+    expect(out.pushPayloads.map(p => p.message)).toEqual(['刚过安检', '落地找你']);
+    expect(out.pushPayloads[0].metadata).not.toHaveProperty('amsgInnerVoice');
+    expect(out.pushPayloads[1].metadata).toHaveProperty('amsgInnerVoice', voice);
+    expect(out.pushPayloads.map(p => p.notification?.body).join('')).not.toMatch(/心声|困了/);
+  });
+  it('private-only or malformed private trailers never create a standalone notification', () => {
+    const voice = { state: '候机', thoughts: '困了', undercurrent: '' };
+    expect(processLLMRound(createFireSessionState(), `<心声>${JSON.stringify(voice)}</心声>`, build).decision).toBe('skip-push');
+    const out = processLLMRound(createFireSessionState(), '到了\n<心声>{oops', build);
+    expect(out.decision).toBe('finish');
+    if (out.decision === 'finish') expect(out.pushPayloads.map(p => p.message)).toEqual(['到了']);
+  });
   it('按换行分段成多条 scheduled push，业务字段形状与 v1 一致 + notification banner', () => {
     const state = createFireSessionState();
     const decision = processLLMRound(state, '想你了。\n快回消息！', build);

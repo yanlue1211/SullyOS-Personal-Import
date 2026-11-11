@@ -28,6 +28,7 @@ import {
   type McpResolvedToolCore,
 } from '../../../utils/mcpFireCore';
 import { sanitizeIntoSegments } from '../../../utils/sanitize';
+import { extractInnerVoice } from '../../../features/personal/innerVoice/protocol';
 import { AMSG_SILENT_MARK } from '../../../utils/amsgFirePack';
 import {
   AMSG_FIRE_SCHEDULE_TOOL,
@@ -485,7 +486,10 @@ export function processLLMRound(
   // 角色决定这次不说（见 AMSG_SILENT_MARK）。标记出现在哪一轮都算数：说了不发就整条
   // 不发，标记旁边多写的话是它在解释自己为什么不说，不是要发给对方的。
   const declined = fullText.includes(AMSG_SILENT_MARK);
-  const segments = declined ? [] : sanitizeIntoSegments(cleanedText);
+  // Private content is not a bubble or a notification. Carry it once, with the
+  // final spoken segment, so the client has a real message to attach it to.
+  const heart = extractInnerVoice(cleanedText);
+  const segments = declined ? [] : sanitizeIntoSegments(heart.text);
 
   if (segments.length === 0) {
     // 没有正文就整条不发，这轮有没有副作用都一样。
@@ -523,6 +527,7 @@ export function processLLMRound(
   // 快照原样随最后一条回去（客户端靠它写事件、推进回合，余韵轮 / 没守信封也一样）；
   // 用户外显同样只挂最后一条，原文不解析。
   const sarLastMeta: Record<string, unknown> = {
+    ...(heart.innerVoice ? { amsgInnerVoice: heart.innerVoice } : {}),
     ...(build.sar ? { [AMSG_SAR_META_KEY]: build.sar } : {}),
     ...(sarParse?.userSurface ? { amsgSarUserSurface: sarParse.userSurface } : {}),
   };

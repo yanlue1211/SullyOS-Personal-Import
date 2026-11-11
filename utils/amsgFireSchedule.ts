@@ -269,7 +269,7 @@ export const buildTaskInstruction = (mode: ActiveMsg2Mode, promptHint?: string):
   }
   return [
     '这是一条需要 AI 自主生成的主动消息。',
-    '请结合角色设定、关系状态、最近上下文与当前时间，自然地主动找用户说一到三句私聊消息。',
+    '请结合角色设定、关系状态、最近上下文与当前时间，沿用平时聊天的语气和节奏，自然地主动找用户聊一两个小点；不因主动联系就扩写成完整报备。',
     promptHint?.trim() ? `可选灵感补充：${promptHint.trim()}` : '可选灵感补充：无',
   ].join('\n');
 };
@@ -284,7 +284,7 @@ export const AMSG_AWAY_DELAY_META = 'amsgAwayDelayMinutes';
 
 export const buildAwayTaskInstruction = (delayMinutes: number): string => [
   `对方已经超过 ${delayMinutes} 分钟没跟你说话了，现在是你可以主动线上联系对方的一次机会。`,
-  '先结合你们最后聊到哪儿、对方离开了多久、你自己这会儿在做什么，判断此刻有没有自然联系的理由；没有就按自主静默规则不发。决定联系才发一到三句私聊。',
+  '先结合你们最后聊到哪儿、对方离开了多久、你自己这会儿在做什么，判断此刻有没有自然联系的理由；没有就按自主静默规则不发。决定联系时沿用平时聊天的语气和节奏，聊一两个小点即可，不写完整报备。',
   '可以惦记对方去哪了、分享你刚经历的事，或者接上没聊完的话；不要像系统提醒，也不要提「多少分钟」这种计时。',
 ].join('\n');
 

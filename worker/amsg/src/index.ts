@@ -718,7 +718,8 @@ interface OffloadBaton {
 }
 
 /**
- * 挪的顺序：思考链 → 情绪评估结果 → SAR 快照 → SAR 用户外显 → 本段 SAR 外显 → XHS 会话数据。
+ * 挪的顺序：心声 → 思考链 → 情绪评估结果 → SAR 快照 → SAR 用户外显 → 本段 SAR 外显 → XHS 会话数据。
+ * 心声和正文分开传输，只随最后一段返回；较长时同样旁路，不挤占通知正文。
  *
  * 前两样都是整段模型输出（几百到几千字），超限时多半是它俩撑爆的，而且客户端拿它们
  * 只是渲染卡片 / 落 buff，晚一步取回来不影响这条消息本身。
@@ -731,6 +732,12 @@ interface OffloadBaton {
  * XHS 那份关系到这条消息里的卡片能不能出来，所以排最后，挪完还是装不下才动它。
  */
 const OFFLOAD_BATONS: OffloadBaton[] = [
+  {
+    field: 'amsgInnerVoice',
+    refField: 'amsgInnerVoiceRef',
+    key: (clientTaskId) => `inner-voice:${clientTaskId}`,
+    log: '[amsg:inner-voice] 心声旁路存储',
+  },
   {
     field: 'amsgReasoning',
     refField: 'amsgReasoningRef',

@@ -1435,6 +1435,17 @@ describe('offloadOversizedPush — push 装不下时旁路存储', () => {
   // 云端情绪评估的结果是一整段模型输出，撑爆一条 push 很正常。它得跟 XHS 那份一样能
   // 旁路走，而且**排在前面**：客户端拿它只是落 buff，晚一步取回来不影响这条消息本身，
   // 而 XHS 数据关系到这条消息里的卡片能不能出来。
+  it('long private voice is offloaded intact instead of overflowing or leaking into the banner', async () => {
+    const writeState = vi.fn().mockResolvedValue({ upserted: 1, skipped: 0, deleted: 0 });
+    const voice = { state: '候机', thoughts: '想睡'.repeat(1500), undercurrent: '' };
+    const payload = { messageKind: 'content', message: '落地找你', metadata: { charId: CHAR_ID, amsgInnerVoice: voice } };
+    const out = await offloadOversizedPush(payload as any, writeState, CHAR_ID, CLIENT_TASK_ID);
+    expect(writeState).toHaveBeenCalledWith(amsgStateNamespace(CHAR_ID), [{ key: `inner-voice:${CLIENT_TASK_ID}`, value: JSON.stringify(voice) }]);
+    expect(out.metadata).toHaveProperty('amsgInnerVoiceRef', `inner-voice:${CLIENT_TASK_ID}`);
+    expect(out.metadata).not.toHaveProperty('amsgInnerVoice');
+    expect(out.message).toBe('落地找你');
+  });
+
   it('情绪评估结果撑爆一条 push → 先挪它，push 换成 amsgEmotionRef', async () => {
     const writeState = vi.fn().mockResolvedValue({ upserted: 1, skipped: 0, deleted: 0 });
     const evalRaw = `{"changed":true,"innerState":"${'想'.repeat(1500)}"}`;
