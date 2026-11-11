@@ -1,8 +1,8 @@
 import { recordingText } from './transcript';
 import type { Message } from '../../../types';
 import { DB, openDB } from '../../../utils/db';
-import { deleteBlobRef, getBlobForRef, isBlobRef } from '../../../utils/blobRef';
-import { REF_SOURCE_STORES } from '../../../utils/blobGc';
+import { getBlobForRef, isBlobRef } from '../../../utils/blobRef';
+import { reclaimUnreferencedVoiceBlobs } from '../../../utils/voiceBlobBatchCleanup';
 import { currentMaintenanceHolder, releaseMaintenanceLock, tryAcquireMaintenanceLock } from '../../../utils/maintenanceLock';
 
 export interface UserRecording { id: number; charId: string; charName?: string; ref: string; timestamp: number; duration: number; bytes: number; description: string; transcript?: string; }
@@ -26,54 +26,59 @@ export async function listUserRecordings(charId?: string, includeCharacterVoices
   return result.sort((a, b) => b.timestamp - a.timestamp || b.id - a.id);
 }
 
-/** Detach only reviewed user recordings. Commit message changes before reclaiming unreferenced blobs. */
-export async function clearUserRecordings(recordings: UserRecording[], includeCharacterVoices = false): Promise<{ cleared: number; freedBytes: number; retainedFiles: number }> {
+/**
+ * Detach reviewed audio messages in bounded transactions. A single locked
+ * reference sweep reclaims orphaned blobs without quadratic full-DB scans.
+ */
+export async function clearUserRecordings(
+  recordings: UserRecording[],
+  includeCharacterVoices = false,
+  onProgress?: (label: string) => void,
+): Promise<{ cleared: number; freedBytes: number; retainedFiles: number }> {
   if (!tryAcquireMaintenanceLock('用户录音清理')) throw new Error(`请等待「${currentMaintenanceHolder()}」完成后重试`);
   try {
     const db = await openDB();
+    const selected = Array.from(new Map(recordings.map(item => [item.id, item])).values());
     const refs = new Map<string, number>();
     let cleared = 0;
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction('messages', 'readwrite');
-      const store = tx.objectStore('messages');
-      for (const candidate of new Map(recordings.map(item => [item.id, item])).values()) {
-        const req = store.get(candidate.id);
-        req.onsuccess = () => {
-          const current = req.result as Message | undefined;
-          if (!current || (current.role !== 'user' && !(includeCharacterVoices && current.role === 'assistant')) || current.type !== 'audio' || current.content !== candidate.ref || current.metadata?.audioCleared) return;
-          refs.set(candidate.ref, candidate.bytes);
-          store.put({ ...current, content: current.role === 'user' ? '[用户录音已清理]' : '[角色语音已清理]', metadata: { ...current.metadata, audioCleared: true } });
-          cleared++;
-        };
-      }
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error || new Error('录音清理失败'));
-      tx.onabort = () => reject(tx.error || new Error('录音清理已取消'));
-    });
-    const referenced = new Set<string>();
-    const inspect = (value: string) => { for (const ref of refs.keys()) if (value.includes(ref)) referenced.add(ref); };
-    // One bounded scan for the whole batch; references in forwards/favorites/backups remain safe.
-    try {
-      for (const name of REF_SOURCE_STORES) {
-        let after: IDBValidKey | null = null;
-        for (;;) {
-          const { rows, lastKey } = await DB.getStoreRowsPage(name, after, 200);
-          for (const row of rows) inspect(JSON.stringify(row) || '');
-          if (lastKey === null || rows.length < 200) break;
-          after = lastKey;
+    let freedInlineBytes = 0;
+    const PAGE_SIZE = 24;
+    for (let i = 0; i < selected.length; i += PAGE_SIZE) {
+      const batch = selected.slice(i, i + PAGE_SIZE);
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction('messages', 'readwrite');
+        const store = tx.objectStore('messages');
+        let batchCleared = 0;
+        let batchInlineBytes = 0;
+        const batchRefs = new Map<string, number>();
+        for (const candidate of batch) {
+          const req = store.get(candidate.id);
+          req.onsuccess = () => {
+            const current = req.result as Message | undefined;
+            if (!current || (current.role !== 'user' && !(includeCharacterVoices && current.role === 'assistant')) || current.type !== 'audio' || current.content !== candidate.ref || current.metadata?.audioCleared) return;
+            if (isBlobRef(candidate.ref)) batchRefs.set(candidate.ref, candidate.bytes);
+            else if (candidate.ref.toLowerCase().startsWith('data:audio/')) batchInlineBytes += candidate.bytes;
+            store.put({ ...current, content: current.role === 'user' ? '[用户录音已清理]' : '[角色语音已清理]', metadata: { ...current.metadata, audioCleared: true } });
+            batchCleared++;
+          };
         }
-      }
-      for (let i = 0; i < localStorage.length; i++) inspect(localStorage.getItem(localStorage.key(i)!) || '');
-    } catch {
-      // Messages are detached, but any incomplete reference scan keeps every file intact.
-      return { cleared, freedBytes: 0, retainedFiles: refs.size };
+        tx.oncomplete = () => {
+          cleared += batchCleared;
+          freedInlineBytes += batchInlineBytes;
+          for (const [ref, bytes] of batchRefs) refs.set(ref, bytes);
+          resolve();
+        };
+        tx.onerror = () => reject(tx.error || new Error('录音清理失败'));
+        tx.onabort = () => reject(tx.error || new Error('录音清理已取消'));
+      });
+      onProgress?.(`正在整理聊天录音（${Math.min(i + PAGE_SIZE, selected.length)}/${selected.length}）`);
     }
-    let freedBytes = 0;
-    let retainedFiles = 0;
-    for (const [ref, bytes] of refs) {
-      if (referenced.has(ref)) { retainedFiles++; continue; }
-      try { await deleteBlobRef(ref); freedBytes += bytes; } catch { retainedFiles++; }
-    }
-    return { cleared, freedBytes, retainedFiles };
-  } finally { releaseMaintenanceLock(); }
+
+    const deleted = await reclaimUnreferencedVoiceBlobs(refs.keys(), onProgress);
+    let freedBytes = freedInlineBytes;
+    for (const ref of deleted) freedBytes += refs.get(ref) || 0;
+    return { cleared, freedBytes, retainedFiles: refs.size - deleted.size };
+  } finally {
+    releaseMaintenanceLock();
+  }
 }
