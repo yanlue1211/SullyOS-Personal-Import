@@ -536,6 +536,10 @@ export function sanitizeIntoSegments(text: string): Segment[] {
     splitText: (plainText: string) => [plainText],
     protectedPatterns: [
       {
+        pattern: /<逛商城>[\s\S]*?<\/逛商城>/,
+        preview: '[正在逛商城]',
+      },
+      {
         pattern: /\[html\][\s\S]*?\[\/html\]/i,
         preview: '[HTML 卡片]',
       },

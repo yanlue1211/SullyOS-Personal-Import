@@ -57,6 +57,7 @@ import { ActiveMsgStore } from './activeMsgStore';
 import { amsgStateNamespace } from './amsgFirePack';
 import { CHAT_GEN_EVENTS } from './chatGenEvents';
 import { DB } from './db';
+import * as CommerceSafeApi from './safeApi';
 import type { ActiveMsg2TaskRecord } from '../types';
 import { readAllInstantTraces } from './instantTraceLog';
 import {
@@ -473,6 +474,23 @@ describe('handlePageBecameVisible（回到前台的入口）', () => {
 // 用的是同一个口径——离线补收落 sentAt，在线送达落写库当刻。修复前主路径永远落写库当刻
 // （离线补收用例挂）、降级路径永远落 sentAt（在线送达用例挂），两套口径各错一半。
 describe('flushInboxToChat 落库时间戳（走真库）', () => {
+  it('cloud shopping continuation reads the frozen request and character API instead of an empty context', async()=>{
+    const charId='cloud-commerce-context';
+    await DB.saveCharacter({id:charId,name:'购物角色',dialogueApi:{baseUrl:'https://character.invalid/v1',apiKey:'fake',model:'character-model'}} as any);
+    const messages=[{role:'system',content:'完整原人设和记忆'},{role:'user',content:'原始对话'}];
+    await ActiveMsgStore.saveCommerceContinuation(charId,{uuid:'commerce-uuid',model:'character-model',messages});
+    const fetch=vi.spyOn(CommerceSafeApi,'safeFetchJson').mockResolvedValue({choices:[{message:{content:'先不买了'}}]});
+    try {
+      await ActiveMsgStore.saveInboxMessage(inboxMsg({charId,taskUuid:'commerce-uuid',messageId:'commerce-query-push',messageType:'text',body:'<逛商城>{"query":"衬衫"}</逛商城>',receivedAt:Date.now()-3600000,sentAt:Date.now()-3600000}));
+      await flushInboxToChat('SW通知');
+      expect(fetch).toHaveBeenCalledTimes(1);
+      const call=fetch.mock.calls[0];expect(call[0]).toBe('https://character.invalid/v1/chat/completions');
+      const body=JSON.parse(call[1].body as string);expect(body.messages.slice(0,2)).toEqual(messages);expect(body.model).toBe('character-model');
+      expect((await assistantMsgs(charId)).map(m=>m.content)).toContain('先不买了');
+      expect(await ActiveMsgStore.getCommerceContinuation(charId,'commerce-uuid')).toBeNull();
+    } finally {fetch.mockRestore();}
+  },20000);
+
   beforeAll(async () => {
     // flush 尾部会 dispatch 'active-msg-received' 等事件；node 测试环境没有 window，
     // 给个最小 stub（事件本身不在本组断言范围内）。

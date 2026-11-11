@@ -546,6 +546,7 @@ export const sendInstantChatTurn = async (params: {
 }): Promise<InstantChatSendResult> => {
   const supersedes = getInstantChatPending(params.char.id);
   const requestedUuid = crypto.randomUUID();
+  let commerceContinuationSaved = false;
   const stopSending = () => {
     markReplyStopped(requestedUuid);
     const receipt = stageStoppedReplyReceipt(params.char.id, requestedUuid, Promise.resolve(''));
@@ -570,6 +571,13 @@ export const sendInstantChatTurn = async (params: {
   };
   try {
     params.signal?.throwIfAborted();
+    if (params.chatMessages.some(m => typeof m.content === 'string' && m.content.includes('【生活购物权限】'))) {
+      try {
+        await ActiveMsgStore.saveCommerceContinuation(params.char.id, { uuid: requestedUuid,
+          model: params.api.model, messages: params.chatMessages });
+        commerceContinuationSaved = true;
+      } catch { /* Storage pressure must not block ordinary chat; missing-context shopping fails closed. */ }
+    }
     const { uuid } = await ActiveMsgClient.sendInstantChat({
       uuid: requestedUuid,
       signal: params.signal,
@@ -611,6 +619,9 @@ export const sendInstantChatTurn = async (params: {
     }
     return { ok: true, uuid };
   } catch (error: any) {
+    if (commerceContinuationSaved) {
+      try { await ActiveMsgStore.clearCommerceContinuation(params.char.id, requestedUuid); } catch { /* best effort */ }
+    }
     if (params.signal?.aborted) {
       // A response can be lost after the task was created. We still know which task to cancel.
       await ActiveMsgClient.cancelTask(requestedUuid).catch(() => {});

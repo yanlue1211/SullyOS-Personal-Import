@@ -12619,6 +12619,10 @@ function sanitizeIntoSegments(text2) {
     splitText: (plainText) => [plainText],
     protectedPatterns: [
       {
+        pattern: /<逛商城>[\s\S]*?<\/逛商城>/,
+        preview: "[\u6B63\u5728\u901B\u5546\u57CE]"
+      },
+      {
         pattern: /\[html\][\s\S]*?\[\/html\]/i,
         preview: "[HTML \u5361\u7247]"
       },
