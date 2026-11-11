@@ -34,7 +34,7 @@ import { startBeautyUsage, stopBeautyUsage, stopBeautyForThemeChange } from '../
 import { FEEDBACK_INVITATION_KEY, hasPriorFeedbackInstallEvidence, initializeFeedbackInvitation, suppressFeedbackInvitation } from '../utils/feedbackInvitation';
 import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react';
 import type { VRSARActivity } from '../types';
-import { APIConfig, AppID, OSTheme, VirtualTime, CharacterProfile, CharacterGroup, ChatTheme, Toast, FullBackupData, UserProfile, ApiPreset, GroupProfile, SystemLog, Worldbook, NovelBook, SongSheet, Message, RealtimeConfig, AppearancePreset, CloudBackupConfig, CloudBackupFile, MemoryPalaceFeatureFlags } from '../types';
+import { APIConfig, AppID, OSTheme, VirtualTime, CharacterProfile, CharacterGroup, ChatTheme, Toast, FullBackupData, UserProfile, ApiPreset, GroupProfile, SystemLog, Worldbook, NovelBook, SongSheet, Message, RealtimeConfig, AppearancePreset, CloudBackupConfig, CloudBackupFile, MemoryPalaceFeatureFlags, SuspendedDate } from '../types';
 import { DB, openDB } from '../utils/db';
 import { streamWorkroomBackup } from '../features/workroom/backup';
 import { reportDatabaseFailure } from '../utils/databaseHealth';
@@ -99,7 +99,7 @@ import {HOME_SECRETS_UPDATED} from '../utils/homeSecrets';
 import { CHAT_GEN_EVENTS, setChatViewSnapshot, isEmbeddedChatVisible } from '../utils/chatGenEvents';
 import { runLocalAwayMessages, syncCloudAwayTask } from '../utils/awayMessage';
 import { getLastRealCharMessageAt } from '../utils/amsg2ExpireGuard';
-import { isAmsgActiveCall } from '../utils/amsgInteractionGuard';
+import { isAmsgActiveCall, getAmsgActiveDateEncounterId } from '../utils/amsgInteractionGuard';
 import { syncAmsgCallPresence } from '../utils/amsgCallPresenceSync';
 import { AMSG_CALL_HEARTBEAT_MS } from '../utils/amsgCallPresence';
 import { buildChatRequestPayload } from '../utils/chatRequestPayload';
@@ -525,6 +525,13 @@ interface OSContextType {
   suspendCall: (info: { charId: string; charName: string; charAvatar?: string; startedAt: number; bubbles?: any[]; sessionId?: string; elapsedSeconds?: number; voiceLang?: string; pendingAvatarTouches?: AvatarTouchRecord[] }) => void;
   resumeCall: () => void;
   clearSuspendedCall: () => void;
+
+  // 见面挂起：对话中途走开时见面留在内存里，回到见面原样恢复（见 docs/personal/date-context-suspension-20261111.md）
+  suspendedDate: SuspendedDate | null;
+  suspendDate: (info: SuspendedDate) => void;
+  resumeDate: () => void;
+  /** DateApp 恢复时取走挂起的见面；之后的打开都是新见面。 */
+  takeSuspendedDate: () => SuspendedDate | null;
 
   // 从聊天「见面」按钮跳进见面：携带目标角色，DateApp 挂载时自动进入该角色的见面流程
   dateAutoStartCharId: string | null;
@@ -1077,6 +1084,9 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
   // Call Suspend
   const [suspendedCall, setSuspendedCall] = useState<{ charId: string; charName: string; charAvatar?: string; startedAt: number; bubbles?: any[]; sessionId?: string; elapsedSeconds?: number; voiceLang?: string; pendingAvatarTouches?: AvatarTouchRecord[] } | null>(null);
+  const [suspendedDate, setSuspendedDate] = useState<SuspendedDate | null>(null);
+  const suspendedDateRef = useRef(suspendedDate);
+  suspendedDateRef.current = suspendedDate;
   // 聊天「见面」按钮 → 见面：记录目标角色，DateApp 挂载后消费一次并自动进入见面
   const [dateAutoStartCharId, setDateAutoStartCharId] = useState<string | null>(null);
 
@@ -5658,10 +5668,21 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       return { status: 'failed' };
     }
   };
-  const openApp = (appId: AppID) => setActiveApp(appId);
+  const openApp = (appId: AppID) => {
+    // 有挂起的见面时，不管从哪个入口打开见面都回到它：当前角色和见面一起切回去，
+    // 同一次渲染里生效，DateApp 挂载第一帧就是那个角色。
+    if (appId === AppID.Date && suspendedDateRef.current) {
+      const saved = suspendedDateRef.current;
+      if (getAmsgActiveDateEncounterId(saved.charId) === saved.encounterId) setActiveCharacterId(saved.charId);
+      else { suspendedDateRef.current = null; setSuspendedDate(null); }
+    }
+    setActiveApp(appId);
+  };
   const closeApp = () => setActiveApp(AppID.Launcher);
   // 从聊天直接进入某角色的见面：切换当前角色 + 标记自动进入 + 打开见面 App
   const openDateWithChar = (charId: string) => {
+    // 和这个角色的见面正挂着：回到那场见面，不另开一场。
+    if (suspendedDateRef.current?.charId === charId) { openApp(AppID.Date); return; }
     setActiveCharacterId(charId);
     setDateAutoStartCharId(charId);
     setActiveApp(AppID.Date);
@@ -5675,6 +5696,19 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   };
   const resumeCall = () => {
     setActiveApp(AppID.Call);
+  };
+  // 挂起由 DateApp 卸载时调用，不负责导航：用户已经在去别处的路上了。
+  const suspendDate = (info: SuspendedDate) => {
+    if (getAmsgActiveDateEncounterId(info.charId) !== info.encounterId) return;
+    suspendedDateRef.current = info;
+    setSuspendedDate(info);
+  };
+  const resumeDate = () => openApp(AppID.Date);
+  const takeSuspendedDate = () => {
+    const taken = suspendedDateRef.current;
+    suspendedDateRef.current = null;
+    setSuspendedDate(null);
+    return taken;
   };
   const clearSuspendedCall = () => {
     setSuspendedCall(null);
@@ -5797,6 +5831,10 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     suspendCall,
     resumeCall,
     clearSuspendedCall,
+    suspendedDate,
+    suspendDate,
+    resumeDate,
+    takeSuspendedDate,
     dateAutoStartCharId,
     openDateWithChar,
     consumeDateAutoStart

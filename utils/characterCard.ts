@@ -23,7 +23,8 @@ export const CARD_STRIPPED_FIELDS = [
   'embeddingConfig',
   'proactiveConfig',
   'activeMsg2Config',
-  'awayMessage', // 个人提醒偏好，不随角色卡分享
+  'awayMessage',             // 离开后消息：发卡人本机的提醒偏好
+  'dateLeaveReminder',       // 见面离开提醒：同上
 
   // 2) 美化
   'embeddedTheme',           // CharacterExportData 上的内嵌主题（导入侧一并剥离）

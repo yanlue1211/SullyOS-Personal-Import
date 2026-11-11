@@ -1,3 +1,6 @@
+import { beginStoryMeeting, endStoryMeeting } from '../../../utils/storyMeetingLock';
+import { ActiveMsgClient } from '../../../utils/activeMsgClient';
+import { isAmsg2EnabledForChar } from '../../../utils/amsg2Tasks';
 import MediaDraft from '../../../features/experience/MediaDraft';
 import {composeMediaMessage} from '../../../features/experience/media';
 import ExperienceTools from '../../../features/experience/Tools';
@@ -287,6 +290,25 @@ const StoryTheaterSession: React.FC<Props> = ({ entry, preset, masks, onBack, on
     const { characters, userProfile, apiConfig, memoryPalaceConfig, remoteVectorConfig, updateCharacter, addToast } = useOS();
     const threadId = storyTheaterThreadId(entry.id);
     const actors = useMemo(() => characters.filter(char => entry.characterIds.includes(char.id)), [characters, entry.characterIds]);
+    const meetingEncounters = useRef(new Map<string, string>());
+    const actorKey = actors.map(actor => actor.id).sort().join('|');
+    useEffect(() => {
+        if (!entry.writesToCharacterMemory) return;
+        for (const actor of actors) {
+            meetingEncounters.current.set(actor.id, beginStoryMeeting(actor.id, entry.id));
+            if (isAmsg2EnabledForChar(actor)) void ActiveMsgClient.putCharLimits(actor).catch(() => {});
+        }
+        // 返回、切应用或打开设置只暂离，不在卸载时解锁。
+    }, [entry.id, entry.writesToCharacterMemory, actorKey]);
+    const endMeeting = () => {
+        for (const actor of actors) {
+            const encounter = meetingEncounters.current.get(actor.id);
+            if (encounter && endStoryMeeting(actor.id, encounter) && isAmsg2EnabledForChar(actor)) {
+                void ActiveMsgClient.putCharLimits(actor).catch(() => {});
+            }
+        }
+        onBack();
+    };
     const memoryActors = useMemo(() => {
         const recipientIds = new Set(storyTheaterMemoryRecipientIds(entry));
         return characters.filter(char => recipientIds.has(char.id));
@@ -961,7 +983,10 @@ const StoryTheaterSession: React.FC<Props> = ({ entry, preset, masks, onBack, on
                 {mediaDraft&&<MediaDraft message={mediaDraft} disabled={sending} onRemove={()=>setMediaDraft(null)}/>}
                 <div className='flex items-end gap-2 p-2 rounded-2xl bg-white border border-slate-200 shadow-sm'>
                     <button type='button' onClick={() => void send(undefined, true)} disabled={sending || !canStart} className='self-end h-11 shrink-0 px-3 rounded-xl border border-violet-200 bg-violet-50 text-violet-700 text-xs font-bold active:scale-95 transition-transform disabled:opacity-30' title='本轮不主动行动，让剧情按当前预设继续' aria-label='继续当前剧情'>继续</button>
-                    <ExperienceTools floating key={threadId} scopeId={threadId} inPerson disabled={sending} onStageMedia={setMediaDraft} onMediaPreparing={setMediaPreparing} onSend={message=>send(undefined,false,message)}/>
+                    <ExperienceTools menuActions={entry.writesToCharacterMemory ? <>
+                        <button onClick={onBack} className='p-4 rounded-2xl bg-emerald-50 text-sm text-emerald-700'>暂离 · 保留见面</button>
+                        <button onClick={endMeeting} className='p-4 rounded-2xl bg-rose-50 text-sm text-rose-700'>结束见面</button>
+                    </> : undefined} floating key={threadId} scopeId={threadId} inPerson disabled={sending} onStageMedia={setMediaDraft} onMediaPreparing={setMediaPreparing} onSend={message=>send(undefined,false,message)}/>
                     <textarea value={input} onChange={event => setInput(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) { event.preventDefault(); void send(); } }} disabled={sending} rows={2} placeholder={pendingRetryInput ? '留空并点击推进，可继续上次中断' : canWriteOpening ? '也可以先写一句；留空推进则由故事开场' : '写下动作、对白、时间跳转，或你希望故事发生的事……'} className='min-w-0 min-h-12 max-h-36 flex-1 px-2 py-2 bg-transparent text-sm leading-6 resize-none outline-none disabled:opacity-50' />
                     <button onClick={() => void send()} disabled={sending || mediaPreparing || (!input.trim() && !mediaDraft && !pendingRetryInput && !canWriteOpening)} title={!input.trim() && pendingRetryInput ? '继续上次中断' : canWriteOpening && !input.trim() ? '让故事先开场' : '推进'} className='story-send-button self-end w-11 h-11 shrink-0 rounded-xl bg-slate-900 text-white grid place-items-center disabled:opacity-30'>{sending ? <SpinnerGap size={18} className='animate-spin' /> : <PaperPlaneTilt size={18} weight='fill' />}</button>
                 </div>

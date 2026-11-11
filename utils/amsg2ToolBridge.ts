@@ -323,7 +323,7 @@ async function handleSchedule(args: Record<string, any>, deps: Amsg2ToolDeps): P
   if (!args.__replaceTaskUuid && !args.__makeupForTaskUuid) {
     const unansweredLimit = limits.maxUnansweredSends;
     const plannedSelfSends = config.tasks
-      .filter((t) => !t.away && !t.clientTaskId?.startsWith('away-') && t.source === 'character' && isPendingTask(t, Date.now()))
+      .filter((t) => !t.dateLeave && !t.away && !t.clientTaskId?.startsWith('away-') && t.source === 'character' && isPendingTask(t, Date.now()))
       .length;
     if (plannedSelfSends + 1 > unansweredLimit) {
       return reject(deps, 'unanswered_limit', `对方还没回复，这期间你已经排了 ${plannedSelfSends} 次后续，用户设的连发上限是 ${unansweredLimit} 次——这次别排了，等 ta 回复再说。`);
@@ -345,7 +345,7 @@ async function handleSchedule(args: Record<string, any>, deps: Amsg2ToolDeps): P
   if (Number.isFinite(sendAtMs)) {
     const now = Date.now();
     const busy = getPendingTasks(config, now)
-      .filter((t) => !t.away && !t.clientTaskId?.startsWith('away-') && t.taskUuid !== args.__replaceTaskUuid)
+      .filter((t) => !t.dateLeave && !t.away && !t.clientTaskId?.startsWith('away-') && t.taskUuid !== args.__replaceTaskUuid)
       .map((t) => currentOccurrenceMs(t, now))
       .filter((ms): ms is number => ms != null);
     const rules = checkSelfScheduleRules({
