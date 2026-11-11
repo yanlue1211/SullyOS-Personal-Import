@@ -56,6 +56,8 @@ const { storeState } = vi.hoisted(() => ({
 }));
 vi.mock('./activeMsgStore', () => ({
   ActiveMsgStore: {
+    saveCommerceContinuation: vi.fn().mockResolvedValue(undefined),
+    clearCommerceContinuation: vi.fn().mockResolvedValue(undefined),
     ensureUserId: async () => TEST_USER_ID,
     getGlobalConfig: async () => {
       if (storeState.configError) throw storeState.configError;
@@ -1442,4 +1444,19 @@ describe('AI 复现排程', () => {
     await expect(ActiveMsgClient.scheduleReproduction('55555555-5555-4555-8555-555555555555', API, 60)).rejects.toThrow('更新');
     expect(calls.some(c => c.url.endsWith('/schedule-message'))).toBe(false);
   });
+});
+
+it('freezes an opted-in commerce request before cloud submission without saving credentials', async()=>{
+ const {ActiveMsgStore}=await import('./activeMsgStore');
+ const messages=[{role:'system',content:'【生活购物权限】完整原系统段'},{role:'user',content:'原消息'}];
+ const send=vi.spyOn(ActiveMsgClient,'sendInstantChat').mockImplementation(async (params:any)=>{
+  expect(ActiveMsgStore.saveCommerceContinuation).toHaveBeenCalledWith(CHAR.id,{uuid:params.uuid,model:API.model,messages});
+  return {uuid:params.uuid};
+ });
+ try {
+  const result=await sendInstantChatTurn({char:CHAR,chatMessages:messages,api:API,userProfile:USER,groups:[],realtimeConfig:{} as any});
+  expect(result.ok).toBe(true);
+  const record=vi.mocked(ActiveMsgStore.saveCommerceContinuation).mock.calls.at(-1)?.[1];
+  expect(JSON.stringify(record)).not.toContain(API.apiKey);
+ } finally {send.mockRestore();}
 });

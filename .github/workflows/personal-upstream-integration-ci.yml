@@ -34,6 +34,9 @@ jobs:
           utils/chibiImageExport.test.ts
           utils/backupMissingAssets.test.ts
           utils/backupPreferences.test.ts
+          utils/commerceBrowse.test.ts
+          utils/personalCommerce.test.ts
+          utils/streamPreview.test.ts
           utils/backupImportPolicy.test.ts
           utils/backupRoundtrip.test.ts
           utils/amsgBundleVersion.test.ts

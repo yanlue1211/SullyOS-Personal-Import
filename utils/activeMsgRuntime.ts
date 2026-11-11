@@ -9,6 +9,8 @@ import { consumeIncomingCallInvites } from '../features/personal/calls/incoming'
 import { extractInnerVoice } from '../features/personal/innerVoice/protocol';
 import { restoreAmsgInnerVoice, stripAmsgInnerVoiceTransport } from './amsgInnerVoice';
 import { ChatPrompts } from './chatPrompts';
+import { hasCommerceBrowse, stripCommerceBrowse } from './commerceBrowse';
+import { resolveDialogueApi } from './characterApi';
 import { ActiveMsgStore } from './activeMsgStore';
 import { ActiveMsgClient, type AmsgOutboxEntry, type RemoteTaskStatus } from './activeMsgClient';
 import { AMSG_CHAT_FAIL_KEY, amsgStateNamespace, parseChatFailRecord } from './amsgFirePack';
@@ -662,12 +664,29 @@ const processInboxMessageWithPostProcessing = async (
     }, offloadedCleanups),
   ));
 
-  const bodyWithInnerVoice = await replyStep(() => restoreAmsgInnerVoice(
+  let bodyWithInnerVoice = await replyStep(() => restoreAmsgInnerVoice(
     message.body || '', isLastChunk(message) ? message.metadata : undefined,
     () => fetchOffloadedExtra(message, 'amsgInnerVoiceRef', {
       what: '心声', whenMissing: '正文照常显示',
     }, offloadedCleanups),
   ));
+  let commerceMessages: any[] = [];
+  let continuationApi = apiConfig;
+  if (hasCommerceBrowse(bodyWithInnerVoice)) {
+    const snapshot = message.taskUuid && await replyStep(() => ActiveMsgStore.getCommerceContinuation(char.id, message.taskUuid!));
+    const resolved = resolveDialogueApi(apiConfig, char);
+    if (snapshot && snapshot.model.replace(/-thinking$/, '') === resolved.model?.replace(/-thinking$/, '')) {
+      commerceMessages = snapshot.messages;
+      continuationApi = { ...resolved, model: snapshot.model };
+    } else {
+      bodyWithInnerVoice = stripCommerceBrowse(bodyWithInnerVoice);
+      await replyStep(() => DB.saveMessageOnce(`commerce-context-missing:${message.messageId}`, {
+        charId: char.id, role: 'system', type: 'text', timestamp: Date.now(),
+        content: '这次商城查询没有继续：原请求上下文已失效或模型配置已更换，没有创建订单。',
+        metadata: { source: 'personal-commerce' },
+      }));
+    }
+  }
   await replyStep(async () => applyAssistantPostProcessing(bodyWithInnerVoice, {
     isProactive: isProactiveStatusDelivery(message),
     replyRun,
@@ -680,9 +699,8 @@ const processInboxMessageWithPostProcessing = async (
     // 昨晚的「22:00 改成陪你聊天」不该落到今天的 22:00 上。
     spokenAt: message.sentAt,
     contextMsgs,
-    // fullMessages / initialData: worker 不会传过来 (Phase 2 才有续跑), 二轮 LLM 又被关掉,
-    // 这两个字段在 skipSecondPassLLM=true 时实际上不会被消费; 给个最小占位避免 undefined NPE。
-    fullMessages: [],
+    // Only local catalogue continuation receives the frozen request; other second passes stay disabled.
+    fullMessages: commerceMessages,
     initialData: null,
     historyMsgCount: contextMsgs.length,
     // 把 source / activeMsg2 元数据通过 mcdInheritMeta 继承到每条 assistant message, 这样
@@ -711,18 +729,16 @@ const processInboxMessageWithPostProcessing = async (
     xhsCaches: pushXhsCaches,
     lastXhsNotesRef: pushLastXhsNotesRef,
     api: {
-      baseUrl: apiConfig.baseUrl,
+      baseUrl: continuationApi.baseUrl,
       headers: {
         'Content-Type': 'application/json',
-        ...(apiConfig.apiKey ? { Authorization: `Bearer ${apiConfig.apiKey}` } : {}),
+        ...(continuationApi.apiKey ? { Authorization: `Bearer ${continuationApi.apiKey}` } : {}),
       },
-      // effectiveApi 在 push 路径里没人读 — skipSecondPassLLM=true 把所有二轮 LLM 入口都堵了。
-      // 留着只为满足 ctx 类型形状; Phase 2 worker 走续跑时也不会让客户端再发 LLM 请求, 所以这里
-      // 长期就是个空架子, 不要花精力同步 os_api_presets / os_available_models 等运行时切换。
+      // Reuse the same character API only for the explicit local catalogue continuation.
       effectiveApi: {
-        baseUrl: apiConfig.baseUrl,
-        apiKey: apiConfig.apiKey,
-        model: apiConfig.model,
+        baseUrl: continuationApi.baseUrl,
+        apiKey: continuationApi.apiKey,
+        model: continuationApi.model,
       },
     },
     hooks: {
@@ -775,6 +791,9 @@ const processInboxMessageWithPostProcessing = async (
     sarModuleSurface,
   }));
 
+  if (isLastChunk(message) && message.taskUuid) {
+    await ActiveMsgStore.clearCommerceContinuation(char.id, message.taskUuid).catch(() => {});
+  }
   // 只有真正落库的线上主动消息才能结束对应线下见面；旧任务不能结束新见面。
   const endedEncounterId = (message.metadata as any)?.amsgDateEndedEncounterId;
   if (typeof endedEncounterId === 'string' && endedEncounterId

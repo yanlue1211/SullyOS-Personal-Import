@@ -31,7 +31,8 @@ it('enforces per-app membership in context and order execution, including explic
  await saveCommerceMembers('taobao',['a']);
  await expect(createCommerceOrder({...input(),explicitRequest:true})).rejects.toThrow('尚未接入');
  await saveCommerceMembers('meituan',['a']);
- expect((await commerceContext('a')).guide).toContain(productId);
+ expect((await commerceContext('a')).guide).toContain('<逛商城>');
+ expect((await commerceContext('a')).guide).not.toContain(productId);
  const order=await createCommerceOrder({...input(),explicitRequest:true});
  expect(orderText(order)).not.toMatch(/模拟|真实支付|平台物流/);
  expect(orderText(order,true)).not.toContain('模拟');

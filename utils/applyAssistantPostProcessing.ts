@@ -4,6 +4,7 @@ import { consumeIncomingCallInvites } from '../features/personal/calls/incoming'
 import { consumeWorkroomActions } from '../features/workroom/bridge';
 import { hasMalformedResponseStatus,extractResponseStatus,proactiveResponseText,isProactiveStatusDelivery,statusScheduleActions,isScheduleOnlyResponse } from '../features/personal/responseStatus/protocol';
 import { consumeCommerceAction } from './personalCommerce';
+import { hasCommerceBrowse, resolveCommerceBrowse } from './commerceBrowse';
 import { extractInnerVoice, type InnerVoice } from '../features/personal/innerVoice/protocol';
 import { withReplyCancellation, type ReplyRun } from './chatReplyCancellation';
 import { dialogueMaxTokens } from './characterApi';
@@ -599,6 +600,30 @@ export async function applyAssistantPostProcessing(
         messageTimestamp,
         sarModuleSurface,
     } = ctx;
+    let commerceResponseData = initialData;
+    // Local catalogue access runs only after an explicit browse request, including cloud instant replies.
+    // Keep it before all side effects so intermediate shopping/heart text is never persisted.
+    if (hasCommerceBrowse(rawAiContent)) {
+        if (!fullMessages.length) throw new Error('商城续答缺少原请求上下文，未调用模型或创建订单');
+        hooks.setSearchStatus?.('正在逛商城…');
+        try {
+            rawAiContent = await replyStep(() => resolveCommerceBrowse({
+                text: rawAiContent, charId: char.id, messages: fullMessages, signal: ctx.replyRun?.signal,
+                complete: async (messages, round) => {
+                    const result = await replyStep(() => safeFetchJson(`${api.baseUrl}/chat/completions`, {
+                        method: 'POST', headers: api.headers, signal: ctx.replyRun?.signal,
+                        body: JSON.stringify({ model: api.effectiveApi.model, messages, temperature: 0.85,
+                            max_tokens: dialogueMaxTokens(api.effectiveApi), stream: false }),
+                    }, 0, 0, { appName: '消息', charId: char.id, charName: char.name, purpose: '商城选购' }));
+                    commerceResponseData = result;
+                    hooks.updateTokenUsage?.(result, historyMsgCount, `commerce-browse-${round}`);
+                    const content = result?.choices?.[0]?.message?.content;
+                    if (typeof content !== 'string') throw new Error('商城查询后的回复为空');
+                    return content;
+                },
+            }));
+        } finally { hooks.setSearchStatus?.(''); }
+    }
     const responseStatusAllowed=ctx.isProactive!==true&&!(mcdInheritMeta?.source==='active_msg_2'&&isProactiveStatusDelivery(mcdInheritMeta.activeMsg2||{}));
     if(!responseStatusAllowed)rawAiContent=proactiveResponseText(rawAiContent);
     const { baseUrl, headers, effectiveApi } = api;
@@ -701,7 +726,7 @@ export async function applyAssistantPostProcessing(
     void agenticCtx;
 
     // 局部 data 副本 — 后续 2nd-pass 会覆盖, 模仿旧版的 let data 行为
-    let data: any = initialData;
+    let data: any = commerceResponseData;
 
     let scheduleFailureNotified = false;
     // 这句话**说出口**的时刻。本地聊天没传就是「现在」；主动消息传 push 的 sentAt。

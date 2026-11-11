@@ -227,6 +227,37 @@ const pruneStaleActionResultReceipts = async (purgeCharId?: string): Promise<voi
 };
 
 export const ActiveMsgStore = {
+  /** One short-lived, key-free request snapshot per character; never part of global-config backup. */
+  async saveCommerceContinuation(charId: string, value: { uuid: string; model: string; messages: any[] }) {
+    const db = await openDB();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_KV, 'readwrite');
+      const store = tx.objectStore(STORE_KV);
+      const now = Date.now();
+      const cursor = store.openCursor();
+      cursor.onsuccess = () => {
+        const c = cursor.result;
+        if (!c) return;
+        if (String(c.key).startsWith('commerce-continuation:') && c.value?.value?.savedAt < now - 24 * 3600_000) c.delete();
+        c.continue();
+      };
+      store.put({ id: `commerce-continuation:${charId}`, value: { ...value, savedAt: now } });
+      tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error); tx.onabort = () => reject(tx.error);
+    });
+  },
+  async getCommerceContinuation(charId: string, uuid: string) {
+    const value = await getKv<{ uuid: string; model: string; messages: any[]; savedAt: number }>(`commerce-continuation:${charId}`);
+    return value?.uuid === uuid && value.savedAt >= Date.now() - 24 * 3600_000 ? value : null;
+  },
+  async clearCommerceContinuation(charId: string, uuid: string) {
+    const db = await openDB();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_KV, 'readwrite'); const store = tx.objectStore(STORE_KV);
+      const request = store.get(`commerce-continuation:${charId}`);
+      request.onsuccess = () => { if (request.result?.value?.uuid === uuid) store.delete(`commerce-continuation:${charId}`); };
+      tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error); tx.onabort = () => reject(tx.error);
+    });
+  },
   /** 纯动作可以没有聊天产物，需单独保留完成回执，防止补收/ACK 重试重放动作。 */
   async hasAppliedActionResult(charId: string, messageId: string): Promise<boolean> {
     const val = await getKv<boolean | { savedAt?: number }>(`${ACTION_RESULT_APPLIED_PREFIX}${JSON.stringify([charId, messageId])}`);
