@@ -525,3 +525,25 @@ it("a post owner may select only two replies from a busy new-comment batch", asy
   expect(actual.filter(c=>c.authorId==="a").map(c=>c.replyTo)).toEqual([roots[0].id,roots[1].id]);
   expect(safeFetchJson).toHaveBeenCalledTimes(1);
 });
+
+it('new activity cards retain only the replied ancestor chain while snapshots retain the full witnessed discussion',async()=>{
+ await saveConfig(c=>{c.friends=[['a','b']];});
+ await transaction(async s=>{
+  const p=(await getRow<Post>(post.id,s))!;
+  const root=(id:string,text:string)=>({id,authorId:'b',name:'E或其他好友',text,at:Date.now()});
+  const answer=(id:string,replyTo:string)=>({id,authorId:'user',name:'帖主A',text:'A-reply-'+replyTo,replyTo,at:Date.now()});
+  p.comments=[root('chain-b','unrelated-B'),root('chain-c','unrelated-C'),root('chain-d','unrelated-D'),root('chain-e','E-comment'),answer('chain-ab','chain-b'),answer('chain-ac','chain-c'),answer('chain-ad','chain-d'),answer('chain-ae','chain-e')];
+  p.revision++;s.put(p);
+ },true);
+ vi.mocked(safeFetchJson).mockImplementation(async(_url,options)=>{
+  const request=promptRequest(options);
+  return {choices:[{finish_reason:'stop',message:{content:JSON.stringify({requestId:request.id,browsed:[post.id],actions:[{kind:'comment',postId:post.id,replyTo:'chain-ae',recipientId:'user',text:'F-reply-A'}],post:null,important:[]})}}]};
+ });
+ await runActivity('a',{api:global,user:{name:'小雨'} as any});
+ const cards=(await DB.getMessagesByCharId('a')).filter(x=>x.type==='moments_card');
+ expect(cards).toHaveLength(1);
+ const part=(cards[0].metadata as any).momentsActivityParts[0];
+ expect(part.post.comments.map((x:any)=>x.text)).toEqual(['E-comment','A-reply-chain-e','F-reply-A']);
+ for(const x of ['unrelated-B','unrelated-C','unrelated-D','A-reply-chain-b'])expect(cards[0].content).not.toContain(x);
+ const snapshot=await getRow<any>('snapshot:a');expect(snapshot.text).toContain('unrelated-B');
+});
