@@ -99,3 +99,17 @@ it('restores the 08:00 activity and 12h setting before checking a stale short sc
     vi.advanceTimersByTime(1);
     expect(trigger).toHaveBeenCalledTimes(1);
 });
+
+it('importing old activity without a schedule waits a full interval instead of calling immediately', () => {
+    browser(); vi.useFakeTimers(); localStorage.clear();
+    const now=Date.UTC(2026,10,11,0);
+    vi.setSystemTime(now);
+    const trigger=vi.fn();
+    VRScheduler.reconcile([{charId:'imported',intervalMinutes:720,lastActiveAt:now-3*24*60*60*1000}]);
+    VRScheduler.onTrigger(trigger);
+    expect(trigger).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(12*60*60*1000-1);
+    expect(trigger).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(trigger).toHaveBeenCalledTimes(1);
+});

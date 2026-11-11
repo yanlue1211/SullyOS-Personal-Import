@@ -252,7 +252,7 @@ export const VRScheduler = {
      * 导入到新设备 / 新浏览器档案后，角色明明是 enabled 但调度表为空，resume() 直接
      * 早退 → 角色永远不会自主登入。数据加载完成后调用本方法对账即可修复。
      *
-     * - 缺调度 → 补建；有角色活动时间时恢复基准，否则从现在起算
+     * - 缺调度 → 补建，从现在起算，避免换设备导入时集中补跑旧活动
      * - 间隔被改过 → 跟随最新设定
      * - 已删除 / 已关闭的角色 → 清掉残留调度
      */
@@ -269,8 +269,9 @@ export const VRScheduler = {
             // 只补缺失值，不推迟已有计划，也不在恢复瞬间集中调用模型。
             const lastFire = getLastFire(a.charId);
             const lastActive = Number(a.lastActiveAt);
-            if (Number.isFinite(lastActive) && lastActive > lastFire) setLastFire(a.charId, lastActive);
-            else if (lastFire === 0) setLastFire(a.charId, Date.now());
+            const activityBase = Number.isFinite(lastActive) && lastActive > 0 ? lastActive : 0;
+            if (!existing || lastFire === 0) setLastFire(a.charId, Math.max(Date.now(), activityBase));
+            else if (activityBase > lastFire) setLastFire(a.charId, activityBase);
             if (!existing) {
                 schedules[a.charId] = { charId: a.charId, intervalMs };
                 changed = true;
