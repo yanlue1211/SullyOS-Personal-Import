@@ -1034,6 +1034,10 @@ describe('buildFirePack 的时区参照系与模板（①）', () => {
     expect(out.template.indexOf('【本轮心声格式】')).toBeLessThan(out.template.indexOf('【最近对话上下文】'));
     expect(out.template.indexOf('【表达提醒】')).toBeLessThan(out.template.indexOf('【本轮心声格式】'));
     expect(out.template.indexOf('【本次任务】')).toBeLessThan(out.template.indexOf('开口前回到你自己'));
+    expect(out.template.lastIndexOf('【本轮线上聊天节奏】')).toBeGreaterThan(out.template.indexOf('【本次任务】'));
+    expect(out.template.lastIndexOf('【本轮心声格式】')).toBeGreaterThan(out.template.indexOf('【本次任务】'));
+    expect(out.template).not.toContain('输出只能是最终要发送的消息正文');
+    expect(out.template).not.toContain('可以用换行拆成多个聊天气泡');
   });
 
   it('角色开了自定义时区 → tzId 用角色的', async () => {

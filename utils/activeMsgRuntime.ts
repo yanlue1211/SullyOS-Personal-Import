@@ -7,6 +7,7 @@ import { ActiveMsg2InboxMessage, ActiveMsg2TaskRecord, APIConfig, RealtimeConfig
 import { DB } from './db';
 import { consumeIncomingCallInvites } from '../features/personal/calls/incoming';
 import { extractInnerVoice } from '../features/personal/innerVoice/protocol';
+import { restoreAmsgInnerVoice, stripAmsgInnerVoiceTransport } from './amsgInnerVoice';
 import { ChatPrompts } from './chatPrompts';
 import { ActiveMsgStore } from './activeMsgStore';
 import { ActiveMsgClient, type AmsgOutboxEntry, type RemoteTaskStatus } from './activeMsgClient';
@@ -241,7 +242,7 @@ const fetchOffloadedXhsSession = async (
 const fetchOffloadedExtra = async (
   message: ActiveMsg2InboxMessage,
   /** metadata 上的引用键字段名。 */
-  refField: 'amsgEmotionRef' | 'amsgReasoningRef' | 'amsgSarRef' | 'amsgSarSurfaceRef' | 'amsgSarUserSurfaceRef',
+  refField: 'amsgEmotionRef' | 'amsgReasoningRef' | 'amsgSarRef' | 'amsgSarSurfaceRef' | 'amsgSarUserSurfaceRef' | 'amsgInnerVoiceRef',
   /** 日志里怎么称呼它 + 取不到时这一轮少了什么。 */
   labels: { what: string; whenMissing: string },
   /** 取回成功时把「这份云端副本可以删了」登记进来，由调用方在处理成功后统一删。 */
@@ -661,7 +662,13 @@ const processInboxMessageWithPostProcessing = async (
     }, offloadedCleanups),
   ));
 
-  await replyStep(async () => applyAssistantPostProcessing(message.body || '', {
+  const bodyWithInnerVoice = await replyStep(() => restoreAmsgInnerVoice(
+    message.body || '', isLastChunk(message) ? message.metadata : undefined,
+    () => fetchOffloadedExtra(message, 'amsgInnerVoiceRef', {
+      what: '心声', whenMissing: '正文照常显示',
+    }, offloadedCleanups),
+  ));
+  await replyStep(async () => applyAssistantPostProcessing(bodyWithInnerVoice, {
     isProactive: isProactiveStatusDelivery(message),
     replyRun,
     char,
@@ -699,7 +706,7 @@ const processInboxMessageWithPostProcessing = async (
       // SAR 临时模块那几个回程载具键（快照 / 这一段的外显 / USER_SURFACE 原文）剔掉：
       // 外显由下面的 sarModuleSurface 按气泡对齐后写成 metadata.sarModuleSurface，
       // 快照在销账时一次性收尾，都不该永久挂在每个气泡上。
-      ...stripAmsgSarTransportKeys(message.metadata),
+      ...stripAmsgInnerVoiceTransport(stripAmsgSarTransportKeys(message.metadata)),
     },
     xhsCaches: pushXhsCaches,
     lastXhsNotesRef: pushLastXhsNotesRef,
@@ -1766,7 +1773,14 @@ const flushInboxToChatImpl = async (trigger: FlushTrigger, charId?: string): Pro
       if (!routed) {
         // 2.0 fallback: even when the rich post-processing pipeline fails, never
         // persist the raw inner-voice protocol as a public chat bubble.
-        const recoveredVoice = extractInnerVoice(await replyStep(() => consumeIncomingCallInvites(isProactiveStatusDelivery(message)?proactiveResponseText(message.body||''):(message.body||''),message.charId,persistTimestamp)));
+        const fallbackHeartCleanups: OffloadedCleanup[] = [];
+        const fallbackBody = await replyStep(() => restoreAmsgInnerVoice(
+          message.body || '', isLastChunk(message) ? message.metadata : undefined,
+          () => fetchOffloadedExtra(message, 'amsgInnerVoiceRef', {
+            what: '心声', whenMissing: '正文照常显示',
+          }, fallbackHeartCleanups),
+        ));
+        const recoveredVoice = extractInnerVoice(await replyStep(() => consumeIncomingCallInvites(isProactiveStatusDelivery(message)?proactiveResponseText(fallbackBody):fallbackBody,message.charId,persistTimestamp)));
         const recoveredStatus=extractResponseStatus(recoveredVoice.text);
         const heartEnabled = (await replyStep(() => DB.getCharacter(message.charId)))?.innerVoiceEnabled !== false;
         try {
@@ -1790,7 +1804,7 @@ const flushInboxToChatImpl = async (trigger: FlushTrigger, charId?: string): Pro
                 receivedAt: message.receivedAt,
               },
               // 同主路径：SAR 回程载具键不进气泡；这一段的角色外显原稿整段挂上。
-              ...stripAmsgSarTransportKeys(message.metadata),
+              ...stripAmsgInnerVoiceTransport(stripAmsgSarTransportKeys(message.metadata)),
               ...(() => {
                 const sarSurface = readAmsgSarSurface(message.metadata);
                 return sarSurface ? { sarModuleSurface: sarSurface } : {};
@@ -1810,6 +1824,7 @@ const flushInboxToChatImpl = async (trigger: FlushTrigger, charId?: string): Pro
           // requeue 后跳过这条消息的 dispatchEvent —— UI 不该误以为收到了
           continue;
         }
+        void runOffloadedCleanups(fallbackHeartCleanups);
         // 情绪附赠也要在这里消费：结果就挂在这条 push 的 metadata 上，而全仓库唯一的
         // 消费点在 post-processing 内部——走到降级这条路说明那边失败到头了，光把 metadata
         // 原样抄进聊天记录的话结果永远无人再读：「情绪更新中」徽章亮满十来分钟的安全网，

@@ -1,4 +1,4 @@
-import { usesHumanStyle, usesInnerVoice, INNER_VOICE_FORMAT_REMINDER, CHAT_EXPRESSION_TAIL_REMINDER } from './chatPromptPreferences';
+import { usesHumanStyle, usesInnerVoice, INNER_VOICE_FORMAT_REMINDER, CHAT_EXPRESSION_TAIL_REMINDER, IM_FRAGMENTED_CHAT_TAIL } from './chatPromptPreferences';
 import { buildChatOutputStylePrompt, readChatTranslationConfig } from './chatOutputStylePrompt';
 import { buildReproductionTask, DIAGNOSTIC_NAMESPACE, diagnosticRunId, type DiagnosticEvent } from './amsgReproduction';
 import { resolveScheduledMessageApi } from './characterApi';
@@ -910,9 +910,9 @@ export const buildFirePack = async (
     '',
     '【重要规则】',
     '- 这不是回复用户刚刚发来的消息，而是角色主动来找用户聊天。',
-    '- 输出只能是最终要发送的消息正文，不要解释，不要写分析，不要加引号。',
-    '- 像真实聊天一样简短自然，优先 1 到 2 句，最多 3 句。',
-    '- 可以用换行拆成多个聊天气泡，但不要写时间戳、名字前缀、系统提示。',
+    '- 输出要发送的聊天正文及已开启功能的协议标签，不解释生成过程，不写分析，不加引号；心声单独遵守心声协议，不属于正文。',
+    '- 沿用最近聊天里角色自己的口语和短气泡节奏，通常一到两个小点就够，不把每个小点扩写成长段。',
+    '- 线上文字一行一个气泡，按自然语意换行；不要写时间戳、名字前缀、系统提示。',
     '- 不要出现“作为AI”“系统提示”等元话语。',
     '- 语气更像真人突然想起对方时发来的私聊，不要像在完成任务。',
     '- 角色设定里描述的查记忆、读日记、联网搜索、逛小红书等能力照常可用：需要时正常输出对应标签，系统会取回结果后让你继续写。',
@@ -956,6 +956,10 @@ export const buildFirePack = async (
     '',
     // Preserve the author's short final character-voice anchor.
     `（开口前回到你自己：这条得是 ${char.name} 会发的那一条——语气、用词、节奏都只属于你。哪怕只是随口一句，也要是你。）`,
+    CHAT_EXPRESSION_TAIL_REMINDER,
+    IM_FRAGMENTED_CHAT_TAIL,
+    '主动联系也是接着你们平时的聊天，不切成报备稿、近况总结或独白。没有必要把活动来龙去脉一次交代完；需要认真解释、用户明确要求长内容时可以展开。上述短气泡要求仅约束线上文字正文，语音和心声各守原协议。',
+    usesInnerVoice(char) ? INNER_VOICE_FORMAT_REMINDER : '',
   ].join('\n');
 
   return {

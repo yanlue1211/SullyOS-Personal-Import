@@ -492,6 +492,23 @@ describe('flushInboxToChat 落库时间戳（走真库）', () => {
   const assistantMsgs = async (charId: string) =>
     (await DB.getRecentMessagesByCharId(charId, 50)).filter((m) => m.role === 'assistant');
 
+  it.each([true, false])('cloud voice reaches the existing bubble metadata; generation switch=%s', async (enabled) => {
+    const charId = `heart-cloud-${enabled}`;
+    const voice = { state: '候机', thoughts: '困了', undercurrent: '' };
+    await DB.saveCharacter({ id: charId, name: '心声角色', innerVoiceEnabled: enabled } as any);
+    await ActiveMsgStore.saveInboxMessage(inboxMsg({
+      charId, messageId: `heart-message-${enabled}`, messageType: 'text',
+      body: '刚过安检\n落地找你', receivedAt: Date.now() - 3600000, sentAt: Date.now() - 3600000,
+      metadata: { charId, amsgInnerVoice: voice },
+    }));
+    await flushInboxToChat('SW通知');
+    const msgs = await assistantMsgs(charId);
+    expect(msgs.map(m => m.content)).toEqual(['刚过安检', '落地找你']);
+    expect(msgs.filter(m => m.metadata?.innerVoice)).toHaveLength(enabled ? 1 : 0);
+    if (enabled) expect(msgs.at(-1)?.metadata?.innerVoice).toEqual(voice);
+    for (const m of msgs) expect(m.metadata).not.toHaveProperty('amsgInnerVoice');
+  }, 20000);
+
   it('主路径·离线补收：sentAt 超过阈值 → 每条气泡都落 sentAt', async () => {
     const sentAt = Date.now() - 13 * 3_600_000; // 昨晚推的，今天中午才打开
     await ActiveMsgStore.saveInboxMessage(inboxMsg({

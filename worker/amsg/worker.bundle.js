@@ -13744,6 +13744,33 @@ var buildMcpFireBlock = (resolve, opts) => {
   ].join("\n");
 };
 
+// features/personal/innerVoice/protocol.ts
+function extractInnerVoice(raw) {
+  let innerVoice;
+  const text2 = raw.replace(/<心声(?:\s[^>]*)?>([\s\S]*?)(?:<\/心声\s*>|$)/g, (_whole, body) => {
+    try {
+      const value = JSON.parse(body.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, ""));
+      if (typeof value.state === "string" && typeof value.thoughts === "string" && (value.undercurrent == null || typeof value.undercurrent === "string")) innerVoice = { state: value.state.trim(), thoughts: value.thoughts.trim(), undercurrent: (value.undercurrent || "").trim() };
+    } catch {
+    }
+    return "";
+  });
+  if (!innerVoice) {
+    const marker = /(?:\n|^)[\[【]角色当时的心声[^\n\]】]*未说出口[^\n\]】]*用户未必知情[\]】]\s*\n状态[：:]\s*([^\n]*)\n内心[：:]\s*([^\n]*)(?:\n暗流[：:]\s*([^\n]*))?\s*$/;
+    const match = marker.exec(text2);
+    if (match) {
+      innerVoice = { state: match[1].trim(), thoughts: match[2].trim(), undercurrent: (match[3] || "").trim() };
+      return { text: text2.slice(0, match.index).trimEnd(), innerVoice };
+    }
+  }
+  if (!innerVoice) {
+    const loose = /(?:^|\n)(?:[【\[]心声[】\]]\s*\n)?(?:当前状态|状态)[：:]\s*([^\n]*)\n(?:内心想法|内心)[：:]\s*([^\n]*)\n(?:深层暗流|暗流)[：:]\s*([^\n]*)\s*$/;
+    const match = loose.exec(text2);
+    if (match) return { text: text2.slice(0, match.index).trimEnd(), innerVoice: { state: match[1].trim(), thoughts: match[2].trim(), undercurrent: match[3].trim() } };
+  }
+  return { text: text2, ...innerVoice ? { innerVoice } : {} };
+}
+
 // utils/amsg2ExpireGuard.ts
 var FIRE_GRACE_MS = 9e4;
 var DAY_MS2 = 24 * 36e5;
@@ -13950,7 +13977,7 @@ var buildTaskInstruction = (mode, promptHint) => {
   }
   return [
     "\u8FD9\u662F\u4E00\u6761\u9700\u8981 AI \u81EA\u4E3B\u751F\u6210\u7684\u4E3B\u52A8\u6D88\u606F\u3002",
-    "\u8BF7\u7ED3\u5408\u89D2\u8272\u8BBE\u5B9A\u3001\u5173\u7CFB\u72B6\u6001\u3001\u6700\u8FD1\u4E0A\u4E0B\u6587\u4E0E\u5F53\u524D\u65F6\u95F4\uFF0C\u81EA\u7136\u5730\u4E3B\u52A8\u627E\u7528\u6237\u8BF4\u4E00\u5230\u4E09\u53E5\u79C1\u804A\u6D88\u606F\u3002",
+    "\u8BF7\u7ED3\u5408\u89D2\u8272\u8BBE\u5B9A\u3001\u5173\u7CFB\u72B6\u6001\u3001\u6700\u8FD1\u4E0A\u4E0B\u6587\u4E0E\u5F53\u524D\u65F6\u95F4\uFF0C\u6CBF\u7528\u5E73\u65F6\u804A\u5929\u7684\u8BED\u6C14\u548C\u8282\u594F\uFF0C\u81EA\u7136\u5730\u4E3B\u52A8\u627E\u7528\u6237\u804A\u4E00\u4E24\u4E2A\u5C0F\u70B9\uFF1B\u4E0D\u56E0\u4E3B\u52A8\u8054\u7CFB\u5C31\u6269\u5199\u6210\u5B8C\u6574\u62A5\u5907\u3002",
     promptHint?.trim() ? `\u53EF\u9009\u7075\u611F\u8865\u5145\uFF1A${promptHint.trim()}` : "\u53EF\u9009\u7075\u611F\u8865\u5145\uFF1A\u65E0"
   ].join("\n");
 };
@@ -13958,7 +13985,7 @@ var AMSG_AWAY_MESSAGE_META = "amsgAwayMessage";
 var AMSG_AWAY_DELAY_META = "amsgAwayDelayMinutes";
 var buildAwayTaskInstruction = (delayMinutes) => [
   `\u5BF9\u65B9\u5DF2\u7ECF\u8D85\u8FC7 ${delayMinutes} \u5206\u949F\u6CA1\u8DDF\u4F60\u8BF4\u8BDD\u4E86\uFF0C\u73B0\u5728\u662F\u4F60\u53EF\u4EE5\u4E3B\u52A8\u7EBF\u4E0A\u8054\u7CFB\u5BF9\u65B9\u7684\u4E00\u6B21\u673A\u4F1A\u3002`,
-  "\u5148\u7ED3\u5408\u4F60\u4EEC\u6700\u540E\u804A\u5230\u54EA\u513F\u3001\u5BF9\u65B9\u79BB\u5F00\u4E86\u591A\u4E45\u3001\u4F60\u81EA\u5DF1\u8FD9\u4F1A\u513F\u5728\u505A\u4EC0\u4E48\uFF0C\u5224\u65AD\u6B64\u523B\u6709\u6CA1\u6709\u81EA\u7136\u8054\u7CFB\u7684\u7406\u7531\uFF1B\u6CA1\u6709\u5C31\u6309\u81EA\u4E3B\u9759\u9ED8\u89C4\u5219\u4E0D\u53D1\u3002\u51B3\u5B9A\u8054\u7CFB\u624D\u53D1\u4E00\u5230\u4E09\u53E5\u79C1\u804A\u3002",
+  "\u5148\u7ED3\u5408\u4F60\u4EEC\u6700\u540E\u804A\u5230\u54EA\u513F\u3001\u5BF9\u65B9\u79BB\u5F00\u4E86\u591A\u4E45\u3001\u4F60\u81EA\u5DF1\u8FD9\u4F1A\u513F\u5728\u505A\u4EC0\u4E48\uFF0C\u5224\u65AD\u6B64\u523B\u6709\u6CA1\u6709\u81EA\u7136\u8054\u7CFB\u7684\u7406\u7531\uFF1B\u6CA1\u6709\u5C31\u6309\u81EA\u4E3B\u9759\u9ED8\u89C4\u5219\u4E0D\u53D1\u3002\u51B3\u5B9A\u8054\u7CFB\u65F6\u6CBF\u7528\u5E73\u65F6\u804A\u5929\u7684\u8BED\u6C14\u548C\u8282\u594F\uFF0C\u804A\u4E00\u4E24\u4E2A\u5C0F\u70B9\u5373\u53EF\uFF0C\u4E0D\u5199\u5B8C\u6574\u62A5\u5907\u3002",
   "\u53EF\u4EE5\u60E6\u8BB0\u5BF9\u65B9\u53BB\u54EA\u4E86\u3001\u5206\u4EAB\u4F60\u521A\u7ECF\u5386\u7684\u4E8B\uFF0C\u6216\u8005\u63A5\u4E0A\u6CA1\u804A\u5B8C\u7684\u8BDD\uFF1B\u4E0D\u8981\u50CF\u7CFB\u7EDF\u63D0\u9192\uFF0C\u4E5F\u4E0D\u8981\u63D0\u300C\u591A\u5C11\u5206\u949F\u300D\u8FD9\u79CD\u8BA1\u65F6\u3002"
 ].join("\n");
 var pad22 = (n) => n.toString().padStart(2, "0");
@@ -14426,7 +14453,8 @@ function processLLMRound(state, llmOutputText, build, mcp, schedule, iteration, 
   );
   const finishMeta = directives.length > 0 ? { directives, ...xhsSession ? { xhsSession } : {} } : void 0;
   const declined = fullText.includes(AMSG_SILENT_MARK);
-  const segments = declined ? [] : sanitizeIntoSegments(cleanedText);
+  const heart = extractInnerVoice(cleanedText);
+  const segments = declined ? [] : sanitizeIntoSegments(heart.text);
   if (segments.length === 0) {
     const scheduleChanges = directives.filter((d) => d.type === "change_schedule").map((d) => ({ startTime: d.time, activity: d.activity }));
     return {
@@ -14439,6 +14467,7 @@ function processLLMRound(state, llmOutputText, build, mcp, schedule, iteration, 
   const sarCharacter = build.sar?.character;
   const surfaceSlots = sarParse && sarCharacter?.phase === "active" ? buildSarSurfaceSlots(sarParse, segments) : [];
   const sarLastMeta = {
+    ...heart.innerVoice ? { amsgInnerVoice: heart.innerVoice } : {},
     ...build.sar ? { [AMSG_SAR_META_KEY]: build.sar } : {},
     ...sarParse?.userSurface ? { amsgSarUserSurface: sarParse.userSurface } : {}
   };
@@ -14486,7 +14515,7 @@ function buildScheduledPush(message, build, extraMeta, bannerBody) {
 }
 
 // utils/amsgBundleVersion.ts
-var AMSG_BUNDLE_VERSION = "2026-11-10.1";
+var AMSG_BUNDLE_VERSION = "2026-11-11";
 
 // worker/amsg/src/reproduction.ts
 async function writeDiagnosticStage(writeState, runId, event, fields = {}) {
@@ -19314,6 +19343,12 @@ var extractInlineThink = (text2) => {
 var amsgReasoningKey = (clientTaskId) => `reasoning:${clientTaskId}`;
 var pushFits = (payload) => measurePushPayload(JSON.stringify(payload), { reserveEnvelope: true }).withinLimit;
 var OFFLOAD_BATONS = [
+  {
+    field: "amsgInnerVoice",
+    refField: "amsgInnerVoiceRef",
+    key: (clientTaskId) => `inner-voice:${clientTaskId}`,
+    log: "[amsg:inner-voice] \u5FC3\u58F0\u65C1\u8DEF\u5B58\u50A8"
+  },
   {
     field: "amsgReasoning",
     refField: "amsgReasoningRef",
