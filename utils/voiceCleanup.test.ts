@@ -1,4 +1,4 @@
-import {beforeEach,expect,it} from 'vitest';
+import {beforeEach,expect,it,vi} from 'vitest';
 import {DB,openDB} from './db';
 import {putImageBlob,getBlobForRef} from './blobRef';
 import {REF_SOURCE_STORES} from './blobGc';
@@ -49,4 +49,31 @@ it('reclaims abandoned recording blobs while keeping music referenced by another
  await DB.saveAssetRaw('yueqi:bgm:local',{ref:music});
  await clearAllVoices(await inspectAllVoices());
  expect(await getBlobForRef(orphan)).toBeNull();expect(await getBlobForRef(music)).not.toBeNull();
+});
+
+it('bulk clearing voice recordings avoids per-blob full database scans and reports progress',async()=>{
+ const audio=new Blob(['voice'],{type:'audio/wav'});
+ const refs:string[]=[];
+ for(let i=0;i<20;i++){
+  const ref=await putImageBlob(audio);refs.push(ref);
+  await DB.saveMessage({charId:'batch-voice',role:'user',type:'audio',content:ref});
+ }
+ const plan=await inspectAllVoices();
+ const pageSpy=vi.spyOn(DB,'getStoreRowsPage');
+ const progress:string[]=[];
+ try{
+  const result=await clearAllVoices(plan,label=>progress.push(label));
+  expect(result.retainedFiles).toBe(0);
+  expect(result.freedBytes).toBeGreaterThanOrEqual(20*audio.size);
+  // One marked reference sweep, not one sweep for each voice.
+  const messagePages=pageSpy.mock.calls.filter(([store])=>store==='messages').length;
+  expect(messagePages).toBeLessThan(12);
+  expect(progress.some(label=>label.includes('共享引用'))).toBe(true);
+  for(const ref of refs)expect(await getBlobForRef(ref)).toBeNull();
+  const messages=await DB.getMessagesByCharId('batch-voice',true);
+  expect(messages).toHaveLength(20);
+  expect(messages.every(m=>m.metadata.audioCleared)).toBe(true);
+ }finally{
+  pageSpy.mockRestore();
+ }
 });
