@@ -10,6 +10,7 @@ import { shouldShowAnniversaryGift, markAnniversaryGiftSeen } from '../utils/ann
 
 
 import React, { useState, useEffect, useMemo, useRef, Suspense } from 'react';
+import { getDateSuspendBannerVisible, subscribeDateSuspendBannerVisibility } from '../utils/dateSuspendBannerPreference';
 import { IMPORT_IN_PROGRESS_KEY, useOS } from '../context/OSContext';
 import StatusBar from './os/StatusBar';
 import { SARModuleMonitor } from './sar/SARModuleMonitor';
@@ -506,6 +507,8 @@ const AppEnterStage: React.FC<{
 
 const PhoneShell: React.FC = () => {
   const { theme, isLocked, unlock, activeApp, closeApp, openApp, virtualTime, isDataLoaded, toasts, unreadMessages, characters, groups, handleBack, suspendedCall, resumeCall, suspendedDate, resumeDate, activeCharacterId, errorDialog, dismissError, sysOperation } = useOS();
+  // 仅控制顶部见面返回横条的呈现；挂起状态、见面锁与恢复入口完全沿用原有逻辑。
+  const showSuspendedDateBanner = React.useSyncExternalStore(subscribeDateSuspendBannerVisibility, getDateSuspendBannerVisible, () => false);
   const useIOSStandaloneLayout = isIOSStandaloneWebApp();
   const reducedBlur = useReducedBlur();
   const deploymentNotice = useDeploymentNotice();
@@ -1186,7 +1189,7 @@ const PhoneShell: React.FC = () => {
             </button>
           )}
           {/* 挂起的见面：和通话条同一个位置，两条都在时排在通话条下面。 */}
-          {suspendedDate && activeApp !== AppID.Date && (
+          {showSuspendedDateBanner && suspendedDate && activeApp !== AppID.Date && (
             <button
               onClick={resumeDate}
               className="absolute left-0 w-full z-[55] flex items-center justify-center gap-2 bg-rose-400 text-white text-xs font-bold py-1.5 cursor-pointer active:bg-rose-500 transition-colors"
