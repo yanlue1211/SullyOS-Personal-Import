@@ -1,3 +1,4 @@
+import { prepareInPersonScheduling, applyInPersonSchedules } from '../../../utils/inPersonScheduling';
 import { beginStoryMeeting, endStoryMeeting } from '../../../utils/storyMeetingLock';
 import { ActiveMsgClient } from '../../../utils/activeMsgClient';
 import { isAmsg2EnabledForChar } from '../../../utils/amsg2Tasks';
@@ -287,7 +288,7 @@ export const StoryOutput: React.FC<{ content: string; onChoose?: (text: string) 
 };
 
 const StoryTheaterSession: React.FC<Props> = ({ entry, preset, masks, onBack, onEdit, onOpenVectorMemory, onOpenArchives, onEntryChange }) => {
-    const { characters, userProfile, apiConfig, memoryPalaceConfig, remoteVectorConfig, updateCharacter, addToast } = useOS();
+    const { characters, userProfile, apiConfig, memoryPalaceConfig, remoteVectorConfig, updateCharacter, addToast, groups, realtimeConfig } = useOS();
     const threadId = storyTheaterThreadId(entry.id);
     const actors = useMemo(() => characters.filter(char => entry.characterIds.includes(char.id)), [characters, entry.characterIds]);
     const meetingEncounters = useRef(new Map<string, string>());
@@ -751,6 +752,7 @@ const StoryTheaterSession: React.FC<Props> = ({ entry, preset, masks, onBack, on
                 content: '[' + (message.role === 'user' ? promptIdentityName + '给出的推进（用户侧）' : '上一层剧场正文') + ']\n' + message.content,
             }));
             const pendingTurn = { role: 'user' as const, content: modelInput };
+            const scheduling = await prepareInPersonScheduling(actors, promptEntry.writesToCharacterMemory, !isReroll, meetingEncounters.current);
             let compiled!: ReturnType<typeof compileStoryPreset>;
             const payload = ContextBuilder.buildWorldbookRequest<StoryApiMessage>({
                 books: selectedBooks, userName: promptIdentityName, charName: actors.map(actor => actor.name).join('、'),
@@ -774,6 +776,7 @@ const StoryTheaterSession: React.FC<Props> = ({ entry, preset, masks, onBack, on
                     ...(affinityEnabled ? [{ role: 'system' as const, content: RELATIONSHIP_TEXTURE_GUIDE }] : []),
                     ...(affinityAwarenessReminder ? [{ role: 'system' as const, content: affinityAwarenessReminder }] : []),
                     ...(oracleBlock?[{role:'system' as const,content:oracleBlock}]:[]),
+                    ...(scheduling.prompt ? [{role:'system' as const, content:scheduling.prompt}] : []),
                     { role: 'system' as const, content: identityGuard },
                     ...(isReroll ? [{ role: 'system' as const, content: STORY_REROLL_INSTRUCTION }] : []),
                 ];
@@ -817,7 +820,10 @@ const StoryTheaterSession: React.FC<Props> = ({ entry, preset, masks, onBack, on
                 setContextTokensExact(true);
             });
             const prefill = compiled.assistantPrefill?.content || '';
-            const rawContent = prefill && !generated.startsWith(prefill) ? `${prefill}${generated}` : generated;
+            const rawWithSchedules = prefill && !generated.startsWith(prefill) ? `${prefill}${generated}` : generated;
+            const rawContent = await applyInPersonSchedules(rawWithSchedules, scheduling, {
+                userProfile, groups, realtimeConfig, apiConfig, updateCharacter,
+            }, ok => addToast(ok ? '已预约未来主动消息' : '线下主动消息预约失败，可在主动消息 2.0 面板检查', ok ? 'success' : 'error'));
             // 关系绝对值要承接最近一轮，即使那轮刚被折叠进事件盒，也不能回退到 50。
             const previousAssistantContent = [...history].reverse().find(message => message.role === 'assistant')?.content || '';
             const content = affinityEnabled
@@ -862,7 +868,7 @@ const StoryTheaterSession: React.FC<Props> = ({ entry, preset, masks, onBack, on
             setSending(false);
             setRerollingId(null);
         }
-    }, [mediaDraft,mediaPreparing,canStart, actors, addToast, affinityDrafts, affinityEnabled, applyActorMemoryPipeline, archiveIfNeeded, buildActorContexts, buildMaskMemoryContext, callCompletion, effectivePreset, entry, independentRecall, input, loadMessages, mask, promptIdentityName, saveCentralAndMirrors, selectedBooks, threadId]);
+    }, [userProfile,groups,realtimeConfig,apiConfig,updateCharacter,mediaDraft,mediaPreparing,canStart, actors, addToast, affinityDrafts, affinityEnabled, applyActorMemoryPipeline, archiveIfNeeded, buildActorContexts, buildMaskMemoryContext, callCompletion, effectivePreset, entry, independentRecall, input, loadMessages, mask, promptIdentityName, saveCentralAndMirrors, selectedBooks, threadId]);
 
     const archivedCount = messages.filter(message => mirrorArchived(message, entry)).length;
     const pendingRetryInput = getPendingStoryRetryInput(messages);

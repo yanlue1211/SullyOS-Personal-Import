@@ -29,9 +29,7 @@ import { setAmsgActiveDate, getAmsgActiveDateEncounterId } from '../utils/amsgIn
 import { ActiveMsgClient } from '../utils/activeMsgClient';
 import { syncCloudAwayTask } from '../utils/awayMessage';
 import { isAmsg2EnabledForChar } from '../utils/amsg2Tasks';
-import { isAmsg2GlobalReady, createAmsg2ToolSession, executeAmsg2ToolWithOutcome } from '../utils/amsg2ToolBridge';
-import { extractFireScheduleTextCalls, buildSendAtExample } from '../utils/amsgFireSchedule';
-import { resolveCharTimeZone } from '../utils/timezone';
+import { prepareInPersonScheduling, applyInPersonSchedules } from '../utils/inPersonScheduling';
 import StoryTheater from '../components/date/story/StoryTheater';
 import { dateLaunch } from '../utils/dateLaunch';
 import { getLocalDateKey } from '../utils/localDate';
@@ -506,42 +504,12 @@ const DateApp: React.FC = () => {
             useVisionDescriptions: apiConfig.visionApi?.enabled === true,
         });
         // 线下会话也可让角色自行预约未来的 2.0 主动联系，和离开后自动消息分开。
-        const canScheduleInPerson = isAmsg2EnabledForChar(char) && await isAmsg2GlobalReady();
-        if (canScheduleInPerson) {
-            const tzId = resolveCharTimeZone(char) || Intl.DateTimeFormat().resolvedOptions().timeZone;
-            messages.splice(1, 0, {
-                role: 'system',
-                content: [
-                    '【线下会话的未来主动联系工具】',
-                    '你此刻仍然和对方在同一线下场景。主动消息 2.0 排下的所有任务，都是未来要真正通过线上聊天发给对方的消息，不是线下提醒、当面台词或待办事项。',
-                    '只有你确实打算在将来那个时刻与对方分开、通过线上消息主动联系，才允许排程（例如你明早 06:30 出门，届时想发消息报备）。',
-                    '现在能够当面说的事就直接当面说，不要为了提醒带伞、讲一句当面就能讲的话而预约明天的线上通知。',
-                    '排程本身不代表见面已经结束；若预约到点后你决定真的发送线上消息，这次线下见面才算结束。到点保留你原本的自主判断，可以选择不发。',
-                    '排程时，在正常线下回复之外独占一行输出 schedule_active_message({"send_at":"YYYY-MM-DDTHH:mm:ss","mode":"auto","prompt_hint":"到时想说什么","expire_policy":"expire"})。',
-                    'send_at 用你所在时区的墙钟时间，不带时区后缀，必须晚于当前时间至少一分钟。',
-                    '明天此刻的时间示例：' + buildSendAtExample(Date.now(), { tzId }),
-                    '遵守用户已有的频率、重复、到点必发权限，不可自行越过。',
-                    '一轮最多预约两条。没有自然理由就不要预约；工具调用不属于剧情台词、旁白。',
-                ].join('\n'),
-            });
-        }
+        const scheduling = await prepareInPersonScheduling([char], true, true, new Map([[char.id, currentEncounterId]]));
+        if (scheduling.prompt) messages.splice(1, 0, { role: 'system', content: scheduling.prompt });
         const rawContent = await callLLM(messages, resolveDialogueApi(apiConfig, char).temperature ?? 0.85);
-        const scheduleCalls = canScheduleInPerson ? extractFireScheduleTextCalls(rawContent).slice(0, 2) : [];
-        let cleanDateContent = rawContent;
-        for (const call of scheduleCalls) cleanDateContent = cleanDateContent.replace(call.matched, '').trim();
-        if (scheduleCalls.length && userProfile) {
-            const toolSession = createAmsg2ToolSession({
-                char, userProfile, groups, realtimeConfig, apiConfig,
-                updateCharacter: (id, updates) => updateCharacter(id, updates),
-            });
-            for (const call of scheduleCalls) {
-                const { outcome } = await executeAmsg2ToolWithOutcome('schedule_active_message', { ...call.args, recurrence: 'none', __dateExitEncounterId: currentEncounterId }, toolSession);
-                addToast(outcome.status === 'done'
-                  ? '已预约未来主动消息'
-                  : '线下主动消息预约失败，可在主动消息 2.0 面板检查',
-                  outcome.status === 'done' ? 'success' : 'error');
-            }
-        }
+        const cleanDateContent = await applyInPersonSchedules(rawContent, scheduling, {
+            userProfile, groups, realtimeConfig, apiConfig, updateCharacter,
+        }, ok => addToast(ok ? '已预约未来主动消息' : '线下主动消息预约失败，可在主动消息 2.0 面板检查', ok ? 'success' : 'error'));
         const parsed = parseSARModuleReply(cleanDateContent, sarModulePlan);
         const sarModuleEvents = createSARModuleEventMeta(sarModulePlan);
         const userSurface = sarModulePlan.user?.phase === 'active' && parsed.userSurface
