@@ -151,7 +151,7 @@ const AwayMessageSettingsModal: React.FC<AwayMessageSettingsModalProps> = ({ isO
                                 <label className="text-xs text-slate-600">开始时间<input type="time" value={quietStart} onChange={e => setQuietStart(e.target.value)} className="block w-full mt-1 bg-slate-100 rounded-xl p-2.5"/></label>
                                 <label className="text-xs text-slate-600">结束时间<input type="time" value={quietEnd} onChange={e => setQuietEnd(e.target.value)} className="block w-full mt-1 bg-slate-100 rounded-xl p-2.5"/></label>
                                 <div className="col-span-2 text-[11px] text-slate-400">
-                                  按你手机的时间计算，允许跨午夜。禁发的自动提醒直接跳过，醒来不会补发。
+                                  {cloud ? '按你手机的时间计算，允许跨午夜。禁发期间到点的机会延至结束时间，之后再按间隔计时；不会累计补发。' : '按你手机的时间计算，允许跨午夜。禁发的自动提醒直接跳过，醒来不会补发。'}
                                   {quietStart === quietEnd ? ' 时间相同表示全天禁发。' : ''}
                                 </div>
                               </div>

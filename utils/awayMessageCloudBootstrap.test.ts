@@ -78,6 +78,45 @@ describe('cloud away first-task creation and passive repair', () => {
     expect(task.away).toEqual({ delayMinutes: 240 });
   });
 
+  it.each([false, true])('夜间补链或重新同步都排在08:00，不从07:58再等90分钟（seedOnly=%s）', async seedOnly => {
+    const now = Date.parse('2026-11-11T07:58:34Z');
+    vi.mocked(Date.now).mockReturnValue(now);
+    vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions').mockReturnValue({ timeZone: 'UTC' } as any);
+    const char = makeChar();
+    char.awayMessage = { enabled: true, delayMinutes: 90,
+      quietHours: { enabled: true, startTime: '01:00', endTime: '08:00' } };
+    const deps = { ...createDeps(char), lastCharAt: Date.parse('2026-11-11T00:38:50Z') };
+    expect(await syncCloudAwayTask(deps, { seedOnly })).toBe(true);
+    const task = vi.mocked(ActiveMsgClient.scheduleCharacterTask).mock.calls[0][0].task;
+    expect(task.firstSendTime).toBe('2026-11-11T08:00:00.000Z');
+  });
+
+  it('夜间已有错误的09:28排程也改回08:00，保留原任务不另建链', async () => {
+    vi.mocked(Date.now).mockReturnValue(Date.parse('2026-11-11T07:58:34Z'));
+    vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions').mockReturnValue({ timeZone: 'UTC' } as any);
+    const char = makeChar();
+    char.awayMessage = { enabled: true, delayMinutes: 90,
+      quietHours: { enabled: true, startTime: '01:00', endTime: '08:00' } };
+    vi.mocked(ActiveMsgClient.listRemoteTasksForChar).mockResolvedValue([{
+      uuid: 'old-away-uuid', clientTaskId: 'away-old-away-uuid', status: 'pending',
+      nextSendAt: '2026-11-11T09:28:34.000Z',
+    }] as any);
+    await syncCloudAwayTask({ ...createDeps(char), lastCharAt: Date.parse('2026-11-11T00:38:50Z') }, { seedOnly: true });
+    expect(ActiveMsgClient.scheduleCharacterTask).not.toHaveBeenCalled();
+    expect(ActiveMsgClient.updatePendingTasksRemote).toHaveBeenCalledWith(['old-away-uuid'], { nextSendAt: '2026-11-11T08:00:00.000Z' });
+  });
+
+  it('夜里刚有角色回复、完整间隔在08:00之后时，不提前联系', async () => {
+    vi.mocked(Date.now).mockReturnValue(Date.parse('2026-11-11T07:58:34Z'));
+    vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions').mockReturnValue({ timeZone: 'UTC' } as any);
+    const char = makeChar();
+    char.awayMessage = { enabled: true, delayMinutes: 90,
+      quietHours: { enabled: true, startTime: '01:00', endTime: '08:00' } };
+    await syncCloudAwayTask({ ...createDeps(char), lastCharAt: Date.parse('2026-11-11T07:50:00Z') });
+    expect(vi.mocked(ActiveMsgClient.scheduleCharacterTask).mock.calls[0][0].task.firstSendTime)
+      .toBe('2026-11-11T09:20:00.000Z');
+  });
+
   it('keeps an existing live future task without postponing it on app open', async () => {
     const deps = createDeps(makeChar());
     vi.mocked(ActiveMsgClient.listRemoteTasksForChar).mockResolvedValue([{

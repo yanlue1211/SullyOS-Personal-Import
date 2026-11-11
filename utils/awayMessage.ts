@@ -22,7 +22,7 @@ import { wasLocalAwayTickChecked, markLocalAwayTickChecked } from './awayMessage
 import { buildLocalAwayHint } from './awayMessagePrompt';
 import { generateNativeLocalAwayMessages } from './awayMessageNative';
 import { AMSG_SILENT_MARK } from './amsgFirePack';
-import { shouldSkipAwayForQuietHours } from './awayMessageQuietHours';
+import { shouldSkipAwayForQuietHours, nextAwayAllowedTimeMs } from './awayMessageQuietHours';
 import { ChatPrompts } from './chatPrompts';
 import { buildChatRequestPayload } from './chatRequestPayload';
 import { applyAssistantPostProcessing } from './applyAssistantPostProcessing';
@@ -163,7 +163,16 @@ export const syncCloudAwayTask = async (deps: CloudAwaySyncDeps, options: { seed
     const delayMinutes = resolveAwayDelayMinutes(char);
     const now = Date.now();
     const delayMs = delayMinutes * 60_000;
-    const targetMs = Math.max(deps.lastCharAt + delayMs, now + (options.seedOnly ? delayMs : 60_000));
+    const userTzId = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const anchorDue = deps.lastCharAt + delayMs;
+    const pendingDue = Math.max(now, anchorDue);
+    const allowedDue = nextAwayAllowedTimeMs(char.awayMessage.quietHours, pendingDue, userTzId);
+    // 在夜间恢复/补链时，已经等够间隔的机会应排到解禁点，不能从打开页面
+    // 再等完整间隔（例如 07:58 打开，错误排到 09:28）。已错过的白天机会不补烧。
+    const waitingForQuietEnd = allowedDue != null && allowedDue > pendingDue && allowedDue > now;
+    const fallbackTarget = Math.max(anchorDue, now + (options.seedOnly ? delayMs : 60_000));
+    const targetMs = waitingForQuietEnd ? allowedDue
+      : nextAwayAllowedTimeMs(char.awayMessage.quietHours, fallbackTarget, userTzId) ?? fallbackTarget;
     const sendAt = new Date(targetMs).toISOString();
     // B 模式下 Worker 每次 fire 会创建下一节拍，客户端本地列表不一定认领过它。
     // 新用户开口时必须先和远端对账：否则老链在云端继续，我们又凭旧的本地清单
@@ -189,7 +198,7 @@ export const syncCloudAwayTask = async (deps: CloudAwaySyncDeps, options: { seed
     const existingAt = record ? awaySendAtMs(record as ActiveMsg2TaskRecord) : null;
     // 前台启动只是补链：不能把已经正常续排的下一节拍改成「打开页面 + 四小时」。
     // 但若用户发言后旧任务排得过早，仍须正常改期，避免在用户刚说话后就催下一条。
-    const validExisting = options.seedOnly && existingAt != null && existingAt > now
+    const validExisting = options.seedOnly && !waitingForQuietEnd && existingAt != null && existingAt > now
       && existingAt >= deps.lastCharAt + delayMs - 60_000;
     const action = validExisting ? 'keep' : decideAwayTaskAction(existingAt, targetMs, now);
     if (action === 'keep') {
