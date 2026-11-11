@@ -27,6 +27,23 @@ const b={id:'b',name:'旁边那位',vrState:{enabled:true,intervalMinutes:120}} 
 const deps={char:a,characters:[a,b],userProfile:{name:'用户'} as any,apiConfig:{baseUrl:'https://model.invalid/v1',apiKey:'fake',model:'test'} as any,groups:[],updateCharacter:vi.fn(),forcedRoom:'sar' as const,manual:true};
 const answer=(text:string)=>vi.mocked(safeFetchJson).mockResolvedValue({choices:[{message:{content:text}}]});
 beforeEach(()=>{vi.restoreAllMocks();localStorage.clear();mocks.messages=[];mocks.board={id:'board',messages:[],updatedAt:0};vi.clearAllMocks();saveFishingMarketState({...ensureActorAccounts(createFishingMarketState(42),[{id:'a',name:'艾文',kind:'character'},{id:'b',name:'旁边那位',kind:'character'},{id:'user',name:'用户',kind:'user'}]),lastPulseAt:Date.now()});});
+it('a persisted morning activity blocks automatic calls until the full 12h boundary after reload',async()=>{
+    const morning=Date.UTC(2026,10,11,0);
+    const char={...a,id:'persisted-12h',vrState:{...a.vrState,intervalMinutes:720,lastActiveAt:morning}};
+    const clock=vi.spyOn(Date,'now').mockReturnValue(morning+12*60*60*1000-1);
+    expect(await runVRSession({...deps,char,manual:false,forcedRoom:'gym'})).toMatchObject({ok:false,reason:'too-soon'});
+    expect(safeFetchJson).not.toHaveBeenCalled();
+    clock.mockReturnValue(morning+12*60*60*1000);
+    answer('<ACTIVITY>散步</ACTIVITY>');
+    expect((await runVRSession({...deps,char,manual:false,forcedRoom:'gym'})).ok).toBe(true);
+    expect(safeFetchJson).toHaveBeenCalledTimes(1);
+});
+it('a manual invitation still works inside the automatic activity interval',async()=>{
+    const char={...a,id:'manual-12h',vrState:{...a.vrState,intervalMinutes:720,lastActiveAt:Date.now()}};
+    answer('<ACTIVITY>散步</ACTIVITY>');
+    expect((await runVRSession({...deps,char,manual:true,forcedRoom:'gym'})).ok).toBe(true);
+    expect(safeFetchJson).toHaveBeenCalledTimes(1);
+});
 it('a board encounter uses one character call and saves the committed scene and reaction in activity cards',async()=>{
     let state=ensureActorAccounts(readFishingMarketState(),[{id:'wanderer:0',name:'临时售票员',kind:'wanderer'}]);
     state=createRequest(state,{id:'wanderer:0',name:'临时售票员',kind:'wanderer'},undefined,'替风扇鼓掌',7,'需要一位热心观众',Date.now(),'favor');

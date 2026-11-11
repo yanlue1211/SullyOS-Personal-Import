@@ -33,6 +33,14 @@ jobs:
           utils/collaborationRouting.test.ts
           utils/chibiImageExport.test.ts
           utils/backupMissingAssets.test.ts
+          utils/backupPreferences.test.ts
+          utils/backupImportPolicy.test.ts
+          utils/backupRoundtrip.test.ts
+          utils/amsgBundleVersion.test.ts
+          utils/amsgAutoUpdateTrigger.test.ts
+          utils/vrWorld/vrWorld.test.ts
+          utils/vrWorld/participation.test.ts
+          utils/vrWorld/activityChoices.test.ts
           utils/storageOptimize.test.ts
           utils/analyticsSnapshot.test.ts
           utils/homePhotoLibrary.test.ts

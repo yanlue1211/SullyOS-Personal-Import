@@ -83,3 +83,33 @@ it('repairs a restored automatic schedule whose last-fire timestamp was lost wit
     vi.advanceTimersByTime(30*60*1000);
     expect(trigger).toHaveBeenCalledTimes(2);
 });
+
+it('restores the 08:00 activity and 12h setting before checking a stale short schedule', () => {
+    browser(); vi.useFakeTimers(); localStorage.clear();
+    const morning = Date.UTC(2026,10,11,0);
+    vi.setSystemTime(morning + 60*60*1000);
+    localStorage.setItem('vr_schedules', JSON.stringify({legacy:{charId:'legacy',intervalMs:30*60*1000}}));
+    localStorage.setItem('vr_last_fire', JSON.stringify({legacy:morning-60*60*1000}));
+    const trigger=vi.fn();
+    VRScheduler.reconcile([{charId:'legacy',intervalMinutes:720,lastActiveAt:morning}]);
+    VRScheduler.onTrigger(trigger);
+    expect(trigger).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(11*60*60*1000-1);
+    expect(trigger).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(trigger).toHaveBeenCalledTimes(1);
+});
+
+it('importing old activity without a schedule waits a full interval instead of calling immediately', () => {
+    browser(); vi.useFakeTimers(); localStorage.clear();
+    const now=Date.UTC(2026,10,11,0);
+    vi.setSystemTime(now);
+    const trigger=vi.fn();
+    VRScheduler.reconcile([{charId:'imported',intervalMinutes:720,lastActiveAt:now-3*24*60*60*1000}]);
+    VRScheduler.onTrigger(trigger);
+    expect(trigger).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(12*60*60*1000-1);
+    expect(trigger).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(trigger).toHaveBeenCalledTimes(1);
+});

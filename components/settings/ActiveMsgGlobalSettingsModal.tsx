@@ -196,12 +196,37 @@ const DIAGNOSTIC_STYLES: Record<AmsgDiagnosticLevel, { dot: string; text: string
   unknown: { dot: 'bg-slate-300', text: 'text-slate-400', word: '查不到' },
 };
 
-/** 刚生成的密钥明文：输入框是 password 型，只能在这一处让用户看见并手动复制。 */
-const SecretReveal: React.FC<{ value: string; className?: string }> = ({ value, className = '' }) => (
-  <p className={`font-mono text-[10px] leading-relaxed text-slate-500 break-all bg-white border border-slate-200 rounded-xl px-2 py-1.5 ${className}`}>
-    {value}
-  </p>
-);
+/** 刚生成的密钥明文：输入框是 password 型，只能在这一处让用户看见并复制。 */
+const SecretReveal: React.FC<{ value: string; className?: string }> = ({ value, className = '' }) => {
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  useEffect(() => setCopyState('idle'), [value]);
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopyState('copied');
+    } catch {
+      setCopyState('failed');
+    }
+  };
+  return (
+    <div className={`flex items-start gap-2 bg-white border border-slate-200 rounded-xl px-2 py-1.5 ${className}`}>
+      {/* body 全局 user-select:none，这里得单独放开，否则连手动复制都做不到 */}
+      <p
+        className="flex-1 font-mono text-[10px] leading-relaxed text-slate-500 break-all"
+        style={{ userSelect: 'all', WebkitUserSelect: 'all' }}
+      >
+        {value}
+      </p>
+      <button
+        type="button"
+        onClick={() => void handleCopy()}
+        className="shrink-0 text-[10px] font-bold text-slate-500 active:scale-95 transition-transform"
+      >
+        {copyState === 'copied' ? '已复制' : copyState === 'failed' ? '复制失败' : '复制'}
+      </button>
+    </div>
+  );
+};
 
 interface ActiveMsgGlobalSettingsModalProps {
   isOpen: boolean;
@@ -1660,6 +1685,12 @@ const ActiveMsgGlobalSettingsModal: React.FC<ActiveMsgGlobalSettingsModalProps> 
                   你这台 Worker 上跑的是
                   {workerVersion.deployed ? <code className="font-mono"> {workerVersion.deployed} </code> : '更早的版本'}
                   ，更新后即时对话才走得上新的生成通道。
+                </p>
+              ) : workerVersion?.state === 'ahead' ? (
+                <p className="text-xs leading-relaxed text-emerald-700">
+                  后端已经是更新的
+                  <code className="font-mono"> {workerVersion.deployed} </code>
+                  ，这个页面还是旧版（<code className="font-mono">{workerVersion.expected}</code>），刷新页面就能用上新版 App。
                 </p>
               ) : workerVersion?.state === 'current' ? (
                 <p className="text-xs leading-relaxed text-slate-500">

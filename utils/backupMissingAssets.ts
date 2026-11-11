@@ -7,6 +7,7 @@ export interface BackupMissingAsset {
     moreLocations?: boolean;
 }
 
+/** 普通导出由 exportSystem 读取偏好；显式选项保留给已有调用方。 */
 export interface BackupExportOptions {
     includeBackendConnection?: boolean;
     userScope?: 'current' | 'all';

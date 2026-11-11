@@ -105,9 +105,10 @@ describe('VRScheduler 熔断', () => {
 describe('自动登入的最小间隔闸', () => {
     const MINUTE = 60_000;
 
-    it('取设定间隔的一半，给后台节流留余量', () => {
-        expect(vrAutoGapMs(120)).toBe(60 * MINUTE);
-        expect(vrAutoGapMs(30)).toBe(15 * MINUTE);
+    it('严格保留完整的自动活动间隔', () => {
+        expect(vrAutoGapMs(120)).toBe(120 * MINUTE);
+        expect(vrAutoGapMs(30)).toBe(30 * MINUTE);
+        expect(vrAutoGapMs(720)).toBe(720 * MINUTE);
     });
 
     it('间隔是脏数据时不能让闸失效 —— NaN 会让所有比较恒为 false', () => {
