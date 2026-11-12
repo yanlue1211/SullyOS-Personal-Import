@@ -67,3 +67,25 @@ describe('ChatPrompts.filterVisibleEmojis', () => {
     expect(res.emojis.find(e => e.name === '挥手')?.url).toBe('b-only-url');
   });
 });
+
+describe('表情包完整名称指令', () => {
+  it('保留表情库中带人名前缀的原始名称，并要求角色在指令中照抄', async () => {
+    const namedEmojis: Emoji[] = [
+      { name: '张真源表情包：无语', url: 'sticker-1', categoryId: 'people' },
+    ];
+    const namedCategories: EmojiCategory[] = [{ id: 'people', name: '成员表情' }];
+    expect(ChatPrompts.buildEmojiContext(namedEmojis, namedCategories))
+      .toContain('成员表情: [张真源表情包：无语]');
+
+    const parts = await ChatPrompts.buildSystemPromptParts(
+      { id: 'c1', name: '张真源' } as any,
+      { name: '用户' } as any,
+      [], namedEmojis, namedCategories, [],
+    );
+    expect(parts.stable).toContain('逐字照抄**完整表情名称**');
+    expect(parts.stable).toContain('[[SEND_EMOJI: 张真源表情包：无语]]');
+    expect(parts.stable).toContain('不能输出');
+    expect(parts.stable).toContain('[[SEND_EMOJI: 无语]]');
+    expect(parts.stable).toContain('分类名不属于表情名称');
+  });
+});
