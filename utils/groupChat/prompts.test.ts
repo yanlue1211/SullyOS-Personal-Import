@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
     buildDirectorInstruction,
+    buildEmojiContextStr,
     buildGroupHistoryBlock,
     buildRoundRobinInstruction,
     GROUP_HISTORY_GAP_THRESHOLD_MS,
@@ -90,5 +91,26 @@ describe('群聊中的 U 与关系连续性', () => {
         expect(prompt).toContain('U 还是 U');
         expect(prompt).toContain('不能因进入群聊就重置关系');
         expect(prompt).toContain('按你自己和 U 的关系反应');
+    });
+});
+
+describe('群聊表情包名称不可省略', () => {
+    it('导演和轮询都提示使用图库里的完整名称（角色本人也不例外）', () => {
+        const list = buildEmojiContextStr(
+            [{ name: '张真源表情包：无语', url: 'sticker-1', categoryId: 'people' }],
+            [{ id: 'people', name: '成员表情' }],
+            ['c1'],
+        );
+        expect(list).toContain('成员表情: [张真源表情包：无语]');
+        const history = { text: '', attachedImages: [], attachedImagesNote: '' };
+        for (const prompt of [
+            buildDirectorInstruction(history, list),
+            buildRoundRobinInstruction('张真源', history, list),
+        ]) {
+            expect(prompt).toContain('逐字复制表情库方括号内的**完整名称**');
+            expect(prompt).toContain('[[SEND_EMOJI: 张真源表情包：无语]]');
+            expect(prompt).toContain('[[SEND_EMOJI: 无语]]');
+            expect(prompt).toContain('方括号外的分类名不写入命令');
+        }
     });
 });
