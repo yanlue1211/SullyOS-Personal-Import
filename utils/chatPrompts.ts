@@ -9,7 +9,7 @@ import { VIRTUAL_MEDIA_GUIDE, RECORDING_HISTORY_GUIDE } from '../features/person
 import { stripDateVoiceTranslations } from './dateVoiceText';
 import {weatherForCharacter} from './characterWeather';
 import {secretNoteContext} from './secretNote';
-import { usesHumanStyle, usesInnerVoice, usesInnerVoiceContext, PERSONAL_CHAT_SUPPLEMENT, ANTI_CONTRAST_PROMPT, ANTI_EMPTY_GRATITUDE_PROMPT, MINIMAL_THINKING_PROMPT, IM_FRAGMENTED_CHAT_RULES, IM_FRAGMENTED_CHAT_TAIL, buildNaturalChatMemoryContext } from './chatPromptPreferences';
+import { usesHumanStyle, usesInnerVoice, usesInnerVoiceContext, PERSONAL_CHAT_SUPPLEMENT, ANTI_CONTRAST_PROMPT, ANTI_EMPTY_GRATITUDE_PROMPT, ANTI_CLICHE_INTERACTION_PROMPT, MINIMAL_THINKING_PROMPT, IM_FRAGMENTED_CHAT_RULES, IM_FRAGMENTED_CHAT_TAIL, buildNaturalChatMemoryContext } from './chatPromptPreferences';
 import { buildCharacterResponsePrinciples } from './characterResponsePrinciples';
 import { expandHomeContextHistory } from './homeContextSegments';
 import { hasReliableMessageTimestamp, protectPendingChatTurn } from './storyTheaterTimeline';
@@ -1096,7 +1096,7 @@ ${voiceActingGuide()}`;
         // New long-form rules belong in the stable prefix. Preserve the author's
         // existing response-principles tail rather than moving it for caching.
         const expressionRules = humanStyle && promptOptions?.appRules === undefined
-            ? PERSONAL_CHAT_SUPPLEMENT + '\n' + ANTI_CONTRAST_PROMPT + '\n' + ANTI_EMPTY_GRATITUDE_PROMPT
+            ? PERSONAL_CHAT_SUPPLEMENT + '\n' + ANTI_CONTRAST_PROMPT + '\n' + ANTI_EMPTY_GRATITUDE_PROMPT + '\n' + ANTI_CLICHE_INTERACTION_PROMPT
             : '';
         // Short delivery reminder stays in the existing uncached tail. Keep shared/stable
         // prompt bytes, worldbook ordering and cache breakpoints unchanged.

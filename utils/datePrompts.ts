@@ -32,6 +32,7 @@ import { getElevenLabsVoiceActingGuide } from './elevenLabsTts';
 import { isElevenLabsV4Model } from './elevenLabsModels';
 import { selectCharacterContextMessages } from './chatContextRange';
 import { buildCharacterResponsePrinciples } from './characterResponsePrinciples';
+import { usesHumanStyle, ANTI_CLICHE_INTERACTION_PROMPT } from './chatPromptPreferences';
 import { voiceLanguagePromptLabel } from './voiceLanguage';
 
 const buildDateVoiceTranslationGuide = (char: CharacterProfile): string => {
@@ -46,7 +47,7 @@ const buildDateVoiceTranslationGuide = (char: CharacterProfile): string => {
 /** Adapted from story preset character-polyphony / evidence-gate / user-agency.
  * In-person companionship permits a small beat; it does not require plot escalation.
  */
-export function buildDateInteractionPrinciples(charName: string, userName: string, peek: boolean | 'invite' = false): string {
+export function buildDateInteractionPrinciples(charName: string, userName: string, peek: boolean | 'invite' = false, includeAntiCliche = false): string {
     return `### 面对面的角色与回应
 人物设定、已经发生的共同经历与本轮事实决定你怎样行动；文风只决定怎样描写。文风示例是格式示意，不是你的性格、关系阶段或本轮行为。
 显著特质只是动机的一部分。把它和你此刻在意的事、责任、习惯、顾虑、疲惫以及眼前事实放在一起，选择属于你的反应；人物的变化要有来路，不必把某项特质每轮推到极端。你可以主动、坚持、不同意，也可以迟疑、改口或继续手头的事。
@@ -55,7 +56,8 @@ export function buildDateInteractionPrinciples(charName: string, userName: strin
 用户没有写出的台词、动作、身体反应、内心和决定留给用户。你可以完成自己的动作、发出邀请、留下具体话头，但不替对方写下接受、回应或关系升级。
 一轮只需走到此刻自然成熟的一步。允许一句台词、一个普通动作、共享沉默或继续日常；无需凑满戏剧拍数。张力可以起伏、回落，不必连续升高。已有亲密和热烈也可以自然延续，程度仍来自这两个人的关系和当前互动。
 ${peek === 'invite' ? '此刻由角色主动靠近用户：用第三人称开场散文写自己的行动和开口，不使用 VN 情绪标签；给用户留下回应空间，不代写用户反应。' : peek ? '此刻是用户尚未走近的第三人称镜头：描写角色自己的生活与当下状态，不新增用户的到场动作、台词或双方互动。' : '保持本场景的 VN 输出格式；角色与回应原则用于形成正文，不在正文解释规则。'}
-` + buildCharacterResponsePrinciples(charName, userName);
+` + buildCharacterResponsePrinciples(charName, userName)
+      + (includeAntiCliche ? '\n\n' + ANTI_CLICHE_INTERACTION_PROMPT : '');
 }
 
 export type ApiMessage = { role: string; content: any; name?: string };
@@ -764,7 +766,7 @@ ${buildDateVoiceTranslationGuide(char)}`;
                 ...(hasHistoryPrefix ? [{ role: 'system', content: liveContext }] : []),
                 { role: 'user', content: `[最近记录 (Previous Context)] 见以上消息历史。${contextSeparator}${peekInstructions}\n\n(Start sensing...)` },
                 ...(!hasHistoryPrefix ? [{ role: 'system', content: liveContext }] : []),
-                { role: 'system', content: buildDateInteractionPrinciples(char.name, userProfile?.name || '对方', invite ? 'invite' : true) },
+                { role: 'system', content: buildDateInteractionPrinciples(char.name, userProfile?.name || '对方', invite ? 'invite' : true, usesHumanStyle(char)) },
             ],
         };
     },
@@ -837,7 +839,7 @@ ${buildDateVoiceTranslationGuide(char)}`;
                     : [message]),
                 // 空历史的实时块必须位于 user 之后，防止原生接口合并进固定 system。
                 ...(!hasHistoryPrefix ? [{ role: 'system', content: liveContext }] : []),
-                { role: 'system', content: buildDateInteractionPrinciples(char.name, userProfile?.name || '对方') },
+                { role: 'system', content: buildDateInteractionPrinciples(char.name, userProfile?.name || '对方', false, usesHumanStyle(char)) },
             ],
         };
     },
