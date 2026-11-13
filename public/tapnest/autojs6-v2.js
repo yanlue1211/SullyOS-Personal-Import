@@ -61,7 +61,7 @@ function setPetVisible(on){
  if(!on){releaseFocus();chatOpen=false;panelOpen=false;eventsQueue=[];tapBatches=[];tapBurstCount=0;tapClosed=true;pendingUntil=0;busy=false;apiPending=false;}
  nextTimer=Date.now()+(payload?payload.binding.intervalMinutes:15)*60000;
  files.write(visibilityFile,JSON.stringify(residentVisible));
- ui.run(function(){win.pet.setVisibility(on?android.view.View.VISIBLE:android.view.View.INVISIBLE);win.setTouchable(!!on);});
+ ui.run(function(){win.pet.getRootView().setVisibility(on?android.view.View.VISIBLE:android.view.View.INVISIBLE);win.setTouchable(!!on);});
  evaluate('window.PetPreview&&window.PetPreview.setVisible('+residentVisible+')');
 }
 function closePetAfterHold(){
@@ -269,4 +269,4 @@ setInterval(function(){},1000);
 var stateReading=false,stateCb=new JavaAdapter(android.webkit.ValueCallback,{onReceiveValue:function(raw){stateReading=false;try{var s=JSON.parse(String(raw));if(s&&payload&&s.revision===payload.revision)renderState=s;}catch(_){}}});
 setInterval(function(){if(ended||stateReading||!residentVisible&&renderState.status==='ready')return;stateReading=true;ui.run(function(){try{win.pet.evaluateJavascript('window.PetPreview&&window.PetPreview.getLoadState?window.PetPreview.getLoadState():null',stateCb);}catch(_){stateReading=false;}});},500);
 
-ui.run(function(){win.pet.setVisibility(residentVisible?android.view.View.VISIBLE:android.view.View.INVISIBLE);win.setTouchable(residentVisible);});
+ui.run(function(){win.pet.getRootView().setVisibility(residentVisible?android.view.View.VISIBLE:android.view.View.INVISIBLE);win.setTouchable(residentVisible);});
