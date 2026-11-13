@@ -1,0 +1,27 @@
+name: Personal TapNest desktop integration
+on:
+  pull_request:
+    branches: [personal/audio-listening]
+    paths: ['apps/TapNestApp.tsx', 'features/tapnest/**', 'public/tapnest/**', 'utils/tapnest*', '.github/workflows/personal-tapnest-verify.yml']
+  push:
+    branches: [personal/audio-listening]
+    paths: ['apps/TapNestApp.tsx', 'features/tapnest/**', 'public/tapnest/**', 'utils/tapnest*', '.github/workflows/personal-tapnest-verify.yml']
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      NODE_OPTIONS: '--max-old-space-size=4096'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm vitest run utils/tapnest.test.ts utils/tapnestGeneration.test.ts utils/tapnestHost.test.ts utils/tapnestProtocol.test.ts utils/tapnestPlayerUI.test.ts utils/tapnestRenderer.test.ts utils/activityBackup.test.ts utils/personalBackupAudit.test.ts utils/chatRequestPayload.test.ts utils/contextVolatileSplit.test.ts utils/datePromptCaching.test.ts utils/storyPromptCaching.test.ts
+      - run: pnpm build

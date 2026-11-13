@@ -1848,7 +1848,7 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
             case 'video': case 'oracle': case 'archived-cleanup': setShowPanel('none');setExperienceOpen(type==='archived-cleanup'?'cleanup':type);break;
             case 'voice-input': setShowPanel('none'); setPersonalMediaPanel('voice'); break;
             case 'virtual-media': setShowPanel('none'); setPersonalMediaPanel('visual'); break;
-            case 'pet-bridge': setShowPanel('none'); setPetBridgeOpen(true); break;
+            case 'pet-bridge': setShowPanel('none'); openApp(AppID.TapNest); break;
             case 'export-chat': void handleExportChat(); break;
             case 'collaboration': setShowPanel('none'); setCollaborationOpen(true); break;
             case 'memory-link': setShowPanel('none'); setMemoryRepairOpen(true); break;
@@ -3031,6 +3031,7 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
         window.addEventListener('workroom-history-updated',refresh);
         window.addEventListener('moments-history-updated',refresh);
         window.addEventListener('yueqi-history-updated',refresh);
+        window.addEventListener('tapnest-history-updated',refresh);
         window.addEventListener('songwriting-history-updated',refresh);
         return()=>{
             window.removeEventListener('home-secrets-updated',refresh);
@@ -3038,6 +3039,7 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
             window.removeEventListener('workroom-history-updated',refresh);
             window.removeEventListener('moments-history-updated',refresh);
             window.removeEventListener('yueqi-history-updated',refresh);
+            window.removeEventListener('tapnest-history-updated',refresh);
             window.removeEventListener('songwriting-history-updated',refresh);
         };
     },[char?.id,visibleCount,reloadMessages]);

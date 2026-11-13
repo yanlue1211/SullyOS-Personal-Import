@@ -1,5 +1,6 @@
 
 import React from 'react';
+import TapNestGate from './features/tapnest/Gate';
 import IncomingCallOverlay from './features/personal/calls/IncomingCallOverlay';
 import { OSProvider } from './context/OSContext';
 import { MusicProvider } from './context/MusicContext';
@@ -46,6 +47,7 @@ const App: React.FC = () => {
             {/* 挂在 Provider 里面才能直接读 characters（省掉轮询 IndexedDB），
                 面板自身用 portal 渲染到 body，绕开上面那层 transform 对 fixed 定位的影响。 */}
             <IncomingCallOverlay />
+            <TapNestGate />
             <Amsg2DebugPanel />
             <WebUpdateNotice />
             <AmsgOwnerConflictNotice />

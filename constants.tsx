@@ -70,6 +70,7 @@ export const Icons: Record<string, React.FC<{ className?: string }>> = {
   Songwriting: ({ className }) => <MusicNotes className={className} weight="regular" />,
   Music: ({ className }) => <MusicNotes className={className} weight="regular" />,
   SongArchive: ({ className }) => <MusicNotes className={className} weight="regular" />,
+  TapNest: ({ className }) => <span className={className} style={{display:'grid',placeItems:'center',fontSize:32}}>🐾</span>,
   Yueqi: ({ className }) => <MoonStars className={className} weight="regular" />,
   Workroom: ({ className }) => <Sparkle className={className} weight="regular" />,
   Call: ({ className }) => <PhoneCall className={className} weight="regular" />,
@@ -124,6 +125,7 @@ export const INSTALLED_APPS: AppConfig[] = [
   { id: AppID.SpecialMoments, name: '特别时光', icon: 'SpecialMoments', color: 'pink' },
   { id: AppID.Music, name: '音乐', icon: 'Music', color: 'rose' },
   { id: AppID.SongArchive, name: '音迹', icon: 'SongArchive', color: 'amber' },
+  { id: AppID.TapNest, name: '桌宠', icon: 'TapNest', color: 'emerald' },
   { id: AppID.Yueqi, name: '月栖', icon: 'Yueqi', color: 'emerald' },
   { id: AppID.Workroom, name: '造物间', icon: 'Workroom', color: 'amber' },
   { id: AppID.CharCreatorDev, name: '捏脸·开发', icon: 'CharCreatorDev', color: 'amber' }, // 仅开发模式显示（Launcher 过滤）

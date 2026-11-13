@@ -4,11 +4,11 @@ import type { FriendFeedImage } from './friendFeedSource';
 import { isLocalFriendImage } from './friendFeedImages';
 import { stripBackupImages } from './backupExport';
 
-export const isPersonalTextAsset = (id:string):boolean => id === 'personal_commerce_v1' || id.startsWith('personal_schedule_once:');
+export const isPersonalTextAsset = (id:string):boolean => ['tapnest_config_v2','tapnest_models_v2'].includes(id) || id === 'personal_commerce_v1' || id.startsWith('personal_schedule_once:');
 
 /** These records live in assets for historical reasons, but contain user history/settings. */
 export const isActivityTextAsset = (id: string): boolean =>
-    ['friend_feed_v1', 'friend_feed_api', 'home_visits_v1', 'personal_commerce_v1'].includes(id)
+    ['friend_feed_v1', 'friend_feed_api', 'home_visits_v1', 'personal_commerce_v1', 'tapnest_config_v2', 'tapnest_models_v2'].includes(id)
     || id.startsWith('personal_schedule_once:') || id.startsWith('friend_feed_eval_v1_') || id.startsWith('home_secrets_v1_');
 
 export type ActivityTextAsset = { id: string; data: string };
