@@ -1,5 +1,7 @@
 export interface DateLaunchIntent {
     surface: 'companion' | 'story';
+    /** Only the explicit return banner restores the suspended screen. */
+    resume?: boolean;
 }
 
 type DateLaunchListener = (intent: DateLaunchIntent) => void;

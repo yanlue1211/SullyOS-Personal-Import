@@ -1,3 +1,4 @@
+import { isOracleControl, saveOracleControl } from '../features/experience/oracle';
 import { armDateLeaveReminder, disarmDateLeaveReminder, startLocalDateLeaveTimer, isDateLeaveCloudReady } from '../utils/dateLeaveReminder';
 import {resolveBlobRefsInRequestBody} from '../utils/apiBlobRefs';
 import type {ExperienceMessage} from '../features/experience/media';
@@ -10,6 +11,7 @@ import { useOS } from '../context/OSContext';
 import { DB } from '../utils/db';
 import { CharacterProfile, Message, AppID, DateState } from '../types';
 import { DatePrompts, ApiMessage } from '../utils/datePrompts';
+import { stripDateVoiceTranslations } from '../utils/dateVoiceText';
 import { processNewMessagesWithAutoArchive } from '../utils/memoryPalace/autoArchive';
 import type { PipelineResult } from '../utils/memoryPalace/pipeline';
 import { incrementDigestRound, runCognitiveDigestion } from '../utils/memoryPalace';
@@ -58,9 +60,12 @@ import {
 const DateApp: React.FC = () => {
     const { closeApp, openApp, characters, activeCharacterId, setActiveCharacterId, apiConfig, addToast, updateCharacter, updateUserProfile, virtualTime, userProfile, memoryPalaceConfig, dateAutoStartCharId, consumeDateAutoStart, characterGroups, groups, realtimeConfig, suspendedDate, suspendDate, takeSuspendedDate } = useOS();
 
-    // 从挂起恢复：对话中途走开时见面留在了内存里，打开见面就回到原来的画面（见 docs/personal/date-context-suspension-20261111.md）。
-    // 打开见面的入口会把当前角色一起切回去，所以角色对不上的只能是别处另开了一场见面，那就不恢复。
-    const [resumed] = useState(() => suspendedDate && suspendedDate.charId === activeCharacterId
+    const suspendedSnapshotRef = useRef(suspendedDate);
+    suspendedSnapshotRef.current = suspendedDate;
+
+    // 暂离的画面留在内存；显式返回时恢复（见 docs/personal/date-context-suspension-20261111.md）。
+    // 普通入口显示选择页；只有返回横条的显式 resume 意图恢复画面。
+    const [resumed, setResumed] = useState(() => dateLaunch.peek()?.resume && suspendedDate && suspendedDate.charId === activeCharacterId
         && getAmsgActiveDateEncounterId(suspendedDate.charId) === suspendedDate.encounterId ? suspendedDate : null);
 
     // 是否由聊天「见面」按钮进入：为真时，退出见面流程回到聊天而非见面选择页/桌面。
@@ -89,7 +94,22 @@ const DateApp: React.FC = () => {
     // 全局更新弹窗等入口可直接落到「剧情」。peek 让首次渲染就显示目标页，
     // subscribe 则覆盖 DateApp 已经打开的情况；应用后立即消费，绝不污染下次普通打开。
     useEffect(() => {
-        const applyLaunchIntent = (intent: { surface: 'companion' | 'story' }) => {
+        const applyLaunchIntent = (intent: { surface: 'companion' | 'story'; resume?: boolean }) => {
+            if (intent.resume) {
+                const saved = suspendedSnapshotRef.current;
+                if (saved && getAmsgActiveDateEncounterId(saved.charId) === saved.encounterId) {
+                    setResumed(saved);
+                    setActiveCharacterId(saved.charId);
+                    encounterIdRef.current = saved.encounterId;
+                    setCameFromChat(saved.cameFromChat);
+                    setMeetSurface('companion');
+                    setPeekStatus(saved.peekStatus);
+                    setHasSavedOpening(true);
+                    setMode('session');
+                    takeSuspendedDate();
+                }
+                dateLaunch.consume(); return;
+            }
             historyRequestRef.current++;
             setHistoryBusy(false);
             setCameFromChat(false);
@@ -229,10 +249,10 @@ const DateApp: React.FC = () => {
     const refreshDateMessagesRef = useRef(loadDateMessages);
     refreshDateMessagesRef.current = loadDateMessages;
     useEffect(() => {
-        takeSuspendedDate();
+        if (resumed) takeSuspendedDate();
         const pending = resumed?.pendingTurn;
         if (pending) trackTurn(pending).finally(() => { void refreshDateMessagesRef.current(); }).catch(() => {});
-    }, []);
+    }, [resumed?.encounterId]);
 
     const loadRecentDateMessages = async (charId: string, limit = DATE_SESSION_MESSAGE_LIMIT) => {
         return (await DB.getRecentMessagesByCharIdAndSource(charId, 'date', limit))
@@ -1043,7 +1063,7 @@ const DateApp: React.FC = () => {
                             </div>
                             {expandedHistory.has(group.id) && <div className="p-4 space-y-4">
                                 {group.messages.map(m => {
-                                    const text = (m.content || '').replace(/\[.*?\]/g, '').trim();
+                                    const text = stripDateVoiceTranslations(m.content || '').replace(/\[.*?\]/g, '').trim();
                                     return (
                                         <div
                                             key={m.id}
@@ -1194,7 +1214,14 @@ const DateApp: React.FC = () => {
                     snapshotRef={snapshotRef}
                     pendingTurn={resumed?.encounterId === encounterIdRef.current ? resumed.pendingTurn : undefined}
                     encounterId={encounterIdRef.current}
-                    onExperienceSend={message=>trackTurn(handleSendMessage(message.content,undefined,message.metadata))}
+                    onExperienceSend={async message=>{
+                        if (isOracleControl(message)) {
+                            await saveOracleControl(char.id, {...message, metadata: {...message.metadata, source: 'date', dateEncounterId: encounterIdRef.current}});
+                            await loadDateMessages();
+                            return '';
+                        }
+                        return trackTurn(handleSendMessage(message.content,undefined,message.metadata));
+                    }}
                     onSendMessage={(text, kind) => trackTurn(handleSendMessage(text, kind))}
                     onReroll={() => trackTurn(handleReroll())}
                     onExit={onExitSession}

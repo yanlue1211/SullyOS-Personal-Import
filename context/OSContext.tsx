@@ -1,3 +1,4 @@
+import { dateLaunch } from '../utils/dateLaunch';
 import { consumePhotoChoices } from '../utils/photoChoice';
 import { getProactiveUserActivity, isProactiveUserReply } from '../utils/proactiveActivity';
 import { reconcileWorldbookMounts } from '../utils/worldbookScope';
@@ -8,11 +9,12 @@ import {stripResponseStatus} from '../features/personal/responseStatus/protocol'
 import { drainWorkroomOutbox, WORKROOM_HISTORY_UPDATED } from '../features/workroom/delivery';
 import { reconcileCommerce } from '../utils/personalCommerce';
 import { isEmotionFeatureOn } from '../utils/scheduleFeature';
+import { mergePhoneGeneration, PHONE_GENERATION_COMMITTED, type PhoneGeneration } from '../utils/phoneGeneration';
+import { applyPhoneEvidenceChatLink, PHONE_EVIDENCE_SYNCED, type PhoneEvidenceChatLink } from '../utils/phoneEvidence';
 import { handleLocalBack } from '../utils/localBackHandlers';
 import { updateVirtualTimeIfChanged } from '../utils/blurPolicy';
 import {isHomeAssetDisposal} from '../utils/homeAssetCancellation';
 import { processHomeMemoryAfterSave } from '../utils/homeMemoryPostHook';
-import { mergePhoneGeneration, PHONE_GENERATION_COMMITTED, type PhoneGeneration } from '../utils/phoneGeneration';
 import { homeSharedRecipients } from '../utils/homeSharedEvents';
 import { homeRecords } from '../utils/homeRecords';
 import { readFriendFeed } from '../utils/friendFeed';
@@ -3234,6 +3236,16 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           setLastMsgTimestamp(Date.now());
       };
       window.addEventListener(PHONE_GENERATION_COMMITTED, onPhoneGenerationCommitted);
+      const phoneEvidenceSyncHandler = (event: Event) => {
+          const link = (event as CustomEvent<PhoneEvidenceChatLink>).detail;
+          setCharacters(previous => previous.map(character => {
+              const next = applyPhoneEvidenceChatLink(character, link);
+              if (next !== character) markAmsgStateDirty({ char: next, userProfile: userProfileRef.current, groups: groupsRef.current, realtimeConfig: realtimeConfigRef.current });
+              return next;
+          }));
+          setLastMsgTimestamp(Date.now());
+      };
+      window.addEventListener(PHONE_EVIDENCE_SYNCED, phoneEvidenceSyncHandler);
       window.addEventListener('amsg2-tasks-adopted', tasksAdoptedHandler);
       window.addEventListener(SAR_MODULE_RUNTIME_CHANGED_EVENT, sarModuleRuntimeChangedHandler);
       const linkedArchiveDeletedHandler = (event: Event) => {
@@ -3252,6 +3264,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       window.addEventListener(MEMORY_AUTO_ARCHIVE_SYNC_EVENT, memoryAutoArchiveSyncHandler);
       return () => {
           window.removeEventListener(PHONE_GENERATION_COMMITTED, onPhoneGenerationCommitted);
+          window.removeEventListener(PHONE_EVIDENCE_SYNCED, phoneEvidenceSyncHandler);
           window.removeEventListener('amsg2-tasks-adopted', tasksAdoptedHandler);
           window.removeEventListener(SAR_MODULE_RUNTIME_CHANGED_EVENT, sarModuleRuntimeChangedHandler);
           window.removeEventListener(LINKED_ARCHIVE_DELETED, linkedArchiveDeletedHandler);
@@ -5669,20 +5682,11 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     }
   };
   const openApp = (appId: AppID) => {
-    // 有挂起的见面时，不管从哪个入口打开见面都回到它：当前角色和见面一起切回去，
-    // 同一次渲染里生效，DateApp 挂载第一帧就是那个角色。
-    if (appId === AppID.Date && suspendedDateRef.current) {
-      const saved = suspendedDateRef.current;
-      if (getAmsgActiveDateEncounterId(saved.charId) === saved.encounterId) setActiveCharacterId(saved.charId);
-      else { suspendedDateRef.current = null; setSuspendedDate(null); }
-    }
     setActiveApp(appId);
   };
   const closeApp = () => setActiveApp(AppID.Launcher);
   // 从聊天直接进入某角色的见面：切换当前角色 + 标记自动进入 + 打开见面 App
   const openDateWithChar = (charId: string) => {
-    // 和这个角色的见面正挂着：回到那场见面，不另开一场。
-    if (suspendedDateRef.current?.charId === charId) { openApp(AppID.Date); return; }
     setActiveCharacterId(charId);
     setDateAutoStartCharId(charId);
     setActiveApp(AppID.Date);
@@ -5703,7 +5707,14 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     suspendedDateRef.current = info;
     setSuspendedDate(info);
   };
-  const resumeDate = () => openApp(AppID.Date);
+  const resumeDate = () => {
+    const saved = suspendedDateRef.current;
+    if (saved && getAmsgActiveDateEncounterId(saved.charId) === saved.encounterId) {
+      setActiveCharacterId(saved.charId);
+      dateLaunch.request({ surface: 'companion', resume: true });
+    }
+    openApp(AppID.Date);
+  };
   const takeSuspendedDate = () => {
     const taken = suspendedDateRef.current;
     suspendedDateRef.current = null;

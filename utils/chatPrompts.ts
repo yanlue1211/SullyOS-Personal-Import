@@ -6,6 +6,7 @@ import { commerceContext } from './personalCommerce';
 import { getShareCardImageUrls } from './shareCardImages';
 import { buildInnerVoiceSystem, innerVoiceContext } from '../features/personal/innerVoice/protocol';
 import { VIRTUAL_MEDIA_GUIDE, RECORDING_HISTORY_GUIDE } from '../features/personal/chatMedia/format';
+import { stripDateVoiceTranslations } from './dateVoiceText';
 import {weatherForCharacter} from './characterWeather';
 import {secretNoteContext} from './secretNote';
 import { usesHumanStyle, usesInnerVoice, usesInnerVoiceContext, PERSONAL_CHAT_SUPPLEMENT, ANTI_CONTRAST_PROMPT, ANTI_EMPTY_GRATITUDE_PROMPT, MINIMAL_THINKING_PROMPT, IM_FRAGMENTED_CHAT_RULES, IM_FRAGMENTED_CHAT_TAIL, buildNaturalChatMemoryContext } from './chatPromptPreferences';
@@ -1183,6 +1184,7 @@ ${voiceActingGuide()}`;
                 }
                 // Normalize historical malformed voice/subtitle markup, without touching stored chat data.
                 let content: any = m.role === 'assistant' && typeof m.content === 'string' ? normalizeVoiceTags(m.content) : m.content;
+                if (m.metadata?.source === 'date' && m.role === 'assistant') content = stripDateVoiceTranslations(content || '');
                 const timeStr = timeAwarenessOn && hasReliableMessageTimestamp(m) ? `[${ChatPrompts.formatDate(m.timestamp, charTz)}]` : '';
                 const sourceTag = (() => {
                     const source = m.metadata?.source;
