@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { ChatPrompts } from './chatPrompts';
+import { buildDateInteractionPrinciples } from './datePrompts';
 import { buildGroupHistoryBlock } from './groupChat/prompts';
 import type { CharacterProfile, Message } from '../types';
 
@@ -145,5 +146,29 @@ describe('score_card 兜底：没被认领的卡片', () => {
         const payload = JSON.stringify(apiMessages);
         expect(payload).not.toContain('data:image');
         expect(payload).not.toContain('AAAA');
+    });
+});
+
+
+describe('anti-cliche interactions: preserve character and consented roleplay', () => {
+    it('only adds one soft reminder to normal human-style chat, not Lite or custom app rules', async () => {
+        const base = { id: 'cliche-check', name: '小角色', innerVoiceEnabled: false } as any;
+        const args = [userProfile, [], [], [], [], undefined, undefined, undefined, undefined, undefined, undefined] as const;
+        const human = await ChatPrompts.buildSystemPromptParts({ ...base, humanStyleEnabled: true }, ...args, {});
+        expect(human.stable).toContain('【亲密互动去套路】');
+        expect(human.stable).toContain('BDSM、D/s');
+        expect(human.stable).toContain('不是禁词');
+        expect(human.stable.split('【亲密互动去套路】')).toHaveLength(2);
+        const lite = await ChatPrompts.buildSystemPromptParts({ ...base, humanStyleEnabled: false }, ...args, {});
+        expect(lite.stable).not.toContain('【亲密互动去套路】');
+        const custom = await ChatPrompts.buildSystemPromptParts({ ...base, humanStyleEnabled: true }, ...args, { appRules: '独立场景协议' });
+        expect(custom.stable).not.toContain('【亲密互动去套路】');
+    });
+
+    it('shares the same lightweight rule with in-person play, without a blanket ban', () => {
+        const regular = buildDateInteractionPrinciples('小角色', '我', false, true);
+        expect(regular).toContain('【亲密互动去套路】');
+        expect(regular).toContain('保留既定的支配、服从、命令、管教与奖惩');
+        expect(buildDateInteractionPrinciples('小角色', '我')).not.toContain('【亲密互动去套路】');
     });
 });
