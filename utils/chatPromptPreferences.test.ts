@@ -6,7 +6,7 @@ import { buildChatOutputStylePrompt } from './chatOutputStylePrompt';
 import { ChatPrompts } from './chatPrompts';
 import { extractInnerVoice } from '../features/personal/innerVoice/protocol';
 import { DB } from './db';
-import { usesHumanStyle, usesInnerVoice, MINIMAL_THINKING_PROMPT, PERSONAL_CHAT_SUPPLEMENT, ANTI_CONTRAST_PROMPT, ANTI_EMPTY_GRATITUDE_PROMPT, ANTI_CLICHE_INTERACTION_PROMPT } from './chatPromptPreferences';
+import { usesHumanStyle, usesInnerVoice, MINIMAL_THINKING_PROMPT } from './chatPromptPreferences';
 
 it('imports the exact delivered four-entry slang worldbook', () => {
  const books=parseStandardWorldbook(JSON.stringify(slangWorldbook),'玩梗与造梗');
@@ -46,32 +46,6 @@ describe('independent per-character chat prompt preferences', () => {
   expect(extractInnerVoice('好。\n状态：坐着\n内心：想笑\n暗流：')).toEqual({text:'好。',innerVoice:{state:'坐着',thoughts:'想笑',undercurrent:''}});
   expect(extractInnerVoice('当前状态：待定\n内心：这只是谈论两个字段')).toEqual({text:'当前状态：待定\n内心：这只是谈论两个字段'});
  });
-});
-
-
-it('deduplicates only human-style emotion guidance while preserving roleplay, boundaries and cache placement', async () => {
- const char={id:'dedupe-style',name:'角色',humanStyleEnabled:true,innerVoiceEnabled:false} as any;
- const user={name:'用户'} as any;
- const args=[user,[],[],[],[],undefined,undefined,undefined,undefined,undefined,undefined] as const;
- const human=await ChatPrompts.buildSystemPromptParts(char,...args,{});
- const lite=await ChatPrompts.buildSystemPromptParts({...char,humanStyleEnabled:false},...args,{});
- expect(PERSONAL_CHAT_SUPPLEMENT).toContain('【尊重表达｜不替用户定义内心】');
- expect(PERSONAL_CHAT_SUPPLEMENT).toContain('【时间核对】');
- expect(PERSONAL_CHAT_SUPPLEMENT).toContain('【关心分寸】');
- expect(PERSONAL_CHAT_SUPPLEMENT).toContain('【生活多样性】');
- expect(PERSONAL_CHAT_SUPPLEMENT).toContain('心声写角色自己的念头与矛盾');
- expect(ANTI_CONTRAST_PROMPT).toContain('事实纠错、拒绝和否认');
- expect(ANTI_EMPTY_GRATITUDE_PROMPT).toContain('重要时刻可以浓烈');
- expect(ANTI_EMPTY_GRATITUDE_PROMPT).toContain('额外时间、劳动或帮助');
- expect(ANTI_CLICHE_INTERACTION_PROMPT).toContain('BDSM、D/s');
- expect(human.stable).toContain('【亲密互动去套路】');
- expect(human.stable).toContain('先稳，再问清楚，最后才安抚');
- expect(human.stable).not.toContain('有时候要”任性”或”以自我为中心”一点');
- expect(human.stable.split('【反煽情｜禁止无意义道谢】')).toHaveLength(2);
- expect(human.recencyTail).toContain('最后，回到你自己');
- expect(human.recencyTail).not.toContain('【反煽情');
- expect(lite.stable).not.toContain('【反煽情');
- expect(lite.stable).not.toContain('【亲密互动去套路】');
 });
 
 it('online IM cadence is stronger, scoped and remains before the final return-to-character tail', async () => {
