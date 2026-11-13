@@ -263,7 +263,7 @@ setInterval(function(){if(ended||!residentVisible||draining)return;draining=true
 setInterval(dispatchBurst,200);
 setInterval(function(){if(pendingUntil&&Date.now()>pendingUntil){pendingUntil=0;busy=false;apiPending=false;speak('等待回复超时，请到糯米机桌宠App查看连接状态。');}if(!residentVisible||!payload||!payload.binding.autoEnabled||renderState.status!=='ready'||renderState.revision!==payload.revision)return;var now=Date.now();if(now<nextTimer)return;nextTimer=now+payload.binding.intervalMinutes*60000;if(busy||apiPending||chatOpen||panelOpen||now-lastInteraction<15000)return;if(payload.binding.apiEnabled){if(session&&now-lastWatch<30000)emit('timer');}else chooseLine('auto');},1000);
 events.on('exit',function(){ended=true;try{server.close();}catch(_){}try{win.close();}catch(_){}});
-toastLog('🐾 桌宠V2已在手机桌面运行\n糯米机 → 桌宠App → 输入六位配对码：'+pin+'\n双击聊天，长按1秒松手打开设置，拖动移动，按住5秒关闭显示，脚本后台待命。');
+toastLog('🐾 桌宠V2连接脚本已运行\n糯米机 → 桌宠App → 输入六位配对码：'+pin+'\n双击聊天，长按1秒松手打开设置，拖动移动，按住5秒关闭显示，脚本后台待命。');
 setInterval(function(){},1000);
 
 var stateReading=false,stateCb=new JavaAdapter(android.webkit.ValueCallback,{onReceiveValue:function(raw){stateReading=false;try{var s=JSON.parse(String(raw));if(s&&payload&&s.revision===payload.revision)renderState=s;}catch(_){}}});
