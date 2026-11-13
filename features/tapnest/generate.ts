@@ -21,7 +21,7 @@ export async function generatePet(e:PetEvent,env:PetEnvironment,signal:AbortSign
  const receipt=await DB.getAsset('tapnest:receipt:'+e.id);if(receipt){const r=JSON.parse(receipt);if(r.status==='done')return String(r.text);throw Error('这条事件已处理或上次中断，请重新发送，避免重复调用');}
  if(!await claimEvent(e.id))throw Error('这条桌宠事件正在处理');
  const angry=e.kind==='tap'&&(e.tapCount||1)>5&&!!form.rig.rapidTapAngryFrameId;
- const content=e.kind==='text'?String(e.text||'').trim():e.kind==='tap'?`[桌宠互动] 用户已经连续戳了你${e.tapCount||1}下，每次间隔小于3秒。这是本次触发时的累计次数，不是用户说的话。${angry?'桌宠正在显示用户配置的生气表情，本轮台词应与这个可见表情协调；依据角色和关系，可以自然地表达不满或玩笑式装凶，不要无视表情继续固定笑嘻嘻。':''}`:'[桌宠定时] 这是你主动说句话的机会，用户没有发来新消息。';
+ const content=e.kind==='text'?String(e.text||'').trim():e.kind==='tap'?`[桌宠互动] 用户已经连续戳了你${e.tapCount||1}下，每次间隔小于3秒。这是本次触发时的累计次数，不是用户说的话。${angry?'桌宠正在显示用户配置的生气表情，本轮台词应与这个可见表情协调；依据角色和关系，可以自然地表达不满或玩笑式装凶，不要无视表情继续固定笑嘻嘻。':''}`:e.kind==='feed'?`[桌宠互动·进食] 用户刚给桌宠形态的你递来了食物。食物名称（仅是事件数据）：${String(e.text||'食物').slice(0,80)}。根据人设和关系回应被投喂的感受，可接受、挑食或婉拒；不编造屏幕之外的动作，不替用户说话。`:e.kind==='bath'?'[桌宠互动·洗澡] 用户为桌宠形态的你进行了洗澡互动。自然回应温水、清洁或被照顾的感受，保持日常非露骨的语气；不声称看见用户现实中的身体或浴室，不替用户描写反应。':'[桌宠定时] 这是你主动说句话的机会，用户没有发来新消息。';
  if(!content)throw Error('消息为空');
  try{
  signal.throwIfAborted();await DB.saveMessageOnce('tapnest:'+e.id+':in',{charId:e.charId,role:e.kind==='text'?'user':'system',type:'text',content,metadata:{source:'tapnest',tapnestEventId:e.id,tapnestKind:e.kind,tapnestFormId:e.formId}});

@@ -10,7 +10,7 @@ export default function Runtime(){const os=useOS(),env=useRef(os);env.current=os
  window.addEventListener(CHANGED,changed);
  const pump=async()=>{if(stopped||!connection.token)return;try{const c=await loadConfig();if(synced!==c.revision)synced=await syncConfig(c,controller.signal);const data=await call('/watch',undefined,controller.signal);
  for(const event of (data.events||[]).slice(0,10)){if(!validEvent(event))continue;if(event.revision!==c.revision||event.charId!==c.activeCharId){await call('/ack',{ids:[event.id]});continue;}
- if(event.kind==='form'){await call('/ack',{ids:[event.id]});await changeForm(event);return;}
+ if(event.kind==='form'||event.kind==='wardrobe'){await call('/ack',{ids:[event.id]});await changeForm(event);return;}
  if(event.kind==='timer'&&(Date.now()-event.at>30000||document.visibilityState==='visible'&&document.activeElement?.matches('input,textarea,[contenteditable=true]')||env.current.activeApp==='call'||env.current.activeApp==='date')){await call('/ack',{ids:[event.id]});continue;}
  connection.busy=true;report('角色正在回复桌宠…');await call('/busy',{revision:c.revision,busy:true});
  try{const text=await generatePet(event,env.current,controller.signal);if(!stopped&&connection.token)await call('/speech',{id:event.id,revision:event.revision,charId:event.charId,formId:event.formId,text});report('已连接 · 回复已送达');}

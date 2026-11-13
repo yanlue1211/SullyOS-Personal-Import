@@ -6,11 +6,11 @@ export const CONFIG_KEY='tapnest_config_v2',INDEX_KEY='tapnest_models_v2',CHANGE
 export const DEFAULT_PROMPT='你现在以桌宠形态陪在用户的桌面上，仍是原来的你，沿用已有关系、经历和记忆。你本次发出的内容会直接显示在桌宠气泡中，用户可以实时看见。根据本次明确提供的消息或互动事件自然回应，遵循角色本人的语气，通常一两句即可。没有收到屏幕内容时，不声称看见用户正在使用什么应用或做什么动作。定时发言只表示你主动说句话，不代表用户刚刚戳你或说了话。不代写用户的反应，不反复解释自己是桌宠。';
 export type Rig=Record<string,any>&{canvasWidth:number;canvasHeight:number;layers:any[]};
 export interface PetForm{id:string;name:string;rig:Rig;tapDialogues?:string[]|null}
-export interface PetModel{id:string;name:string;forms:PetForm[];activeFormId:string;assets:Record<string,string>;tapDialogues:string[];zipRef:string;importedAt:number;warnings:string[]}
-export interface Binding{modelId:string;formId:string;apiEnabled:boolean;tapThreshold?:number;independent:boolean;api?:DialogueApiConfig;prompt:string;autoEnabled:boolean;intervalMinutes:number;forms:Record<string,{tapLines?:string[];autoLines?:string[]}>;modelSettings?:Record<string,{formId:string;forms:Record<string,{tapLines?:string[];autoLines?:string[]}>}>}
+export interface PetModel{id:string;name:string;forms:PetForm[];activeFormId:string;assets:Record<string,string>;tapDialogues:string[];zipRef:string;importedAt:number;warnings:string[];defaultWardrobe?:Record<string,string>}
+export interface Binding{modelId:string;formId:string;apiEnabled:boolean;wardrobe?:Record<string,string>;actionLines?:{feed?:string[];bath?:string[]};tapThreshold?:number;independent:boolean;api?:DialogueApiConfig;prompt:string;autoEnabled:boolean;intervalMinutes:number;forms:Record<string,{tapLines?:string[];autoLines?:string[]}>;modelSettings?:Record<string,{formId:string;wardrobe?:Record<string,string>;forms:Record<string,{tapLines?:string[];autoLines?:string[]}>}>}
 export interface PetConfig{version:2;revision:string;activeCharId:string;bindings:Record<string,Binding>}
 export const emptyConfig=():PetConfig=>({version:2,revision:crypto.randomUUID(),activeCharId:'',bindings:{}});
-export const defaultBinding=(m:PetModel):Binding=>({modelId:m.id,formId:m.activeFormId,apiEnabled:false,tapThreshold:undefined,independent:false,prompt:DEFAULT_PROMPT,autoEnabled:false,intervalMinutes:15,forms:{}});
+export const defaultBinding=(m:PetModel):Binding=>({modelId:m.id,formId:m.activeFormId,apiEnabled:false,wardrobe:m.defaultWardrobe||{},actionLines:{feed:['（接过你递来的食物）'],bath:['（乖乖待在温水里）']},tapThreshold:undefined,independent:false,prompt:DEFAULT_PROMPT,autoEnabled:false,intervalMinutes:15,forms:{}});
 export const lines=(s:unknown):string[]=>Array.isArray(s)?s.filter(x=>typeof x==='string').map(x=>x.trim().slice(0,300)).filter(Boolean).slice(0,100):[];
 const safePath=(p:string)=>p.length<240&&!p.startsWith('/')&&!p.includes('\\')&&!p.split('/').some(x=>x==='..'||x==='.'||!x)&&!/[\x00-\x1f:]/.test(p);
 export function validateRig(r:any):Rig{
@@ -23,12 +23,12 @@ export function validateRig(r:any):Rig{
  for(const l of r.layers){let id=l.parentId,seen=new Set([l.id]);while(id){if(seen.has(id)||!map.has(id))throw Error('父图层引用无效或成环');seen.add(id);id=(map.get(id) as any).parentId;}}
  return r;
 }
-export function parseModelDocuments(rig:any,collection:any,manifest:any):Pick<PetModel,'forms'|'activeFormId'|'name'|'tapDialogues'|'warnings'>{
+export function parseModelDocuments(rig:any,collection:any,manifest:any):Pick<PetModel,'forms'|'activeFormId'|'name'|'tapDialogues'|'warnings'|'defaultWardrobe'>{
  let forms:PetForm[];
  if(collection){if(collection.version!==1||!Array.isArray(collection.forms)||collection.forms.length<1||collection.forms.length>24)throw Error('forms.json 格式不支持');forms=collection.forms.map((f:any)=>({id:String(f.id),name:String(f.name||'形态').slice(0,50),rig:validateRig(f.rig),...(f.tapDialogues!==undefined?{tapDialogues:f.tapDialogues===null?null:lines(f.tapDialogues)}:{})}));}
  else forms=[{id:'default',name:'默认形态',rig:validateRig(rig)}];
  if(new Set(forms.map(f=>f.id)).size!==forms.length||forms.some(f=>!/^[-\w]{1,100}$/.test(f.id)))throw Error('形态编号重复或无效');
- return {forms,activeFormId:forms.some(f=>f.id===collection?.activeFormId)?collection.activeFormId:forms[0].id,name:String(manifest?.displayName||'TapNest 桌宠').slice(0,80),tapDialogues:lines(manifest?.tapDialogues),warnings:collection?.overrides&&Object.keys(collection.overrides).length?['已保留完整形态；TapNest 跨形态混搭配件请先在 TapNest 固化为独立形态再导入。']:[]};
+ return {forms,activeFormId:forms.some(f=>f.id===collection?.activeFormId)?collection.activeFormId:forms[0].id,name:String(manifest?.displayName||'TapNest 桌宠').slice(0,80),tapDialogues:lines(manifest?.tapDialogues),warnings:[],defaultWardrobe:cleanWardrobe(collection?.overrides,forms)};
 }
 export async function importModel(file:File):Promise<PetModel>{
  if(file.size>60*1024*1024||!file.size)throw Error('请选择60MB以内的单只桌宠ZIP');
@@ -49,5 +49,7 @@ export async function listModels():Promise<PetModel[]>{const ids=JSON.parse(awai
 export async function loadConfig():Promise<PetConfig>{const raw=await DB.getAsset(CONFIG_KEY);return raw?JSON.parse(raw):emptyConfig();}
 export async function saveConfig(c:PetConfig){const next={...c,revision:crypto.randomUUID()};await DB.saveAsset(CONFIG_KEY,JSON.stringify(next));typeof window!=='undefined'&&window.dispatchEvent(new Event(CHANGED));return next;}
 export async function dataUrl(ref:string){const b=await getBlobForRef(ref);if(!b)throw Error('桌宠素材缺失，请重新导入原ZIP');return new Promise<string>((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(String(r.result));r.onerror=()=>reject(Error('素材读取失败'));r.readAsDataURL(b);});}
-export function publicBinding(b:Binding,m:PetModel){return {modelId:b.modelId,formId:b.formId,apiEnabled:b.apiEnabled===true,tapThreshold:Math.max(1,Math.min(50,b.tapThreshold||1)),autoEnabled:b.autoEnabled===true,intervalMinutes:Math.max(1,Math.min(1440,b.intervalMinutes)),forms:m.forms.map(f=>({id:f.id,name:f.name,angryFrameConfigured:!!f.rig.rapidTapAngryFrameId&&f.rig.layers.some(l=>l.id===f.rig.rapidTapAngryFrameId&&l.image),tapLines:lines(b.forms[f.id]?.tapLines??f.tapDialogues??m.tapDialogues),autoLines:lines(b.forms[f.id]?.autoLines??[])}))};}
+
+export function cleanWardrobe(value:any,forms:PetForm[]):Record<string,string>{const out:Record<string,string>={};if(!value||typeof value!=='object'||Array.isArray(value))return out;for(const [k,v]of Object.entries(value).slice(0,50))if(/^[A-Za-z][A-Za-z0-9_]{0,105}$/.test(k)&&typeof v==='string'&&(v==='none'||forms.some(f=>f.id===v)))out[k]=v;return out;}
+export function publicBinding(b:Binding,m:PetModel){return {modelId:b.modelId,formId:b.formId,wardrobe:cleanWardrobe(b.wardrobe??m.defaultWardrobe,m.forms),actionLines:{feed:lines(b.actionLines?.feed??['（接过你递来的食物）']),bath:lines(b.actionLines?.bath??['（乖乖待在温水里）'])},apiEnabled:b.apiEnabled===true,tapThreshold:Math.max(1,Math.min(50,b.tapThreshold||1)),autoEnabled:b.autoEnabled===true,intervalMinutes:Math.max(1,Math.min(1440,b.intervalMinutes)),forms:m.forms.map(f=>({id:f.id,name:f.name,angryFrameConfigured:!!f.rig.rapidTapAngryFrameId&&f.rig.layers.some(l=>l.id===f.rig.rapidTapAngryFrameId&&l.image),tapLines:lines(b.forms[f.id]?.tapLines??f.tapDialogues??m.tapDialogues),autoLines:lines(b.forms[f.id]?.autoLines??[])}))};}
 export async function rendererPack(m:PetModel){const assets:Record<string,string>={};for(const [p,ref]of Object.entries(m.assets))assets[p]=await dataUrl(ref);return {name:m.name,forms:m.forms,assets};}
