@@ -1101,7 +1101,9 @@ ${voiceActingGuide()}`;
         // Short delivery reminder stays in the existing uncached tail. Keep shared/stable
         // prompt bytes, worldbook ordering and cache breakpoints unchanged.
         const emojiNameReminder = promptOptions?.appRules === undefined && emojis.length > 0 ? buildEmojiNameReminder() : '';
-        const recencyTail = emojiNameReminder + (humanStyle ? (promptOptions?.appRules === undefined ? IM_FRAGMENTED_CHAT_TAIL : '') + buildCharacterResponsePrinciples(char.name, userProfile.name) : '');
+        const timestampReminder = promptOptions?.appRules === undefined && char.timeAwarenessEnabled !== false
+            ? '\n【回复前核对时间】未归档的原始聊天同样属于有日期的历史：每条消息前的时间戳是当时的发送时间，不是现在。先定位相关原话的日期，再理解原话中的今天、昨天、昨晚、明天；事件有明确日期时以事件日期为准，不能把发言日期当成事件日期。旧回复里的相对时间也要重新核对，不能当成已确认事实照搬。例如11日说“昨晚”指10日，到了13日再提这件事不能叫“昨天”。拿不准用“那天/之前”或可靠的具体日期，不猜成昨天；正常接话即可，不在正文或心声表演核对过程。\n' : '';
+        const recencyTail = timestampReminder + emojiNameReminder + (humanStyle ? (promptOptions?.appRules === undefined ? IM_FRAGMENTED_CHAT_TAIL : '') + buildCharacterResponsePrinciples(char.name, userProfile.name) : '');
 
         if (!humanStyle && char.memoryPalaceEnabled && char.memoryPalaceInjection) volatileState += '\n' + char.memoryPalaceInjection;
 
