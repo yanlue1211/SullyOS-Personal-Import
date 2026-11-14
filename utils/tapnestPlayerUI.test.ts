@@ -16,3 +16,5 @@ it('shows pickup before any movement, restores on release/cancel and never count
 });
 
 it('shrinks to the pet when idle, grows for speech or settings, and reports a scaled width',async()=>{const {p,payload}=await setup();const state=()=>p.getState().split('|').map(Number);await p.apply({...payload,binding:{...payload.binding,scale:.5}});expect(state()[3]).toBe(110);const idle=state()[1];expect(idle).toBeLessThan(180);p.speak('你好');expect(state()[1]).toBeGreaterThan(idle);p.showSettings();expect(state()[3]).toBeGreaterThanOrEqual(300);expect(state()[1]).toBeGreaterThan(idle);document.getElementById('closeMenu')!.click();vi.advanceTimersByTime(30001);expect(state()[1]).toBe(idle);});
+
+it('uses the native phone bounds rather than treating the small current WebView as the screen',async()=>{const {p,payload}=await setup();p.setViewportLimits(390,844);await p.apply({...payload,binding:{...payload.binding,scale:1.5}});expect(Number(p.getState().split('|')[3])).toBe(330);p.showSettings();const first=p.getState();Object.defineProperty(window,'innerHeight',{value:250,configurable:true});window.dispatchEvent(new Event('resize'));expect(p.getState()).toBe(first);});

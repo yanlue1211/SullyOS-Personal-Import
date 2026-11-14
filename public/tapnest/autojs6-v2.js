@@ -209,7 +209,7 @@ setInterval(function(){
   ui.run(function(){
     try{
       win.pet.evaluateJavascript(
-        "(function(){return window.PetPreview&&window.PetPreview.getState?window.PetPreview.getState():'0|8'})()",cb
+        "(function(){if(window.PetPreview&&window.PetPreview.setViewportLimits)window.PetPreview.setViewportLimits("+Math.floor(device.width/d)+","+Math.floor(device.height/d)+");return window.PetPreview&&window.PetPreview.getState?window.PetPreview.getState():'0|215'})()",cb
       );
     }catch(_){
       checking=false;
