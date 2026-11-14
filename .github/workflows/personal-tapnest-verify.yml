@@ -2,10 +2,10 @@ name: Personal TapNest desktop integration
 on:
   pull_request:
     branches: [personal/audio-listening]
-    paths: ['apps/TapNestApp.tsx', 'features/tapnest/**', 'public/tapnest/**', 'utils/tapnest*', '.github/workflows/personal-tapnest-verify.yml']
+    paths: ['apps/TapNestApp.tsx', 'apps/TapNestApp.css', 'components/tapnest/**', 'constants.tsx', 'scripts/test-tapnest-ui.mjs', 'test/fixtures/tapnest*', 'features/tapnest/**', 'public/tapnest/**', 'utils/tapnest*', '.github/workflows/personal-tapnest-verify.yml']
   push:
     branches: [personal/audio-listening]
-    paths: ['apps/TapNestApp.tsx', 'features/tapnest/**', 'public/tapnest/**', 'utils/tapnest*', '.github/workflows/personal-tapnest-verify.yml']
+    paths: ['apps/TapNestApp.tsx', 'apps/TapNestApp.css', 'components/tapnest/**', 'constants.tsx', 'scripts/test-tapnest-ui.mjs', 'test/fixtures/tapnest*', 'features/tapnest/**', 'public/tapnest/**', 'utils/tapnest*', '.github/workflows/personal-tapnest-verify.yml']
 permissions:
   contents: read
 jobs:
@@ -25,3 +25,28 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm vitest run utils/tapnest.test.ts utils/tapnestWake.test.ts utils/tapnestGeneration.test.ts utils/tapnestHost.test.ts utils/tapnestProtocol.test.ts utils/tapnestPlayerUI.test.ts utils/tapnestRenderer.test.ts utils/activityBackup.test.ts utils/personalBackupAudit.test.ts utils/chatRequestPayload.test.ts utils/contextVolatileSplit.test.ts utils/datePromptCaching.test.ts utils/storyPromptCaching.test.ts
       - run: pnpm build
+
+      - name: Install isolated UI browser
+        run: |
+          mkdir -p "$RUNNER_TEMP/tapnest-browser"
+          pnpm --dir "$RUNNER_TEMP/tapnest-browser" add playwright@1.56.1
+          pnpm --dir "$RUNNER_TEMP/tapnest-browser" exec playwright install --with-deps chromium
+      - name: Verify mobile layout and screenshot all pages
+        env:
+          TAPNEST_BROWSER_MODULE: ${{ runner.temp }}/tapnest-browser/node_modules/playwright/index.mjs
+        run: |
+          pnpm exec vite --host 127.0.0.1 --port 4188 --strictPort > /tmp/tapnest-vite.log 2>&1 &
+          vite_pid=$!
+          trap 'kill "$vite_pid" 2>/dev/null || true' EXIT
+          for attempt in {1..60}; do
+            if curl --silent --fail http://127.0.0.1:4188/test/fixtures/tapnest.html > /dev/null; then break; fi
+            if ! kill -0 "$vite_pid" 2>/dev/null || [ "$attempt" -eq 60 ]; then cat /tmp/tapnest-vite.log; exit 1; fi
+            sleep 1
+          done
+          node scripts/test-tapnest-ui.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tapnest-mobile-screenshots
+          path: /tmp/tapnest-ui
+          if-no-files-found: ignore

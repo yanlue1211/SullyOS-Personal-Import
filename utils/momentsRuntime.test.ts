@@ -341,7 +341,7 @@ it("important event cards include only the submitted comment material, not unrea
             content: JSON.stringify({
               requestId: id,
               browsed: [post.id],
-              actions: [],
+              actions: [{kind:"comment",postId:post.id,text:"这阵海风好舒服"}],
               post: null,
               important: [{ postId: post.id, summary: "读到了一段重要的交流" }],
             }),
@@ -546,4 +546,26 @@ it('new activity cards retain only the replied ancestor chain while snapshots re
  expect(part.post.comments.map((x:any)=>x.text)).toEqual(['E-comment','A-reply-chain-e','F-reply-A']);
  for(const x of ['unrelated-B','unrelated-C','unrelated-D','A-reply-chain-b'])expect(cards[0].content).not.toContain(x);
  const snapshot=await getRow<any>('snapshot:a');expect(snapshot.text).toContain('unrelated-B');
+});
+
+it('a model important flag cannot turn a plain browse or like into a new private-chat activity card',async()=>{
+ for(const liked of [false,true]){
+  vi.mocked(safeFetchJson).mockImplementation(async(_url,options)=>({choices:[{finish_reason:'stop',message:{content:JSON.stringify({requestId:promptRequest(options).id,browsed:[post.id],actions:liked?[{kind:'like',postId:post.id}]:[],post:null,important:[{postId:post.id,summary:'模型把普通见闻再次标为重要'}]})}}]}));
+  if(liked)await interact('user','小雨',post.id,{kind:'comment',text:'只有别人之间的讨论'});
+  await runActivity('a',{api:global,user:{name:'小雨'} as any});
+  expect((await DB.getMessagesByCharId('a')).filter(m=>m.type==='moments_card')).toHaveLength(0);
+ }
+ expect(await getRow(`seen:a:${post.id}`)).toBeTruthy();expect((await getRow<any>('snapshot:a')).text).toContain('今天去海边');
+});
+it('importance does not resurrect an already-read reply on a later posting opportunity',async()=>{
+ const own=await publish('a','阿青',{text:'新买了一盆小绿植',media:[],visibility:{mode:'all',ids:[]},theme:'绿植'});
+ await interact('user','小雨',own.id,{kind:'comment',text:'记得浇水呀'});
+ const {markCallSent,applyActivity}=await import('../features/moments/runtime');
+ const first=(await reserveActivity('a',false))!;await markCallSent(first.call.id);await applyActivity(first,{requestId:first.call.id,browsed:[own.id],actions:[],post:null,important:[{postId:own.id,summary:'第一次实际读到提醒'}]},actor);
+ const before=(await DB.getMessagesByCharId('a')).filter(m=>m.type==='moments_card');expect(before).toHaveLength(1);
+ const second=(await reserveActivity('a',false))!;await markCallSent(second.call.id);
+ // Re-read the same witnessed material in a valid reserved round: no new comment was created.
+ second.posts=first.posts;
+ await applyActivity(second,{requestId:second.call.id,browsed:[own.id],actions:[],post:null,important:[{postId:own.id,summary:'又觉得这件事重要'}]},actor);
+ expect((await DB.getMessagesByCharId('a')).filter(m=>m.type==='moments_card')).toHaveLength(1);
 });
