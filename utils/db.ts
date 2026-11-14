@@ -1,3 +1,4 @@
+import {amsgDeliveryKey} from './amsgDeliveryKey';
 import { recordProactiveUserActivity } from './proactiveActivity';
 import { reconcileWorldbookMounts } from './worldbookScope';
 import {createMomentsStore} from '../features/moments/schema';
@@ -765,9 +766,11 @@ export const DB = {
   },
 
   /** 补收去重覆盖完整私聊历史（含已归档部分），只收集本次需要核对的消息 ID。 */
-  findPersistedActiveMessageIds: async (charId: string, messageIds: string[]): Promise<Set<string>> => {
+  findPersistedActiveMessageIds: async (charId: string, messageIds: string[], deliveries: Array<{messageId:string;taskUuid?:unknown;occurrenceMs?:unknown;metadata?:any}> = []): Promise<Set<string>> => {
     const remaining = new Set(messageIds.filter(Boolean));
     const found = new Set<string>();
+    const byDelivery = new Map<string,string[]>();
+    for(const item of deliveries){const key=amsgDeliveryKey(item);if(key)byDelivery.set(key,[...(byDelivery.get(key)||[]),item.messageId]);}
     if (remaining.size === 0) return found;
     const db = await openDB();
     return new Promise((resolve, reject) => {
@@ -779,8 +782,10 @@ export const DB = {
         if (!cursor) return;
         const message = cursor.value as Message;
         const messageId = message.metadata?.activeMsg2?.messageId;
-        if (!message.groupId && typeof messageId === 'string' && remaining.delete(messageId)) {
-          found.add(messageId);
+        if (!message.groupId && message.role === 'assistant') {
+          if(typeof messageId === 'string' && remaining.delete(messageId))found.add(messageId);
+          const key=amsgDeliveryKey(message);
+          for(const candidate of key?byDelivery.get(key)||[]:[]){if(remaining.delete(candidate))found.add(candidate);}
         }
         if (remaining.size > 0) cursor.continue();
       };

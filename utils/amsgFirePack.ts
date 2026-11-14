@@ -464,6 +464,7 @@ export interface AmsgFirePackChat {
 }
 
 export interface AmsgFirePack {
+  receivedCloudOccurrences?: string[];
   /** 模板是否含用户指定的内心独白协议；旧包缺省不回传原始推理。 */
   thinkingChainEnabled?: boolean;
   v: typeof FIRE_PACK_VERSION;
@@ -783,7 +784,7 @@ export const reconcileSelfLogWithPack = (
   let log = stored ?? createSelfLog(pack.builtAt, lastUserMessageAt);
   if (lastUserMessageAt != null
     && (log.anchorUserMsgAt == null || lastUserMessageAt > log.anchorUserMsgAt)) {
-    log = { ...log, anchorUserMsgAt: lastUserMessageAt, entries: [], unansweredSends: 0, awayUnansweredSends: 0, separatedAwayCounts: true, recurringSends: {} };
+    log = { ...log, anchorUserMsgAt: lastUserMessageAt, entries: pack.receivedCloudOccurrences === undefined ? [] : log.entries, unansweredSends: 0, awayUnansweredSends: 0, separatedAwayCounts: true, recurringSends: {} };
   }
   if (log.basePackAt !== pack.builtAt) {
     // 只有快照里明确带回的 uuid 才代表客户端已认领；打包时间本身不是回执。
@@ -875,17 +876,34 @@ const formatAgo = (atMs: number, nowMs: number, tz: AmsgTzRef): string => {
  * 结尾那行连发计数是软提醒的主体：把「已连发几条 / 上限几条」摆在几条相对时间戳的正下方，
  * 模型看到的是频率事实而不是一句抽象劝告。硬拦不在这（见 worker 的排程工具闸与到点兜底闸）。
  */
+export function receivedCloudOccurrences(messages: Array<{role:string;metadata?:any}>): string[] {
+  const groups = new Map<string,{total:number;indexes:Set<number>}>();
+  for (const m of messages) {
+    const meta=m.metadata,uuid=meta?.activeMsg2?.taskUuid,at=meta?.amsgOccurrenceMs;
+    if(m.role!=='assistant'||typeof uuid!=='string'||!Number.isFinite(at))continue;
+    const index=Number(meta.messageIndex),total=Number(meta.totalMessages);
+    if(!Number.isInteger(index)||!Number.isInteger(total)||index<1||total<1||total>100||index>total)continue;
+    const key=`${uuid}@${at}`,group=groups.get(key)||{total,indexes:new Set<number>()};
+    group.total=Math.max(group.total,total);group.indexes.add(index);groups.set(key,group);
+  }
+  return [...groups].filter(([,g])=>g.indexes.size===g.total).map(([key])=>key);
+}
+
 export const renderSelfLogBlock = (
   log: AmsgSelfLog | null,
   nowMs: number,
   tz: AmsgTzRef,
   maxUnanswered: number = DEFAULT_MAX_UNANSWERED_SENDS,
+  receivedCloudOccurrences?: string[],
 ): string => {
   if (!log || log.entries.length === 0) return '';
-  // 正文只渲染还没进【最近对话上下文】的那些（发出时刻晚于本次 fire_pack 打包时刻）；
-  // 更早的条目客户端已经写进聊天记录、随新转写回来了，这里再抄一遍就是同一段话出现两次。
+  // New clients acknowledge only complete cloud occurrences actually present in this transcript.
+  // Old clients retain the timestamp fallback until their next frontend update.
   // 计数不跟着过滤——连发额度问的是「用户没回期间总共发了几条」，跟正文在哪无关。
-  const fresh = log.entries.filter((e) => e.at > log.basePackAt);
+  const received = receivedCloudOccurrences === undefined ? null : new Set(receivedCloudOccurrences);
+  const fresh = log.entries.filter((e) => received
+    ? !received.has(`${e.taskUuid}@${e.id.slice(e.id.lastIndexOf('@') + 1)}`)
+    : e.at > log.basePackAt);
   const sends = countUnansweredSends(log);
   // 说实话：到上限之后自排的那几条到点是**跳过**，不补发（一次性的当场就没了）。
   // 写成「暂停、回复后恢复」的话，角色会以为排着的话迟早会说出去，照样许诺。
@@ -903,10 +921,12 @@ export const renderSelfLogBlock = (
   }
   // 回复和主动发的分开写：回复是在答对方刚说的话，对方看到了；主动发的那几条才是
   // 「对方还没回」。混在一个标题下，角色会把刚答完的话当成没人理的独白。
-  const replies = fresh.filter((e) => e.reply);
-  const proactive = fresh.filter((e) => !e.reply);
+  const historical = fresh.filter(e => log.anchorUserMsgAt != null && e.at <= log.anchorUserMsgAt);
+  const replies = fresh.filter((e) => e.reply && !historical.includes(e));
+  const proactive = fresh.filter((e) => !e.reply && !historical.includes(e));
   const line = (e: AmsgSelfLogEntry) => `- ${formatAgo(e.at, nowMs, tz)}　${e.text}`;
   const out: string[] = ['', ''];
+  if(historical.length)out.push('【你此前发过（此后对方已开口）】',...historical.map(line),'（这些原文尚未包含在上面的聊天转写中；此后对方已经发言，不代表一直未回应。）');
   if (replies.length > 0) {
     out.push(
       '【这之后你回了对方】',
@@ -1007,7 +1027,7 @@ export const renderFirePack = (
   out = fillSlot(out, AMSG_SLOT_AWAY_HINT, awayHint);
   out = fillSlot(out, AMSG_SLOT_TASK_INSTRUCTION, taskInstruction);
   out = fillSlot(out, AMSG_SLOT_SELF_LOG, renderSelfLogBlock(
-    extras?.selfLog ?? null, nowMs, tz, extras?.maxUnansweredSends ?? DEFAULT_MAX_UNANSWERED_SENDS,
+    extras?.selfLog ?? null, nowMs, tz, extras?.maxUnansweredSends ?? DEFAULT_MAX_UNANSWERED_SENDS, pack.receivedCloudOccurrences,
   ));
   out = fillSlot(out, AMSG_SLOT_LIVE_CHAT, renderLiveChatLine(pack.targetName, lastUserMessageAt, nowMs));
   out = fillSlot(out, AMSG_SLOT_TASK_LIST, extras?.taskListBlock ?? '');

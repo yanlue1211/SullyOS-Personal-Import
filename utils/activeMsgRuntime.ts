@@ -1,3 +1,4 @@
+import {amsgDeliveryKey} from './amsgDeliveryKey';
 import {extractResponseStatus,proactiveResponseText,isProactiveStatusDelivery} from '../features/personal/responseStatus/protocol';
 import { diagnosticRunId } from './amsgReproduction';
 import { recordDiagnosticInbox } from './amsgReproductionStore';
@@ -1594,12 +1595,11 @@ const flushInboxToChatImpl = async (trigger: FlushTrigger, charId?: string): Pro
     if (!messageId) return false;
     let ids = persistedIdsByChar.get(charId);
     if (!ids) {
-      const recent = await DB.getRecentMessagesByCharId(charId, 200);
-      ids = new Set(
-        recent
-          .map((m: any) => m?.metadata?.activeMsg2?.messageId)
-          .filter((id: unknown): id is string => typeof id === 'string' && !!id),
-      );
+      // A delayed push can arrive long after backfill, beyond the last 200 bubbles.
+      // Match exact identities across history; repeated wording is never a dedupe key.
+      ids = await DB.findPersistedActiveMessageIds(charId,
+        pendingMessages.filter(m => m.charId === charId).map(m => m.messageId),
+        pendingMessages.filter(m => m.charId === charId));
       persistedIdsByChar.set(charId, ids);
     }
     return ids.has(messageId);
@@ -1896,6 +1896,11 @@ const flushInboxToChatImpl = async (trigger: FlushTrigger, charId?: string): Pro
         await ActiveMsgStore.markActionResultApplied(message.charId, message.messageId);
       }
       landedMessageIds.push(message.messageId);
+      const persisted=persistedIdsByChar.get(message.charId);
+      persisted?.add(message.messageId);
+      const deliveryKey=amsgDeliveryKey(message);
+      if(deliveryKey)for(const other of pendingMessages){if(other.charId===message.charId&&amsgDeliveryKey(other)===deliveryKey)persisted?.add(other.messageId);}
+
 
       // 不管走 post-processing 还是 raw fallback, 单条 inbox message 触发一次 'active-msg-received',
       // 驱动 toast / 未读 / 通知。body 用原文做预览即可。

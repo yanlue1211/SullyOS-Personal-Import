@@ -920,6 +920,25 @@ describe('flushInboxToChat 落库时间戳（走真库）', () => {
   // 同一条推送的「第二次到达」（outbox 补收先落库、被推送服务延迟的原始 push 几分钟后
   // 才送达；或补收销账时 cancelTask 没拦住、worker 重试重跑复用同 messageId）不该再上
   // 屏一遍：落库前按聊天近史里的 activeMsg2.messageId 去重。
+  it('same task occurrence and segment is one delivery even with a changed transport id; next occurrence is not discarded',async()=>{
+    const charId='away-transport-alias';await DB.saveCharacter({id:charId,name:'去重'} as any);
+    const metadata={charId,amsgOccurrenceMs:100,messageIndex:1,totalMessages:1};
+    await DB.saveMessage({charId,role:'assistant',type:'text',content:'下班了没',metadata:{...metadata,activeMsg2:{messageId:'original',taskUuid:'same-task'}}} as any);
+    await ActiveMsgStore.saveInboxMessage(inboxMsg({charId,messageId:'alias',taskUuid:'same-task',body:'下班了没',metadata,sentAt:Date.now()-3600000}));
+    await flushInboxToChat('SW通知');expect((await DB.getMessagesByCharId(charId,true)).length).toBe(1);
+    await ActiveMsgStore.saveInboxMessage(inboxMsg({charId,messageId:'next',taskUuid:'same-task',body:'下班了没',metadata:{...metadata,amsgOccurrenceMs:200},sentAt:Date.now()-3600000}));
+    await flushInboxToChat('SW通知');expect((await DB.getMessagesByCharId(charId,true)).length).toBe(2);
+  });
+
+  it('a delayed duplicate beyond 200 newer messages cannot replay its text/voice batch',async()=>{
+    const charId='away-old-delivery';await DB.saveCharacter({id:charId,name:'去重'} as any);
+    await DB.saveMessage({charId,role:'assistant',type:'text',content:'已收到的整组',metadata:{activeMsg2:{messageId:'away-old'}}} as any);
+    for(let i=0;i<205;i++)await DB.saveMessage({charId,role:'user',type:'text',content:'后续'+i} as any);
+    const before=(await DB.getMessagesByCharId(charId,true)).length;
+    await ActiveMsgStore.saveInboxMessage(inboxMsg({charId,messageId:'away-old',body:'已收到的整组',sentAt:Date.now()-3600000}));
+    await flushInboxToChat('SW通知');expect((await DB.getMessagesByCharId(charId,true)).length).toBe(before);
+  });
+
   it('聊天记录里已有同 messageId → 第二次到达整条丢弃，不重复上屏', async () => {
     const charId = 'char-dedup-redelivery';
     await DB.saveCharacter({ id: charId, name: '去重角色' } as any);
@@ -2381,8 +2400,8 @@ describe('收件箱处理途中抛错不许吞掉整批（走真库）', () => {
     } as any);
 
     // 去重那步读近史时炸一次 = 最常见的那种瞬态存储故障。
-    const realRecent = DB.getRecentMessagesByCharId.bind(DB);
-    vi.spyOn(DB, 'getRecentMessagesByCharId')
+    const realRecent = DB.findPersistedActiveMessageIds.bind(DB);
+    vi.spyOn(DB, 'findPersistedActiveMessageIds')
       .mockImplementation(realRecent as any)
       .mockRejectedValueOnce(new Error('IndexedDB 连接被占'));
 
@@ -2426,8 +2445,8 @@ describe('收件箱处理途中抛错不许吞掉整批（走真库）', () => {
     } as any);
 
     // 去重那步读近史时炸一次 = 收发环节的兜底 catch，不是后处理。
-    const realRecent = DB.getRecentMessagesByCharId.bind(DB);
-    vi.spyOn(DB, 'getRecentMessagesByCharId')
+    const realRecent = DB.findPersistedActiveMessageIds.bind(DB);
+    vi.spyOn(DB, 'findPersistedActiveMessageIds')
       .mockImplementation(realRecent as any)
       .mockRejectedValueOnce(new Error('IndexedDB 连接被占'));
 
@@ -2466,8 +2485,8 @@ describe('收件箱处理途中抛错不许吞掉整批（走真库）', () => {
 
     // 第一次读近史（去重那一步）炸掉，之后照常。这一步在后处理那圈 try/catch 之外，
     // 旧行为下异常会一路冒到 flushInboxToChat 的包装层被 console.warn 掉，两条一起蒸发。
-    const realRecent = DB.getRecentMessagesByCharId.bind(DB);
-    vi.spyOn(DB, 'getRecentMessagesByCharId')
+    const realRecent = DB.findPersistedActiveMessageIds.bind(DB);
+    vi.spyOn(DB, 'findPersistedActiveMessageIds')
       .mockImplementation(realRecent as any)
       .mockRejectedValueOnce(new Error('IndexedDB 连接被占'));
 
@@ -2521,8 +2540,8 @@ describe('收件箱处理途中抛错不许吞掉整批（走真库）', () => {
     await ActiveMsgStore.saveInboxMessage(inbox(failCharId, 'msg-ack-requeue', base));
     await ActiveMsgStore.saveInboxMessage(inbox(okCharId, 'msg-ack-settled', base + 1_000));
 
-    const realRecent = DB.getRecentMessagesByCharId.bind(DB);
-    vi.spyOn(DB, 'getRecentMessagesByCharId')
+    const realRecent = DB.findPersistedActiveMessageIds.bind(DB);
+    vi.spyOn(DB, 'findPersistedActiveMessageIds')
       .mockImplementation(realRecent as any)
       .mockRejectedValueOnce(new Error('IndexedDB 连接被占'));
     const ack = vi.spyOn(ActiveMsgClient, 'ackOutboxMessages').mockResolvedValue(undefined);

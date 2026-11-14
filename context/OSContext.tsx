@@ -1,7 +1,8 @@
+import {syncCommittedAmsgUserTurn} from '../utils/amsgUserTurnSync';
 import {isPetControlCancellation} from '../features/tapnest/transport';
 import { dateLaunch } from '../utils/dateLaunch';
 import { consumePhotoChoices } from '../utils/photoChoice';
-import { getProactiveUserActivity, isProactiveUserReply } from '../utils/proactiveActivity';
+import { PROACTIVE_ACTIVITY_EVENT, getProactiveUserActivity, isProactiveUserReply } from '../utils/proactiveActivity';
 import { reconcileWorldbookMounts } from '../utils/worldbookScope';
 import { consumeIncomingCallInvites } from '../features/personal/calls/incoming';
 import {SONGWRITING_UPDATED} from '../features/songwriting/model';
@@ -2349,6 +2350,12 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           const char = charactersRef.current.find(c => c.id === charId);
           if (char) markAmsgStateDirty({char, userProfile: userProfileRef.current, groups: groupsRef.current, realtimeConfig: realtimeConfigRef.current});
       };
+      const committedUserTurnHandler = (event: Event) => {
+          const charId = (event as CustomEvent).detail?.charId;
+          const char = charactersRef.current.find(c => c.id === charId);
+          if (char) syncCommittedAmsgUserTurn({char,userProfile:userProfileRef.current,groups:groupsRef.current,realtimeConfig:realtimeConfigRef.current},getProactiveUserActivity(charId));
+      };
+      window.addEventListener(PROACTIVE_ACTIVITY_EVENT, committedUserTurnHandler);
       window.addEventListener(HOME_SECRETS_UPDATED, secretSyncHandler);
       window.addEventListener('friend-feed-history-updated', secretSyncHandler);
       window.addEventListener('emotion-updated', buffSyncHandler);
@@ -2364,6 +2371,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           window.removeEventListener('active-msg-backfill-stale', backfillStaleHandler);
           window.removeEventListener('active-msg-progress', progressHandler);
           window.removeEventListener('active-msg-open', openHandler);
+          window.removeEventListener(PROACTIVE_ACTIVITY_EVENT, committedUserTurnHandler);
           window.removeEventListener(HOME_SECRETS_UPDATED, secretSyncHandler);
           window.removeEventListener('friend-feed-history-updated', secretSyncHandler);
           window.removeEventListener('emotion-updated', buffSyncHandler);
