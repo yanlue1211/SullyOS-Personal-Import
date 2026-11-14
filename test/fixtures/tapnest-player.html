@@ -1,0 +1,12 @@
+<!doctype html><html lang="zh-CN"><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:0;background:#eef5ef;color:#315f43;font:14px system-ui}h1{margin:12px;font-size:16px}canvas{display:block;width:320px;height:360px;background:#fff}p{margin:12px}</style><h1>原生动作对照 · 合成测试图</h1><canvas id="pet"></canvas><p id="phase">待机</p><script>
+if(location.search.includes('canvas=1')){const get=HTMLCanvasElement.prototype.getContext;HTMLCanvasElement.prototype.getContext=function(type,...args){return type==='webgl'?null:get.call(this,type,...args);};}
+window.clock=0;let nextFrame;Object.defineProperty(performance,'now',{value:()=>clock});window.requestAnimationFrame=fn=>{nextFrame=fn;return 1;};window.cancelAnimationFrame=()=>{};
+</script><script src="/tapnest/engine.js"></script><script>
+(async()=>{
+ const png=(w,h,paint)=>{const c=document.createElement('canvas');c.width=w;c.height=h;paint(c.getContext('2d'));return c.toDataURL();};
+ const body=png(200,200,c=>{c.fillStyle='#90ab77';c.fillRect(64,95,78,80);}),head=png(100,80,c=>{c.fillStyle='#e5b56f';c.beginPath();c.ellipse(50,40,42,35,0,0,Math.PI*2);c.fill();c.fillStyle='#315f43';c.fillRect(25,30,8,8);c.fillRect(65,30,8,8);}),ear=png(80,140,c=>{c.fillStyle='#b78456';c.beginPath();c.moveTo(30,110);c.lineTo(10,10);c.quadraticCurveTo(70,20,50,110);c.closePath();c.fill();});
+ const rig={canvasWidth:200,canvasHeight:200,layers:[{id:'body',image:'body.png'},{id:'head_0',image:'head.png',parentId:'body',x:50,y:30,pivotY:.85},{id:'ear_left',image:'ear.png',parentId:'head_0',x:-5,y:-70,pivotX:.45,pivotY:.8,interactionConfigured:true,tapShake:true,tapFlexible:{enabled:true,scope:'TIP',amplitude:35},tapBones:[{x:.45,y:.8},{x:.4,y:.45},{x:.3,y:.12}],idleSwing:true,swingMode:'SPRING',springVersion:2,bones:[{x:.45,y:.8},{x:.4,y:.45},{x:.3,y:.12}]}]};
+ const player=TapNestEngine.make(document.getElementById('pet'));window.player=player;await player.load({assets:{'body.png':body,'head.png':head,'ear.png':ear},forms:[{id:'default',rig}]},{formId:'default'});
+ window.drawAt=(t,label)=>{window.clock=t;nextFrame(t);document.getElementById('phase').textContent=label||String(t);};window.drawAt(0,'待机');window.ready=true;
+})();
+</script></html>

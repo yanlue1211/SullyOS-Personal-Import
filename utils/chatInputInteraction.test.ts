@@ -52,6 +52,10 @@ afterEach(() => {
 });
 
 describe('private chat input controls', () => {
+    it('keeps desktop pet management out of the chat toolbar', () => {
+        renderInput({showPanel:'actions',personalMediaEnabled:true});
+        expect([...container.querySelectorAll('button')].some(b=>b.textContent?.trim()==='桌宠')).toBe(false);
+    });
     it.each([false, true])('closes the toolbar on an outside touch regardless of auto reply (%s) and keyboard focus', autoReplyEnabled => {
         renderInput({ showPanel: 'actions', autoReplyEnabled });
         pointerdown(container);

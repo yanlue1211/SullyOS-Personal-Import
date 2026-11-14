@@ -2,10 +2,10 @@ name: Personal TapNest desktop integration
 on:
   pull_request:
     branches: [personal/audio-listening]
-    paths: ['apps/TapNestApp.tsx', 'apps/TapNestApp.css', 'components/tapnest/**', 'constants.tsx', 'scripts/test-tapnest-ui.mjs', 'test/fixtures/tapnest*', 'features/tapnest/**', 'public/tapnest/**', 'utils/tapnest*', '.github/workflows/personal-tapnest-verify.yml']
+    paths: ['apps/TapNestApp.tsx', 'apps/TapNestApp.css', 'components/tapnest/**', 'constants.tsx', 'scripts/test-tapnest-ui.mjs', 'scripts/test-tapnest-player.mjs', 'test/fixtures/tapnest*', 'test/fixtures/tapnest-native/**', 'scripts/generate-tapnest-native-golden.py', 'apps/Chat.tsx', 'components/chat/ChatInputArea.tsx', 'features/tapnest/**', 'public/tapnest/**', 'utils/tapnest*', '.github/workflows/personal-tapnest-verify.yml']
   push:
     branches: [personal/audio-listening]
-    paths: ['apps/TapNestApp.tsx', 'apps/TapNestApp.css', 'components/tapnest/**', 'constants.tsx', 'scripts/test-tapnest-ui.mjs', 'test/fixtures/tapnest*', 'features/tapnest/**', 'public/tapnest/**', 'utils/tapnest*', '.github/workflows/personal-tapnest-verify.yml']
+    paths: ['apps/TapNestApp.tsx', 'apps/TapNestApp.css', 'components/tapnest/**', 'constants.tsx', 'scripts/test-tapnest-ui.mjs', 'scripts/test-tapnest-player.mjs', 'test/fixtures/tapnest*', 'test/fixtures/tapnest-native/**', 'scripts/generate-tapnest-native-golden.py', 'apps/Chat.tsx', 'components/chat/ChatInputArea.tsx', 'features/tapnest/**', 'public/tapnest/**', 'utils/tapnest*', '.github/workflows/personal-tapnest-verify.yml']
 permissions:
   contents: read
 jobs:
@@ -23,7 +23,7 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm vitest run utils/tapnest.test.ts utils/tapnestWake.test.ts utils/tapnestGeneration.test.ts utils/tapnestHost.test.ts utils/tapnestProtocol.test.ts utils/tapnestPlayerUI.test.ts utils/tapnestRenderer.test.ts utils/activityBackup.test.ts utils/personalBackupAudit.test.ts utils/chatRequestPayload.test.ts utils/contextVolatileSplit.test.ts utils/datePromptCaching.test.ts utils/storyPromptCaching.test.ts
+      - run: pnpm vitest run utils/tapnest.test.ts utils/tapnestWake.test.ts utils/tapnestGeneration.test.ts utils/tapnestHost.test.ts utils/tapnestProtocol.test.ts utils/tapnestPlayerUI.test.ts utils/tapnestRenderer.test.ts utils/tapnestNativeParity.test.ts utils/chatInputInteraction.test.ts utils/activityBackup.test.ts utils/personalBackupAudit.test.ts utils/chatRequestPayload.test.ts utils/contextVolatileSplit.test.ts utils/datePromptCaching.test.ts utils/storyPromptCaching.test.ts
       - run: pnpm build
 
       - name: Install isolated UI browser
@@ -45,6 +45,7 @@ jobs:
             sleep 1
           done
           node scripts/test-tapnest-ui.mjs
+          node scripts/test-tapnest-player.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
