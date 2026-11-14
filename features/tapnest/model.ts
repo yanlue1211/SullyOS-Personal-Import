@@ -25,10 +25,12 @@ export function validateRig(r:any):Rig{
 }
 export function parseModelDocuments(rig:any,collection:any,manifest:any):Pick<PetModel,'forms'|'activeFormId'|'name'|'tapDialogues'|'warnings'|'defaultWardrobe'>{
  let forms:PetForm[];
- if(collection){if(collection.version!==1||!Array.isArray(collection.forms)||collection.forms.length<1||collection.forms.length>24)throw Error('forms.json 格式不支持');forms=collection.forms.map((f:any)=>({id:String(f.id),name:String(f.name||'形态').slice(0,50),rig:validateRig(f.rig),...(f.tapDialogues!==undefined?{tapDialogues:f.tapDialogues===null?null:lines(f.tapDialogues)}:{})}));}
+ // Kotlin Json omits default-valued fields: a missing version means native v1.
+ if(collection!=null){if(typeof collection!=='object'||Array.isArray(collection)||(collection.version!==undefined&&collection.version!==1)||!Array.isArray(collection.forms)||collection.forms.length<1||collection.forms.length>24)throw Error('forms.json 格式不支持');forms=collection.forms.map((f:any)=>({id:String(f.id),name:String(f.name||'形态').slice(0,50),rig:validateRig(f.rig),...(f.tapDialogues!==undefined?{tapDialogues:f.tapDialogues===null?null:lines(f.tapDialogues)}:{})}));}
  else forms=[{id:'default',name:'默认形态',rig:validateRig(rig)}];
  if(new Set(forms.map(f=>f.id)).size!==forms.length||forms.some(f=>!/^[-\w]{1,100}$/.test(f.id)))throw Error('形态编号重复或无效');
- return {forms,activeFormId:forms.some(f=>f.id===collection?.activeFormId)?collection.activeFormId:forms[0].id,name:String(manifest?.displayName||'TapNest 桌宠').slice(0,80),tapDialogues:lines(manifest?.tapDialogues),warnings:[],defaultWardrobe:cleanWardrobe(collection?.overrides,forms)};
+ const activeFormId=collection?.activeFormId===undefined?'default':collection.activeFormId;
+ return {forms,activeFormId:forms.some(f=>f.id===activeFormId)?activeFormId:forms[0].id,name:String(manifest?.displayName||'TapNest 桌宠').slice(0,80),tapDialogues:lines(manifest?.tapDialogues),warnings:[],defaultWardrobe:cleanWardrobe(collection?.overrides,forms)};
 }
 export async function importModel(file:File):Promise<PetModel>{
  if(file.size>60*1024*1024||!file.size)throw Error('请选择60MB以内的单只桌宠ZIP');

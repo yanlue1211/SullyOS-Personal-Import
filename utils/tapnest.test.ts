@@ -29,3 +29,23 @@ it('imports a real native-compatible ZIP with forms and keeps original ZIP in me
 it('does not commit a partially missing model',async()=>{const zip=new JSZip();zip.file('rig.json',JSON.stringify(rig()));const bytes=await zip.generateAsync({type:'nodebuffer'});await expect(importModel(Object.assign(bytes,{size:bytes.length,arrayBuffer:async()=>bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.length)}) as any)).rejects.toThrow('缺少');expect(await listModels()).toEqual([]);});
 
 it('preserves native wardrobe overrides and independent action lines without leaking private context',()=>{const p=parseModelDocuments(rig(),{version:1,activeFormId:'chat',overrides:{hat:'work',tail:'none'},forms:[{id:'chat',rig:rig()},{id:'work',rig:rig()}]},{}),m={...p,id:'m'} as any,b={...defaultBinding(m),actionLines:{feed:['只吃饭'],bath:['只洗澡']}};const pub=publicBinding(b,m);expect(pub.wardrobe).toEqual({hat:'work',tail:'none'});expect(pub.actionLines).toEqual({feed:['只吃饭'],bath:['只洗澡']});});
+
+it('accepts native Kotlin forms with omitted v1 defaults and resolves default form by ID',()=>{
+ const collection={forms:[{id:'work',name:'工作',rig:rig(),tapDialogues:[]},{id:'default',name:'默认',rig:rig()}]};
+ const p=parseModelDocuments(rig(),collection,{});
+ expect(p.activeFormId).toBe('default');expect(p.forms[0].tapDialogues).toEqual([]);expect(p.forms[1].tapDialogues).toBeUndefined();expect(p.defaultWardrobe).toEqual({});
+ for(const version of [null,0,2,'1'])expect(()=>parseModelDocuments(rig(),{...collection,version},{})).toThrow('格式不支持');
+ expect(()=>parseModelDocuments(rig(),{forms:[]},{})).toThrow('格式不支持');
+ expect(()=>parseModelDocuments(rig(),{forms:[{id:'default',rig:{...rig(),layers:[{id:'body',image:'../body.png'}]}}]},{})).toThrow();
+});
+it('imports an unmodified Kotlin-style ZIP without default version or activeFormId',async()=>{
+ const zip=new JSZip();
+ zip.file('rig.json',JSON.stringify(rig()));
+ // TapNestForms.encode uses Json with encodeDefaults=false; version=1 and activeFormId="default" are absent.
+ zip.file('forms.json',JSON.stringify({forms:[{id:'work',name:'工作',rig:rig(),tapDialogues:[]},{id:'default',name:'默认',rig:rig()}],overrides:{hat:'work'}}));
+ zip.file('tapnest-pet.json',JSON.stringify({displayName:'伙伴',tapDialogues:['你好']}));
+ zip.file('body.png',Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j8qkAAAAASUVORK5CYII=','base64'));
+ const bytes=await zip.generateAsync({type:'nodebuffer'});
+ const m=await importModel({size:bytes.length,arrayBuffer:async()=>bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.length)} as File);
+ expect(m.activeFormId).toBe('default');expect(m.name).toBe('伙伴');expect(m.tapDialogues).toEqual(['你好']);expect(m.forms[0].tapDialogues).toEqual([]);expect(m.defaultWardrobe).toEqual({hat:'work'});expect(m.zipRef).toMatch(/^blobref:/);expect((await listModels())[0]).toEqual(m);
+});
