@@ -1,0 +1,11 @@
+import assert from 'node:assert/strict';
+import {mkdir} from 'node:fs/promises';
+import {pathToFileURL} from 'node:url';
+const {chromium}=await import(pathToFileURL(process.env.TAPNEST_BROWSER_MODULE).href);
+const browser=await chromium.launch({headless:true,args:['--no-sandbox','--use-angle=swiftshader','--enable-unsafe-swiftshader']});
+const out=process.env.TAPNEST_SCREENSHOTS||'/tmp/tapnest-ui';await mkdir(out,{recursive:true});
+const stats=[];const errors=[];
+try{for(const canvasMode of [false,true]){const page=await browser.newPage({viewport:{width:320,height:520},deviceScaleFactor:1});page.on('pageerror',e=>errors.push(e.message));await page.goto((process.env.TAPNEST_PREVIEW_ORIGIN||'http://127.0.0.1:4188')+'/test/fixtures/tapnest-player.html'+(canvasMode?'?canvas=1':''));await page.waitForFunction(()=>window.ready===true);
+const sample=await page.evaluate(canvasMode=>{window.player.tap(1);window.drawAt(270,'点触 270ms');const canvas=document.querySelector('canvas');let pixels;if(canvasMode){pixels=canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data;}else{const gl=canvas.getContext('webgl');if(!gl)throw Error('WebGL must be exercised');pixels=new Uint8Array(canvas.width*canvas.height*4);gl.readPixels(0,0,canvas.width,canvas.height,gl.RGBA,gl.UNSIGNED_BYTE,pixels);}let count=0,x=0,y=0;for(let row=0;row<canvas.height;row++)for(let col=0;col<canvas.width;col++){const i=(row*canvas.width+col)*4;if(pixels[i+3]>200){count++;x+=col;y+=canvasMode?row:canvas.height-1-row;}}return {count,x:x/count,y:y/count};},canvasMode);assert.ok(sample.count>500,'Pet must actually be visible');stats.push(sample);await page.screenshot({path:`${out}/native-poke-${canvasMode?'canvas':'gpu'}.png`});await page.evaluate(()=>{window.player.held(true);window.drawAt(520,'长按拎起');});await page.screenshot({path:`${out}/native-held-${canvasMode?'canvas':'gpu'}.png`});await page.close();}
+assert.ok(Math.abs(stats[0].count-stats[1].count)/stats[0].count<.05,'GPU and Canvas coverage');assert.ok(Math.abs(stats[0].x-stats[1].x)<1.5&&Math.abs(stats[0].y-stats[1].y)<1.5,'GPU source orientation and transforms');assert.deepEqual(errors,[]);console.log('Native mesh GPU/Canvas rendering, cropped head pivot, pickup and screenshots passed',stats);
+}finally{await browser.close();}

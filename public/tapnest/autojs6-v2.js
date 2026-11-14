@@ -57,7 +57,7 @@ function cancelHoldExit(){
   if(holdExitTimer!==null){clearTimeout(holdExitTimer);holdExitTimer=null;}
 }
 function setPetVisible(on){
- residentVisible=!!on;fingerDown=false;cancelHoldExit();
+ residentVisible=!!on;fingerDown=false;cancelHoldExit();cancelPickupTimer();setPickupState(false);
  if(!on){releaseFocus();chatOpen=false;panelOpen=false;eventsQueue=[];tapBatches=[];tapBurstCount=0;tapClosed=true;pendingUntil=0;busy=false;apiPending=false;}
  nextTimer=Date.now()+(payload?payload.binding.intervalMinutes:15)*60000;
  files.write(visibilityFile,JSON.stringify(residentVisible));
@@ -71,7 +71,7 @@ function closePetAfterHold(){
 }
 function stopResident(){
  if(shuttingDown)return;
- shuttingDown=true;ended=true;fingerDown=false;cancelHoldExit();
+ shuttingDown=true;ended=true;fingerDown=false;cancelHoldExit();cancelPickupTimer();
  try{win.disableFocus();}catch(_){}try{server.close();}catch(_){}try{win.close();}catch(_){}
  try{engines.myEngine().forceStop();}catch(_){exit();}
 }
@@ -138,13 +138,14 @@ var cb=new JavaAdapter(android.webkit.ValueCallback,{
     }catch(_){}
   }
 });
-var sx=0,sy=0,ox=0,oy=0,at=0,drag=false;
+var sx=0,sy=0,ox=0,oy=0,at=0,drag=false,pickupTimer=null;
+function cancelPickupTimer(){if(pickupTimer!==null){clearTimeout(pickupTimer);pickupTimer=null;}}
 function setPickupState(active){
   // Never expose native objects to untrusted remote HTML. Send only one bool.
   ui.run(function(){
     try{
       win.pet.evaluateJavascript(
-        "window.PetPreview&&window.PetPreview.setDragging("+ (!!active ? "true":"false") +")",
+        "window.PetPreview&&window.PetPreview.setHeld("+ (!!active ? "true":"false") +")",
         null
       );
     }catch(_){}
@@ -153,12 +154,14 @@ function setPickupState(active){
 win.pet.setOnTouchListener(function(v,e){
   var a=e.getActionMasked();
   if(a===0){
-    cancelHoldExit();
+    cancelHoldExit();cancelPickupTimer();
     fingerDown=true;
     sx=e.getRawX();sy=e.getRawY();ox=win.getX();oy=win.getY();
     at=Date.now();drag=false;
     if(chatOpen&&!focusHeld)takeFocus();
     if(!chatOpen&&!panelOpen){
+      // Pickup is visual state, separate from actual movement.
+      pickupTimer=setTimeout(function(){pickupTimer=null;if(fingerDown&&!chatOpen&&!panelOpen&&!shuttingDown)setPickupState(true);},500);
       // Five continuous seconds without crossing the drag threshold.
       holdExitTimer=setTimeout(function(){
         holdExitTimer=null;
@@ -169,8 +172,9 @@ win.pet.setOnTouchListener(function(v,e){
     var dx=e.getRawX()-sx,dy=e.getRawY()-sy;
     if(!chatOpen&&!panelOpen&&!drag&&Math.abs(dx)+Math.abs(dy)>dp(12)){
       drag=true;
-      cancelHoldExit();
+      cancelHoldExit();cancelPickupTimer();
       setPickupState(true);
+      evaluate('window.PetPreview&&window.PetPreview.setDragging(true)');
     }
     if(drag){
       anchorY=Math.max(0,Math.min(device.height-dp(PET_SIZE_DP+BASE_EXTRA_DP),Math.round(oy+dy)));
@@ -180,8 +184,8 @@ win.pet.setOnTouchListener(function(v,e){
       );
     }
    }else if(a===1){
-    fingerDown=false;cancelHoldExit();
-    if(drag){setPickupState(false);drag=false;return false;}
+    fingerDown=false;cancelHoldExit();cancelPickupTimer();setPickupState(false);
+    if(drag){evaluate('window.PetPreview&&window.PetPreview.setDragging(false)');drag=false;return false;}
     var heldMs=Date.now()-at;
     if(!drag&&!chatOpen&&!panelOpen){
       if(heldMs>=HOLD_TO_CLOSE_MS)closePetAfterHold();
@@ -189,8 +193,8 @@ win.pet.setOnTouchListener(function(v,e){
       // Fast double taps open input in HTML; long holds never also count as pokes.
     }
    }else if(a===3){
-    fingerDown=false;cancelHoldExit();
-    if(drag){setPickupState(false);drag=false;}
+    fingerDown=false;cancelHoldExit();cancelPickupTimer();setPickupState(false);
+    if(drag){evaluate('window.PetPreview&&window.PetPreview.setDragging(false)');drag=false;}
   }
   return false; // do not swallow webpage clicks or drag gestures
 });
