@@ -1,3 +1,4 @@
+import {seenCommentIds} from './schema';
 import {saveActivityCard} from "./cards";
 import {resolveMomentsNames} from "./names";
 import { momentsEnabled } from "./gate";
@@ -110,7 +111,7 @@ export async function prepareMomentsQuery(
       if (explicit) {
         const view=projectPost(live,charId,actual)!;
         const seen=await getRow<Seen>(`seen:${charId}:${p.id}`,s);
-        const old=new Set(seen?.projection.comments.map(x=>x.id)||[]);
+        const old=seenCommentIds(seen);
         const received=view.comments.filter(x=>x.authorId!==charId&&!old.has(x.id)&&(x.replyTo?view.comments.some(parent=>parent.id===x.replyTo&&parent.authorId===charId):view.owner===charId));
         if(received.length)receipts.push({post:view,events:['聊天中实际读到别人对自己的评论或回复'],commentIds:received.map(x=>x.id)});
         await markSeen(s, live, charId, actual);

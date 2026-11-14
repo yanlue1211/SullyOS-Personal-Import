@@ -1,3 +1,4 @@
+import {seenCommentIds} from './schema';
 import { setMomentsEnabled } from "./gate";
 import { mayReply } from "./threads";
 import { openDB } from "../../utils/db";
@@ -422,6 +423,8 @@ export async function markSeen(
 ) {
   const view = projectPost(c, owner, p);
   if (!view) throw Error("无权浏览");
+  const prior=await getRow<Seen>(`seen:${owner}:${p.id}`,s);
+  const readIds=seenCommentIds(prior);for(const comment of view.comments)readIds.add(comment.id);
   s.put({
     id: `seen:${owner}:${p.id}`,
     kind: "seen",
@@ -429,6 +432,7 @@ export async function markSeen(
     at: Date.now(),
     postId: p.id,
     projection: view,
+    readCommentIds:[...readIds],
     reaction: clean(reaction, 1000, true),
   } satisfies Seen);
 }

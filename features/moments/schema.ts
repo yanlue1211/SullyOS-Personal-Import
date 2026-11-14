@@ -135,8 +135,11 @@ export interface Seen {
   at: number;
   postId: string;
   projection: Post;
+  /** Read identities survive shorter prompt excerpts; never supplied as unread comment text. */
+  readCommentIds?: string[];
   reaction: string;
 }
+export function seenCommentIds(seen?:Seen):Set<string>{return new Set([...(seen?.readCommentIds||[]),...(seen?.projection.comments.map(x=>x.id)||[])]);}
 export interface FeedEvent {
   id: string;
   kind: "event";

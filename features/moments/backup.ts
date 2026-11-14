@@ -87,6 +87,7 @@ export function validateMomentsBackup(value: unknown): Row[] {
       r.kind === "seen" &&
       (r.id !== `seen:${r.owner}:${r.postId}` ||
         r.projection.id !== r.postId ||
+        (r.readCommentIds!==undefined&&(!Array.isArray(r.readCommentIds)||r.readCommentIds.some((id:any)=>typeof id!=="string")||new Set(r.readCommentIds).size!==r.readCommentIds.length)) ||
         typeof r.reaction !== "string" ||
         r.reaction.length > 1000)
     )

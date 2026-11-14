@@ -1,4 +1,5 @@
 import React from 'react';
+import PetMark from './components/tapnest/PetMark';
 import BibiIcon from './components/os/BibiIcon';
 import { AppConfig, AppID } from './types';
 import {
@@ -70,7 +71,7 @@ export const Icons: Record<string, React.FC<{ className?: string }>> = {
   Songwriting: ({ className }) => <MusicNotes className={className} weight="regular" />,
   Music: ({ className }) => <MusicNotes className={className} weight="regular" />,
   SongArchive: ({ className }) => <MusicNotes className={className} weight="regular" />,
-  TapNest: ({ className }) => <span className={className} style={{display:'grid',placeItems:'center',fontSize:32}}>🐾</span>,
+  TapNest: ({ className }) => <PetMark className={className} />,
   Yueqi: ({ className }) => <MoonStars className={className} weight="regular" />,
   Workroom: ({ className }) => <Sparkle className={className} weight="regular" />,
   Call: ({ className }) => <PhoneCall className={className} weight="regular" />,
