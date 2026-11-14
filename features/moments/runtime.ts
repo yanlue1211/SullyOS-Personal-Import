@@ -1,3 +1,4 @@
+import {seenCommentIds} from './schema';
 import {assertReplyRecipient} from "./replies";
 import {reviseCommentIn} from "./comments";
 import {saveActivityCard} from "./cards";
@@ -200,7 +201,7 @@ export async function reserveActivity(
       const size = JSON.stringify(material).length;
       if (posts.length >= 5 || chars + size > 16000) break;
       const seen = await getRow<Seen>(`seen:${charId}:${view.id}`, s);
-      const oldIds = new Set(seen?.projection.comments.map(x => x.id) || []);
+      const oldIds = seenCommentIds(seen);
       const fresh = material.comments.filter(x => x.authorId !== charId && !oldIds.has(x.id));
       const engagement = momentsEngagement(view, charId, p.habits, !seen, fresh.map(x => x.id));
       review[view.id] = {firstView: !seen, newCommentIds: fresh.map(x => x.id),
@@ -432,7 +433,7 @@ export async function applyActivity(
     for (const id of browsed) {
       const material=task.posts.find(p=>p.id===id)!;
       const previous=await getRow<Seen>(`seen:${char.id}:${id}`,s);
-      const prior=new Set(previous?.projection.comments.map(x=>x.id)||[]);
+      const prior=seenCommentIds(previous);
       const received=material.comments.filter(x=>x.authorId!==char.id&&!prior.has(x.id)&&(x.replyTo?material.comments.some(parent=>parent.id===x.replyTo&&parent.authorId===char.id):material.owner===char.id));
       const oldLikes=new Set(previous?.projection.likes.map(x=>x.authorId)||[]);
       const newLikes=material.owner===char.id?material.likes.filter(x=>x.authorId!==char.id&&!oldLikes.has(x.authorId)):[];

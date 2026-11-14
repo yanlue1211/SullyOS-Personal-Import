@@ -569,3 +569,21 @@ it('importance does not resurrect an already-read reply on a later posting oppor
  await applyActivity(second,{requestId:second.call.id,browsed:[own.id],actions:[],post:null,important:[{postId:own.id,summary:'又觉得这件事重要'}]},actor);
  expect((await DB.getMessagesByCharId('a')).filter(m=>m.type==='moments_card')).toHaveLength(1);
 });
+
+it('does not notify previously read replies again after a shorter browse excerpt replaces the projection',async()=>{
+ const own=await publish('a','阿青',{text:'阳台的绿植长出新叶子了',media:[],visibility:{mode:'all',ids:[]},theme:'新叶'});
+ for(let i=0;i<16;i++)await interact('user','小雨',own.id,{kind:'comment',text:'提醒-'+i});
+ const query=(id:number)=>({id,charId:'a',role:'user',type:'text',content:'看看阿青的朋友圈',timestamp:Date.now()} as any);
+ await prepareMomentsQuery('a',[query(200)]);
+ expect((await DB.getMessagesByCharId('a')).filter(m=>m.type==='moments_card')).toHaveLength(1);
+ const actual=(await getRow<Post>(own.id))!;
+ await transaction(async s=>markSeen(s,await getConfig(s),'a',activityMaterial(actual)),true);
+ await prepareMomentsQuery('a',[query(201)]);
+ expect((await DB.getMessagesByCharId('a')).filter(m=>m.type==='moments_card')).toHaveLength(1);
+ await interact('user','小雨',own.id,{kind:'comment',text:'后来真正新增的评论'});await prepareMomentsQuery('a',[query(202)]);
+ const cards=(await DB.getMessagesByCharId('a')).filter(m=>m.type==='moments_card');expect(cards).toHaveLength(2);expect(cards[1].content).toContain('后来真正新增的评论');expect(cards[1].content).not.toContain('提醒-0');
+ const backup=await exportMoments(await openDB());validateMomentsBackup(backup);
+ const seen=backup.find((r:any)=>r.kind==='seen'&&r.postId===own.id) as any;expect(seen.readCommentIds).toHaveLength(17);
+ const legacy=structuredClone(backup);for(const r of legacy)if(r.kind==='seen')delete (r as any).readCommentIds;expect(()=>validateMomentsBackup(legacy)).not.toThrow();
+ const invalid=structuredClone(backup);(invalid.find((r:any)=>r.kind==='seen') as any).readCommentIds=[42];expect(()=>validateMomentsBackup(invalid)).toThrow('浏览档案无效');
+});
