@@ -379,13 +379,13 @@ it('a plain like or browse creates no activity card',async()=>{
  vi.mocked(safeFetchJson).mockImplementation(async(_url,options)=>({choices:[{finish_reason:'stop',message:{content:JSON.stringify({requestId:promptRequest(options).id,browsed:[post.id],actions:[{kind:'like',postId:post.id}],post:null,important:[]})}}]}));
  await runActivity('a',{api:global,user:{name:'小雨'} as any});expect((await DB.getMessagesByCharId('a')).filter(m=>m.type==='moments_card')).toHaveLength(0);
 });
-it('only actual first reading of a comment addressed to the actor creates a receipt card',async()=>{
+it('explicit reading of an incoming reply only updates recent sightings',async()=>{
  const own=await publish('a','阿青',{text:'周末散步',theme:'散步',media:[],visibility:{mode:'all',ids:[]}});
  await transaction(async s=>markSeen(s,await getConfig(s),'a',own),true);
  await interact('user','小雨',own.id,{kind:'comment',text:'一起去呀'});
  const m={id:100,charId:'a',role:'user',type:'text',content:'看看阿青的朋友圈',timestamp:Date.now()} as any;
  await prepareMomentsQuery('a',[m]);await prepareMomentsQuery('a',[m]);
- const cards=(await DB.getMessagesByCharId('a')).filter(m=>m.type==='moments_card');expect(cards).toHaveLength(1);expect(cards[0].content).toContain('一起去呀');
+ const cards=(await DB.getMessagesByCharId('a')).filter(m=>m.type==='moments_card');expect(cards).toHaveLength(0);expect((await getRow<any>('snapshot:a')).text).toContain('一起去呀');
 });
 it('queries five newest visible posts across same-person accounts, and binds results only to the latest user ID',async()=>{
  await DB.saveCharacter({id:'z',name:'张真源',memories:[]} as any);await DB.saveCharacter({id:'z2',name:'源',memories:[]} as any);
@@ -399,14 +399,14 @@ it('queries five newest visible posts across same-person accounts, and binds res
  await prepareMomentsQuery('a',[m,{...m,id:202,content:'今天吃什么'},{...m,id:203,role:'assistant',content:'源源的朋友圈'}]);expect(JSON.parse((await DB.getAsset('moments_query:a'))!).messageId).toBe(200);
 });
 
-it('observed incoming comments and likes record factual response state, with no card for likes alone',async()=>{
+it('observed incoming comments and likes remain in recent sightings without a private-chat card',async()=>{
  const own=await publish('a','阿青',{text:'刚练完琴',theme:'音乐',media:[],visibility:{mode:'all',ids:[]}});
  await transaction(async s=>markSeen(s,await getConfig(s),'a',own),true);
  await interact('user','小雨',own.id,{kind:'like'});await interact('user','小雨',own.id,{kind:'comment',text:'好听！'});
  vi.mocked(safeFetchJson).mockImplementation(async(_url,options)=>({choices:[{finish_reason:'stop',message:{content:JSON.stringify({requestId:promptRequest(options).id,browsed:[own.id],actions:[],post:null,important:[]})}}]}));
  await runActivity('a',{api:global,user:{name:'小雨'} as any});
  const snap=(await getRow<any>('snapshot:a')).text;expect(snap).toContain('已看到的点赞：小雨');expect(snap).toContain('本轮未新增评论或回复');expect(snap).toContain('好听！');
- const cards=(await DB.getMessagesByCharId('a')).filter(m=>m.type==='moments_card');expect(cards).toHaveLength(1);expect(cards[0].content).toContain('本轮未新增评论或回复');
+ const cards=(await DB.getMessagesByCharId('a')).filter(m=>m.type==='moments_card');expect(cards).toHaveLength(0);
 });
 it('a char may ordinary-delete its own submitted comment, but not edit or delete someone else',async()=>{
  await interact('a','阿青',post.id,{kind:'comment',text:'自己的旧评论'});const source=(await getRow<Post>(post.id))!;
@@ -562,12 +562,12 @@ it('importance does not resurrect an already-read reply on a later posting oppor
  await interact('user','小雨',own.id,{kind:'comment',text:'记得浇水呀'});
  const {markCallSent,applyActivity}=await import('../features/moments/runtime');
  const first=(await reserveActivity('a',false))!;await markCallSent(first.call.id);await applyActivity(first,{requestId:first.call.id,browsed:[own.id],actions:[],post:null,important:[{postId:own.id,summary:'第一次实际读到提醒'}]},actor);
- const before=(await DB.getMessagesByCharId('a')).filter(m=>m.type==='moments_card');expect(before).toHaveLength(1);
+ const before=(await DB.getMessagesByCharId('a')).filter(m=>m.type==='moments_card');expect(before).toHaveLength(0);
  const second=(await reserveActivity('a',false))!;await markCallSent(second.call.id);
  // Re-read the same witnessed material in a valid reserved round: no new comment was created.
  second.posts=first.posts;
  await applyActivity(second,{requestId:second.call.id,browsed:[own.id],actions:[],post:null,important:[{postId:own.id,summary:'又觉得这件事重要'}]},actor);
- expect((await DB.getMessagesByCharId('a')).filter(m=>m.type==='moments_card')).toHaveLength(1);
+ expect((await DB.getMessagesByCharId('a')).filter(m=>m.type==='moments_card')).toHaveLength(0);
 });
 
 it('does not notify previously read replies again after a shorter browse excerpt replaces the projection',async()=>{
@@ -575,15 +575,26 @@ it('does not notify previously read replies again after a shorter browse excerpt
  for(let i=0;i<16;i++)await interact('user','小雨',own.id,{kind:'comment',text:'提醒-'+i});
  const query=(id:number)=>({id,charId:'a',role:'user',type:'text',content:'看看阿青的朋友圈',timestamp:Date.now()} as any);
  await prepareMomentsQuery('a',[query(200)]);
- expect((await DB.getMessagesByCharId('a')).filter(m=>m.type==='moments_card')).toHaveLength(1);
+ expect((await DB.getMessagesByCharId('a')).filter(m=>m.type==='moments_card')).toHaveLength(0);
  const actual=(await getRow<Post>(own.id))!;
  await transaction(async s=>markSeen(s,await getConfig(s),'a',activityMaterial(actual)),true);
  await prepareMomentsQuery('a',[query(201)]);
- expect((await DB.getMessagesByCharId('a')).filter(m=>m.type==='moments_card')).toHaveLength(1);
+ expect((await DB.getMessagesByCharId('a')).filter(m=>m.type==='moments_card')).toHaveLength(0);
  await interact('user','小雨',own.id,{kind:'comment',text:'后来真正新增的评论'});await prepareMomentsQuery('a',[query(202)]);
- const cards=(await DB.getMessagesByCharId('a')).filter(m=>m.type==='moments_card');expect(cards).toHaveLength(2);expect(cards[1].content).toContain('后来真正新增的评论');expect(cards[1].content).not.toContain('提醒-0');
+ const cards=(await DB.getMessagesByCharId('a')).filter(m=>m.type==='moments_card');expect(cards).toHaveLength(0);expect((await getRow<any>('snapshot:a')).text).toContain('后来真正新增的评论');
  const backup=await exportMoments(await openDB());validateMomentsBackup(backup);
  const seen=backup.find((r:any)=>r.kind==='seen'&&r.postId===own.id) as any;expect(seen.readCommentIds).toHaveLength(17);
  const legacy=structuredClone(backup);for(const r of legacy)if(r.kind==='seen')delete (r as any).readCommentIds;expect(()=>validateMomentsBackup(legacy)).not.toThrow();
  const invalid=structuredClone(backup);(invalid.find((r:any)=>r.kind==='seen') as any).readCommentIds=[42];expect(()=>validateMomentsBackup(invalid)).toThrow('浏览档案无效');
+});
+
+it('a mixed round delivers only the new comment, without an unrelated read receipt',async()=>{
+ const own=await publish('a','阿青',{text:'只浏览的旧动态',theme:'日常',media:[],visibility:{mode:'all',ids:[]}});
+ await interact('user','小雨',own.id,{kind:'comment',text:'仅阅读的来信'});
+ vi.mocked(safeFetchJson).mockImplementation(async(_url,options)=>({choices:[{finish_reason:'stop',message:{content:JSON.stringify({requestId:promptRequest(options).id,browsed:[own.id,post.id],actions:[{kind:'comment',postId:post.id,text:'本轮真实发出的评论'}],post:null,important:[]})}}]}));
+ await runActivity('a',{api:global,user:{name:'小雨'} as any});
+ const cards=(await DB.getMessagesByCharId('a')).filter(m=>m.type==='moments_card');
+ expect(cards).toHaveLength(1);expect(cards[0].content).toContain('本轮真实发出的评论');
+ expect(cards[0].content).not.toContain('只浏览的旧动态');expect(cards[0].content).not.toContain('仅阅读的来信');
+ expect((await getRow<any>('snapshot:a')).text).toContain('仅阅读的来信');
 });

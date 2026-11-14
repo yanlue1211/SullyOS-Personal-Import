@@ -1,5 +1,3 @@
-import {seenCommentIds} from './schema';
-import {saveActivityCard} from "./cards";
 import {resolveMomentsNames} from "./names";
 import { momentsEnabled } from "./gate";
 import { getScheduleDateKey } from "../../utils/scheduleTime";
@@ -13,7 +11,6 @@ import {
   markSeen,
   refreshSnapshot,
   log,
-  announceHistory,
 } from "./storage";
 import { projectPost, projectSeenPost } from "./permissions";
 import type { Post, Snapshot, Seen } from "./schema";
@@ -98,9 +95,7 @@ export async function prepareMomentsQuery(
     chosen.push(p);
     if (chosen.length === 5) break;
   }
-  let wroteCard=false;
-  await transaction(async (s,tx) => {
-    const receipts:{post:Post;events:string[];commentIds:string[]}[]=[];
+  await transaction(async (s) => {
     const live = await getConfig(s);
     if (live.revision !== c.revision)
       throw Error("朋友圈权限在读取时变化，请重新查看");
@@ -109,15 +104,9 @@ export async function prepareMomentsQuery(
       if (!actual || actual.revision !== p.revision)
         throw Error("朋友圈在读取期间变化，请重新查看");
       if (explicit) {
-        const view=projectPost(live,charId,actual)!;
-        const seen=await getRow<Seen>(`seen:${charId}:${p.id}`,s);
-        const old=seenCommentIds(seen);
-        const received=view.comments.filter(x=>x.authorId!==charId&&!old.has(x.id)&&(x.replyTo?view.comments.some(parent=>parent.id===x.replyTo&&parent.authorId===charId):view.owner===charId));
-        if(received.length)receipts.push({post:view,events:['聊天中实际读到别人对自己的评论或回复'],commentIds:received.map(x=>x.id)});
         await markSeen(s, live, charId, actual);
       }
     }
-    wroteCard=await saveActivityCard(tx,live,charId,`query:${last.id}` ,receipts);
     if (explicit && chosen.length) {
       await refreshSnapshot(s, live, charId);
       await log(
@@ -127,7 +116,6 @@ export async function prepareMomentsQuery(
       );
     }
   }, true);
-  if(wroteCard)announceHistory(charId);
   if (chosen.length !== 1) await DB.deleteAsset(`moments_topic:${charId}`);
   if (chosen.length === 1)
     await DB.saveAsset(

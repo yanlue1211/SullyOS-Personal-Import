@@ -440,7 +440,6 @@ export async function applyActivity(
       const acted=response.actions.some((x:any)=>x.kind==='comment'&&x.postId===id&&(!x.replyTo||mayReply(material,x.replyTo)));
       const state=acted?'本轮新增了评论或回复':'本轮未新增评论或回复';
       if(received.length||newLikes.length)reactions.set(id,[newLikes.length?'实际看到新点赞：'+newLikes.map(x=>x.name).join('、'):'',received.length?'实际看到针对自己的评论/回复：'+received.map(x=>x.name).join('、'):'',state].filter(Boolean).join('；'));
-      if(received.length)record({...material,comments:material.comments},'实际读到别人对自己的评论或回复：'+[...new Set(received.map(x=>x.name))].join('、')+'；'+state,received.map(x=>x.id));
       await markSeen(s,c,char.id,material,reactions.get(id));
     }
     const dedup = new Set<string>();
