@@ -137,7 +137,7 @@ async function appendDiagnosticEvent(entry) {
   });
 }
 
-// ../pet-watch/node_modules/.pnpm/@rei-standard+amsg-shared@0.4.0/node_modules/@rei-standard/amsg-shared/dist/index.mjs
+// node_modules/.pnpm/@rei-standard+amsg-shared@0.4.0/node_modules/@rei-standard/amsg-shared/dist/index.mjs
 var TEXT_ENCODER = new TextEncoder();
 var TEXT_DECODER = new TextDecoder("utf-8", { fatal: false });
 function concatBytes(...chunks) {
@@ -263,7 +263,7 @@ function notificationIntent(payload) {
 var REASONING_CHUNK_ENCODER = new TextEncoder();
 var REASONING_CHUNK_DECODER = new TextDecoder("utf-8", { fatal: true });
 
-// ../pet-watch/node_modules/.pnpm/@rei-standard+amsg-sw@2.4.0/node_modules/@rei-standard/amsg-sw/dist/index.mjs
+// node_modules/.pnpm/@rei-standard+amsg-sw@2.4.0/node_modules/@rei-standard/amsg-sw/dist/index.mjs
 var REI_SW_DB_NAME = "rei-sw";
 var REI_SW_DB_STORE = "request-outbox";
 var REI_SW_MULTIPART_STORE = "multipart-pending";
