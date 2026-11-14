@@ -1,7 +1,14 @@
+import {getLocalDateKey} from '../../utils/localDate';
 import {projectPost,postText} from './permissions';
 import {result,type Config,type Post} from './schema';
 export interface ActivityCardPart {postId:string;text:string;post?:Post;events?:string[];commentIds?:string[]}
-export const activityCardText=(parts:ActivityCardPart[],at:string)=>`[私人朋友圈活动记录 · ${at}]\n【经历记录，不是聊天台词；按原有规则判断是否值得记忆，不额外提高重要性。】\n`+parts.map(p=>p.text).join('\n\n');
+/** User-facing event times use the device zone, with an offset for unambiguous model input. */
+export function activityTime(value:string|number):string {
+ const date=new Date(value);if(!Number.isFinite(date.getTime()))return String(value);
+ const pad=(n:number)=>String(n).padStart(2,'0'),offset=-date.getTimezoneOffset();
+ return `${getLocalDateKey(date)} ${pad(date.getHours())}:${pad(date.getMinutes())} (UTC${offset>=0?'+':'-'}${pad(Math.floor(Math.abs(offset)/60))}:${pad(Math.abs(offset)%60)})`;
+}
+export const activityCardText=(parts:ActivityCardPart[],at:string)=>`[私人朋友圈活动记录 · ${activityTime(at)}]\n【经历记录，不是聊天台词；按原有规则判断是否值得记忆，不额外提高重要性。】\n`+parts.map(p=>p.text).join('\n\n');
 export async function saveActivityCard(tx:IDBTransaction,c:Config,owner:string,eventId:string,entries:{post:Post;events:string[];commentIds?:string[]}[]):Promise<boolean>{
  if(!entries.length)return false;
  const messages=tx.objectStore('messages'),deliveryId=`moments:${owner}:activity:${eventId}`;
@@ -27,6 +34,6 @@ export function activityCommentChain(view:Post,ids:string[]):Post['comments']{
 }
 export function renderActivityPart(view:Post,events:string[],commentIds?:string[]):ActivityCardPart{
  if(commentIds!==undefined)view={...view,likes:[],comments:activityCommentChain(view,commentIds)};
- const comments=view.comments.map(x=>{const parent=x.replyTo&&view.comments.find(y=>y.id===x.replyTo);return `[${new Date(x.at).toISOString()}] ${x.name}${parent?' 回复 '+parent.name:''}：${x.text}`;}).join('\n');
- return {postId:view.id,post:structuredClone(view),events:[...events],...(commentIds!==undefined?{commentIds:[...new Set(commentIds)]}:{}),text:`${events.join('；')}\n[发布于 ${new Date(view.at).toISOString()}] ${postText(view)}\n${comments}\n动态ID：${view.id}`};
+ const comments=view.comments.map(x=>{const parent=x.replyTo&&view.comments.find(y=>y.id===x.replyTo);return `[${activityTime(x.at)}] ${x.name}${parent?' 回复 '+parent.name:''}：${x.text}`;}).join('\n');
+ return {postId:view.id,post:structuredClone(view),events:[...events],...(commentIds!==undefined?{commentIds:[...new Set(commentIds)]}:{}),text:`${events.join('；')}\n[发布于 ${activityTime(view.at)}] ${postText(view)}\n${comments}\n动态ID：${view.id}`};
 }
