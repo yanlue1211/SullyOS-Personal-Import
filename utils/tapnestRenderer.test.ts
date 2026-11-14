@@ -23,3 +23,11 @@ it('keeps a long pickup PNG proportional and expands downwards without shrinking
 });
 
 it('matches native accessory categories, keeps action frames and supports removing one group',()=>{const base={id:'a',rig:{layers:[{id:'body',image:'body'},{id:'hat',image:'old'},{id:'tail',image:'tail'}]}},other={id:'b',rig:{layers:[{id:'body',image:'otherBody'},{id:'hat',image:'new',parentId:'body'},{id:'hat_f1',frameOwner:'hat',image:'frame'}]}};expect(math.category({id:'body'})).toBe(null);expect(math.category({id:'part_1',wardrobeCategory:'ribbon'})).toBe('ribbon');const rig=math.compose([base,other],'a',{hat:'b',tail:'none'});expect(rig.layers.map((l:any)=>l.image)).toEqual(['body','new','frame']);expect(math.parts([base,other]).map((p:any)=>p.id)).toEqual(['hat','tail']);});
+
+it('matches native bitmap sampling without changing authored dimensions or pivots',async()=>{
+ let frame:any;const draws:any[]=[],transforms:any[]=[];const draw:any={setTransform:()=>{},clearRect:()=>{},save:()=>{},restore:()=>{},transform:(...v:any[])=>transforms.push(v),drawImage:(...v:any[])=>draws.push(v)};
+ class Image{width=2048;height=1024;naturalWidth=2048;naturalHeight=1024;onload:any;set src(_:string){queueMicrotask(()=>this.onload());}}
+ const c:any={Image,performance:{now:()=>0},requestAnimationFrame:(f:any)=>{frame=f;return 1;},cancelAnimationFrame:()=>{},devicePixelRatio:1,document:{createElement:()=>({width:0,height:0,getContext:()=>draw})}};vm.createContext(c);vm.runInContext(readFileSync('public/tapnest/engine.js','utf8'),c);
+ const player=c.TapNestEngine.make({clientWidth:320,clientHeight:360,width:0,height:0,getContext:()=>draw});await player.load({assets:{'body.png':'data:image/png;base64,AAAA'},forms:[{id:'one',rig:{canvasWidth:2048,canvasHeight:1024,clips:[{durationMs:100,tracks:[{layerId:'body',frames:[{atMs:0,pose:{angle:90}}]}]}],layers:[{id:'body',image:'body.png',restScale:2}]}}]},{formId:'one'});frame(0);
+ expect(draws[0].slice(1)).toEqual([0,0,512,256]);expect(draws.at(-1).slice(1)).toEqual([0,0,2048,1024]);expect(transforms.at(-1).map((v:number)=>Math.round(v)||0)).toEqual([0,2,-2,0,3072,-1024]);player.destroy();
+});
