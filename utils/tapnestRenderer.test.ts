@@ -31,3 +31,16 @@ it('matches native bitmap sampling without changing authored dimensions or pivot
  const player=c.TapNestEngine.make({clientWidth:320,clientHeight:360,width:0,height:0,getContext:()=>draw});await player.load({assets:{'body.png':'data:image/png;base64,AAAA'},forms:[{id:'one',rig:{canvasWidth:2048,canvasHeight:1024,clips:[{durationMs:100,tracks:[{layerId:'body',frames:[{atMs:0,pose:{angle:90}}]}]}],layers:[{id:'body',image:'body.png',restScale:2}]}}]},{formId:'one'});frame(0);
  expect(draws[0].slice(1)).toEqual([0,0,512,256]);expect(draws.at(-1).slice(1)).toEqual([0,0,2048,1024]);expect(transforms.at(-1).map((v:number)=>Math.round(v)||0)).toEqual([0,2,-2,0,3072,-1024]);player.destroy();
 });
+
+// A live native host can still poll JS while WebView has stopped delivering animation frames.
+it('restarts a stalled frame loop once, preserves model state, and never revives hidden or destroyed pets',async()=>{
+ let now=1000,id=0;const frames=new Map<number,(t:number)=>void>(),draws:string[]=[];
+ const draw={setTransform:()=>{},clearRect:()=>{},save:()=>{},restore:()=>{},transform:()=>{},drawImage:(img:any)=>draws.push(img.src)};
+ class Image{width=100;height=100;naturalWidth=100;naturalHeight=100;onload:any;_src='';set src(s:string){this._src=s;queueMicrotask(()=>this.onload());}get src(){return this._src;}}
+ const c:any={Image,performance:{now:()=>now},requestAnimationFrame:(f:any)=>{frames.set(++id,f);return id;},cancelAnimationFrame:(i:number)=>frames.delete(i),devicePixelRatio:1};vm.createContext(c);vm.runInContext(readFileSync('public/tapnest/engine.js','utf8'),c);
+ const player=c.TapNestEngine.make({clientWidth:220,clientHeight:215,width:0,height:0,getContext:()=>draw});
+ await player.load({assets:{'body.png':'data:image/png;base64,BODY'},forms:[{id:'work',rig:{canvasWidth:100,canvasHeight:100,layers:[{id:'body',image:'body.png'}]}}]},{formId:'work'});
+ const run=()=>{const [key,fn]=[...frames][0];frames.delete(key);fn(now);};run();expect(draws).toHaveLength(1);expect(player.ensureRendering()).toBe(false);
+ frames.clear();now+=3000;expect(player.ensureRendering()).toBe(true);expect(frames.size).toBe(1);expect(player.ensureRendering()).toBe(false);run();expect(draws).toHaveLength(2);expect(player.formId).toBe('work');expect(frames.size).toBe(1);
+ player.suspend(true);now+=3000;expect(player.ensureRendering()).toBe(false);expect(frames.size).toBe(0);player.suspend(false);expect(frames.size).toBe(1);player.destroy();now+=3000;expect(player.ensureRendering()).toBe(false);expect(frames.size).toBe(0);
+});
