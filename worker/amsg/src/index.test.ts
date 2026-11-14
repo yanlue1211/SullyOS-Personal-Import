@@ -757,6 +757,26 @@ describe('离开后云端机会不依赖预约消息开关', () => {
     return result;
   };
 
+  it('away force delivery checks a user turn arriving during generation',async()=>{
+    const {ctx}=awayCtx();ctx.task.metadata.amsgExpirePolicy='force';
+    fired(await amsgHooks.onBeforeFire(ctx));
+    ctx.readState.mockResolvedValueOnce([{key:AMSG_CHAT_PRESENCE_KEY,value:presenceValue(Date.now(),{lastUserMessageAt:Date.now()})}]);
+    const result=await amsgHooks.onLLMOutput({sessionId:'away-race',taskId:FIRE_TASK_ID,taskUuid:TASK_UUID,llmResponse:{},llmOutputText:'你怎么一直没回',contactName:'Nyah',metadata:ctx.task.metadata,scratch:ctx.scratch,readState:ctx.readState,writeState:ctx.writeState,emitResult:vi.fn(async()=>({}))} as any) as any;
+    expect(result.decision).toBe('skip-push');
+  });
+
+  it('a committed user turn from hours ago still blocks an older away transcript without a live chat lease',async()=>{
+    const {ctx}=awayCtx();ctx.task.metadata.amsgExpirePolicy='force';const original=ctx.readState;
+    const rows=await original('amsg:char:'+CHAR_ID);ctx.readState=vi.fn(async(ns:string)=>ns.startsWith('amsg:char:')?[...rows,{key:'last_user_turn_v1',value:JSON.stringify({v:1,charId:CHAR_ID,at:NOW.getTime()-2*3600000})}]:await original(ns));
+    expect(await amsgHooks.onBeforeFire(ctx)).toEqual({defer:{afterMs:45000}});expect(ctx.scheduleTask).not.toHaveBeenCalled();
+  });
+
+  it('away waits without model work when presence is newer than the uploaded transcript',async()=>{
+    const {ctx}=awayCtx();const original=ctx.readState;
+    const rows=await original('amsg:char:'+CHAR_ID);ctx.readState=vi.fn(async(ns:string)=>ns.startsWith('amsg:char:')?[...rows,{key:AMSG_CHAT_PRESENCE_KEY,value:presenceValue(NOW.getTime()-600000,{lastUserMessageAt:NOW.getTime()-1000})}]:await original(ns));
+    expect(await amsgHooks.onBeforeFire(ctx)).toEqual({defer:{afterMs:45000}});expect(ctx.scheduleTask).not.toHaveBeenCalled();
+  });
+
   it('预约关闭且离开后开启：仍给离开后模型机会、并在云端续排下次节拍', async () => {
     const { ctx, writeState } = awayCtx();
     const outcome = fired(await amsgHooks.onBeforeFire(ctx));

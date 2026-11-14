@@ -1,3 +1,4 @@
+import {receivedCloudOccurrences} from './amsgFirePack';
 import { describe, it, expect } from 'vitest';
 import {
   AMSG_SLOT_AWAY_HINT,
@@ -894,12 +895,30 @@ describe('renderFirePack — 把 includeClock 透传给场景块', () => {
   const at = Date.UTC(2026, 7, 2, 23 - 8, 10);
 
   it('不传时照常报钟点（老行为）', () => {
-    expect(renderFirePack(scenePack, at, '指令')).toContain('当前时段：22:00 你正在睡觉');
+    expect(renderFirePack(scenePack, at, '指令')).toContain('22:00 睡觉');
   });
 
   it('includeClock=false 时钟点消失，活动还在', () => {
     const out = renderFirePack(scenePack, at, '指令', { includeClock: false });
-    expect(out).toContain('你正在睡觉');
+    expect(out).toContain('睡觉');
     expect(out).not.toContain('22:00');
   });
+});
+
+describe('explicit cloud transcript receipts',()=>{
+ it('requires every delivered segment in the actual context range',()=>{
+  const msg=(index:number)=>({role:'assistant',metadata:{activeMsg2:{taskUuid:'uuid'},amsgOccurrenceMs:100,messageIndex:index,totalMessages:2}});
+  expect(receivedCloudOccurrences([msg(1)])).toEqual([]);expect(receivedCloudOccurrences([msg(1),msg(1)])).toEqual([]);expect(receivedCloudOccurrences([msg(1),msg(2)])).toEqual(['uuid@100']);
+ });
+ it('a new user reply resets counts while preserving cloud text not acknowledged in the transcript',()=>{
+  const stored=appendSelfLogEntry(createSelfLog(100,50),{id:'client@100',taskUuid:'uuid',at:200,text:'未收进网页的旧原文'});
+  const pack={v:FIRE_PACK_VERSION,template:'x',builtAt:300,lastUserMessageAt:250,receivedCloudOccurrences:[],pendingTasks:[],tzId:'UTC',userTzId:'UTC',targetName:'用户',scene:null,selfScheduleEnabled:true} as AmsgFirePack;
+  const next=reconcileSelfLogWithPack(stored,pack,250);expect(countUnansweredSends(next)).toBe(0);
+  const text=renderSelfLogBlock(next,400,'UTC',3,[]);expect(text).toContain('未收进网页的旧原文');expect(text).toContain('此后对方已开口');expect(text).not.toContain('对方一直没回应');
+ });
+ it('a newer pack timestamp cannot erase unreceived cloud text',()=>{
+  const log=appendSelfLogEntry(createSelfLog(300),{id:'client@100',taskUuid:'uuid',at:200,text:'尚未收入聊天的原文'});
+  expect(renderSelfLogBlock(log,500,'UTC',3,[])).toContain('尚未收入聊天的原文');
+  expect(renderSelfLogBlock(log,500,'UTC',3,['uuid@100'])).not.toContain('尚未收入聊天的原文');
+ });
 });

@@ -1,3 +1,4 @@
+import {AMSG_USER_TURN_KEY,readAmsgUserTurnAt} from '../../../utils/amsgUserTurn';
 import { buildAmsgInPersonContext, resolveAmsgDateExitEncounter } from '../../../utils/amsgInPersonContext';
 import { INSTANT_INPUT_NAMESPACE, INSTANT_INPUT_TTL_DAYS, parseInstantInputEnvelope, parseInstantInputRef } from './instantInput';
 import { installAnthropicFetch } from '../../../utils/anthropicApi';
@@ -2216,7 +2217,8 @@ export const amsgHooks = {
     // 到点时对方在不在聊天不拦发送：说不说由角色看着最新对话自己判（提示词里那段
     // 「开口之前」），这个时刻只是给它的事实之一。
     const presenceLastUserMessageAt = presence?.charId === charId ? presence.lastUserMessageAt : null;
-    const lastUserMessageAt = laterOf(pack.lastUserMessageAt ?? null, presenceLastUserMessageAt);
+    const committedUserAt = readAmsgUserTurnAt(charRows.find(r=>r.key===AMSG_USER_TURN_KEY)?.value,charId);
+    const lastUserMessageAt = laterOf(laterOf(pack.lastUserMessageAt ?? null, presenceLastUserMessageAt),committedUserAt);
     // 两个来源分别留一行，便于排查 fire_pack / presence 是否落后于真实对话。
     // 字段全是时间戳与枚举，不含正文、不含角色名。
     if (!instant) {
@@ -2239,6 +2241,13 @@ export const amsgHooks = {
       if (!Number.isFinite(delay) || delay < 1 || delay > 60) return {skip: true} as const;
       const waitMs = presence.activeAt + delay * 60_000 - ctx.now.getTime();
       if (waitMs > 5_000) return {defer: {afterMs: Math.min(waitMs, 24 * 60 * 60_000)}} as const;
+    }
+
+    // A lightweight user-presence stamp can arrive before the full transcript.
+    // Away tasks must wait for that transcript, never generate against the previous turn.
+    if (!instant && away && lastUserMessageAt != null
+        && (pack.lastUserMessageAt == null || lastUserMessageAt > pack.lastUserMessageAt)) {
+      return { defer: { afterMs: 45_000 } } as const;
     }
 
     // B 模式（循环空闲机会）：只针对 amsgAwayMessage 系统任务。
@@ -2651,7 +2660,7 @@ export const amsgHooks = {
       // （resolveFireSceneSong 与 renderFireSceneBlock 共用判定），冻的必然是正文里那首。
       sceneSong: resolveFireSceneSong(pack.scene, ctx.now.getTime(), tz),
       instant,
-      overlapGuard: !instant && (policy === 'expire' || dateLeave) ? { lastUserMessageAt } : null,
+      overlapGuard: !instant && (policy === 'expire' || dateLeave || away) ? { lastUserMessageAt } : null,
       instantInputKey,
       // 下面即时对话那一支起跑（要等请求消息拼完才知道给评估喂什么）。
       emotionEvalPromise: null,
@@ -2783,7 +2792,7 @@ export const amsgHooks = {
         timeAwarenessEnabled: toolPack.timeAwarenessEnabled,
         blocks: [
           realtimeWorldBlock,
-          renderSelfLogBlock(selfLog, ctx.now.getTime(), tz, maxUnansweredSends),
+          renderSelfLogBlock(selfLog, ctx.now.getTime(), tz, maxUnansweredSends, pack.receivedCloudOccurrences),
           taskListBlock, mcpBlock, scheduleBlock, replyScopeBlock,
         ],
       });
@@ -3015,8 +3024,11 @@ export const amsgHooks = {
     if (decision.decision === 'finish' && stash.overlapGuard) {
       const presenceRows = await ctx.readState(amsgStateNamespace(stash.charId), { key: AMSG_CHAT_PRESENCE_KEY });
       const presence = parseAmsgChatPresence(presenceRows.find((r) => r.key === AMSG_CHAT_PRESENCE_KEY)?.value);
+      const userRows = stash.away ? await ctx.readState(amsgStateNamespace(stash.charId),{key:AMSG_USER_TURN_KEY}) : [];
+      const userAt=readAmsgUserTurnAt(userRows.find(r=>r.key===AMSG_USER_TURN_KEY)?.value,stash.charId);
       if ((presence?.scene !== 'date' || ctx.metadata?.[AMSG_DATE_LEAVE_META] === true)
-          && chattedDuringFire(presence, stash.charId, Date.now(), stash.overlapGuard.lastUserMessageAt)) {
+          && (chattedDuringFire(presence, stash.charId, Date.now(), stash.overlapGuard.lastUserMessageAt)
+            || (userAt!=null&&(stash.overlapGuard.lastUserMessageAt==null||userAt>stash.overlapGuard.lastUserMessageAt)))) {
         // shortcut: 这一轮已经用工具改过任务的照常发出——跳过的话客户端收不到这批改动、认领不到新任务；
         // 真撞上再改成拦下时单独 emitResult 送任务改动。
         if (stash.scheduledTasks.length || stash.cancelledTasks.length || stash.renewedTasks.length) {

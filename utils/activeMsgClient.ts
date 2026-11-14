@@ -1,3 +1,4 @@
+import {receivedCloudOccurrences} from './amsgFirePack';
 import { usesHumanStyle, usesInnerVoice, INNER_VOICE_FORMAT_REMINDER, CHAT_EXPRESSION_TAIL_REMINDER, IM_FRAGMENTED_CHAT_TAIL } from './chatPromptPreferences';
 import { buildChatOutputStylePrompt, readChatTranslationConfig } from './chatOutputStylePrompt';
 import { buildReproductionTask, DIAGNOSTIC_NAMESPACE, diagnosticRunId, type DiagnosticEvent } from './amsgReproduction';
@@ -983,6 +984,7 @@ export const buildFirePack = async (
     // 自排任务备账还配不配得上当前清单（见 amsgFirePack 的 reconcileSelfLogWithPack）。
     // 每打一次包都是新值。
     builtAt: Date.now(),
+    receivedCloudOccurrences: receivedCloudOccurrences(recentMessages),
     // 角色级 2.0 开关随包上云：关着的角色即便走即时对话（全局开关是另一颗），云端
     // fire 也不给排程能力——本地的 amsg2ToolsInjected 闸门在云端的对应物就是它。
     selfScheduleEnabled: isAmsg2EnabledForChar(char),
