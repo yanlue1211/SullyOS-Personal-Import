@@ -171,6 +171,7 @@ win.pet.setOnTouchListener(function(v,e){
       },HOLD_TO_CLOSE_MS);
     }
   }else if(a===2){
+    if(!fingerDown)return false;
     var dx=e.getRawX()-sx,dy=e.getRawY()-sy;
     if(!chatOpen&&!panelOpen&&!drag&&Math.abs(dx)+Math.abs(dy)>dp(12)){
       drag=true;
@@ -187,6 +188,8 @@ win.pet.setOnTouchListener(function(v,e){
       );
     }
    }else if(a===1){
+    // A cancelled/outside gesture must never reuse an old press time and close the pet.
+    if(!fingerDown)return false;
     fingerDown=false;cancelHoldExit();cancelPickupTimer();setPickupState(false);
     if(drag){evaluate('window.PetPreview&&window.PetPreview.setDragging(false)');drag=false;return false;}
     var heldMs=Date.now()-at;
@@ -195,7 +198,7 @@ win.pet.setOnTouchListener(function(v,e){
       if(heldMs>=1000&&heldMs<HOLD_TO_CLOSE_MS)evaluate('window.PetPreview&&window.PetPreview.showSettings()');
       // Fast double taps open input in HTML; long holds never also count as pokes.
     }
-   }else if(a===3){
+   }else if(a===3||a===4){
     fingerDown=false;cancelHoldExit();cancelPickupTimer();setPickupState(false);
     if(drag){evaluate('window.PetPreview&&window.PetPreview.setDragging(false)');drag=false;}
   }
@@ -209,7 +212,7 @@ setInterval(function(){
   ui.run(function(){
     try{
       win.pet.evaluateJavascript(
-        "(function(){if(window.PetPreview&&window.PetPreview.setViewportLimits)window.PetPreview.setViewportLimits("+Math.floor(device.width/d)+","+Math.floor(device.height/d)+");return window.PetPreview&&window.PetPreview.getState?window.PetPreview.getState():'0|215'})()",cb
+        "(function(){if(window.PetPreview&&window.PetPreview.setViewportLimits)window.PetPreview.setViewportLimits("+Math.floor(device.width/d)+","+Math.floor(device.height/d)+");if(window.PetPreview&&window.PetPreview.recoverRendering)window.PetPreview.recoverRendering();return window.PetPreview&&window.PetPreview.getState?window.PetPreview.getState():'0|215'})()",cb
       );
     }catch(_){
       checking=false;

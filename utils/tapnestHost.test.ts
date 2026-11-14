@@ -21,6 +21,9 @@ it('lifts a stationary long hold before settings; only movement cancels close an
  const event=(a:number,x=10)=>({getActionMasked:()=>a,getRawX:()=>x,getRawY:()=>10});
  listener(null,event(0));[...timers.values()].find(t=>t.ms===500)!.fn();expect(ctx.codes.at(-1)).toContain('setHeld(true)');expect(ctx.drag).toBe(false);
  now+=1200;listener(null,event(1));expect(ctx.codes.at(-1)).toContain('showSettings');expect(ctx.codes.some((s:string)=>s.includes('setHeld(false)'))).toBe(true);
+ // A native cancellation/outside touch followed by a delayed UP used to reuse at and close.
+ ctx.codes=[];timers.clear();listener(null,event(0));listener(null,event(3));now+=6000;listener(null,event(1));expect(closed).toBe(0);expect(timers.size).toBe(0);
+ listener(null,event(0));listener(null,event(4));now+=6000;listener(null,event(2,80));listener(null,event(1));expect(closed).toBe(0);expect(ctx.drag).toBe(false);expect(timers.size).toBe(0);
  ctx.codes=[];timers.clear();listener(null,event(0));now+=5000;[...timers.values()].find(t=>t.ms===5000)!.fn();expect(closed).toBe(1);
  timers.clear();listener(null,event(0));listener(null,event(2,40));expect(timers.size).toBe(0);expect(ctx.codes.at(-1)).toContain('setDragging(true)');now+=6000;listener(null,event(1));expect(closed).toBe(1);expect(ctx.codes.at(-1)).toContain('setDragging(false)');
 });
