@@ -23,7 +23,7 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm vitest run utils/tapnest.test.ts utils/tapnestWake.test.ts utils/tapnestGeneration.test.ts utils/tapnestHost.test.ts utils/tapnestProtocol.test.ts utils/tapnestPlayerUI.test.ts utils/tapnestRenderer.test.ts utils/tapnestNativeParity.test.ts utils/chatInputInteraction.test.ts utils/activityBackup.test.ts utils/personalBackupAudit.test.ts utils/chatRequestPayload.test.ts utils/contextVolatileSplit.test.ts utils/datePromptCaching.test.ts utils/storyPromptCaching.test.ts
+      - run: pnpm vitest run utils/tapnest.test.ts utils/tapnestWake.test.ts utils/tapnestGeneration.test.ts utils/tapnestHost.test.ts utils/tapnestProtocol.test.ts utils/tapnestPlayerUI.test.ts utils/tapnestRenderer.test.ts utils/tapnestNativeParity.test.ts utils/tapnestRuntime.test.ts utils/tapnestTransport.test.ts utils/chatInputInteraction.test.ts utils/activityBackup.test.ts utils/personalBackupAudit.test.ts utils/chatRequestPayload.test.ts utils/contextVolatileSplit.test.ts utils/datePromptCaching.test.ts utils/storyPromptCaching.test.ts
       - run: pnpm build
 
       - name: Install isolated UI browser

@@ -10,9 +10,9 @@ try{html=download('viewer.html');engine=download('engine.js');files.write(files.
 try{html=html.replace('<script src="engine.js"></script>','<script>'+engine.replace(/<\/script/gi,'<\\/script')+'</script>');}catch(e){toastLog(String(e));exit();}
 var d=context.getResources().getDisplayMetrics().density;
 function dp(v){return Math.round(v*d);}
-var PET_SIZE_DP=210,BASE_EXTRA_DP=90,WW=dp(220),HH=dp(330),anchorY=Math.round(device.height*.33),extraDp=90;
+var PET_SIZE_DP=210,BASE_EXTRA_DP=0,WW=dp(220),HH=dp(215),anchorY=Math.round(device.height*.33),anchorX=Math.max(0,device.width-WW-dp(10)),extraDp=0;
 var win=floaty.rawWindow(<frame w="*" h="*" bg="#00000000"><webview id="pet" w="*" h="*" /></frame>);
-win.setSize(WW,HH);win.setPosition(Math.max(0,device.width-WW-dp(10)),anchorY);win.setTouchable(true);
+win.setSize(WW,HH);win.setPosition(anchorX,anchorY);win.setTouchable(true);
 var residentVisible=true;
 var visibilityFile=files.join(cacheDir,'visibility-v1.json');
 try{residentVisible=JSON.parse(files.read(visibilityFile))!==false;}catch(_){}
@@ -34,8 +34,8 @@ function interaction(e){if(!residentVisible||!e||!payload||renderState.status!==
   if(at-tapBurstAt>=3000){if(payload.binding.apiEnabled)closeBurst();tapBurstCount=1;}else tapBurstCount=Math.min(1000,tapBurstCount+1);
   tapBurstAt=at;tapClosed=false;chooseLine('tap');return;
  }
- if(e.kind==='feed'||e.kind==='bath'){chooseLine(e.kind);if(!payload.binding.apiEnabled)return;if(!session||Date.now()-lastWatch>30000&&!busy&&!apiPending){preset('API连接暂不可用，请保持糯米机运行并重新配对。');return;}emit(e.kind,String(e.text||'').slice(0,80));return;}
- if(e.kind==='text'&&payload.binding.apiEnabled){if(!session||Date.now()-lastWatch>30000&&!busy&&!apiPending){speak('API连接暂不可用，请保持糯米机运行并重新配对。');return;}emit('text',e.text);}
+ if(e.kind==='feed'||e.kind==='bath'){chooseLine(e.kind);if(!payload.binding.apiEnabled)return;if(!session||Date.now()-lastWatch>30000&&!busy&&!apiPending){preset('糯米机连接暂不可用，请保持网页运行；将自动恢复，也可到桌宠App点开启。');return;}emit(e.kind,String(e.text||'').slice(0,80));return;}
+ if(e.kind==='text'&&payload.binding.apiEnabled){if(!session||Date.now()-lastWatch>30000&&!busy&&!apiPending){speak('糯米机连接暂不可用，请保持网页运行；将自动恢复，也可到桌宠App点开启。');return;}emit('text',e.text);}
 }
 function dispatchBurst(){if(!residentVisible||!payload||!payload.binding.apiEnabled||renderState.status!=='ready')return;var now=Date.now();if(!session||now-lastWatch>30000&&!busy&&!apiPending){tapBatches=[];if(now-tapBurstAt>3000)tapClosed=true;return;}if(now-tapBurstAt>3000)closeBurst();if(busy||apiPending||chatOpen||panelOpen||now-tapBurstAt<=3000||!tapBatches.length)return;var batch=tapBatches.shift(),current=tapBurstCount;tapBurstCount=batch.count;emit('tap');tapBurstCount=current;}
 var cacheFile=files.join(cacheDir,'desktop-v2.json'),formCache=files.join(cacheDir,'active-form-v2.json');
@@ -103,7 +103,9 @@ var cb=new JavaAdapter(android.webkit.ValueCallback,{
     var parts=textResult.split("|");
     if(parts.length<2)return;
     var opened=parts[0]==="1",nextExtra=Number(parts[1]);panelOpen=parts[2]==="1";
-    if(isFinite(nextExtra)){var nextHeight=Math.max(dp(330),Math.min(device.height,dp(nextExtra)));if(Math.abs(nextHeight-HH)>dp(2)){HH=nextHeight;ui.run(function(){win.setSize(WW,HH);win.setPosition(win.getX(),Math.max(0,Math.min(device.height-HH,anchorY)));});}}
+    var nextWidth=Number(parts[3]);
+    if(isFinite(nextExtra)){var nextHeight=Math.max(dp(60),Math.min(device.height,dp(nextExtra))),nextW=isFinite(nextWidth)&&nextWidth>0?Math.max(dp(100),Math.min(device.width,dp(nextWidth))):WW;if(Math.abs(nextHeight-HH)>dp(1)||Math.abs(nextW-WW)>dp(1)){HH=nextHeight;WW=nextW;ui.run(function(){win.setSize(WW,HH);win.setPosition(Math.max(0,Math.min(device.width-WW,anchorX)),Math.max(0,Math.min(device.height-HH,anchorY)));});}}
+
     var newlyOpened=opened&&!chatOpen;
     chatOpen=opened;
     if(newlyOpened){
@@ -177,7 +179,8 @@ win.pet.setOnTouchListener(function(v,e){
       evaluate('window.PetPreview&&window.PetPreview.setDragging(true)');
     }
     if(drag){
-      anchorY=Math.max(0,Math.min(device.height-dp(PET_SIZE_DP+BASE_EXTRA_DP),Math.round(oy+dy)));
+      anchorY=Math.max(0,Math.min(device.height-HH,Math.round(oy+dy)));
+      anchorX=Math.max(0,Math.min(device.width-WW,Math.round(ox+dx)));
       win.setPosition(
         Math.max(0,Math.min(device.width-WW,Math.round(ox+dx))),
         Math.max(0,Math.min(device.height-HH,anchorY))
@@ -206,7 +209,7 @@ setInterval(function(){
   ui.run(function(){
     try{
       win.pet.evaluateJavascript(
-        "(function(){return window.PetPreview&&window.PetPreview.getState?window.PetPreview.getState():'0|8'})()",cb
+        "(function(){if(window.PetPreview&&window.PetPreview.setViewportLimits)window.PetPreview.setViewportLimits("+Math.floor(device.width/d)+","+Math.floor(device.height/d)+");return window.PetPreview&&window.PetPreview.getState?window.PetPreview.getState():'0|215'})()",cb
       );
     }catch(_){
       checking=false;

@@ -1,3 +1,4 @@
+import {isPetControlCancellation} from '../features/tapnest/transport';
 import { dateLaunch } from '../utils/dateLaunch';
 import { consumePhotoChoices } from '../utils/photoChoice';
 import { getProactiveUserActivity, isProactiveUserReply } from '../utils/proactiveActivity';
@@ -1400,7 +1401,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
               return response;
           } catch (err: any) {
               const requestSignal = (sendArgs[1] as RequestInit | undefined)?.signal || (sendArgs[0] instanceof Request ? sendArgs[0].signal : undefined);
-              if (isHomeAssetDisposal(err, requestSignal, urlStr)) throw err;
+              if (isHomeAssetDisposal(err, requestSignal, urlStr) || isPetControlCancellation(err, requestSignal, urlStr)) throw err;
               // Network Failure
               if (urlStr.includes('/chat/completions')) {
                   updateApiRequestCaptureUsage({ captureId: apiRequestCaptureId, ok: false });
