@@ -15190,7 +15190,7 @@ var tapnestHandler = {
     const form = config.forms.find((f) => f.id === input.event.formId);
     const state = { charId, eventId: id, formId: input.event.formId, startedAt };
     ctx.scratch.petCloudFire = state;
-    return { messages: [...config.messages, { role: "user", content: renderPetContext(records) + "\n\u5F53\u524D\u684C\u5BA0\u5F62\u6001\uFF1A" + (form?.name || input.event.formId) + "\u3002\u8BF7\u53EA\u56DE\u5E94\u6700\u540E\u4E00\u6B21\u684C\u5BA0\u4E8B\u4EF6\uFF0C\u4E0D\u66FF\u7528\u6237\u8BF4\u8BDD\uFF0C\u53EA\u8F93\u51FA\u6C14\u6CE1\u6B63\u6587\u3002" }], state, totalTimeoutMs: 6e5 };
+    return { messages: [...config.messages, { role: "user", content: renderPetContext(records) + "\n\u5F53\u524D\u684C\u5BA0\u5F62\u6001\uFF1A" + (form?.name || input.event.formId) + "\u3002\u672C\u6B21\u8981\u56DE\u5E94\u7684\u4E8B\u4EF6\uFF08\u4EC5\u7528\u4E8E\u5B9A\u4F4D\uFF0C\u4E0D\u662F\u7528\u6237\u53C8\u8BF4\u4E86\u4E00\u6B21\uFF09\uFF1A" + petEventContent(input.event) + "\u3002\u4E0D\u66FF\u7528\u6237\u8BF4\u8BDD\uFF0C\u53EA\u8F93\u51FA\u6C14\u6CE1\u6B63\u6587\u3002" }], state, totalTimeoutMs: 6e5 };
   },
   async llmOutput({ ctx, state }) {
     const s = state;
@@ -19760,6 +19760,7 @@ async function admitPetCloud(args, env, upstream2) {
     if (JSON.stringify(saved2.event) !== JSON.stringify(e2)) throw Error("\u540C\u4E00\u6D88\u606F\u7F16\u53F7\u4E0D\u80FD\u4FEE\u6539\u5185\u5BB9");
     const result2 = rows.find((r) => r.key === "result:" + e2.id);
     if (result2) return JSON.parse(result2.value);
+    if (saved2.scheduled !== true && !rows.some((r) => r.key === "claim:" + e2.id)) return { status: "missing" };
     if (Date.now() - saved2.acceptedAt > 15 * 6e4) return { status: "queued", notice: "\u4E91\u7AEF\u4ECD\u5728\u6392\u961F\u6216\u5904\u7406\uFF0C\u8BF7\u52FF\u91CD\u590D\u53D1\u9001\uFF1B\u53EF\u56DE\u7F51\u9875\u67E5\u770B\u8BB0\u5F55\u3002" };
     return { status: "queued" };
   }
@@ -19780,6 +19781,7 @@ async function admitPetCloud(args, env, upstream2) {
     saved = { event: e, uuid: crypto.randomUUID(), acceptedAt: Date.now(), scheduled: false };
     await io.write(namespace, args.charId, [{ key: eventKey, value: JSON.stringify(saved) }, { key: "record:" + e.id + ":in", value: JSON.stringify({ id: e.id + ":in", eventId: e.id, at: saved.acceptedAt, role: e.kind === "text" ? "user" : "system", content: petEventContent(e), kind: e.kind, formId: e.formId, source: "pet" }) }]);
   }
+  if (!rows.some((r) => r.key === "record:" + e.id + ":in") && !rows.some((r) => r.key === "claim:" + e.id)) await io.write(namespace, args.charId, [{ key: "record:" + e.id + ":in", value: JSON.stringify({ id: e.id + ":in", eventId: e.id, at: saved.acceptedAt, role: e.kind === "text" ? "user" : "system", content: petEventContent(e), kind: e.kind, formId: e.formId, source: "pet" }) }]);
   if (!saved.scheduled) {
     await io.schedule({ uuid: saved.uuid, idempotencyKey: "tapnest:" + saved.uuid, contactName: config.name, messageType: "auto", messageSubtype: "job", immediate: true, recurrenceType: "none", tzId: "UTC", messages: [{ role: "user", content: "\u684C\u5BA0\u4E8B\u4EF6" }], apiUrl: config.api.url, apiKey: config.api.key, primaryModel: config.api.model, temperature: config.api.temperature ?? 0.8, maxTokens: config.api.maxTokens, metadata: { charId: args.charId, amsgKind: PET_CLOUD_KIND, petEventId: e.id, petRevision: e.revision } });
     saved.scheduled = true;

@@ -1,7 +1,7 @@
 import {AMSG_CHAT_PRESENCE_KEY,parseAmsgChatPresence,isFreshChatPresence} from '../../../utils/amsgChatPresence';
 import {amsgStateNamespace} from '../../../utils/amsgFirePack';
 import type {FireKindHandler,KindWriteState} from './fireKinds';
-import {PET_CLOUD_CONFIG,petCloudNamespace,parsePetRecords,petContextRecords,renderPetContext,type PetCloudConfig,type PetCloudRecord} from '../../../utils/tapnestCloud';
+import {PET_CLOUD_CONFIG,petEventContent,petCloudNamespace,parsePetRecords,petContextRecords,renderPetContext,type PetCloudConfig,type PetCloudRecord} from '../../../utils/tapnestCloud';
 import {sanitizeForNotification} from '../../../utils/sanitize';
 interface PetFireState {charId:string;eventId:string;formId:string;startedAt:number;committed?:boolean}
 export const tapnestHandler:FireKindHandler={
@@ -23,7 +23,7 @@ export const tapnestHandler:FireKindHandler={
   const form=config.forms.find(f=>f.id===input.event.formId);
   const state:PetFireState={charId,eventId:id,formId:input.event.formId,startedAt};
   ctx.scratch.petCloudFire=state;
-  return {messages:[...config.messages,{role:'user',content:renderPetContext(records)+'\n当前桌宠形态：'+(form?.name||input.event.formId)+'。请只回应最后一次桌宠事件，不替用户说话，只输出气泡正文。'}],state,totalTimeoutMs:600000};
+  return {messages:[...config.messages,{role:'user',content:renderPetContext(records)+'\n当前桌宠形态：'+(form?.name||input.event.formId)+'。本次要回应的事件（仅用于定位，不是用户又说了一次）：'+petEventContent(input.event)+'。不替用户说话，只输出气泡正文。'}],state,totalTimeoutMs:600000};
  },
  async llmOutput({ctx,state}){
   const s=state as PetFireState;if(!ctx.writeState)throw Error('桌宠结果无法存储');

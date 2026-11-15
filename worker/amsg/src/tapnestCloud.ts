@@ -39,6 +39,7 @@ export async function admitPetCloud(args:PetRouteArgs,env:PetEnv,upstream:Instan
   const savedRow=rows.find(r=>r.key==='event:'+e.id);if(!savedRow)return {status:'missing'};
   const saved=JSON.parse(savedRow.value);if(JSON.stringify(saved.event)!==JSON.stringify(e))throw Error('同一消息编号不能修改内容');
   const result=rows.find(r=>r.key==='result:'+e.id);if(result)return JSON.parse(result.value);
+  if(saved.scheduled!==true&&!rows.some(r=>r.key==='claim:'+e.id))return {status:'missing'};
   if(Date.now()-saved.acceptedAt>15*60000)return {status:'queued',notice:'云端仍在排队或处理，请勿重复发送；可回网页查看记录。'};
   return {status:'queued'};
  }
@@ -57,6 +58,7 @@ export async function admitPetCloud(args:PetRouteArgs,env:PetEnv,upstream:Instan
   saved={event:e,uuid:crypto.randomUUID(),acceptedAt:Date.now(),scheduled:false};
   await io.write(namespace,args.charId,[{key:eventKey,value:JSON.stringify(saved)},{key:'record:'+e.id+':in',value:JSON.stringify({id:e.id+':in',eventId:e.id,at:saved.acceptedAt,role:e.kind==='text'?'user':'system',content:petEventContent(e),kind:e.kind,formId:e.formId,source:'pet'})}]);
  }
+ if(!rows.some(r=>r.key==='record:'+e.id+':in')&&!rows.some(r=>r.key==='claim:'+e.id))await io.write(namespace,args.charId,[{key:'record:'+e.id+':in',value:JSON.stringify({id:e.id+':in',eventId:e.id,at:saved.acceptedAt,role:e.kind==='text'?'user':'system',content:petEventContent(e),kind:e.kind,formId:e.formId,source:'pet'})}]);
  if(!saved.scheduled){
   // UUID + idempotency key prevent an interrupted acknowledgement from enqueueing twice.
   await io.schedule({uuid:saved.uuid,idempotencyKey:'tapnest:'+saved.uuid,contactName:config.name,messageType:'auto',messageSubtype:'job',immediate:true,recurrenceType:'none',tzId:'UTC',messages:[{role:'user',content:'桌宠事件'}],apiUrl:config.api.url,apiKey:config.api.key,primaryModel:config.api.model,temperature:config.api.temperature??.8,maxTokens:config.api.maxTokens,metadata:{charId:args.charId,amsgKind:PET_CLOUD_KIND,petEventId:e.id,petRevision:e.revision}});
