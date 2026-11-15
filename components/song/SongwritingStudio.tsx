@@ -641,7 +641,7 @@ export default function SongwritingStudio({
             </div>
           </>
         )}
-        {tab === "voice" && <SingingLab char={char} />}
+        {tab === "voice" && <SingingLab key={char?.id} char={char} />}
         {tab === "production" && <HaimianProduction key={song.id} song={song} onUpdate={setSong} />}
         {tab === "history" && (
           <>

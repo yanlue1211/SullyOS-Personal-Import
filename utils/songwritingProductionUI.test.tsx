@@ -6,6 +6,7 @@ import HaimianProduction from '../components/song/HaimianProduction';
 import {productionFingerprint} from '../features/songwriting/production';
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
 const state=vi.hoisted(()=>({song:null as any,call:vi.fn(),text:vi.fn(),turn:vi.fn()}));
+vi.mock('../features/songwriting/voiceClone',()=>({loadVoiceClone:async()=>null}));
 vi.mock('../context/OSContext',()=>({useOS:()=>({apiConfig:{},userProfile:{name:'我'},characters:[],groups:[]})}));
 vi.mock('../features/songwriting/storage',()=>({getSong:async()=>state.song,writeTurn:(...a:any[])=>state.turn(...a),mutateSong:async(_id:string,change:any)=>{const d=change(state.song);state.song=d.song;return d.song}}));
 vi.mock('../features/songwriting/production',async original=>({...await original<any>(),haimianCall:(...a:any[])=>state.call(...a),generateProductionText:(...a:any[])=>state.text(...a)}));

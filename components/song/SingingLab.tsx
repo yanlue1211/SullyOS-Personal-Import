@@ -1,3 +1,5 @@
+import VoiceClonePanel from "./VoiceClonePanel";
+import { HAIMIAN_READING_TEXT } from "../../features/songwriting/voiceClone";
 import React, { useEffect, useState } from "react";
 import { useOS } from "../../context/OSContext";
 import { DB } from "../../utils/db";
@@ -7,7 +9,8 @@ import type { CharacterProfile } from "../../types";
 /** Preparation only. No Haimian credentials or unverified endpoints are submitted. */
 export default function SingingLab({ char }: { char?: CharacterProfile }) {
   const { apiConfig, addToast } = useOS();
-  const [script, setScript] = useState(""),
+  const [sampleScript, setSampleScript] = useState("");
+  const [script, setScript] = useState(HAIMIAN_READING_TEXT),
     [sample, setSample] = useState<Blob | null>(null),
     [url, setUrl] = useState(""),
     [busy, setBusy] = useState(false),
@@ -23,7 +26,8 @@ export default function SingingLab({ char }: { char?: CharacterProfile }) {
             const blob = await (await fetch(row.audio)).blob();
             if (active) {
               setSample(blob);
-              setScript(row.script || "");
+              setScript(row.script || HAIMIAN_READING_TEXT);
+              setSampleScript(row.script || "");
             }
           }
         })
@@ -66,6 +70,7 @@ export default function SingingLab({ char }: { char?: CharacterProfile }) {
           createdAt: Date.now(),
         });
         setSample(blob);
+        setSampleScript(script);
         addToast("测试朗读已准备好", "success");
       } finally {
         if (result.url.startsWith("blob:")) URL.revokeObjectURL(result.url);
@@ -80,12 +85,11 @@ export default function SingingLab({ char }: { char?: CharacterProfile }) {
   return (
     <section className="sw-panel">
       <div className="sw-panel-heading">
-        <h3>专属歌声 · 实验室</h3>
+        <h3>专属歌声</h3>
         <small>A VOICE THAT FEELS LIKE YOU</small>
       </div>
       <p className="sw-lab-copy">
-        原创歌曲可在「海绵出歌」生成；这里先准备角色的
-        MiniMax 测试朗读。
+        先准备角色朗读，再直接上传创建海绵音色。
       </p>
       <div className="sw-lab-info">
         {char?.name || "未选择角色"} · MiniMax 音色：
@@ -93,7 +97,7 @@ export default function SingingLab({ char }: { char?: CharacterProfile }) {
           (char?.voiceProfile?.timberWeights?.length ? "混合音色" : "尚未配置")}
       </div>
       <p className="sw-lab-copy">
-        选择海绵提供的一张固定台词卡，把完整台词原样粘贴到下面。可以用角色音色朗读歌词，不需要唱出来，也不用手机外放再录音。
+        已填入这次官网确认的第五张「朗读以下文字」台词。直接用角色平时的声音朗读，不需要唱。若官网以后更换台词，可以修改后重新生成。
       </p>
       <textarea
         aria-label="音色克隆测试台词"
@@ -145,6 +149,7 @@ export default function SingingLab({ char }: { char?: CharacterProfile }) {
           </button>
         </div>
       )}
+      {char && <VoiceClonePanel key={char.id} charId={char.id} sample={sample} script={sampleScript} />}
       <a
         className="sw-lab-link"
         href="https://www.haimian.com/create"
@@ -155,7 +160,7 @@ export default function SingingLab({ char }: { char?: CharacterProfile }) {
       </a>
       <a className="sw-lab-link" href="https://nuomi-haimian.yanlue.workers.dev/music" target="_blank" rel="noopener noreferrer">打开音频文件上传测试页 ↗</a>
       <p className="sw-note">
-        保存测试音频后，在上传测试页展开“上传朗读音频”，直接选择文件上传，无需外放录音。本页只准备朗读素材，不自动上传或克隆。音色上传仍在独立测试页验证；已有音色可直接到「海绵出歌」使用。
+        保存测试音频后，在上传测试页展开“上传朗读音频”，直接选择文件上传，无需外放录音。文件上传链路仍待实测；处理成功不代表歌唱音色完全相同，需要再试听成品确认。
       </p>
     </section>
   );

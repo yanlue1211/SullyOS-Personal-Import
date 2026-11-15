@@ -1,3 +1,4 @@
+import { loadVoiceClone } from "../../features/songwriting/voiceClone";
 import React, { useEffect, useRef, useState } from 'react';
 import type { SongSheet } from '../../types';
 import { useOS } from '../../context/OSContext';
@@ -89,7 +90,7 @@ export default function HaimianProduction({ song, onUpdate }: {
         throw Error('音色查询失败'); const items = [...(v.data.data.voices || []), ...(v.data.data.campaign_voices || [])].filter((v: any) => v.status === 2); setVoices([...new Map(items.map((v: any) => [String(v.id), { id: String(v.id), title: v.title || String(v.id) }])).values()] as {
         id: string;
         title: string;
-    }[]); setInfo('当前积分：' + b.data.data.total_balance); })}>读取积分与音色</button>
+    }[]); const binding = await loadVoiceClone(song.collaboratorId); if(binding?.state === 'ready' && items.some((v:any)=>String(v.id)===binding.id))setVoice(binding.id); setInfo('当前积分：' + b.data.data.total_balance); })}>读取积分与音色</button>
  <select aria-label="海绵演唱音色" value={voice} onChange={e => setVoice(e.target.value)}><option value="">选择已有音色</option>{voices.map(v => <option key={v.id} value={v.id}>{v.title}</option>)}</select></details>
  <div className="sw-production-step"><div className="sw-production-step-heading"><span>04</span><div><h4>生成歌曲</h4><p>确认后生成一首，会消耗海绵积分。</p></div></div><button className="sw-primary sw-production-submit" disabled={!!busy || !!task && ['submitting', 'unknown', 'processing'].includes(task.state)} onClick={submit}>确认消耗积分，生成一首</button>
  {task && <div className="sw-production-task"><p className="sw-note">任务：{task.id} · {({submitting:"正在提交",unknown:"待核对",processing:"生成中",complete:"已完成",failed:"失败"})[task.state]}</p>{['submitting', 'unknown'].includes(task.state) ? <><p>提交结果尚未确认，请先到海绵官网核对，勿重复生成。</p><button disabled={!!busy} onClick={() => { const id = window.prompt('官网已有任务时填写任务 ID；确认未受理可留空解除。'); if (id === null)
