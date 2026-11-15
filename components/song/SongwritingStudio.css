@@ -700,3 +700,23 @@
 .sw-production-view .sw-hero h2 { font-size:16px; margin:4px 0; }
 .sw-production-view .sw-hero .sw-eyebrow { font-size:8px; letter-spacing:1px; }
 .sw-production-view .sw-scroll { padding-top:12px; }
+
+/* The existing Haimian production controls can also live inside the AI-generator modal. */
+.sw-production-modal {
+  --sw-bg: #f4faf5;
+  --sw-ink: #34574e;
+  --sw-muted: #79968d;
+  --sw-accent: #79a68d;
+  --sw-border: #d2e4da;
+  --sw-light: #dcefe0;
+  color: var(--sw-ink);
+  min-width: 0;
+}
+.sw-production-modal .sw-production { margin: 0; }
+.sw-production-modal .sw-production-intro { padding: 2px 0 12px; }
+.sw-production-modal .sw-production-step { padding: 13px 11px; margin-bottom: 10px; border-radius: 16px; }
+.sw-production-modal .sw-production-step-heading { margin-bottom: 10px; }
+.sw-production-modal .sw-production-step-heading h4 { font-size: 14px; }
+.sw-production-modal .sw-production textarea { min-height: 100px; }
+.sw-production-modal .sw-production button { width: 100%; }
+.sw-production-modal .sw-production .sw-actions button { width: 100%; }
