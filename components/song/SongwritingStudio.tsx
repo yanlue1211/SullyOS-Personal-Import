@@ -42,6 +42,7 @@ interface Props {
   onTheme: (t: StudioTheme) => void;
   onBack: () => void;
   onPreview: (song: SongSheet) => void;
+  initialTab?: "lyrics" | "production";
 }
 export default function SongwritingStudio({
   song: initial,
@@ -49,6 +50,7 @@ export default function SongwritingStudio({
   onTheme,
   onBack,
   onPreview,
+  initialTab = "lyrics",
 }: Props) {
   const {
     characters,
@@ -60,7 +62,7 @@ export default function SongwritingStudio({
     lastMsgTimestamp,
   } = useOS();
   const [song, setSong] = useState(initial),
-    [tab, setTab] = useState<"lyrics" | "chat" | "history" | "voice" | "production">("lyrics"),
+    [tab, setTab] = useState<"lyrics" | "chat" | "history" | "voice" | "production">(initialTab),
     [rows, setRows] = useState<Message[]>([]),
     [all, setAll] = useState(false);
   const [visibleCount, setVisibleCount] = useState(200);
