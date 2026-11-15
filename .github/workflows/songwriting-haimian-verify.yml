@@ -1,0 +1,34 @@
+name: Songwriting Haimian modal + completed-song access
+on:
+  push:
+    branches: [personal/songwriting-haimian-reentry-20261116]
+  pull_request:
+    branches: [personal/audio-listening]
+    paths:
+      - 'apps/SongwritingApp.tsx'
+      - 'apps/Settings.tsx'
+      - 'components/settings/HaimianMusicSettings.tsx'
+      - 'components/song/**'
+      - 'features/songwriting/**'
+      - 'utils/songwriting.test.ts'
+      - '.github/workflows/songwriting-haimian-verify.yml'
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      NODE_OPTIONS: '--max-old-space-size=8192'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm vitest run utils/songwriting.test.ts --maxWorkers=2 --minWorkers=1
+      - run: pnpm build
