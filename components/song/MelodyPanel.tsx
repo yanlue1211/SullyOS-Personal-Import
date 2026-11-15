@@ -158,9 +158,15 @@ export default function MelodyPanel({ song, onUpdate }: Props) {
       const sounds = await synth.init({ visualObj: elements[0], audioContext, options: { chordsOff: true } });
       if (sounds?.error?.length) throw Error('部分钢琴音色加载失败，请检查网络');
       await synth.prime();
-      const wave = synth.download();
-      if (!(wave instanceof ArrayBuffer) && !ArrayBuffer.isView(wave)) throw Error('abcjs 未返回有效 WAV 数据');
-      const blob = new Blob([wave], { type: 'audio/wav' });
+      // abcjs CreateSynth.download() returns a blob: URL, not a byte array.
+      const temporaryUrl: string = synth.download();
+      if (!temporaryUrl?.startsWith('blob:')) throw Error('abcjs 未返回有效 WAV 地址');
+      let blob: Blob;
+      try {
+        const response = await fetch(temporaryUrl);
+        if (!response.ok) throw Error('abcjs WAV 读取失败');
+        blob = await response.blob();
+      } finally { URL.revokeObjectURL(temporaryUrl); }
       if (blob.size < 44) throw Error('音频文件为空');
       setSound('wav', { versionId: current.id, blob, url: URL.createObjectURL(blob) });
       const binary = abc.synth.getMidiFile(elements[0], { midiOutputType: 'binary', chordsOff: true });
