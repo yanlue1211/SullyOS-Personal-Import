@@ -58,7 +58,7 @@ test('original submits exactly one song without reference or canvas, with numeri
   calls++;assert.equal(new URL(url).pathname,'/jd/api/v1/generate/music');
   const body=JSON.parse(opts.body);assert.equal(body.voice_id,456);assert.equal(body.batch_size,1);
   assert.equal(body.source_item,undefined);assert.equal(body.canvas_id,undefined);
-  assert.equal(body.genre,'Folk');return Response.json({status_code:0,data:{task_id:'originalTest'}});
+  assert.equal(body.genre,undefined);assert.equal(body.biz_type,0);assert.equal(body.is_original_prompt,true);assert.ok(body.prompt.includes('民谣'));return Response.json({status_code:0,data:{tasks:[{task_id:'originalTest'}],deducted_credit:5,total_balance:100}});
  });
  assert.equal(calls,1);assert.equal(d.songTaskId,'originalTest');
  await assert.rejects(musicOperation('original',{...input,confirmSpend:false},cookie,async()=>{throw Error('must not call')}),/invalid_input/);
@@ -72,7 +72,8 @@ test('original completion requires progress and vid; download uses generated vid
  const incomplete=await musicOperation('original-status',{songTaskId:'originalTest'},cookie,async()=>Response.json({status_code:0,data:{status:2,payload:JSON.stringify({progress:90})}}));assert.equal(incomplete.state,'processing');
  const r=await musicOperation('original-download',{songTaskId:'originalTest'},cookie,async(url,opts)=>{
   if(new URL(url).pathname.includes('/generate/task/'))return Response.json({status_code:0,data:{status:2,payload:JSON.stringify({progress:100,vid:'vTest'})}});
-  assert.equal(new URL(url).pathname,'/jd/api/v1/video/video_urls/get');assert.deepEqual(JSON.parse(opts.body),{vid:['vTest'],format_type:1});
-  return Response.json({status_code:0,data:{video_urls:{vTest:{origin_video_url:'https://v3-swing.haimianyinyue.com/final.wav',transcoding_video_url:'https://v3-swing.haimianyinyue.com/original.mp3'}}}});
+  assert.equal(new URL(url).pathname,'/jd/api/v1/misc/download');assert.deepEqual(JSON.parse(opts.body),{task_id:'originalTest'});
+  return Response.json({status_code:0,data:{video_info:{origin_video_url:'https://v3-swing.haimianyinyue.com/final.wav',transcoding_video_url:'https://v3-swing.haimianyinyue.com/original.mp3'}}});
  });assert.ok(r.mediaUrl.endsWith('final.wav'));
 });
+
