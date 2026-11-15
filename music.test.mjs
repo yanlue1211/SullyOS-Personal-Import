@@ -77,3 +77,11 @@ test('original completion requires progress and vid; download uses generated vid
  });assert.ok(r.mediaUrl.endsWith('final.wav'));
 });
 
+test('personal app preflight succeeds; foreign origins still denied',async()=>{
+ const req=origin=>new Request('https://probe.example/music/original',{method:'OPTIONS',headers:{Origin:origin}});
+ const r=await handleMusic(req('https://yanlue1211.github.io'),env);assert.equal(r.status,204);assert.equal(r.headers.get('Access-Control-Allow-Origin'),'https://yanlue1211.github.io');assert.ok(r.headers.get('Access-Control-Allow-Headers').includes('Content-Type'));
+ assert.equal((await handleMusic(req('https://evil.example'),env)).status,403);
+});
+test('custom production prompt is sent unchanged without appended preset',async()=>{
+ await musicOperation('original',{confirmSpend:true,voiceId:'123',lyrics:'测试歌词',prompt:'爵士与民谣融合',title:'测试',genre:'Custom'},cookie,async(url,opts)=>{assert.equal(JSON.parse(opts.body).prompt,'爵士与民谣融合');return Response.json({status_code:0,data:{tasks:[{task_id:'fakeTask'}]}})});
+});

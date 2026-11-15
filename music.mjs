@@ -76,10 +76,10 @@ export async function musicOperation(action, input, cookie, upstreamFetch = fetc
       : typeof input.lyrics !== 'string' || !input.lyrics.trim() || input.lyrics.length > 5000 ? 'lyrics'
       : typeof input.prompt !== 'string' || !input.prompt.trim() || input.prompt.length > 2000 ? 'prompt'
       : typeof input.title !== 'string' || input.title.length > 100 ? 'title'
-      : !['Pop','Folk','Rock','R&B','Electronic','Jazz'].includes(input.genre) ? 'genre' : null;
+      : !['Pop','Folk','Rock','R&B','Electronic','Jazz','Custom'].includes(input.genre) ? 'genre' : null;
     if (invalidField) { const error = new Error('invalid_input'); error.field = invalidField; throw error; }
     const d = await api('/jd/api/v1/generate/music', {}, {
-      prompt: input.prompt + '，' + ({Pop:'流行',Folk:'民谣',Rock:'摇滚','R&B':'R&B',Electronic:'电子',Jazz:'爵士'}[input.genre]), lyrics: input.lyrics.replace(/\r\n?/g, '\n'),
+      prompt: input.prompt + (input.genre === 'Custom' ? '' : '，' + ({Pop:'流行',Folk:'民谣',Rock:'摇滚','R&B':'R&B',Electronic:'电子',Jazz:'爵士'}[input.genre])), lyrics: input.lyrics.replace(/\r\n?/g, '\n'),
       is_original_prompt: true, voice_id: Number(input.voiceId),
       task_type: 1, biz_type: 0, batch_size: 1,
       title: input.title || '糯米原创测试',
@@ -147,12 +147,13 @@ export async function musicOperation(action, input, cookie, upstreamFetch = fetc
 }
 export async function handleMusic(request, env, upstreamFetch = fetch) {
   const u = new URL(request.url); const origin = request.headers.get('Origin');
-  const reply = (data, status = 200) => Response.json(data, { status, headers: { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } });
-  if (origin && origin !== u.origin) return reply({ error: 'origin_denied' }, 403);
+  const reply = (data, status = 200) => Response.json(data, { status, headers: { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', ...(origin ? {'Access-Control-Allow-Origin': origin, 'Vary':'Origin'} : {}) } });
+  if (origin && origin !== u.origin && origin !== (env.APP_ORIGIN || 'https://yanlue1211.github.io')) return reply({ error: 'origin_denied' }, 403);
   if (u.search) return reply({ error: 'route_not_found' }, 404);
   if (request.method === 'GET' && u.pathname === '/music') return new Response(MUSIC_PAGE, { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'Content-Security-Policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; media-src https://*.haimianyinyue.com; base-uri 'none'; frame-ancestors 'none'; form-action 'none'" } });
   const action = u.pathname.split('/')[2];
   if (!['prepare', 'generate', 'status', 'download', 'original', 'original-status', 'original-download', 'voice-upload', 'voice-status'].includes(action) || u.pathname !== '/music/' + action) return reply({ error: 'route_not_found' }, 404);
+  if (request.method === 'OPTIONS') return new Response(null,{status:204,headers:{...(origin?{'Access-Control-Allow-Origin':origin,'Vary':'Origin'}:{}),'Access-Control-Allow-Methods':'POST','Access-Control-Allow-Headers':'Authorization, X-Haimian-Cookie, Content-Type','Access-Control-Max-Age':'600'}});
   if (request.method !== 'POST') return reply({ error: 'method_not_allowed' }, 405);
   if (typeof env.AUTH_TOKEN !== 'string' || env.AUTH_TOKEN.length < 32) return reply({ error: 'configure_AUTH_TOKEN_secret_first' }, 503);
   if (request.headers.get('Authorization') !== 'Bearer ' + env.AUTH_TOKEN) return reply({ error: 'unauthorized' }, 401);

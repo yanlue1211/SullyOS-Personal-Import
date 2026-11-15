@@ -27,7 +27,7 @@ export async function handle(request, env, upstreamFetch = fetch) {
   if (url.pathname === '/music' || url.pathname.startsWith('/music/')) return handleMusic(request, env, upstreamFetch);
   const origin = request.headers.get('Origin');
   // The built-in test page is same-origin. Optionally permit the personal app.
-  const allowed = origin && (origin === url.origin || origin === env.APP_ORIGIN);
+  const allowed = origin && (origin === url.origin || origin === (env.APP_ORIGIN || 'https://yanlue1211.github.io'));
   if (origin && !allowed) return json({ error: 'origin_denied' }, 403);
   const cors = allowed ? { 'Access-Control-Allow-Origin': origin, 'Vary': 'Origin' } : {};
   const reply = (body, status = 200) => json(body, status, cors);
@@ -105,3 +105,4 @@ export async function handle(request, env, upstreamFetch = fetch) {
 // Cloudflare passes ExecutionContext as the third argument; keep it separate
 // from handle's injectable upstreamFetch used by unit tests.
 export default { fetch(request, env) { return handle(request, env); } };
+
