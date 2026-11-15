@@ -1,3 +1,4 @@
+import HaimianCredentials, { useHaimianCredentials } from './HaimianCredentials';
 import React, { useEffect, useRef, useState } from 'react';
 import { createVoiceClone, inspectVoiceClone, loadVoiceClone, mutateVoiceClone, type VoiceCloneRecord } from '../../features/songwriting/voiceClone';
 export default function VoiceClonePanel({ charId, sample, script }: {
@@ -5,7 +6,9 @@ export default function VoiceClonePanel({ charId, sample, script }: {
     sample: Blob | null;
     script: string;
 }) {
-    const [token, setToken] = useState(''), [cookie, setCookie] = useState(''), [record, setRecord] = useState<VoiceCloneRecord | null>(null), [id, setId] = useState(''), [busy, setBusy] = useState(false), [error, setError] = useState('');
+    const connection = useHaimianCredentials();
+    const { credentials } = connection;
+    const [record, setRecord] = useState<VoiceCloneRecord | null>(null), [id, setId] = useState(''), [busy, setBusy] = useState(false), [error, setError] = useState('');
     const [confirmation, setConfirmation] = useState<'upload' | 'unlock' | null>(null);
     const lock = useRef(false), active = useRef(true);
     useEffect(() => { active.current = true; void loadVoiceClone(charId).then(r => { if (active.current) {
@@ -32,11 +35,10 @@ export default function VoiceClonePanel({ charId, sample, script }: {
         if (active.current)
             setBusy(false);
     } };
-    const credentials = { token, cookie };
     const confirmationView = confirmation && <div className="sw-note" role="group" aria-label="音色操作确认"><p>{confirmation === 'upload' ? '将当前朗读转换为 WAV，并上传到海绵创建音色？' : '请先核对海绵官网，确认本次没有创建出音色，再解除提交锁。'}</p><button disabled={busy} onClick={() => { const action = confirmation; setConfirmation(null); void run(async () => { if (action === 'upload') { if (sample) await createVoiceClone(charId, sample, script, credentials); } else { await mutateVoiceClone(charId, old => { if (!old || old.id !== record?.id || !['unknown', 'submitting'].includes(old.state)) throw Error('任务已变化，请重新查询'); return { ...old, state: 'failed' }; }); } }); }}>确认{confirmation === 'upload' ? '上传' : '解除锁定'}</button><button disabled={busy} onClick={() => setConfirmation(null)}>取消</button></div>;
     return <div className="sw-production sw-clone"><div className="sw-production-step"><div className="sw-production-step-heading"><span>02</span><div><h4>上传朗读，创建音色</h4><p>直接发送音频文件，不经过外放录音。</p></div></div>
- <label>专用连接密钥<input type="password" autoComplete="off" value={token} onChange={e => setToken(e.target.value)}/></label><label>海绵 Cookie<input type="password" autoComplete="off" value={cookie} onChange={e => setCookie(e.target.value)}/></label>
- <p className="sw-production-hint">只在本页内存使用。先试听上面的朗读，确认是你想要的角色声音，再上传一次。</p>
+ <HaimianCredentials connection={connection}/>
+ <p className="sw-production-hint">先试听上面的朗读，确认是你想要的角色声音，再上传一次。</p>
  <button className="sw-primary sw-production-submit" disabled={busy || !sample || !!record && record.state !== 'failed'} onClick={() => { setError(''); setConfirmation('upload'); }}>上传当前朗读，创建音色</button>
  {confirmation === 'upload' && confirmationView}
  {record && <p className="sw-note">{({ submitting: '正在提交；离开后请先核对官网', unknown: '提交结果待核对，暂不重复上传', processing: '音色处理中', ready: '音色已就绪，已绑定当前角色', failed: '处理失败，可检查素材后重新创建' })[record.state]}{['ready', 'processing', 'failed'].includes(record.state) && ` · ${record.id}`}</p>}
