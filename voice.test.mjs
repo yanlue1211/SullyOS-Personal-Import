@@ -38,3 +38,8 @@ test('observed Haimian VOD upload host is allowed exactly, without widening to u
  assert.equal(voiceUploadUrl('tos-mya2hl.vodupload.com','tos-cn-v-test/fakeKey'),'https://tos-mya2hl.vodupload.com/upload/v1/tos-cn-v-test/fakeKey');
  for(const h of ['tos-mya2hl.vodupload.com.evil.example','evil.vodupload.com','https://user:pass@tos-mya2hl.vodupload.com'])assert.throws(()=>voiceUploadUrl(h,'tos-cn-v-test/fakeKey'),/unsupported_media_url/);
 });
+test('VOD storage regional tos nodes are supported with strict provider boundary',async()=>{
+ const {voiceUploadUrl}=await import('./voice.mjs');
+ for(const host of ['tos-mya2lf.vodupload.com','tos-mya2hl.vodupload.com','tos-region-node.vodupload.com'])assert.equal(new URL(voiceUploadUrl(host,'tos-cn-v-test/fakeKey')).hostname,host);
+ for(const host of ['evil.vodupload.com','tos-a.evil.vodupload.com','tos-a.vodupload.com.evil.example','tos-a-vodupload.com','https://tos-a.vodupload.com:123'])assert.throws(()=>voiceUploadUrl(host,'tos-cn-v-test/fakeKey'),/unsupported_media_url/);
+});

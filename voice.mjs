@@ -31,7 +31,7 @@ export function voiceUploadUrl(hostValue, uriValue) {
  let target;
  try { target = new URL(hostValue.includes('://') ? hostValue : 'https://' + hostValue); } catch {}
  const host = target?.hostname || '';
- const validHost = target?.protocol === 'https:' && !target.username && !target.password && !target.port && target.pathname === '/' && !target.search && !target.hash && (/^tos-[a-z0-9.-]+\.snssdk\.com$/.test(host) || host === 'tos-mya2hl.vodupload.com');
+ const validHost = target?.protocol === 'https:' && !target.username && !target.password && !target.port && target.pathname === '/' && !target.search && !target.hash && (/^tos-[a-z0-9.-]+\.snssdk\.com$/.test(host) || /^tos-[a-z0-9-]+\.vodupload\.com$/.test(host));
  const uri = uriValue.replace(/^\/+/, '');
  const validPath = /^[A-Za-z0-9_/-]+$/.test(uri) && !uri.includes('..') && !uri.includes('//');
  if (!validHost || !validPath) {
