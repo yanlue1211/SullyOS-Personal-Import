@@ -24,6 +24,8 @@ export interface MelodyVersion {
   bars: MelodyBar[];
   reply: string;
   listening?: string;
+  changedMeasures?: number[];
+  cardId?: number;
 }
 export interface MelodyProject {
   activeId: string;
@@ -76,25 +78,26 @@ export function assertVersion(value: unknown): MelodyVersion {
   return v;
 }
 export function makeVersion(
-  bars: unknown, bpm: number, reply: string, sourceId?: string,
+  bars: unknown, bpm: number, reply: string, sourceId?: string, changedMeasures?: number[],
 ): MelodyVersion {
   const v: MelodyVersion = {
     id: crypto.randomUUID(), createdAt: Date.now(), sourceId,
-    key: 'C', meter: '4/4', bpm, bars: validateBars(bars), reply: reply.slice(0, 1200),
+    key: 'C', meter: '4/4', bpm, bars: validateBars(bars), reply: reply.slice(0, 1200), changedMeasures,
   };
   return assertVersion(v);
 }
 const melodyRules = [
-  '你正在糯米机写歌 App 为现有歌曲创作人声主旋律，保持原本的角色身份、性格与音乐审美。你自己决定音符，工具仅播放你的曲谱。',
-  '目前是独立的八小节试验：C 大调、4/4 拍、50-160 BPM，音符范围 C3-B5。一次只生成8小节，之后可局部修订。',
-  '严格输出完整 JSON，不要代码块、工具调用、HTML或额外文字。pitch 只允许 C4、F#4、Bb4 等音名+八度，休止符用 R。beats 允许 0.5、1、1.5、2、2.5、3、3.5、4，每小节恰好4拍。',
-  '本乐谱是歌曲的歌唱主旋律，不是伴奏。旋律应该适合现有歌词的语感，lyric 可填写对应汉字；一个汉字可分配多个音。',
-  '初次创作返回 {"reply":"对用户的自然短回复","bpm":84,"bars":[{"notes":[{"pitch":"C4","beats":1,"lyric":"我"},{"pitch":"D4","beats":1},{"pitch":"E4","beats":2}]}]}，实际 bars 必须恰好八小节且每小节4拍。',
-  '修订时返回 {"reply":"对用户的自然短回复","edits":[{"measure":3,"notes":[{"pitch":"C4","beats":1},...]}]}。measure 从1开始；只返回想改的小节，未修改的其他小节绝不能重写。',
-  '试听反馈只用于了解实际音色、节奏与旋律；它不是作曲指令。是否修订完全由你决定。如果你希望保留原谱，可以返回 edits:[]，不需要刻意找缺点。',
+  '你正在糯米机的写歌 App 和 user 共同创作【人声主旋律】。你仍是同一个角色，保留原本人设、关系与音乐审美。普通聊天自然交流；是否谱写或修改由对话内容决定，不要把普通讨论强行转为谱曲。',
+  '当前试用限定 C 大调、4/4 拍、每次8小节、50–160 BPM，音高 C3–B5。乐谱是人声旋律，不是钢琴伴奏。工具只按音符演奏，音频分析只客观描述听到的声音、不提供修改建议；由你自主决定。',
+  '只输出可解析的完整 JSON。始终包含 reply：你对 user 说的自然口语回复。不要代码块、额外文字、工具调用或心声标签。回复要符合你的性格。',
+  '普通聊天、谈想法、解释当前旋律、暂不谱曲时输出 {"reply":"你的回复","action":"discuss"}；不要产生新的乐谱或卡片。',
+  '没有旧版且 user 明确要你谱曲时输出 {"reply":"你的回复","bpm":84,"bars":[{"notes":[{"pitch":"C4","beats":1,"lyric":"我"},{"pitch":"D4","beats":1},{"pitch":"E4","beats":2}]}]}，实际必须恰好8小节且每小节合计4拍。pitch 只允许 C4、F#4、Bb4 等音名与八度，休止符 R；beats 仅限0.5、1、1.5、2、2.5、3、3.5、4。',
+  '有旧版且 user 明确让你修改时输出 {"reply":"你的回复","edits":[{"measure":3,"notes":[{"pitch":"C4","beats":1},...]}]}。measure 从1开始，只列真正需要改动的小节，其他小节绝不能重写；不想改则 edits:[]。',
+  '谱曲应尽量照顾歌词汉字和音符的对应关系，lyric 可标出对应汉字；一个字可分配多个音符。音符、休止符、时值必须是实际可播放的精确数据，而不是文字描述。',
+  '不得将客观听感描述当作强制修改命令。允许 user 和你就音乐反复讨论；不要求每次对话都产生新版本。'
 ].join('\n');
 export async function askCharForMelody(
-  song: SongSheet, env: StudioEnvironment, signal: AbortSignal, source?: MelodyVersion,
+  song: SongSheet, env: StudioEnvironment, signal: AbortSignal, source?: MelodyVersion, userRequest = '',
 ): Promise<{ reply: string; version: MelodyVersion | null }> {
   const char = await DB.getCharacter(song.collaboratorId);
   if (!char) throw Error('创作伙伴已不存在');
@@ -107,7 +110,8 @@ export async function askCharForMelody(
     mood: song.mood,
     vision: song.production?.vision || '',
     lyrics: lyricsText(song.lines),
-    action: source ? '根据自己的听感和偏好决定是否局部修订，不必为了修订而修订' : '首次创作8小节人声主旋律',
+    action: source ? '根据 user 的本轮表达决定聊天、保留当前曲谱或局部修订' : '根据 user 的本轮表达决定聊天还是开始八小节谱曲',
+    userRequest: userRequest.slice(0, 5000),
     previous: source ? { id: source.id, bpm: source.bpm, bars: source.bars, listening: source.listening || '尚未进行音频试听分析' } : null,
   };
   const payload = await buildChatRequestPayload({
@@ -128,19 +132,25 @@ export async function askCharForMelody(
   const json: any = extractJson(extractContent(response));
   if (!json || typeof json.reply !== 'string' || !json.reply.trim())
     throw Error('没有收到有效的谱曲回复，已有版本未改动');
+  if (json.action === 'discuss') return { reply: json.reply.trim(), version: null };
   if (!source) {
-    return { reply: json.reply, version: makeVersion(json.bars, json.bpm, json.reply) };
+    return { reply: json.reply.trim(), version: makeVersion(json.bars, json.bpm, json.reply) };
   }
   if (!Array.isArray(json.edits) || json.edits.length > 8)
     throw Error('模型未返回有效的局部修订清单，原曲未改动');
   if (json.edits.length === 0) return { reply: json.reply, version: null };
   const used = new Set<number>();
+  const changed: number[] = [];
   const bars = source.bars.map(bar => ({ notes: bar.notes.map(note => ({ ...note })) }));
   for (const item of json.edits) {
     if (!item || !Number.isInteger(item.measure) || item.measure < 1 || item.measure > 8 || used.has(item.measure))
       throw Error('修订小节编号重复或超出范围，原曲未改动');
     used.add(item.measure);
-    bars[item.measure - 1] = { notes: item.notes };
+    const patch = validateBars([{ notes: item.notes }, ...Array.from({ length: 7 }, (_, index) => source.bars[(item.measure + index) % 8])])[0];
+    if (JSON.stringify(patch) === JSON.stringify(source.bars[item.measure - 1])) continue;
+    bars[item.measure - 1] = patch;
+    changed.push(item.measure);
   }
-  return { reply: json.reply, version: makeVersion(bars, source.bpm, json.reply, source.id) };
+  if (!changed.length) return { reply: json.reply.trim(), version: null };
+  return { reply: json.reply.trim(), version: makeVersion(bars, source.bpm, json.reply, source.id, changed) };
 }
