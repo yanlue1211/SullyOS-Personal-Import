@@ -23,6 +23,8 @@ import {
   generateStudioReply,
   parseStudioReply,
 } from "../features/songwriting/generate";
+import { commitMelodyTurn } from "../features/songwriting/melodyChat";
+import { getMelody, makeVersion } from "../features/songwriting/melody";
 import { formatMessageForPrompt } from "./messageFormat";
 import * as palace from "./memoryPalace/pipeline";
 vi.mock("./activeMsgRuntime", () => ({
@@ -478,4 +480,64 @@ it("keeps lyric finalization card and new recording cards independent, including
   expect(stored.completionCardId).toBe(lyricCardId);
   expect(stored.performanceRecords?.length).toBe(2);
   expect(stored.performanceRecords?.every((r) => typeof r.cardId === "number")).toBe(true);
+});
+
+it("shared melody dialogue saves one reply and exactly one character-facing card atomically", async () => {
+  const bars = Array.from({ length: 8 }, () => ({ notes: [{ pitch: "C4", beats: 4, lyric: "我" }] }));
+  const v1 = makeVersion(bars, 84, "我想先听一下这段。");
+  await writeTurn(song, "user", "你先谱一版八小节旋律", "melody:1:user");
+  const f = lyricFingerprint(song.lines);
+  await Promise.all([
+    commitMelodyTurn(song.id, "melody:1", v1.reply, v1, undefined, f, "阿源"),
+    commitMelodyTurn(song.id, "melody:1", v1.reply, v1, undefined, f, "阿源"),
+  ]);
+  const current = await getSong(song.id);
+  expect(getMelody(current)?.versions).toHaveLength(1);
+  expect(getMelody(current)?.versions[0].cardId).toBeTypeOf("number");
+  expect(current.completionCardId).toBeUndefined();
+  const rows = await studioMessages(song);
+  expect(rows.map(m => m.role)).toEqual(["user", "assistant", "assistant"]);
+  const card = rows.find(m => m.metadata?.songwritingCard?.kind === "melody");
+  expect(card?.content).toContain("阿源完成了");
+  expect(card?.content).toContain("歌曲引用：test-song");
+  expect(card?.content).not.toMatch(/AI生成|模型生成|接口生成/);
+  expect(formatMessageForPrompt(card!, "阿源", "User")).toContain("谱曲完成");
+  expect(card?.id).toBe(getMelody(current)?.versions[0].cardId);
+
+  await writeTurn(current, "user", "第二版请改第三小节", "melody:2:user");
+  const v2 = makeVersion(
+    bars.map((bar, i) => i === 2 ? { notes: [{ pitch: "G4", beats: 4, lyric: "我" }] } : bar),
+    84, "我把第三小节改了一下。", v1.id, [3],
+  );
+  await commitMelodyTurn(song.id, "melody:2", v2.reply, v2, v1.id, f, "阿源");
+  const next = await getSong(song.id);
+  expect(getMelody(next)?.versions).toHaveLength(2);
+  expect(getMelody(next)?.versions[0].bars[2].notes[0].pitch).toBe("C4");
+  expect(getMelody(next)?.versions[1].bars[2].notes[0].pitch).toBe("G4");
+  expect(next.completionCardId).toBeUndefined();
+  const cards = (await studioMessages(song)).filter(m => m.metadata?.songwritingCard?.kind === "melody");
+  expect(cards).toHaveLength(2);
+  expect(cards[1].content).toContain("阿源调整了");
+  expect(cards[1].content).toContain("第3小节");
+});
+
+it("melody discussion shares song chat without generating unwanted scores or cards", async () => {
+  await writeTurn(song, "user", "我想先聊聊旋律，不用谱曲", "melody:chat:user");
+  await commitMelodyTurn(song.id, "melody:chat", "好，你想先从哪一段聊起？", null, undefined, lyricFingerprint(song.lines), "阿源");
+  expect(getMelody(await getSong(song.id))).toBeUndefined();
+  const rows = await studioMessages(song);
+  expect(rows.map(m => m.role)).toEqual(["user", "assistant"]);
+  expect(rows.every(m => !m.metadata?.songwritingCard)).toBe(true);
+});
+
+it("stale melody versions cannot overwrite a newer version, and a failed commit writes no assistant/card", async () => {
+  const bars = Array.from({ length: 8 }, () => ({ notes: [{ pitch: "C4", beats: 4 }] }));
+  const f = lyricFingerprint(song.lines);
+  const v1 = makeVersion(bars, 84, "先听这个版本");
+  await commitMelodyTurn(song.id, "melody:1", v1.reply, v1, undefined, f, "阿源");
+  const stale = makeVersion(bars, 84, "过期的回答", undefined);
+  await expect(commitMelodyTurn(song.id, "melody:stale", "这不应保存", stale, undefined, f, "阿源")).rejects.toThrow(/更新/);
+  const rows = await studioMessages(song);
+  expect(rows.some(m => m.content.includes("这不应保存"))).toBe(false);
+  expect(getMelody(await getSong(song.id))?.versions).toHaveLength(1);
 });
