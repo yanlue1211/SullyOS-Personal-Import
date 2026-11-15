@@ -85,3 +85,14 @@ test('personal app preflight succeeds; foreign origins still denied',async()=>{
 test('custom production prompt is sent unchanged without appended preset',async()=>{
  await musicOperation('original',{confirmSpend:true,voiceId:'123',lyrics:'测试歌词',prompt:'爵士与民谣融合',title:'测试',genre:'Custom'},cookie,async(url,opts)=>{assert.equal(JSON.parse(opts.body).prompt,'爵士与民谣融合');return Response.json({status_code:0,data:{tasks:[{task_id:'fakeTask'}]}})});
 });
+
+test('original file refreshes URL and streams audio without CDN credentials',async()=>{
+ const {musicOperation}=await import('./music.mjs');const calls=[];
+ const r=await musicOperation('original-file',{songTaskId:'test-task'},'private-cookie',async(url,opts)=>{
+  calls.push([url,opts]);
+  if(url.includes('/generate/task/')) return Response.json({status_code:0,data:{status:2,payload:JSON.stringify({vid:'v',progress:100})}});
+  if(url.includes('/misc/download'))return Response.json({status_code:0,data:{video_info:{origin_video_url:'https://audio.haimianyinyue.com/song?signature=test'}}});
+  assert.equal(opts.headers.Cookie,undefined);assert.equal(opts.headers.Authorization,undefined);assert.equal(opts.headers.Referer,'https://www.haimian.com/');return new Response('ID3audio',{headers:{'Content-Type':'audio/mpeg'}});
+ });
+ assert.equal(await r.text(),'ID3audio');assert.equal(calls.length,3);
+});

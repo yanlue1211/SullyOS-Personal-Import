@@ -89,6 +89,18 @@ export async function musicOperation(action, input, cookie, upstreamFetch = fetc
     if (!taskId(id)) fail('upstream_invalid_response');
     return { songTaskId: id, tasks: tasks.map(t => ({songTaskId:t.task_id})), deductedCredit: d.deducted_credit ?? null, totalBalance: d.total_balance ?? null, note: '已提交原创生成，请保存任务 ID。' };
   }
+  if (action === 'original-file') {
+    const { mediaUrl } = await musicOperation('original-download', input, cookie, upstreamFetch);
+    // Fresh signed URL, fixed provider hosts only. Never forward account credentials to CDN.
+    const media = await upstreamFetch(mediaUrl, { method: 'GET', redirect: 'manual', signal: AbortSignal.timeout(120000), headers: { Referer: 'https://www.haimian.com/', Origin: 'https://www.haimian.com' } });
+    const type = (media.headers.get('Content-Type') || '').split(';')[0].toLowerCase();
+    if (!media.ok || !media.body || !(type.startsWith('audio/') || type === 'application/octet-stream')) { await media.body?.cancel(); fail('upstream_http_error'); }
+    const limit = 64 * 1024 * 1024;
+    if (Number(media.headers.get('Content-Length')) > limit) { await media.body.cancel(); fail('payload_too_large'); }
+    let size = 0;
+    const stream = media.body.pipeThrough(new TransformStream({ transform(chunk, controller) { size += chunk.byteLength; if (size > limit) throw Error('payload_too_large'); controller.enqueue(chunk); } }));
+    return new Response(stream, { headers: { 'Content-Type': type, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } });
+  }
   if (action === 'original-status' || action === 'original-download') {
     if (!taskId(input.songTaskId)) fail('invalid_input');
     const d = await api('/jd/api/v1/generate/task/' + input.songTaskId);
@@ -147,12 +159,12 @@ export async function musicOperation(action, input, cookie, upstreamFetch = fetc
 }
 export async function handleMusic(request, env, upstreamFetch = fetch) {
   const u = new URL(request.url); const origin = request.headers.get('Origin');
-  const reply = (data, status = 200) => Response.json(data, { status, headers: { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'X-Voice-Upload-Version':'4', ...(origin ? {'Access-Control-Allow-Origin': origin, 'Vary':'Origin'} : {}) } });
+  const reply = (data, status = 200) => Response.json(data, { status, headers: { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'X-Voice-Upload-Version':'4', 'X-Music-Download-Version':'1', ...(origin ? {'Access-Control-Allow-Origin': origin, 'Vary':'Origin'} : {}) } });
   if (origin && origin !== u.origin && origin !== (env.APP_ORIGIN || 'https://yanlue1211.github.io')) return reply({ error: 'origin_denied' }, 403);
   if (u.search) return reply({ error: 'route_not_found' }, 404);
   if (request.method === 'GET' && u.pathname === '/music') return new Response(MUSIC_PAGE, { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'Content-Security-Policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; media-src https://*.haimianyinyue.com; base-uri 'none'; frame-ancestors 'none'; form-action 'none'" } });
   const action = u.pathname.split('/')[2];
-  if (!['prepare', 'generate', 'status', 'download', 'original', 'original-status', 'original-download', 'voice-upload', 'voice-status'].includes(action) || u.pathname !== '/music/' + action) return reply({ error: 'route_not_found' }, 404);
+  if (!['prepare', 'generate', 'status', 'download', 'original', 'original-status', 'original-download', 'original-file', 'voice-upload', 'voice-status'].includes(action) || u.pathname !== '/music/' + action) return reply({ error: 'route_not_found' }, 404);
   if (request.method === 'OPTIONS') return new Response(null,{status:204,headers:{...(origin?{'Access-Control-Allow-Origin':origin,'Vary':'Origin'}:{}),'Access-Control-Allow-Methods':'POST','Access-Control-Allow-Headers':'Authorization, X-Haimian-Cookie, Content-Type','Access-Control-Max-Age':'600'}});
   if (request.method !== 'POST') return reply({ error: 'method_not_allowed' }, 405);
   if (typeof env.AUTH_TOKEN !== 'string' || env.AUTH_TOKEN.length < 32) return reply({ error: 'configure_AUTH_TOKEN_secret_first' }, 503);
@@ -162,7 +174,9 @@ export async function handleMusic(request, env, upstreamFetch = fetch) {
   try {
     const input = JSON.parse(await boundedText(request.body, action === 'voice-upload' ? 11300000 : 48000));
     if (!input || typeof input !== 'object' || Array.isArray(input)) fail('invalid_input');
-    return reply(await musicOperation(action, input, cookie, upstreamFetch));
+    const result = await musicOperation(action, input, cookie, upstreamFetch);
+    if (result instanceof Response) { const headers = new Headers(result.headers); if (origin) { headers.set('Access-Control-Allow-Origin', origin); headers.set('Vary', 'Origin'); } headers.set('X-Music-Download-Version', '1'); return new Response(result.body, { status: result.status, headers }); }
+    return reply(result);
   } catch (error) {
     const codes = ['invalid_input', 'payload_too_large', 'upstream_http_error', 'upstream_invalid_response', 'upstream_business_error', 'unsupported_media_url', 'song_not_complete'];
     const code = codes.includes(error?.message) ? error.message : 'operation_failed';
