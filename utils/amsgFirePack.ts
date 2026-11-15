@@ -464,6 +464,7 @@ export interface AmsgFirePackChat {
 }
 
 export interface AmsgFirePack {
+  petCloudCoveredIds?: string[];
   receivedCloudOccurrences?: string[];
   /** 模板是否含用户指定的内心独白协议；旧包缺省不回传原始推理。 */
   thinkingChainEnabled?: boolean;

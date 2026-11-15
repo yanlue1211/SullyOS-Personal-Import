@@ -342,7 +342,7 @@ const GZIP_MAGIC = [0x1f, 0x8b];
  * 「请求体不是合法的 JSON」。看魔数则三种情形都对：没解过的解开、替我们解过的原样读、
  * 压根没压的原样读。
  */
-const readMaybeGzippedBody = async (request: Request): Promise<string> => {
+export const readMaybeGzippedBody = async (request: Request): Promise<string> => {
   if ((request.headers.get('content-encoding') ?? '').toLowerCase() !== 'gzip') {
     return request.text();
   }

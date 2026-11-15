@@ -14,6 +14,7 @@ export async function claimEvent(id:string):Promise<boolean>{const db=await open
 export async function generatePet(e:PetEvent,env:PetEnvironment,signal:AbortSignal){
  const c=await loadConfig(),b=c.bindings[e.charId];if(c.activeCharId!==e.charId||c.revision!==e.revision||b?.formId!==e.formId)throw Error('桌宠设置已切换，旧事件已跳过');
  if(b.apiEnabled!==true)throw Error('桌宠API已关闭');
+ if(b.cloudEnabled===true)throw Error('此事件由桌宠专用云端处理，不会重复调用本地API');
  if(e.kind==='timer'&&(b.autoEnabled!==true||Date.now()-e.at>30000))throw Error('定时事件已过期或关闭');
  const char=await DB.getCharacter(e.charId);if(!char)throw Error('角色已删除');
  if(b.independent&&(!b.api?.baseUrl?.trim()||!b.api?.model?.trim()||!b.api?.apiKey?.trim()))throw Error('独立API需要完整URL、Key和模型；不会回退主模型');

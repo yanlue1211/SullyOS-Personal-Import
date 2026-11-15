@@ -18,6 +18,8 @@ import { readTaskKind } from '../../../utils/amsgTaskKinds';
 import { PLATE_CONSOLIDATE_KIND } from '../../../utils/amsgPlateJob';
 import { plateConsolidateHandler } from './plateFire';
 import { reproductionHandler } from './reproduction';
+import { tapnestHandler } from './tapnestFire';
+import { PET_CLOUD_KIND } from '../../../utils/tapnestCloud';
 
 /** client_state 的写入口（value 传 null 即删除该 key）。 */
 export type KindWriteState = (
@@ -63,6 +65,7 @@ export interface KindSessionCtx {
 /** 到点这一步的结论：要么安静跳过，要么给出这次要问 LLM 的话。 */
 export type KindFirePlan =
   | { skip: true; reason: string }
+  | { defer: {afterMs:number} }
   | {
       messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
       /** 跨到 onLLMOutput 的上下文，库把它原样挂在 scratch 上带过去 */
@@ -109,7 +112,7 @@ export interface FireKindHandler {
  */
 export const FIRE_KIND_HANDLERS: Record<string, FireKindHandler> = Object.assign(
   Object.create(null) as Record<string, FireKindHandler>,
-  { [PLATE_CONSOLIDATE_KIND]: plateConsolidateHandler, diagnostic: reproductionHandler },
+  { [PLATE_CONSOLIDATE_KIND]: plateConsolidateHandler, diagnostic: reproductionHandler, [PET_CLOUD_KIND]: tapnestHandler },
 );
 
 /** 挂在 scratch 上跨 hook 传递的键。 */
