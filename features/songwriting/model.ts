@@ -137,5 +137,8 @@ export function createProposal(
   return p;
 }
 export function cardText(card: SongwritingCard) {
-  return `${card.kind === "lyrics" ? "🎼 歌词修改卡" : "🎵 歌曲完成卡"} · ${card.title}\n${card.label} · 第${card.version}版 · ${card.author}\n${card.kind === "lyrics" ? `修改前：\n${card.before || "（空）"}\n修改后：\n${card.after || "（空）"}` : `歌词已定稿，${card.audio ? "已有音频：" + card.audio : "音频尚未生成"}。\n${card.after || ""}`}\n歌曲引用：${card.songId}`;
+  if (card.kind === "lyrics") {
+    return `🎼 歌词修改卡 · ${card.title}\n${card.label} · 第${card.version}版 · ${card.author}\n修改前：\n${card.before || "（空）"}\n修改后：\n${card.after || "（空）"}\n歌曲引用：${card.songId}`;
+  }
+  return `🎵 歌曲完成卡 · ${card.title}\n${card.author}完成了这首歌。\n${card.after || ""}\n歌曲引用：${card.songId}`;
 }
