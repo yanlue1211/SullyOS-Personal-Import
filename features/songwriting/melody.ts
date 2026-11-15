@@ -59,7 +59,7 @@ function abcPitch(value: string): string {
   if (value === 'R') return 'z';
   const m = PITCH.exec(value)!;
   const note = m[3] === '3' ? m[1] + ',' : m[3] === '5' ? m[1].toLowerCase() : m[1];
-  return (m[2] === '#' ? '^' : m[2] === 'b' ? '_' : '') + note;
+  return (m[2] === '#' ? '^' : m[2] === 'b' ? '_' : '=') + note; // explicit natural resets ABC measure accidentals
 }
 export function melodyToAbc(v: Pick<MelodyVersion, 'bars' | 'bpm'>, title: string): string {
   validateBars(v.bars, v.bars.length);
