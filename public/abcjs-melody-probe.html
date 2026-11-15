@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>糯米机 · abcjs 旋律试听验证</title>
+<style>
+:root{font-family:system-ui,-apple-system,"PingFang SC","Noto Sans CJK SC",sans-serif;color:#315a4e;background:#eff8f1}
+*{box-sizing:border-box}body{margin:0;padding:max(18px,env(safe-area-inset-top)) 14px 50px}
+main{max-width:740px;margin:auto}.panel{background:#fff;border:1px solid #d9eadf;border-radius:19px;padding:19px 15px;margin-bottom:13px;box-shadow:0 7px 22px #335f4510}
+h1{font-size:22px;margin:0 0 12px}h2{font-size:16px;margin:0 0 10px}.muted{color:#698779;font-size:13px;line-height:1.8}
+button,.btn{display:inline-flex;align-items:center;justify-content:center;background:#a3d6b4;color:#244d3f;border:0;border-radius:13px;padding:12px 16px;font-weight:650;text-decoration:none;font-size:15px;min-height:45px}
+button:disabled{opacity:.6}button:focus-visible,.btn:focus-visible{outline:3px solid #34594e;outline-offset:2px}
+.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}.actions>*{flex:1}
+#paper{min-height:140px;max-width:100%;overflow-x:auto;background:#fff}
+#paper svg{max-width:100%}audio{display:block;width:100%;margin:12px 0}
+#status{border-radius:12px;background:#e6f4ea;padding:12px;min-height:44px;line-height:1.65;white-space:pre-wrap;overflow-wrap:anywhere}
+#status[data-error=true]{background:#ffeded;color:#9d3838}
+pre{white-space:pre-wrap;font-size:12px;line-height:1.7;overflow-wrap:anywhere}
+small{display:block;line-height:1.8;color:#6b887e}.hidden{display:none!important}
+</style>
+</head>
+<body>
+<main>
+<section class="panel">
+  <small>ABCJS · 乐谱与人声主旋律试听技术验证</small>
+  <h1>🎼 一段小旋律</h1>
+  <p class="muted">这是一段固定的<strong>八小节示例</strong>，用于确认你的手机能否显示五线谱、合成 WAV 和导出 MIDI。它不是 Char 实际创作的成品，也没有调用付费模型。</p>
+  <div id="status" role="status">正在加载 abcjs 乐谱库…</div>
+</section>
+<section class="panel">
+  <h2>🎵 五线谱</h2><div id="paper" aria-label="人声主旋律的五线谱"></div>
+  <p class="muted">这是预定给歌手演唱的旋律；目前仅借用钢琴音色试听，不是钢琴伴奏。</p>
+</section>
+<section class="panel">
+  <h2>🎹 试听</h2>
+  <p class="muted">点击按钮后，将加载钢琴音色并在浏览器内合成试听。第一次可能需要联网下载音色文件。不会向海绵或音频识别 API 发送任何内容。</p>
+  <div class="actions"><button id="synth" disabled>合成八小节试听</button></div>
+  <audio id="player" controls class="hidden"></audio>
+  <div id="downloads" class="actions hidden">
+    <a class="btn" id="wav" download="abcjs-八小节人声主旋律.wav">下载 WAV</a>
+    <a class="btn" id="midi" download="abcjs-八小节人声主旋律.mid">下载 MIDI</a>
+  </div>
+</section>
+<details class="panel"><summary>查看原始 ABC 乐谱</summary><pre id="source"></pre></details>
+<p class="muted">独立验证页 · 不修改糯米机聊天、记忆、歌曲或备份数据。关闭页面即释放临时试听资源。任何音乐 API 的自动上传尚未接入。</p>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/abcjs@6.7.2/dist/abcjs-basic-min.js"></script>
+<script>
+(function(){
+'use strict';
+const abc=[
+'X:1','T:八小节主旋律试音','M:4/4','L:1/8','Q:1/4=84','K:C','V:1 clef=treble',
+'|: C2 D2 E2 G2 | A2 G2 E4 | D2 E2 G2 A2 | G4 z2 E2 |',
+'G2 A2 c2 B2 | A4 G2 E2 | D2 E2 G2 E2 | C6 z2 :|'
+].join('\n');
+const $=id=>document.getElementById(id);
+const status=$('status'),btn=$('synth');
+let tune=null,audioUrl='',midiUrl='',ctx=null;
+function report(message,error=false){status.dataset.error=error?'true':'false';status.textContent=message;}
+function cleanup(){
+  if(audioUrl)URL.revokeObjectURL(audioUrl);
+  if(midiUrl)URL.revokeObjectURL(midiUrl);
+  audioUrl='';midiUrl='';
+  if(ctx){ctx.close().catch(()=>{});ctx=null;}
+}
+$('source').textContent=abc;
+if(!window.ABCJS?.renderAbc||!window.ABCJS?.synth?.CreateSynth){
+  report('abcjs 库未加载成功。请检查当前浏览器是否可以访问 jsDelivr，再刷新本页。',true);
+  return;
+}
+try{
+  const tunes=ABCJS.renderAbc('paper',abc,{responsive:'resize',staffwidth:620});
+  tune=tunes&&tunes[0];
+  if(!tune)throw Error('乐谱解析返回空结果');
+  btn.disabled=false;
+  report('✅ 五线谱已绘制。请点击「合成八小节试听」检查手机的真实音频能力。');
+}catch(e){report('❌ 乐谱绘制失败：'+(e?.message||e),true);return;}
+window.addEventListener('pagehide',cleanup,{once:true});
+btn.addEventListener('click',async()=>{
+  btn.disabled=true;
+  $('downloads').classList.add('hidden');
+  $('player').classList.add('hidden');
+  $('player').removeAttribute('src');
+  cleanup();
+  try{
+    if(!ABCJS.synth.supportsAudio())throw Error('此浏览器不支持 abcjs 音频合成');
+    const Context=window.AudioContext||window.webkitAudioContext;
+    if(!Context)throw Error('当前浏览器没有 AudioContext');
+    ctx=new Context(); // create in direct click gesture
+    await ctx.resume();
+    report('⏳ 正在读取钢琴音色并合成音频（首次可能较慢）…');
+    const synth=new ABCJS.synth.CreateSynth();
+    const loaded=await synth.init({visualObj:tune,audioContext:ctx,options:{chordsOff:true}});
+    if(loaded?.error?.length)throw Error('音色加载失败：'+loaded.error.map(e=>e?.message||String(e)).join('；'));
+    const primed=await synth.prime();
+    if(!Number.isFinite(primed?.duration)||primed.duration<=0)throw Error('未生成有效音频时长');
+    audioUrl=synth.download(); // abcjs returns blob: URL (not ArrayBuffer)
+    if(!audioUrl||!audioUrl.startsWith('blob:'))throw Error('abcjs 没有生成有效 WAV 地址');
+    const midi=ABCJS.synth.getMidiFile(tune,{midiOutputType:'binary',chordsOff:true});
+    if(!midi?.length)throw Error('MIDI 数据为空');
+    midiUrl=URL.createObjectURL(new Blob([midi],{type:'audio/midi'}));
+    $('player').src=audioUrl;
+    $('wav').href=audioUrl;$('midi').href=midiUrl;
+    $('player').classList.remove('hidden');
+    $('downloads').classList.remove('hidden');
+    report('✅ 已生成约 '+primed.duration.toFixed(1)+' 秒的试听音频和 MIDI。点击下方播放器开始听；可以保存文件。');
+  }catch(e){
+    cleanup();report('❌ 音频测试失败：'+(e?.message||String(e))+'\n五线谱若显示正常，说明绘谱和音频加载是两个独立问题。',true);
+  }finally{
+    if(ctx){await ctx.close().catch(()=>{});ctx=null;}
+    btn.disabled=false;
+  }
+});
+})();
+</script>
+</body>
+</html>
