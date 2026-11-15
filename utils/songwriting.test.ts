@@ -6,6 +6,7 @@ import {
   parseLyrics,
   lyricsText,
   lyricFingerprint,
+  cardText,
 } from "../features/songwriting/model";
 import {
   acceptProposal,
@@ -416,4 +417,22 @@ it('Haimian generation does not retry on timeout and credentials are only sent t
 });
 it('production snapshots survive existing backup without creating a second memory history',async()=>{
  song.production={vision:'自由曲风',prompt:'轻快',task:{id:'fakeTask',state:'processing',title:song.title,lyrics:'原版歌词',prompt:'原版说明',voiceId:'123'}};await DB.saveSong(song);const backup=await DB.exportFullData();await DB.importFullData(backup as any);expect((await getSong(song.id)).production).toEqual(song.production);expect(await studioMessages(song)).toHaveLength(0);
+});
+
+
+it("song completion card credits the character and never calls the song AI-generated", () => {
+  const text = cardText({
+    kind: "completed",
+    songId: song.id,
+    title: song.title,
+    label: "歌曲完成",
+    author: "阿源",
+    version: 1,
+    at: Date.now(),
+    after: "第一句",
+    audio: "海绵音乐",
+  });
+  expect(text).toContain("阿源完成了这首歌");
+  expect(text).toContain("第一句");
+  expect(text).not.toMatch(/生成|AI|海绵|音频尚未/);
 });
