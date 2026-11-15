@@ -1,19 +1,11 @@
-# 糯米海绵 · 独立部署分支
+# 糯米海绵 · 独立测试部署
 
-本分支仅部署 nuomi-haimian，禁止合并到糯米机网页分支。当前是只读额度/音色探针，海绵接口尚待实际验证。
+仅部署 nuomi-haimian，禁止合并到糯米机网页分支。Cloudflare Builds 连接 deploy/haimian-probe，构建 node --test worker.test.mjs，部署 npx wrangler@4 deploy。运行时 AUTH_TOKEN Secret 至少 32 位。
 
-Cloudflare: 现有 nuomi-haimian → Settings → Builds → Connect → 选择本仓库及 deploy/haimian-probe 分支；根目录留空；Build command: node --test worker.test.mjs；Deploy command: npx wrangler@4 deploy；关闭非生产分支部署。
+/music：原创谱曲直连测试版 4。输入歌词、曲风、歌名和已有音色；固定 batch_size=1、biz_type=0、is_original_prompt=true；按官网成功抓包解析 tasks 数组并显示实际扣分和余额。完成必须 progress=100 且有成品 vid；下载使用 misc/download，无需发布或画布。生成不自动重试，结果不明先核对官网。保存任务 ID 可恢复查询。
 
-连接 GitHub 后，向本分支推送新提交以触发首次构建；以 Cloudflare 构建日志及部署结果为准。
+音色创建测试：展开上传朗读音频，选择不超过 8MB 的角色日常 TTS 干声文件并填写完全对应的海绵指定台词；临时 VOD 授权→上传→提交→source=0 注册→查询状态。临时密钥仅留在请求中，不发送 Cookie 到上传存储，不自动重试。该上传链路仅通过模拟测试，需真实文件验证。尚未接入糯米机角色 TTS 的自动合成。音色克隆成功不保证歌唱音色完全相似。
 
-首次部署后，在 Worker Settings → Variables and Secrets 新增 Secret AUTH_TOKEN（至少32位随机字符串），值仅在 Cloudflare 私填。访问 Worker 首页即可临时填密钥和海绵 Cookie。Cookie 不提交 GitHub，不填全局代理。没有自动任务或付费操作。
+/ 保留只读积分与音色查询。凭证仅在页面内存，不提交代码。任务 ID 单独本地保存。无定时任务或数据库。没有翻唱、原曲导入或发布功能。历史画布 API 保留兼容，主测试页不调用。
 
-本服务无数据库与定时器。独立 Worker 仍共享同账户请求额度。没有全账户硬限流，保密专用密钥，避免公开滥用。不会让助手自动取得 Cookie。
-
-## 已有音色联调
-
-`/` 保留只读探针；`/music` 为已有音色的独立生成联调页，尚未完成真实生成验证，也尚未接入糯米机前端。构建命令不变，worker.test.mjs 会加载 music.test.mjs。
-
-在 `/music` 私填运行时密钥和 Cookie，读取积分与音色；输入用户指定的测试画布 ID 和歌词。准备会在该画布新增独立歌词、音乐节点及绑定，不删除已有节点、不覆盖布局。生成需用户明确点击，固定 batch_size=1，会消耗海绵积分。生成调用不自动重试；出现超时或错误需先到官网画布确认是否已经受理。保存生成任务 ID，可刷新页面后重新填入并手动查询。
-
-进度查询追踪画布任务输出中的 song_task_id，再读取歌曲任务状态；完成后获取固定官方下载接口返回的音频链接。链接有有效期。没有后台轮询、定时器或数据库。创建新画布及自定义音色流程未接入；不会使用抓包里的个人画布或任务 ID 作为代码默认值。真实 HAR、Cookie、动态令牌不提交仓库。
+源码已按真实成功抓包适配，实际 Worker 生成/音色上传仍需联调。测试通过不等于部署或真实生成成功。真实 HAR、录音、Cookie、动态令牌与个人 ID 禁止提交仓库。
