@@ -1,5 +1,5 @@
 // Existing-voice adapter. Fixed official endpoints; no captured credentials or IDs.
-const META = { app_name: 'goat', app_name_cn: '海绵音乐', aid: '588628', app_id: '588628', region: 'CN', language: 'zh', app_version: '1.0.0.1667', channel: 'online', device_platform: 'web' };
+const META = { app_name: 'goat', app_name_cn: '海绵音乐', aid: '588628', app_id: '588628', region: 'CN', language: 'zh', app_version: '1.0.0.1685', channel: 'online', device_platform: 'web' };
 const numeric = value => typeof value === 'string' && /^\d{1,24}$/.test(value);
 const taskId = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(value);
 function fail(code) { throw new Error(code); }
@@ -48,9 +48,38 @@ export async function musicOperation(action, input, cookie, upstreamFetch = fetc
     const response = await upstreamFetch(u.href, { method: body ? 'POST' : 'GET', redirect: 'manual', signal: AbortSignal.timeout(20000), headers: { Cookie: cookie, Accept: 'application/json', ...(body ? { 'Content-Type': 'application/json' } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
     if (!response.ok || !response.headers.get('Content-Type')?.includes('application/json')) { await response.body?.cancel(); fail('upstream_http_error'); }
     let data; try { data = JSON.parse(await boundedText(response.body, 1048576)); } catch { fail('upstream_invalid_response'); }
-    if (data.status_code !== 0) fail('upstream_business_error');
+    if (data.status_code !== 0) { const error = new Error('upstream_business_error'); if (Number.isSafeInteger(data.status_code)) error.businessCode = data.status_code; throw error; }
     if (!data.data || typeof data.data !== 'object') fail('upstream_invalid_response');
     return data.data;
+  }
+  if (action === 'original') {
+    if (input.confirmSpend !== true || !numeric(input.voiceId) || !Number.isSafeInteger(Number(input.voiceId)) || typeof input.lyrics !== 'string' || !input.lyrics.trim() || input.lyrics.length > 5000 || typeof input.prompt !== 'string' || !input.prompt.trim() || input.prompt.length > 2000 || typeof input.title !== 'string' || input.title.length > 100 || !['Pop','Folk','Rock','R&B','Electronic','Jazz'].includes(input.genre)) fail('invalid_input');
+    const d = await api('/jd/api/v1/generate/music', {}, {
+      prompt: input.prompt, lyrics: input.lyrics.replace(/\r\n?/g, '\n'),
+      is_original_prompt: false, voice_id: Number(input.voiceId),
+      task_type: 1, biz_type: 7, batch_size: 1,
+      title: input.title || '糯米原创测试', genre: input.genre,
+    });
+    const id = d.task_id || d.task_ids?.[0] || d.task?.task_id;
+    if (!taskId(id)) fail('upstream_invalid_response');
+    return { songTaskId: id, note: '已提交原创生成，请保存任务 ID。' };
+  }
+  if (action === 'original-status' || action === 'original-download') {
+    if (!taskId(input.songTaskId)) fail('invalid_input');
+    const d = await api('/jd/api/v1/generate/task/' + input.songTaskId);
+    let payload = d.payload;
+    if (typeof payload === 'string') { try { payload = JSON.parse(payload); } catch { fail('upstream_invalid_response'); } }
+    // Tutorials disagree on status enums: completion requires progress plus a media ID.
+    const complete = payload?.progress === 100 && taskId(payload?.vid);
+    const failed = !complete && (d.status === 4 || d.status === 5 || d.err_code || payload?.err_code || (d.status === 3 && !payload?.vid));
+    const state = complete ? 'complete' : failed ? 'failed' : 'processing';
+    if (action === 'original-status') return { state, songStatus: d.status, progress: payload?.progress ?? null, songTaskId: input.songTaskId, title: payload?.title || '', deductedCredit: d.deducted_credit ?? null };
+    if (!complete) fail('song_not_complete');
+    const result = await api('/jd/api/v1/video/video_urls/get', {}, { vid: [payload.vid], format_type: 1 });
+    const info = result.video_urls?.[payload.vid];
+    const mediaUrl = safeMedia(info?.origin_video_url);
+    if (!mediaUrl) fail('unsupported_media_url');
+    return { mediaUrl, expiresAt: info.expire_at ?? null };
   }
   if (action === 'prepare') {
     if (!numeric(input.canvasId) || !numeric(input.voiceId) || typeof input.lyrics !== 'string' || !input.lyrics.trim() || input.lyrics.length > 10000) fail('invalid_input');
@@ -98,7 +127,7 @@ export async function handleMusic(request, env, upstreamFetch = fetch) {
   if (u.search) return reply({ error: 'route_not_found' }, 404);
   if (request.method === 'GET' && u.pathname === '/music') return new Response(MUSIC_PAGE, { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'Content-Security-Policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; media-src https://*.haimianyinyue.com; base-uri 'none'; frame-ancestors 'none'; form-action 'none'" } });
   const action = u.pathname.split('/')[2];
-  if (!['prepare', 'generate', 'status', 'download'].includes(action) || u.pathname !== '/music/' + action) return reply({ error: 'route_not_found' }, 404);
+  if (!['prepare', 'generate', 'status', 'download', 'original', 'original-status', 'original-download'].includes(action) || u.pathname !== '/music/' + action) return reply({ error: 'route_not_found' }, 404);
   if (request.method !== 'POST') return reply({ error: 'method_not_allowed' }, 405);
   if (typeof env.AUTH_TOKEN !== 'string' || env.AUTH_TOKEN.length < 32) return reply({ error: 'configure_AUTH_TOKEN_secret_first' }, 503);
   if (request.headers.get('Authorization') !== 'Bearer ' + env.AUTH_TOKEN) return reply({ error: 'unauthorized' }, 401);
@@ -109,33 +138,31 @@ export async function handleMusic(request, env, upstreamFetch = fetch) {
     if (!input || typeof input !== 'object' || Array.isArray(input)) fail('invalid_input');
     return reply(await musicOperation(action, input, cookie, upstreamFetch));
   } catch (error) {
-    const codes = ['invalid_input', 'payload_too_large', 'upstream_http_error', 'upstream_invalid_response', 'upstream_business_error', 'unsupported_media_url'];
+    const codes = ['invalid_input', 'payload_too_large', 'upstream_http_error', 'upstream_invalid_response', 'upstream_business_error', 'unsupported_media_url', 'song_not_complete'];
     const code = codes.includes(error?.message) ? error.message : 'operation_failed';
-    return reply({ error: code, ...(action === 'generate' ? { note: '生成请求可能已受理，请到海绵画布确认后再决定是否重新提交。' } : {}) }, ['invalid_input', 'payload_too_large'].includes(code) ? 400 : 502);
+    return reply({ error: code, ...(Number.isSafeInteger(error?.businessCode) ? { businessCode: error.businessCode } : {}), ...(['generate','original'].includes(action) ? { note: '生成请求可能已受理，请到海绵官网作品列表确认后再决定是否重新提交。' } : {}) }, ['invalid_input', 'payload_too_large'].includes(code) ? 400 : 502);
   }
 }
 
 const MUSIC_PAGE = `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>糯米 · 已有音色创作</title>
 <style>body{margin:0;background:#edf7f3;color:#284d49;font:16px system-ui}main{max-width:560px;margin:24px auto;padding:24px;background:white;border-radius:24px}input,textarea,select,button{box-sizing:border-box;width:100%;padding:13px;margin:8px 0 18px;border:1px solid #add4cc;border-radius:12px;font:inherit}button{background:#d7eee7;color:#234d47}button:disabled{opacity:.45}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#eef5fb;padding:16px;border-radius:12px}small{display:block;line-height:1.7}audio{width:100%}a{color:#284d49}</style>
-<main><h2>把歌词唱给你听</h2><p>已有音色 · 独立联调页</p><small>准备步骤会在指定的海绵画布新增歌词和音乐节点。点击提交生成会按海绵规则消耗积分；每次仅提交一首。本页尚待实际生成验证。凭证仅保留在本页内存。</small>
+<main><h2>把歌词唱给你听</h2><p>原创谱曲 · 直连测试版 2</p><small>填写自己的歌词和曲风，使用已有音色生成原创歌曲，无需画布 ID。点击提交生成会按海绵规则消耗积分；每次仅提交一首。本页尚待实际生成验证。凭证仅保留在本页内存。</small>
 <label>专用连接密钥<input id="token" type="password" autocomplete="off"></label><label>海绵 Cookie<input id="cookie" type="password" autocomplete="off"></label>
 <button id="load">读取积分与已有音色</button><p id="balance"></p><label>已有音色<select id="voice"><option value="">请先读取音色</option></select></label>
-<label>海绵画布 ID<input id="canvas" inputmode="numeric" placeholder="填写专门用于测试的画布 ID"></label><small>可从官网画布链接或 canvas/get 请求的 canvas_id 查看；只新增独立节点。</small>
+<label>歌名<input id="title" maxlength="100" value="晚风里的小狗"></label><label>曲风<select id="genre"><option value="Folk">民谣</option><option value="Pop">流行</option><option value="Rock">摇滚</option><option value="R&B">R&amp;B</option><option value="Electronic">电子</option><option value="Jazz">爵士</option></select></label><label>演唱与编曲描述<textarea id="prompt" rows="3" maxlength="2000">轻快温暖的民谣，清亮自然的人声，木吉他伴奏，旋律流畅</textarea></label>
 <label>歌词<textarea id="lyrics" rows="8" maxlength="10000" placeholder="粘贴完整歌词，可包含段落标记"></textarea></label>
-<button id="prepare">准备歌词与音色（不提交生成）</button><button id="generate" disabled>确认消耗海绵积分，提交生成一首</button>
-<label>生成任务 ID<input id="task" inputmode="numeric" placeholder="生成后自动填入，可自行保存以恢复查询"></label><button id="status">查询一次进度</button><button id="download" disabled>获取播放与下载地址</button>
+<button id="generate">确认消耗海绵积分，提交生成一首</button>
+<label>生成任务 ID<input id="task" placeholder="生成后自动填入，可自行保存以恢复查询"></label><button id="status">查询一次进度</button><button id="download" disabled>获取播放与下载地址</button>
 <audio id="audio" controls hidden></audio><a id="link" target="_blank" rel="noreferrer" hidden>打开音频并下载</a><button id="clear">清空凭证</button><pre id="result">等待准备</pre></main>
 <script type="module">
-const $=id=>document.getElementById(id);let prepared=null,songTaskId=null,busy=false;
-async function call(path,data){const r=await fetch(path,{method:'POST',headers:{Authorization:'Bearer '+$('token').value,'X-Haimian-Cookie':$('cookie').value,...(data?{'Content-Type':'application/json'}:{})},...(data?{body:JSON.stringify(data)}:{}),cache:'no-store'});const d=await r.json();if(!r.ok||d.error)throw Error(d.note||d.error||'请求失败');return d;}
+const $=id=>document.getElementById(id);let songTaskId=null,busy=false;
+async function call(path,data){const r=await fetch(path,{method:'POST',headers:{Authorization:'Bearer '+$('token').value,'X-Haimian-Cookie':$('cookie').value,...(data?{'Content-Type':'application/json'}:{})},...(data?{body:JSON.stringify(data)}:{}),cache:'no-store'});const d=await r.json();if(!r.ok||d.error)throw Error([d.error,d.businessCode,d.note].filter(Boolean).join(' · ')||'请求失败');return d;}
 function show(d){$('result').textContent=typeof d==='string'?d:JSON.stringify(d,null,2)}
 function run(id,fn){$(id).onclick=async()=>{if(busy)return;busy=true;$(id).disabled=true;try{await fn()}catch(e){show(e.message)}finally{busy=false;if(id!=='generate')$(id).disabled=false}}}
-run('load',async()=>{const b=await call('/probe/balance');if(b.data?.status_code!==0)throw Error('积分查询未成功');$('balance').textContent='当前积分：'+b.data.data.total_balance;const v=await call('/probe/voices');if(v.data?.status_code!==0)throw Error('音色查询未成功');$('voice').replaceChildren();const seen=new Set();for(const item of [...(v.data.data.voices||[]),...(v.data.data.campaign_voices||[])]){const id=String(item.id);if(seen.has(id))continue;seen.add(id);const o=document.createElement('option');o.value=id;o.textContent=item.title||id;$('voice').append(o)}show('读取成功，请填写画布 ID 和歌词。')});
-for(const id of ['canvas','lyrics','voice'])$(id).oninput=()=>{prepared=null;$('generate').disabled=true};
-run('prepare',async()=>{prepared=null;$('generate').disabled=true;const d=await call('/music/prepare',{canvasId:$('canvas').value.trim(),lyrics:$('lyrics').value,voiceId:$('voice').value});prepared=d.prepared;$('generate').disabled=false;show(d)});
-run('generate',async()=>{if(!prepared)throw Error('请先准备歌词与音色');const draft=prepared;prepared=null;songTaskId=null;$('download').disabled=true;const d=await call('/music/generate',{...draft,confirmSpend:true});$('task').value=d.generationTaskId;show({...d,note:'请保存任务 ID，点击查询进度；请勿重复提交。'})});
+run('load',async()=>{const b=await call('/probe/balance');if(b.data?.status_code!==0)throw Error('积分查询未成功');$('balance').textContent='当前积分：'+b.data.data.total_balance;const v=await call('/probe/voices');if(v.data?.status_code!==0)throw Error('音色查询未成功');$('voice').replaceChildren();const seen=new Set();for(const item of [...(v.data.data.voices||[]),...(v.data.data.campaign_voices||[])]){const id=String(item.id);if(seen.has(id))continue;seen.add(id);const o=document.createElement('option');o.value=id;o.textContent=item.title||id;$('voice').append(o)}show('读取成功，请选择音色、填写歌词和曲风。')});
+run('generate',async()=>{if(!confirm('确认用海绵积分生成一首原创歌曲？')){$('generate').disabled=false;return}songTaskId=null;$('download').disabled=true;$('task').value='';const d=await call('/music/original',{voiceId:$('voice').value,lyrics:$('lyrics').value,prompt:$('prompt').value,title:$('title').value,genre:$('genre').value,confirmSpend:true});$('task').value=d.songTaskId;try{localStorage.setItem('nuomi-haimian-original-task',d.songTaskId)}catch{}show(d)});
 $('task').oninput=()=>{songTaskId=null;$('download').disabled=true};
-run('status',async()=>{songTaskId=null;$('download').disabled=true;const d=await call('/music/status',{generationTaskId:$('task').value.trim()});if(d.state==='complete'){songTaskId=d.songTaskId;$('download').disabled=false}show(d)});
-run('download',async()=>{if(!songTaskId)throw Error('请先查询到生成完成');const d=await call('/music/download',{songTaskId});$('audio').src=d.mediaUrl;$('audio').hidden=false;$('link').href=d.mediaUrl;$('link').hidden=false;show('音频已就绪，点击播放；下载地址可能会过期。')});
-function clear(){$('token').value='';$('cookie').value=''}$('clear').onclick=()=>{clear();show('凭证已清空')};window.addEventListener('pagehide',clear);
+run('status',async()=>{songTaskId=null;$('download').disabled=true;const d=await call('/music/original-status',{songTaskId:$('task').value.trim()});if(d.state==='complete'){songTaskId=d.songTaskId;$('download').disabled=false}show(d)});
+run('download',async()=>{if(!songTaskId)throw Error('请先查询到生成完成');const d=await call('/music/original-download',{songTaskId});$('audio').src=d.mediaUrl;$('audio').hidden=false;$('link').href=d.mediaUrl;$('link').hidden=false;show('音频已就绪，点击播放；下载地址可能会过期。')});
+try{$('task').value=localStorage.getItem('nuomi-haimian-original-task')||''}catch{}\nfunction clear(){$('token').value='';$('cookie').value=''}$('clear').onclick=()=>{clear();show('凭证已清空')};window.addEventListener('pagehide',clear);
 </script></html>`;
