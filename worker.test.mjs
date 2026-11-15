@@ -1,3 +1,4 @@
+import './voice.test.mjs';
 import './music.test.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -70,3 +71,4 @@ test('Cloudflare entry does not treat ExecutionContext as upstream fetch', async
     assert.equal(calls, 1);
   } finally { globalThis.fetch = original; }
 });
+
