@@ -1,5 +1,6 @@
 import CleanupManager from '../features/experience/CleanupManager';
 import AudioApiFields from '../components/settings/AudioApiFields';
+import HaimianMusicSettings from '../components/settings/HaimianMusicSettings';
 import RecordingManager from '../features/personal/chatMedia/RecordingManager';
 import AudioApiTestButton from '../components/settings/AudioApiTestButton';
 import { readBackupPreferences, updateBackupPreferences } from '../utils/backupPreferences';
@@ -3228,6 +3229,8 @@ const Settings: React.FC = () => {
                         </div>
                     )}
                 </div>
+
+                <HaimianMusicSettings />
 
                 <div className="group">
                     <div className="flex items-center justify-between mb-1.5 pl-1">
