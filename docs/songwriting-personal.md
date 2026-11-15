@@ -1,6 +1,6 @@
 # 个人版写歌：月光织词 / 潮汐来信
 
-> **维护状态提示（2026-11-16）：** 本文记录原写歌方案与当时的阶段性验收，部分「尚未」是历史描述，**不能据此判断当前功能没有完成**。在正式分支 `personal/audio-listening` 的最新代码中，海绵原创出歌、成功后重新获取音频、下载成品、保存到原音乐 App 歌单以及角色演唱完成卡均已接入；具体以 `components/song/HaimianProduction.tsx`、`features/songwriting/{production,download,musicLibrary}.ts` 和当前 GitHub Pages 部署验证为准。**Char 自主谱曲还在 PR #145 实验分支，不在正式版；海绵参考旋律上传仍待单独接入。** 总入口见 [PERSONAL_DEV_START_HERE.md](../PERSONAL_DEV_START_HERE.md)。
+> **维护状态提示（2026-11-16）：** 本文记录原写歌方案与当时的阶段性验收，部分「尚未」是历史描述，**不能据此判断当前功能没有完成**。在正式分支 `personal/audio-listening` 的最新代码中，海绵原创出歌、成功后重新获取音频、下载成品、保存到原音乐 App 歌单以及角色演唱完成卡均已接入；具体以 `components/song/HaimianProduction.tsx`、`features/songwriting/{production,download,musicLibrary}.ts` 和当前 GitHub Pages 部署验证为准。**Char 自主谱曲八小节试用已通过 PR #146 融入正式源码**：写歌页有「自主谱曲」标签，逐音乐谱、abcjs 五线谱与 WAV/MIDI 试听、音频 API 只做客观声音描述、由 Char 决定局部修改；独立 abcjs 试听页已在用户手机验证正常，**实际 Char 出谱、识别、修订与演唱衔接尚未完成真机验收**；海绵参考旋律上传仍待单独接入。旧 PR #145 是过时实验基线，不得覆盖最新版。 总入口见 [PERSONAL_DEV_START_HERE.md](../PERSONAL_DEV_START_HERE.md)。
 
 ## 本轮实现
 
