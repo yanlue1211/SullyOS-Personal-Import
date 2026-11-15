@@ -1,3 +1,4 @@
+import { prepareVoiceUpload } from './voiceAudio';
 import { DB, openDB } from '../../utils/db';
 import { haimianCall, type HaimianCredentials } from './production';
 export const HAIMIAN_READING_TEXT = '今天天气很好，阳光从窗帘的缝隙里照进来，让整个房间都变得明亮。我准备收拾一下出门，沿着街边慢慢走到附近的咖啡馆，找一个靠窗的位置坐坐。想点一杯热拿铁，再选一块小蛋糕，一边看看路上的行人，一边整理最近的想法。';
@@ -25,7 +26,8 @@ export async function createVoiceClone(charId: string, sample: Blob, script: str
         throw Error('请填写连接密钥与 Cookie');
     if (!script.trim() || sample.size < 1000 || sample.size > 8 * 1024 * 1024)
         throw Error('请选择 8MB 以内的完整朗读音频，并保留对应台词');
-    const bytes = new Uint8Array(await sample.arrayBuffer());
+    const uploadCopy = await prepareVoiceUpload(sample);
+    const bytes = new Uint8Array(await uploadCopy.arrayBuffer());
     let raw = '';
     for (let i = 0; i < bytes.length; i += 8192)
         raw += String.fromCharCode(...bytes.subarray(i, i + 8192));

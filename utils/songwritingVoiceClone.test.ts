@@ -2,6 +2,7 @@ import {it,expect,vi,afterEach} from 'vitest';
 import {DB} from './db';
 import {createVoiceClone,inspectVoiceClone,loadVoiceClone,mutateVoiceClone,HAIMIAN_READING_TEXT} from '../features/songwriting/voiceClone';
 import {haimianCall} from '../features/songwriting/production';
+vi.mock('../features/songwriting/voiceAudio',()=>({prepareVoiceUpload:vi.fn(async (sample:Blob)=>sample)}));
 vi.mock('../features/songwriting/production',()=>({haimianCall:vi.fn()}));
 afterEach(()=>vi.clearAllMocks());
 it('clone uses sample bytes and exact script, retains no credentials, and binds after ready',async()=>{
