@@ -53,7 +53,13 @@ export async function musicOperation(action, input, cookie, upstreamFetch = fetc
     return data.data;
   }
   if (action === 'original') {
-    if (input.confirmSpend !== true || !numeric(input.voiceId) || !Number.isSafeInteger(Number(input.voiceId)) || typeof input.lyrics !== 'string' || !input.lyrics.trim() || input.lyrics.length > 5000 || typeof input.prompt !== 'string' || !input.prompt.trim() || input.prompt.length > 2000 || typeof input.title !== 'string' || input.title.length > 100 || !['Pop','Folk','Rock','R&B','Electronic','Jazz'].includes(input.genre)) fail('invalid_input');
+    const invalidField = input.confirmSpend !== true ? 'confirmation'
+      : !numeric(input.voiceId) || !Number.isSafeInteger(Number(input.voiceId)) ? 'voice'
+      : typeof input.lyrics !== 'string' || !input.lyrics.trim() || input.lyrics.length > 5000 ? 'lyrics'
+      : typeof input.prompt !== 'string' || !input.prompt.trim() || input.prompt.length > 2000 ? 'prompt'
+      : typeof input.title !== 'string' || input.title.length > 100 ? 'title'
+      : !['Pop','Folk','Rock','R&B','Electronic','Jazz'].includes(input.genre) ? 'genre' : null;
+    if (invalidField) { const error = new Error('invalid_input'); error.field = invalidField; throw error; }
     const d = await api('/jd/api/v1/generate/music', {}, {
       prompt: input.prompt, lyrics: input.lyrics.replace(/\r\n?/g, '\n'),
       is_original_prompt: false, voice_id: Number(input.voiceId),
@@ -140,6 +146,8 @@ export async function handleMusic(request, env, upstreamFetch = fetch) {
   } catch (error) {
     const codes = ['invalid_input', 'payload_too_large', 'upstream_http_error', 'upstream_invalid_response', 'upstream_business_error', 'unsupported_media_url', 'song_not_complete'];
     const code = codes.includes(error?.message) ? error.message : 'operation_failed';
+    const hints = { confirmation: '请确认生成操作。', voice: '请先点击读取积分与已有音色，再从列表选择一个音色。', lyrics: '请填写 1—5000 字的歌词。', prompt: '请填写 1—2000 字的演唱与编曲描述。', title: '歌名最多 100 字。', genre: '请从列表选择曲风。' };
+    if (code === 'invalid_input' && hints[error.field]) return reply({ error: code, field: error.field, note: hints[error.field], safeToRetry: true }, 400);
     return reply({ error: code, ...(Number.isSafeInteger(error?.businessCode) ? { businessCode: error.businessCode } : {}), ...(['generate','original'].includes(action) ? { note: '生成请求可能已受理，请到海绵官网作品列表确认后再决定是否重新提交。' } : {}) }, ['invalid_input', 'payload_too_large'].includes(code) ? 400 : 502);
   }
 }
@@ -156,11 +164,11 @@ const MUSIC_PAGE = `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><met
 <audio id="audio" controls hidden></audio><a id="link" target="_blank" rel="noreferrer" hidden>打开音频并下载</a><button id="clear">清空凭证</button><pre id="result">等待准备</pre></main>
 <script type="module">
 const $=id=>document.getElementById(id);let songTaskId=null,busy=false;
-async function call(path,data){const r=await fetch(path,{method:'POST',headers:{Authorization:'Bearer '+$('token').value,'X-Haimian-Cookie':$('cookie').value,...(data?{'Content-Type':'application/json'}:{})},...(data?{body:JSON.stringify(data)}:{}),cache:'no-store'});const d=await r.json();if(!r.ok||d.error)throw Error([d.error,d.businessCode,d.note].filter(Boolean).join(' · ')||'请求失败');return d;}
+async function call(path,data){const r=await fetch(path,{method:'POST',headers:{Authorization:'Bearer '+$('token').value,'X-Haimian-Cookie':$('cookie').value,...(data?{'Content-Type':'application/json'}:{})},...(data?{body:JSON.stringify(data)}:{}),cache:'no-store'});const d=await r.json();if(!r.ok||d.error){const e=new Error([d.error,d.businessCode,d.note].filter(Boolean).join(' · ')||'请求失败');e.safeToRetry=d.safeToRetry===true;throw e;}return d;}
 function show(d){$('result').textContent=typeof d==='string'?d:JSON.stringify(d,null,2)}
-function run(id,fn){$(id).onclick=async()=>{if(busy)return;busy=true;$(id).disabled=true;try{await fn()}catch(e){show(e.message)}finally{busy=false;if(id!=='generate')$(id).disabled=false}}}
+function run(id,fn){$(id).onclick=async()=>{if(busy)return;busy=true;$(id).disabled=true;try{await fn()}catch(e){show(e.message);if(id==='generate'&&e.safeToRetry)$(id).disabled=false}finally{busy=false;if(id!=='generate')$(id).disabled=false}}}
 run('load',async()=>{const b=await call('/probe/balance');if(b.data?.status_code!==0)throw Error('积分查询未成功');$('balance').textContent='当前积分：'+b.data.data.total_balance;const v=await call('/probe/voices');if(v.data?.status_code!==0)throw Error('音色查询未成功');$('voice').replaceChildren();const seen=new Set();for(const item of [...(v.data.data.voices||[]),...(v.data.data.campaign_voices||[])]){const id=String(item.id);if(seen.has(id))continue;seen.add(id);const o=document.createElement('option');o.value=id;o.textContent=item.title||id;$('voice').append(o)}show('读取成功，请选择音色、填写歌词和曲风。')});
-run('generate',async()=>{if(!confirm('确认用海绵积分生成一首原创歌曲？')){$('generate').disabled=false;return}songTaskId=null;$('download').disabled=true;$('task').value='';const d=await call('/music/original',{voiceId:$('voice').value,lyrics:$('lyrics').value,prompt:$('prompt').value,title:$('title').value,genre:$('genre').value,confirmSpend:true});$('task').value=d.songTaskId;try{localStorage.setItem('nuomi-haimian-original-task',d.songTaskId)}catch{}show(d)});
+run('generate',async()=>{if(!$('voice').value){$('generate').disabled=false;throw Error('请先读取积分与已有音色，再选择一个音色。')}if(!$('lyrics').value.trim()||!$('prompt').value.trim()){$('generate').disabled=false;throw Error('请填写歌词和演唱与编曲描述。')}if(!confirm('确认用海绵积分生成一首原创歌曲？')){$('generate').disabled=false;return}songTaskId=null;$('download').disabled=true;$('task').value='';const d=await call('/music/original',{voiceId:$('voice').value,lyrics:$('lyrics').value,prompt:$('prompt').value,title:$('title').value,genre:$('genre').value,confirmSpend:true});$('task').value=d.songTaskId;try{localStorage.setItem('nuomi-haimian-original-task',d.songTaskId)}catch{}show(d)});
 $('task').oninput=()=>{songTaskId=null;$('download').disabled=true};
 run('status',async()=>{songTaskId=null;$('download').disabled=true;const d=await call('/music/original-status',{songTaskId:$('task').value.trim()});if(d.state==='complete'){songTaskId=d.songTaskId;$('download').disabled=false}show(d)});
 run('download',async()=>{if(!songTaskId)throw Error('请先查询到生成完成');const d=await call('/music/original-download',{songTaskId});$('audio').src=d.mediaUrl;$('audio').hidden=false;$('link').href=d.mediaUrl;$('link').hidden=false;show('音频已就绪，点击播放；下载地址可能会过期。')});
