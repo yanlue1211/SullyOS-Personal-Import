@@ -45,10 +45,21 @@ export async function musicOperation(action, input, cookie, upstreamFetch = fetc
   async function api(path, params = {}, body) {
     const u = new URL('https://www.haimian.com' + path);
     u.search = new URLSearchParams({ ...META, ...params }).toString();
-    const response = await upstreamFetch(u.href, { method: body ? 'POST' : 'GET', redirect: 'manual', signal: AbortSignal.timeout(20000), headers: { Cookie: cookie, Accept: 'application/json', ...(body ? { 'Content-Type': 'application/json' } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
+    const response = await upstreamFetch(u.href, { method: body ? 'POST' : 'GET', redirect: 'manual', signal: AbortSignal.timeout(20000), headers: { Cookie: cookie, 'User-Agent': 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36', Accept: 'application/json', ...(body ? { 'Content-Type': 'application/json' } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
     if (!response.ok || !response.headers.get('Content-Type')?.includes('application/json')) { await response.body?.cancel(); fail('upstream_http_error'); }
     let data; try { data = JSON.parse(await boundedText(response.body, 1048576)); } catch { fail('upstream_invalid_response'); }
-    if (data.status_code !== 0) { const error = new Error('upstream_business_error'); if (Number.isSafeInteger(data.status_code)) error.businessCode = data.status_code; throw error; }
+    if (data.status_code !== 0) { const error = new Error('upstream_business_error'); if (Number.isSafeInteger(data.status_code)) error.businessCode = data.status_code;
+      // Only return fixed classifications, never raw upstream text or credentials.
+      const message = String(data.status_info?.status_msg || '');
+      error.businessHint = /积分|余额|credit|balance/i.test(message) ? '海绵提示积分或余额问题。'
+        : /登录|登陆|cookie|session|unauthor/i.test(message) ? '海绵提示登录状态问题。'
+        : /参数|parameter|invalid.*param/i.test(message) ? '海绵提示请求参数不符合要求。'
+        : /音色|voice/i.test(message) ? '海绵提示音色问题。'
+        : /版权|copyright/i.test(message) ? '海绵提示版权审核问题。'
+        : /违规|审核|敏感|特殊字符/i.test(message) ? '海绵提示内容或格式审核问题。'
+        : /频繁|限流|rate.*limit/i.test(message) ? '海绵提示请求过于频繁。'
+        : '海绵未返回可识别的错误原因；尚未取得生成任务 ID。';
+      throw error; }
     if (!data.data || typeof data.data !== 'object') fail('upstream_invalid_response');
     return data.data;
   }
@@ -148,29 +159,29 @@ export async function handleMusic(request, env, upstreamFetch = fetch) {
     const code = codes.includes(error?.message) ? error.message : 'operation_failed';
     const hints = { confirmation: '请确认生成操作。', voice: '请先点击读取积分与已有音色，再从列表选择一个音色。', lyrics: '请填写 1—5000 字的歌词。', prompt: '请填写 1—2000 字的演唱与编曲描述。', title: '歌名最多 100 字。', genre: '请从列表选择曲风。' };
     if (code === 'invalid_input' && hints[error.field]) return reply({ error: code, field: error.field, note: hints[error.field], safeToRetry: true }, 400);
-    return reply({ error: code, ...(Number.isSafeInteger(error?.businessCode) ? { businessCode: error.businessCode } : {}), ...(['generate','original'].includes(action) ? { note: '生成请求可能已受理，请到海绵官网作品列表确认后再决定是否重新提交。' } : {}) }, ['invalid_input', 'payload_too_large'].includes(code) ? 400 : 502);
+    return reply({ error: code, ...(Number.isSafeInteger(error?.businessCode) ? { businessCode: error.businessCode, businessHint: error.businessHint } : {}), ...(['generate','original'].includes(action) ? { note: '生成请求可能已受理，请到海绵官网作品列表确认后再决定是否重新提交。' } : {}) }, ['invalid_input', 'payload_too_large'].includes(code) ? 400 : 502);
   }
 }
 
 const MUSIC_PAGE = `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>糯米 · 已有音色创作</title>
 <style>body{margin:0;background:#edf7f3;color:#284d49;font:16px system-ui}main{max-width:560px;margin:24px auto;padding:24px;background:white;border-radius:24px}input,textarea,select,button{box-sizing:border-box;width:100%;padding:13px;margin:8px 0 18px;border:1px solid #add4cc;border-radius:12px;font:inherit}button{background:#d7eee7;color:#234d47}button:disabled{opacity:.45}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#eef5fb;padding:16px;border-radius:12px}small{display:block;line-height:1.7}audio{width:100%}a{color:#284d49}</style>
-<main><h2>把歌词唱给你听</h2><p>原创谱曲 · 直连测试版 2</p><small>填写自己的歌词和曲风，使用已有音色生成原创歌曲，无需画布 ID。点击提交生成会按海绵规则消耗积分；每次仅提交一首。本页尚待实际生成验证。凭证仅保留在本页内存。</small>
+<main><h2>把歌词唱给你听</h2><p>原创谱曲 · 直连测试版 3</p><small>填写自己的歌词和曲风，使用已有音色生成原创歌曲，无需画布 ID。点击提交生成会按海绵规则消耗积分；每次仅提交一首。本页尚待实际生成验证。凭证仅保留在本页内存。</small>
 <label>专用连接密钥<input id="token" type="password" autocomplete="off"></label><label>海绵 Cookie<input id="cookie" type="password" autocomplete="off"></label>
 <button id="load">读取积分与已有音色</button><p id="balance"></p><label>已有音色<select id="voice"><option value="">请先读取音色</option></select></label>
 <label>歌名<input id="title" maxlength="100" value="晚风里的小狗"></label><label>曲风<select id="genre"><option value="Folk">民谣</option><option value="Pop">流行</option><option value="Rock">摇滚</option><option value="R&B">R&amp;B</option><option value="Electronic">电子</option><option value="Jazz">爵士</option></select></label><label>演唱与编曲描述<textarea id="prompt" rows="3" maxlength="2000">轻快温暖的民谣，清亮自然的人声，木吉他伴奏，旋律流畅</textarea></label>
-<label>歌词<textarea id="lyrics" rows="8" maxlength="10000" placeholder="粘贴完整歌词，可包含段落标记"></textarea></label>
+<label>歌词<textarea id="lyrics" rows="8" maxlength="5000" placeholder="粘贴完整歌词，可包含段落标记"></textarea></label>
 <button id="generate">确认消耗海绵积分，提交生成一首</button>
 <label>生成任务 ID<input id="task" placeholder="生成后自动填入，可自行保存以恢复查询"></label><button id="status">查询一次进度</button><button id="download" disabled>获取播放与下载地址</button>
 <audio id="audio" controls hidden></audio><a id="link" target="_blank" rel="noreferrer" hidden>打开音频并下载</a><button id="clear">清空凭证</button><pre id="result">等待准备</pre></main>
 <script type="module">
 const $=id=>document.getElementById(id);let songTaskId=null,busy=false;
-async function call(path,data){const r=await fetch(path,{method:'POST',headers:{Authorization:'Bearer '+$('token').value,'X-Haimian-Cookie':$('cookie').value,...(data?{'Content-Type':'application/json'}:{})},...(data?{body:JSON.stringify(data)}:{}),cache:'no-store'});const d=await r.json();if(!r.ok||d.error){const e=new Error([d.error,d.businessCode,d.note].filter(Boolean).join(' · ')||'请求失败');e.safeToRetry=d.safeToRetry===true;throw e;}return d;}
+async function call(path,data){const r=await fetch(path,{method:'POST',headers:{Authorization:'Bearer '+$('token').value,'X-Haimian-Cookie':$('cookie').value,...(data?{'Content-Type':'application/json'}:{})},...(data?{body:JSON.stringify(data)}:{}),cache:'no-store'});const d=await r.json();if(!r.ok||d.error){const e=new Error([d.error,d.businessCode,d.businessHint,d.note].filter(Boolean).join(' · ')||'请求失败');e.safeToRetry=d.safeToRetry===true;throw e;}return d;}
 function show(d){$('result').textContent=typeof d==='string'?d:JSON.stringify(d,null,2)}
 function run(id,fn){$(id).onclick=async()=>{if(busy)return;busy=true;$(id).disabled=true;try{await fn()}catch(e){show(e.message);if(id==='generate'&&e.safeToRetry)$(id).disabled=false}finally{busy=false;if(id!=='generate')$(id).disabled=false}}}
 run('load',async()=>{const b=await call('/probe/balance');if(b.data?.status_code!==0)throw Error('积分查询未成功');$('balance').textContent='当前积分：'+b.data.data.total_balance;const v=await call('/probe/voices');if(v.data?.status_code!==0)throw Error('音色查询未成功');$('voice').replaceChildren();const seen=new Set();for(const item of [...(v.data.data.voices||[]),...(v.data.data.campaign_voices||[])]){const id=String(item.id);if(seen.has(id))continue;seen.add(id);const o=document.createElement('option');o.value=id;o.textContent=item.title||id;$('voice').append(o)}show('读取成功，请选择音色、填写歌词和曲风。')});
 run('generate',async()=>{if(!$('voice').value){$('generate').disabled=false;throw Error('请先读取积分与已有音色，再选择一个音色。')}if(!$('lyrics').value.trim()||!$('prompt').value.trim()){$('generate').disabled=false;throw Error('请填写歌词和演唱与编曲描述。')}if(!confirm('确认用海绵积分生成一首原创歌曲？')){$('generate').disabled=false;return}songTaskId=null;$('download').disabled=true;$('task').value='';const d=await call('/music/original',{voiceId:$('voice').value,lyrics:$('lyrics').value,prompt:$('prompt').value,title:$('title').value,genre:$('genre').value,confirmSpend:true});$('task').value=d.songTaskId;try{localStorage.setItem('nuomi-haimian-original-task',d.songTaskId)}catch{}show(d)});
 $('task').oninput=()=>{songTaskId=null;$('download').disabled=true};
-run('status',async()=>{songTaskId=null;$('download').disabled=true;const d=await call('/music/original-status',{songTaskId:$('task').value.trim()});if(d.state==='complete'){songTaskId=d.songTaskId;$('download').disabled=false}show(d)});
+run('status',async()=>{if(!$('task').value.trim())throw Error('还没有生成任务 ID，暂时无法查询进度。');songTaskId=null;$('download').disabled=true;const d=await call('/music/original-status',{songTaskId:$('task').value.trim()});if(d.state==='complete'){songTaskId=d.songTaskId;$('download').disabled=false}show(d)});
 run('download',async()=>{if(!songTaskId)throw Error('请先查询到生成完成');const d=await call('/music/original-download',{songTaskId});$('audio').src=d.mediaUrl;$('audio').hidden=false;$('link').href=d.mediaUrl;$('link').hidden=false;show('音频已就绪，点击播放；下载地址可能会过期。')});
 try{$('task').value=localStorage.getItem('nuomi-haimian-original-task')||''}catch{}\nfunction clear(){$('token').value='';$('cookie').value=''}$('clear').onclick=()=>{clear();show('凭证已清空')};window.addEventListener('pagehide',clear);
 </script></html>`;
