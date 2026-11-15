@@ -1,4 +1,6 @@
 # SullyOS·糯米机
+
+> **个人二改仓库开发入口：** [PERSONAL_DEV_START_HERE.md](./PERSONAL_DEV_START_HERE.md)。正式个人网页源码位于 `personal/audio-listening`，GitHub 默认分支不是最新网页版本；开发、合并与部署请先按入口文档核对。以下保留原项目介绍与授权说明。
 <div align="center">
 <img width="800" alt="banner" src="https://cdn.jsdelivr.net/gh/qegj567-cloud/SullyOS-assets@main/bgm/SULLY/sDN.png" />
 </div>
