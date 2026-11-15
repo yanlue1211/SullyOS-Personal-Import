@@ -93,7 +93,7 @@ export default function SingingLab({ char }: { char?: CharacterProfile }) {
           (char?.voiceProfile?.timberWeights?.length ? "混合音色" : "尚未配置")}
       </div>
       <p className="sw-lab-copy">
-        在海绵的「新增音色」查看要求，把它提供的朗读台词原样粘贴到下面。素材能否使用、是否允许合成音频，以平台当前规则和实际测试为准。
+        选择海绵提供的一张固定台词卡，把完整台词原样粘贴到下面。可以用角色音色朗读歌词，不需要唱出来，也不用手机外放再录音。
       </p>
       <textarea
         aria-label="音色克隆测试台词"
@@ -153,8 +153,9 @@ export default function SingingLab({ char }: { char?: CharacterProfile }) {
       >
         打开海绵音乐 ↗
       </a>
+      <a className="sw-lab-link" href="https://nuomi-haimian.yanlue.workers.dev/music" target="_blank" rel="noopener noreferrer">打开音频文件上传测试页 ↗</a>
       <p className="sw-note">
-        本页只准备朗读素材，不自动上传或克隆。音色上传仍在独立测试页验证；已有音色可直接到「海绵出歌」使用。
+        保存测试音频后，在上传测试页展开“上传朗读音频”，直接选择文件上传，无需外放录音。本页只准备朗读素材，不自动上传或克隆。音色上传仍在独立测试页验证；已有音色可直接到「海绵出歌」使用。
       </p>
     </section>
   );

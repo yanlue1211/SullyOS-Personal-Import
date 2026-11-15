@@ -319,7 +319,7 @@ export default function SongwritingStudio({
     });
   };
   return (
-    <div className={`sw-studio sw-${theme}`}>
+    <div className={`sw-studio sw-${theme}${tab === "production" ? " sw-production-view" : ""}`}>
       <header className="sw-header">
         <button className="sw-icon" onClick={onBack} aria-label="返回歌曲书架">
           ‹

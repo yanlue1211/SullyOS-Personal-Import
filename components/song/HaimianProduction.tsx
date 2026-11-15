@@ -76,14 +76,14 @@ export default function HaimianProduction({ song, onUpdate }: {
     const inspect = () => void run('正在查询进度', async () => { if (!task)
         return; const d = await haimianCall('/music/original-status', credentials, { songTaskId: task.id }); await update(s => { if (s.production?.task?.id !== task.id)
         throw Error('任务已变化'); return { ...s, production: { ...s.production, task: { ...s.production.task, state: d.state } } }; }); setInfo(`当前状态：${d.state === 'complete' ? '已完成' : d.state === 'failed' ? '失败' : '处理中'}，进度 ${d.progress ?? '待确认'}%`); });
-    return <section className="sw-panel"><div className="sw-panel-heading"><h3>把创作设想唱出来</h3><small>YOUR SONG, YOUR WAY</small></div>
- <p className="sw-note">保留当前曲风与情绪，也可以自由表达。角色构思与整理说明会调用角色聊天 API；提交海绵才生成歌曲。</p>
- <label>这首歌想表达什么、是什么风格<textarea aria-label="自由创作设想" rows={5} value={vision} maxLength={3000} onChange={e => setVision(e.target.value)} placeholder="曲风、主题、想表达的话、主副歌情绪、希望怎样唱…"/></label>
- <div className="sw-actions"><button disabled={!!busy} onClick={() => void run('保存创作设想', async () => { await save(); })}>保存设想</button><button disabled={!!busy} onClick={() => generateText('vision')}>让角色填写</button></div>
- <button disabled={!!busy || !song.lines.some(l => !l.isDraft)} onClick={() => generateText('prompt')}>整理海绵创作说明</button>
- <label>生成前预览与修改<textarea aria-label="海绵创作说明" rows={6} value={prompt} maxLength={2000} onChange={e => setPrompt(e.target.value)}/></label>
- <details><summary>本次完整歌词（不会由整理步骤改写）</summary><pre>{lyricsText(song.lines) || '请先保存歌词'}</pre></details>
- <details><summary>海绵连接与音色</summary><label>专用连接密钥<input type="password" autoComplete="off" value={token} onChange={e => setToken(e.target.value)}/></label><label>海绵 Cookie<input type="password" autoComplete="off" value={cookie} onChange={e => setCookie(e.target.value)}/></label>
+    return <section className="sw-production"><div className="sw-production-intro"><span className="sw-production-kicker">海绵音乐 · 原创歌曲</span><h3>让这首歌，有自己的声音</h3><p>写下设想，整理说明，再交给海绵唱出来。</p></div>
+ <div className="sw-production-step"><div className="sw-production-step-heading"><span>01</span><div><h4>创作设想</h4><p>你来写，也可以让角色发挥。</p></div></div>
+ <label>想表达的话 · 曲风与情绪<textarea aria-label="自由创作设想" rows={5} value={vision} maxLength={3000} onChange={e => setVision(e.target.value)} placeholder="比如：轻快的民谣，想唱出对明天的期待。主歌轻轻说，副歌明亮一点…"/></label>
+ <div className="sw-actions"><button disabled={!!busy} onClick={() => void run('保存创作设想', async () => { await save(); })}>保存设想</button><button disabled={!!busy} onClick={() => generateText('vision')}>让角色填写</button></div><p className="sw-production-hint">角色填写会调用当前角色的聊天模型。</p></div>
+ <div className="sw-production-step"><div className="sw-production-step-heading"><span>02</span><div><h4>生成说明</h4><p>整理成音乐要求，歌词保持原样。</p></div></div><button className="sw-production-outline" disabled={!!busy || !song.lines.some(l => !l.isDraft)} onClick={() => generateText('prompt')}>整理海绵创作说明</button>
+ <label>预览与修改<textarea aria-label="海绵创作说明" rows={6} value={prompt} maxLength={2000} onChange={e => setPrompt(e.target.value)}/></label>
+ <details><summary>本次完整歌词（不会由整理步骤改写）</summary><pre>{lyricsText(song.lines) || '请先保存歌词'}</pre></details></div>
+ <details className="sw-production-step sw-production-connection"><summary><span className="sw-production-number">03</span>海绵连接与音色</summary><label>专用连接密钥<input type="password" autoComplete="off" value={token} onChange={e => setToken(e.target.value)}/></label><label>海绵 Cookie<input type="password" autoComplete="off" value={cookie} onChange={e => setCookie(e.target.value)}/></label>
  <p className="sw-note">凭证仅留在本页内存，离开后需重新填写。</p><button disabled={!!busy} onClick={() => void run('读取积分与音色', async () => { const b = await haimianCall('/probe/balance', credentials); if (b.data?.status_code !== 0)
         throw Error('积分查询失败'); const v = await haimianCall('/probe/voices', credentials); if (v.data?.status_code !== 0)
         throw Error('音色查询失败'); const items = [...(v.data.data.voices || []), ...(v.data.data.campaign_voices || [])].filter((v: any) => v.status === 2); setVoices([...new Map(items.map((v: any) => [String(v.id), { id: String(v.id), title: v.title || String(v.id) }])).values()] as {
@@ -91,8 +91,8 @@ export default function HaimianProduction({ song, onUpdate }: {
         title: string;
     }[]); setInfo('当前积分：' + b.data.data.total_balance); })}>读取积分与音色</button>
  <select aria-label="海绵演唱音色" value={voice} onChange={e => setVoice(e.target.value)}><option value="">选择已有音色</option>{voices.map(v => <option key={v.id} value={v.id}>{v.title}</option>)}</select></details>
- <button className="sw-primary" disabled={!!busy || !!task && ['submitting', 'unknown', 'processing'].includes(task.state)} onClick={submit}>确认消耗积分，生成一首</button>
- {task && <div><p className="sw-note">任务：{task.id} · {task.state}</p>{['submitting', 'unknown'].includes(task.state) ? <><p>提交结果尚未确认，请先到海绵官网核对，勿重复生成。</p><button disabled={!!busy} onClick={() => { const id = window.prompt('官网已有任务时填写任务 ID；确认未受理可留空解除。'); if (id === null)
+ <div className="sw-production-step"><div className="sw-production-step-heading"><span>04</span><div><h4>生成歌曲</h4><p>确认后生成一首，会消耗海绵积分。</p></div></div><button className="sw-primary sw-production-submit" disabled={!!busy || !!task && ['submitting', 'unknown', 'processing'].includes(task.state)} onClick={submit}>确认消耗积分，生成一首</button>
+ {task && <div className="sw-production-task"><p className="sw-note">任务：{task.id} · {({submitting:"正在提交",unknown:"待核对",processing:"生成中",complete:"已完成",failed:"失败"})[task.state]}</p>{['submitting', 'unknown'].includes(task.state) ? <><p>提交结果尚未确认，请先到海绵官网核对，勿重复生成。</p><button disabled={!!busy} onClick={() => { const id = window.prompt('官网已有任务时填写任务 ID；确认未受理可留空解除。'); if (id === null)
             return; if (id && !/^[A-Za-z0-9_-]{1,80}$/.test(id)) {
             setError('任务 ID 格式无效');
             return;
@@ -103,6 +103,7 @@ export default function HaimianProduction({ song, onUpdate }: {
             throw Error('任务已变化'); const recorded = s.production.task.completionRecorded; return { song: { ...s, production: { ...s.production, task: { ...s.production.task, mediaUrl: d.mediaUrl, completionRecorded: true } } }, ...(!recorded ? { card: { kind: 'completed' as const, songId: s.id, title: task.title, label: '海绵原创歌曲生成完成', author: os.characters.find(c => c.id === s.collaboratorId)?.name || '创作伙伴', version: s.lyricRevisions?.length || 1, after: task.lyrics, at: Date.now(), audio: '海绵音乐' } } : {}) }; }); if (active.current)
             onUpdate(saved); })}>获取播放与下载地址</button>}
  {task.mediaUrl && <><audio controls src={task.mediaUrl}/><a href={task.mediaUrl} target="_blank" rel="noreferrer">打开并下载成品</a><p className="sw-note">链接会过期，可再次获取。旧任务使用提交时保存的歌词与说明。</p></>}</div>}
+ </div>
  {!!song.production?.taskHistory?.length && <details><summary>历史生成任务（{song.production.taskHistory.length}）</summary>{song.production.taskHistory.map(t => <details key={t.id}><summary>{t.title} · {t.id} · {t.state}</summary><pre>{t.lyrics}</pre><p>{t.prompt}</p></details>)}</details>}
  {busy && <p role="status">{busy}…</p>}{info && <p>{info}</p>}{error && <div className="sw-error" role="alert">{error}</div>}
  </section>;

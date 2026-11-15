@@ -658,3 +658,45 @@
 .sw-panel input:not([type="checkbox"]) { box-sizing:border-box; width:100%; padding:12px; margin:8px 0; border:1px solid var(--sw-border); border-radius:12px; color:var(--sw-ink); background:var(--sw-bg); }
 .sw-panel audio { width:100%; margin:12px 0; }
 .sw-panel pre { white-space:pre-wrap; overflow-wrap:anywhere; }
+
+/* Haimian: separate steps and consistent mobile form rhythm. */
+.sw-production { margin:12px 0 24px; font-size:13px; line-height:1.65; min-width:0; }
+.sw-production-intro { padding:4px 4px 16px; }
+.sw-production-kicker { color:var(--sw-muted); font-size:10px; letter-spacing:1px; }
+.sw-production-intro h3 { margin:5px 0; font-size:19px; line-height:1.5; font-weight:600; }
+.sw-production-intro p { color:var(--sw-muted); font-size:12px; margin:0; }
+.sw-production-step { display:block; margin:0 0 14px; padding:18px 16px; border:1px solid var(--sw-border); border-radius:20px; background:linear-gradient(135deg,#ffffffdc,#ffffff94); box-shadow:0 5px 18px #34574e04; min-width:0; }
+.sw-production-step-heading { display:flex; align-items:center; gap:11px; margin-bottom:17px; }
+.sw-production-step-heading > span,.sw-production-number { display:inline-flex; align-items:center; justify-content:center; width:30px; height:30px; flex-shrink:0; border-radius:11px; background:var(--sw-light); color:var(--sw-ink); font-size:11px; font-weight:600; letter-spacing:1px; }
+.sw-production-step-heading h4 { font-size:15px; margin:0; font-weight:600; color:var(--sw-ink); }
+.sw-production-step-heading p { margin:2px 0 0; font-size:11px; color:var(--sw-muted); }
+.sw-production label { display:flex; flex-direction:column; gap:8px; margin:14px 0 0; font-size:12px; font-weight:500; }
+.sw-production textarea { display:block; font-size:13px; line-height:1.8; min-height:125px; background:#fff9; padding:13px; border-radius:13px; }
+.sw-production textarea::placeholder { font-size:12px; line-height:1.8; }
+.sw-production input,.sw-production select { width:100%; box-sizing:border-box; display:block; border:1px solid var(--sw-border); border-radius:12px; padding:12px; min-height:44px; background:#ffffffa8; color:var(--sw-ink); font:inherit; margin:0; }
+.sw-production select { margin-top:12px; }
+.sw-production button { box-sizing:border-box; display:block; min-height:42px; padding:10px 13px; border:1px solid var(--sw-border); border-radius:12px; background:var(--sw-bg); color:var(--sw-ink); font-size:12px; line-height:1.5; font-weight:500; }
+.sw-production button:disabled { opacity:.45; }
+.sw-production .sw-actions { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:12px; }
+.sw-production .sw-actions > button { width:100%; font-size:12px; }
+.sw-production .sw-actions > button:last-child { background:var(--sw-light); border-color:transparent; }
+.sw-production-hint,.sw-production .sw-note { font-size:11px; color:var(--sw-muted); text-align:left; line-height:1.7; margin:10px 0 0; overflow-wrap:anywhere; }
+.sw-production-outline,.sw-production-submit { width:100%; }
+.sw-production .sw-primary { background:var(--sw-accent); color:white; border-color:transparent; min-height:46px; font-size:13px; }
+.sw-production details:not(.sw-production-connection) { margin-top:15px; border-top:1px solid var(--sw-border); padding-top:12px; }
+.sw-production summary { font-size:12px; cursor:pointer; color:var(--sw-ink); }
+.sw-production-connection > summary { display:flex; align-items:center; gap:11px; font-size:15px; font-weight:600; list-style:none; }
+.sw-production-connection > summary::after { content:'展开'; margin-left:auto; font-size:11px; font-weight:400; color:var(--sw-muted); }
+.sw-production-connection[open] > summary::after { content:'收起'; }
+.sw-production-connection > button { width:100%; margin-top:12px; }
+.sw-production pre { white-space:pre-wrap; overflow-wrap:anywhere; font:inherit; font-size:12px; max-height:230px; overflow:auto; margin:10px 0 0; }
+.sw-production-task { margin-top:14px; padding:12px; border-radius:13px; background:var(--sw-bg); }
+.sw-production-task > button { width:100%; margin-top:10px; }
+.sw-production audio { width:100%; display:block; margin:12px 0; }
+.sw-production a { display:block; font-size:12px; color:var(--sw-ink); margin-top:10px; text-decoration:underline; }
+
+.sw-production-view .sw-hero { padding-top:12px; padding-bottom:12px; }
+.sw-production-view .sw-mascot { width:82px; max-width:26%; }
+.sw-production-view .sw-hero h2 { font-size:16px; margin:4px 0; }
+.sw-production-view .sw-hero .sw-eyebrow { font-size:8px; letter-spacing:1px; }
+.sw-production-view .sw-scroll { padding-top:12px; }
