@@ -2464,7 +2464,7 @@ const SongwritingApp: React.FC = () => {
                 </div>
 
                 {/* Lyrics body — like a booklet page (draft lines excluded) */}
-                <div className="flex-1 overflow-y-auto px-8 py-8 no-scrollbar relative z-10 pb-32">
+                <div className="flex-1 overflow-y-auto px-8 py-8 no-scrollbar relative z-10 pb-52">
                     {activeSong.lines.filter(l => !l.isDraft).map(line => {
                         const showSection = line.section !== currentSec;
                         if (showSection) currentSec = line.section;
