@@ -28,3 +28,8 @@ test('voice routes require authorization and return training state without paylo
  assert.equal((await handleMusic(request('wrong'),env,upstream)).status,401);assert.equal(calls,0);
  const r=await handleMusic(request('Bearer '+env.AUTH_TOKEN),env,upstream);assert.deepEqual(await r.json(),{voiceId:'123',state:'ready'});assert.equal(calls,1);
 });
+test('official storage address variants normalize without allowing other domains',async()=>{
+ const {voiceUploadUrl}=await import('./voice.mjs');
+ for(const host of ['tos-d-ct-hl.snssdk.com','https://tos-d-ct-hl.snssdk.com','tos-d-ct-hl.snssdk.com:443'])assert.equal(voiceUploadUrl(host,'/tos-cn-v-test/fakeKey'),'https://tos-d-ct-hl.snssdk.com/upload/v1/tos-cn-v-test/fakeKey');
+ for(const host of ['https://evil.example','tos-test.snssdk.com.evil.example','https://u:p@tos-test.snssdk.com','http://tos-test.snssdk.com'])assert.throws(()=>voiceUploadUrl(host,'tos-cn-v-test/fakeKey'),e=>e.safeToRetry&&e.message==='unsupported_media_url');
+});

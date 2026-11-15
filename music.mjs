@@ -168,7 +168,7 @@ export async function handleMusic(request, env, upstreamFetch = fetch) {
     const code = codes.includes(error?.message) ? error.message : 'operation_failed';
     const hints = { confirmation: '请确认生成操作。', voice: '请先点击读取积分与已有音色，再从列表选择一个音色。', lyrics: '请填写 1—5000 字的歌词。', prompt: '请填写 1—2000 字的演唱与编曲描述。', title: '歌名最多 100 字。', genre: '请从列表选择曲风。' };
     if (code === 'invalid_input' && hints[error.field]) return reply({ error: code, field: error.field, note: hints[error.field], safeToRetry: true }, 400);
-    return reply({ error: code, ...(Number.isSafeInteger(error?.businessCode) ? { businessCode: error.businessCode, businessHint: error.businessHint } : {}), ...(['generate','original'].includes(action) ? { note: '生成请求可能已受理，请到海绵官网作品列表确认后再决定是否重新提交。' } : {}) }, ['invalid_input', 'payload_too_large'].includes(code) ? 400 : 502);
+    return reply({ error: code, ...(action === 'voice-upload' && error.uploadHint ? {businessHint:error.uploadHint,safeToRetry:true} : {}), ...(Number.isSafeInteger(error?.businessCode) ? { businessCode: error.businessCode, businessHint: error.businessHint } : {}), ...(['generate','original'].includes(action) ? { note: '生成请求可能已受理，请到海绵官网作品列表确认后再决定是否重新提交。' } : {}) }, ['invalid_input', 'payload_too_large'].includes(code) ? 400 : 502);
   }
 }
 

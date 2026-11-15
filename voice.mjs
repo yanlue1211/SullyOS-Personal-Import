@@ -27,6 +27,21 @@ async function jsonResponse(response) {
  try{for(;;){const r=await reader.read();if(r.done)break;size+=r.value.byteLength;if(size>1048576){await reader.cancel();throw Error('payload_too_large')}text+=decoder.decode(r.value,{stream:true});}}finally{reader.releaseLock()}
  try{return JSON.parse(text+decoder.decode())}catch{throw Error('upstream_invalid_response')}
 }
+export function voiceUploadUrl(hostValue, uriValue) {
+ let target;
+ try { target = new URL(hostValue.includes('://') ? hostValue : 'https://' + hostValue); } catch {}
+ const host = target?.hostname || '';
+ const validHost = target?.protocol === 'https:' && !target.username && !target.password && !target.port && target.pathname === '/' && !target.search && !target.hash && /^tos-[a-z0-9.-]+\.snssdk\.com$/.test(host);
+ const uri = uriValue.replace(/^\/+/, '');
+ const validPath = /^[A-Za-z0-9_/-]+$/.test(uri) && !uri.includes('..') && !uri.includes('//');
+ if (!validHost || !validPath) {
+  const error = new Error('unsupported_media_url');
+  error.safeToRetry = true;
+  error.uploadHint = !validHost ? '上传前停止：海绵返回的存储域名暂未适配（' + (/^[a-z0-9.-]{1,200}$/.test(host) ? host : '地址格式异常') + '）。未上传音频，未注册音色。' : '上传前停止：存储路径格式暂未适配。未上传音频，未注册音色。';
+  throw error;
+ }
+ return target.origin + '/upload/v1/' + uri;
+}
 export async function uploadVoice(input, api, upstreamFetch) {
  if(input.confirmUpload!==true || typeof input.audioBase64!=='string' || input.audioBase64.length>11200000 || !/^[A-Za-z0-9+/]+={0,2}$/.test(input.audioBase64) || typeof input.lyrics!=='string' || !input.lyrics.trim() || input.lyrics.length>3000)throw Error('invalid_input');
  let bytes;try{bytes=Uint8Array.from(atob(input.audioBase64),c=>c.charCodeAt(0))}catch{throw Error('invalid_input')}
@@ -37,9 +52,8 @@ export async function uploadVoice(input, api, upstreamFetch) {
  const apply=await vod('GET',{Action:'ApplyUploadInner',Version:'2020-11-19',SpaceName:'jd_video_play',FileType:'video',IsInner:'1',FileSize:bytes.length,s:crypto.randomUUID().replaceAll('-','').slice(0,11)});
  const node=apply?.InnerUploadAddress?.UploadNodes?.[0];const store=node?.StoreInfos?.[0];
  if(!node||!store||typeof node.UploadHost!=='string'||typeof store.StoreUri!=='string'||!store.Auth||!node.SessionKey)throw Error('upstream_invalid_response');
- const host=node.UploadHost;
- if(!/^[a-z0-9.-]+$/.test(host)||!host.endsWith('.snssdk.com')||!/^tos-[a-z0-9.-]+$/.test(host)||store.StoreUri.startsWith('/')||store.StoreUri.includes('..')||/[?#]/.test(store.StoreUri))throw Error('unsupported_media_url');
- const uploaded=await jsonResponse(await upstreamFetch('https://'+host+'/upload/v1/'+store.StoreUri,{method:'POST',headers:{Authorization:store.Auth,'Content-Type':'application/octet-stream','Content-CRC32':crc32(bytes)},body:bytes,redirect:'manual',signal:AbortSignal.timeout(60000)}));
+ const uploadUrl=voiceUploadUrl(node.UploadHost,store.StoreUri);
+ const uploaded=await jsonResponse(await upstreamFetch(uploadUrl,{method:'POST',headers:{Authorization:store.Auth,'Content-Type':'application/octet-stream','Content-CRC32':crc32(bytes)},body:bytes,redirect:'manual',signal:AbortSignal.timeout(60000)}));
  if(uploaded.code!==2000)throw Error('upstream_http_error');
  const committed=await vod('POST',{Action:'CommitUploadInner',Version:'2020-11-19',SpaceName:'jd_video_play'},JSON.stringify({SessionKey:node.SessionKey,Functions:[{name:'GetMeta'}]}));
  const vid=committed?.Results?.[0]?.Vid;
