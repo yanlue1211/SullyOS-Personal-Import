@@ -1,0 +1,23 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {webcrypto} from 'node:crypto';
+import {uploadVoice,crc32,signedVod} from './voice.mjs';
+globalThis.crypto ||= webcrypto;
+test('CRC and signed VOD requests use temporary credentials and deterministic scope',async()=>{
+ assert.equal(crc32(new TextEncoder().encode('123456789')),'cbf43926');
+ const r=await signedVod('GET',{Version:'2020-11-19',Action:'ApplyUploadInner'},'',{access_key:'fake-access',secret_key:'fake-secret',auth_token:'fake-token'},new Date('2026-11-15T12:00:00Z'));
+ assert.ok(r.options.headers.Authorization.includes('20261115/cn-north-1/vod/aws4_request'));
+ assert.equal(r.options.headers['x-amz-date'],'20261115T120000Z');assert.equal(r.options.redirect,'manual');assert.ok(!r.url.includes('fake-secret'));
+});
+test('voice upload follows authorization, upload, commit, register once; no Cookie on storage',async()=>{
+ const calls=[];const bytes=new Uint8Array(1000);const input={audioBase64:Buffer.from(bytes).toString('base64'),lyrics:'测试朗读',confirmUpload:true};
+ const api=async(path,params,body)=>{calls.push(path);if(path.endsWith('get_auth_token'))return {access_key:'fake-key',secret_key:'fake-secret',auth_token:'fake-token'};assert.deepEqual(body,{lyrics:'测试朗读',vid:'fakeVid',source:0});return {voice_id:123};};
+ const fetcher=async(url,opts)=>{calls.push(new URL(url).hostname);assert.equal(opts.headers.Cookie,undefined);if(new URL(url).searchParams.get('Action')==='ApplyUploadInner')return Response.json({Result:{InnerUploadAddress:{UploadNodes:[{SessionKey:'fake-session',UploadHost:'tos-test.snssdk.com',StoreInfos:[{StoreUri:'test/audio',Auth:'fake-storage'}]}]}}});if(new URL(url).hostname==='tos-test.snssdk.com'){assert.equal(opts.body.length,1000);return Response.json({code:2000})}assert.deepEqual(JSON.parse(opts.body),{SessionKey:'fake-session',Functions:[{name:'GetMeta'}]});return Response.json({Result:{Results:[{Vid:'fakeVid'}]}})};
+ const d=await uploadVoice(input,api,fetcher);assert.equal(d.voiceId,'123');assert.equal(calls.length,5);
+ let attempts=0;await assert.rejects(uploadVoice(input,api,async()=>{attempts++;throw Error('timeout')}));assert.equal(attempts,1);
+ await assert.rejects(uploadVoice({...input,confirmUpload:false},()=>{throw Error('must not call')},fetcher),/invalid_input/);
+});
+test('untrusted upload hosts are rejected before sending audio',async()=>{
+ const api=async()=>({access_key:'fake',secret_key:'fake',auth_token:'fake'});let calls=0;
+ await assert.rejects(uploadVoice({audioBase64:Buffer.alloc(1000).toString('base64'),lyrics:'测试',confirmUpload:true},api,async()=>{calls++;return Response.json({Result:{InnerUploadAddress:{UploadNodes:[{SessionKey:'s',UploadHost:'evil.example',StoreInfos:[{StoreUri:'x',Auth:'a'}]}]}}})}),/unsupported_media_url/);assert.equal(calls,1);
+});
