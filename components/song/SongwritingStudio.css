@@ -724,3 +724,9 @@
 .sw-production-modal .sw-production textarea { min-height: 100px; }
 .sw-production-modal .sw-production button { width: 100%; }
 .sw-production-modal .sw-production .sw-actions button { width: 100%; }
+
+/* A single co-writing conversation, switched between lyric and melody intent. */
+.sw-chat-mode { display:flex; flex-wrap:wrap; gap:8px; padding:12px 0; }
+.sw-chat-mode button { border:1px solid var(--sw-border);border-radius:13px;background:#fff;color:var(--sw-ink);padding:9px 13px;min-height:38px;font-size:12px; }
+.sw-chat-mode button[aria-pressed="true"] { background:var(--sw-light);border-color:var(--sw-accent);font-weight:650; }
+.sw-scroll > .sw-melody { margin:0 0 12px; }
