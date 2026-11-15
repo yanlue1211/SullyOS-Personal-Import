@@ -128,7 +128,11 @@
   padding: 0 20px 11px;
   border-bottom: 1px solid var(--sw-border);
   flex-shrink: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
+.sw-tabs::-webkit-scrollbar { display: none; }
+.sw-tabs button { flex-shrink: 0; white-space: nowrap; }
 .sw-tabs button {
   padding: 8px 15px;
   font-size: 12px;

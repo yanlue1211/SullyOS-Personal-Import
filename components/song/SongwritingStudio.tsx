@@ -1,4 +1,5 @@
 import HaimianProduction from "./HaimianProduction";
+import MelodyPanel from "./MelodyPanel";
 import SingingLab from "./SingingLab";
 import { useLocalBackHandler } from "../../hooks/useLocalBackHandler";
 import { LYRIC_CO_WRITING_STYLES } from "../../utils/songPrompts";
@@ -62,7 +63,7 @@ export default function SongwritingStudio({
     lastMsgTimestamp,
   } = useOS();
   const [song, setSong] = useState(initial),
-    [tab, setTab] = useState<"lyrics" | "chat" | "history" | "voice" | "production">(initialTab),
+    [tab, setTab] = useState<"lyrics" | "chat" | "history" | "voice" | "production" | "melody">(initialTab),
     [rows, setRows] = useState<Message[]>([]),
     [all, setAll] = useState(false);
   const [visibleCount, setVisibleCount] = useState(200);
@@ -356,6 +357,7 @@ export default function SongwritingStudio({
             ["history", "修改历史"],
             ["voice", "专属歌声"],
             ["production", "海绵出歌"],
+            ["melody", "自主谱曲"],
           ] as const
         ).map(([id, title]) => (
           <button key={id} onClick={() => setTab(id)} aria-pressed={tab === id}>
@@ -645,6 +647,7 @@ export default function SongwritingStudio({
         )}
         {tab === "voice" && <SingingLab key={char?.id} char={char} />}
         {tab === "production" && <HaimianProduction key={song.id} song={song} onUpdate={setSong} />}
+        {tab === "melody" && <MelodyPanel key={song.id} song={song} onUpdate={setSong} />}
         {tab === "history" && (
           <>
             {!(song.lyricRevisions || []).length && (
