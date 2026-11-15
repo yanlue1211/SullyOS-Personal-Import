@@ -18,13 +18,27 @@ var visibilityFile=files.join(cacheDir,'visibility-v1.json');
 try{residentVisible=JSON.parse(files.read(visibilityFile))!==false;}catch(_){}
 var renderState={revision:'',status:'idle',error:''};
 var payload=null,session='',ended=false,busy=false,upload=null,nextTimer=0,lastInteraction=0,lastWatch=0,eventsQueue=[],spokenIds=[],apiPending=false,tapBurstAt=0,tapBurstCount=0,tapClosed=true,tapBatches=[],pendingUntil=0;
+var cloudFile=files.join(cacheDir,'cloud-device-v1.json'),cloudCode,cloudFileLock=new java.util.concurrent.locks.ReentrantLock();
+try{cloudCode=download('cloud-transport.js');files.write(files.join(cacheDir,'cloud-transport.js'),cloudCode);}catch(error){try{cloudCode=files.read(files.join(cacheDir,'cloud-transport.js'));}catch(_){} }
+if(!cloudCode){toastLog('桌宠云端模块未能下载，请联网后重启脚本');exit();}
+eval(cloudCode);
+var petCloud=PetCloudTransport.create({
+ now:function(){return Date.now();},
+ load:function(){try{return JSON.parse(files.read(cloudFile));}catch(_){return null;}},
+ save:function(data){cloudFileLock.lock();try{var tmp=cloudFile+'.tmp';files.write(tmp,JSON.stringify(data));if(!new java.io.File(tmp).renameTo(new java.io.File(cloudFile)))throw Error('桌宠待发送记录保存失败');}finally{cloudFileLock.unlock();}},
+ request:function(s,operation,event){var r=http.postJson(s.workerUrl+'/tapnest-cloud/'+operation,{capability:s.capability,event:event});var b=JSON.parse(r.body.string());if(r.statusCode!==200||!b.success)throw Error(typeof b.error==='string'?b.error:'桌宠云端暂不可用');return b.data;},
+ result:function(event,data){if(!payload||payload.charId!==event.charId||payload.revision!==event.revision||payload.binding.formId!==event.formId)return;busy=false;apiPending=petCloud.pending();pendingUntil=0;if(!residentVisible)return;if(data.status==='done')speak(data.text);else if(data.status==='failed')speak(data.error||'本次生成未完成，请重新发送。');},
+ error:function(error){/* Keep the same event ID; never fall back to webpage generation. */}
+});
 function evaluate(code){ui.run(function(){try{win.pet.evaluateJavascript(code,null);}catch(e){}});}
 function speak(text){evaluate('window.PetPreview&&window.PetPreview.speak('+JSON.stringify(String(text).slice(0,1500))+')');}
 function thinking(){pendingUntil=Date.now()+180000;evaluate('window.PetPreview&&window.PetPreview.setThinking(true)');}
 function currentForm(){if(!payload)return null;return payload.binding.forms.filter(function(f){return f.id===payload.binding.formId;})[0];}
 function preset(text){evaluate('window.PetPreview&&window.PetPreview.preset('+JSON.stringify(String(text).slice(0,1500))+')');}
 function chooseLine(kind){var f=currentForm(),arr=kind==='feed'||kind==='bath'?payload.binding.actionLines&&payload.binding.actionLines[kind]:f&&(kind==='tap'?f.tapLines:f.autoLines);if(!arr||!arr.length)return;var key=payload.charId+':'+f.id+':'+kind;var i=Math.floor(Math.random()*arr.length);if(arr.length>1&&chooseLine.last[key]===i)i=(i+1)%arr.length;chooseLine.last[key]=i;preset(arr[i]);}chooseLine.last={};
-function emit(kind,text,formId,wardrobe){if(!payload)return;var now=Date.now();eventsQueue.push({id:'p'+now+'-'+Math.floor(Math.random()*1e8),kind:kind,text:String(text||'').slice(0,1000),charId:payload.charId,formId:formId||payload.binding.formId,modelId:payload.binding.modelId,revision:payload.revision,at:now,tapCount:kind==='tap'?tapBurstCount:undefined,wardrobe:wardrobe,expression:kind==='tap'&&tapBurstCount>=5&&currentForm()&&currentForm().angryFrameConfigured?'angry':'normal'});if(eventsQueue.length>25)eventsQueue.shift();if(kind!=='form'&&kind!=='wardrobe'){apiPending=true;thinking();}}
+function emit(kind,text,formId,wardrobe){if(!payload)return;var now=Date.now();var event=({id:'p'+now+'-'+Math.floor(Math.random()*1e8),kind:kind,text:String(text||'').slice(0,1000),charId:payload.charId,formId:formId||payload.binding.formId,modelId:payload.binding.modelId,revision:payload.revision,at:now,tapCount:kind==='tap'?tapBurstCount:undefined,wardrobe:wardrobe,expression:kind==='tap'&&tapBurstCount>=5&&currentForm()&&currentForm().angryFrameConfigured?'angry':'normal'});if(kind!=='form'&&kind!=='wardrobe'&&payload.binding.cloudEnabled){try{petCloud.enqueue(event);apiPending=true;thinking();}catch(error){speak(String(error));}return;}eventsQueue.push(event);if(eventsQueue.length>25)eventsQueue.shift();if(kind!=='form'&&kind!=='wardrobe'){apiPending=true;thinking();}}
+function cloudReady(){return !!payload&&payload.binding.cloudEnabled&&petCloud.ready({charId:payload.charId,revision:payload.revision});}
+
 function closeBurst(){if(!tapClosed&&tapBurstCount>0){if(tapBurstCount>=Math.max(1,Math.min(50,Number(payload.binding.tapThreshold)||1)))tapBatches.push({count:tapBurstCount,at:tapBurstAt});tapClosed=true;}}
 function interaction(e){if(!residentVisible||!e||!payload||renderState.status!=='ready'||renderState.revision!==payload.revision)return;
  if(e.kind==='form'||e.kind==='wardrobe'){if(!payload.binding.forms.some(function(f){return f.id===e.formId;}))return;eventsQueue=[];apiPending=false;tapBurstAt=0;tapBurstCount=0;tapClosed=true;tapBatches=[];payload.binding.formId=e.formId;payload.binding.wardrobe=e.wardrobe||{};try{files.write(formCache,JSON.stringify({revision:payload.revision,charId:payload.charId,formId:e.formId,wardrobe:payload.binding.wardrobe}));}catch(_){}emit(e.kind,'',e.formId,payload.binding.wardrobe);nextTimer=Date.now()+payload.binding.intervalMinutes*60000;return;}
@@ -34,10 +48,10 @@ function interaction(e){if(!residentVisible||!e||!payload||renderState.status!==
   if(at-tapBurstAt>=3000){if(payload.binding.apiEnabled)closeBurst();tapBurstCount=1;}else tapBurstCount=Math.min(1000,tapBurstCount+1);
   tapBurstAt=at;tapClosed=false;chooseLine('tap');return;
  }
- if(e.kind==='feed'||e.kind==='bath'){chooseLine(e.kind);if(!payload.binding.apiEnabled)return;if(!session||Date.now()-lastWatch>30000&&!busy&&!apiPending){preset('糯米机连接暂不可用，请保持网页运行；将自动恢复，也可到桌宠App点开启。');return;}emit(e.kind,String(e.text||'').slice(0,80));return;}
- if(e.kind==='text'&&payload.binding.apiEnabled){if(!session||Date.now()-lastWatch>30000&&!busy&&!apiPending){speak('糯米机连接暂不可用，请保持网页运行；将自动恢复，也可到桌宠App点开启。');return;}emit('text',e.text);}
+ if(e.kind==='feed'||e.kind==='bath'){chooseLine(e.kind);if(!payload.binding.apiEnabled)return;if(!cloudReady()&&(!session||Date.now()-lastWatch>30000&&!busy&&!apiPending)){preset('糯米机连接暂不可用，请保持网页运行；将自动恢复，也可到桌宠App点开启。');return;}emit(e.kind,String(e.text||'').slice(0,80));return;}
+ if(e.kind==='text'&&payload.binding.apiEnabled){if(!cloudReady()&&(!session||Date.now()-lastWatch>30000&&!busy&&!apiPending)){speak('糯米机连接暂不可用，请保持网页运行；将自动恢复，也可到桌宠App点开启。');return;}emit('text',e.text);}
 }
-function dispatchBurst(){if(!residentVisible||!payload||!payload.binding.apiEnabled||renderState.status!=='ready')return;var now=Date.now();if(!session||now-lastWatch>30000&&!busy&&!apiPending){tapBatches=[];if(now-tapBurstAt>3000)tapClosed=true;return;}if(now-tapBurstAt>3000)closeBurst();if(busy||apiPending||chatOpen||panelOpen||now-tapBurstAt<=3000||!tapBatches.length)return;var batch=tapBatches.shift(),current=tapBurstCount;tapBurstCount=batch.count;emit('tap');tapBurstCount=current;}
+function dispatchBurst(){if(!residentVisible||!payload||!payload.binding.apiEnabled||renderState.status!=='ready')return;var now=Date.now();if(!cloudReady()&&(!session||now-lastWatch>30000&&!busy&&!apiPending)){tapBatches=[];if(now-tapBurstAt>3000)tapClosed=true;return;}if(now-tapBurstAt>3000)closeBurst();if(busy||apiPending||chatOpen||panelOpen||now-tapBurstAt<=3000||!tapBatches.length)return;var batch=tapBatches.shift(),current=tapBurstCount;tapBurstCount=batch.count;emit('tap');tapBurstCount=current;}
 var cacheFile=files.join(cacheDir,'desktop-v2.json'),formCache=files.join(cacheDir,'active-form-v2.json');
 function apply(p){if(!p||p.version!==2||typeof p.revision!=='string'||typeof p.charId!=='string'||!p.binding||!p.pack||!Array.isArray(p.pack.forms)||!p.pack.forms.length||p.pack.forms.length>24)throw Error('模型同步格式错误');
  // The browser sends only a public binding; reject credentials even if an outdated client tries.
@@ -242,7 +256,7 @@ function handle(socket){var origin='';try{socket.setSoTimeout(5000);var inp=new 
  function ok(o){respond(socket,'200 OK',Object.assign({ok:true},o||{}),origin);}function bad(s){respond(socket,'400 Bad Request',{ok:false,error:s},origin);}
  if(origin!==ORIGIN)return respond(socket,'403 Forbidden',{ok:false,error:'origin'},origin);if(method==='OPTIONS')return ok();if(method!=='GET'&&method!=='POST')return bad('method');if(!isFinite(length)||length<0||length>120000)return bad('request too large');
  var obj={};if(method==='POST'){var buf=java.lang.reflect.Array.newInstance(java.lang.Byte.TYPE,length),at=0;while(at<length){var got=inp.read(buf,at,length-at);if(got<=0)throw Error('truncated');at+=got;}obj=JSON.parse(String(new java.lang.String(buf,'UTF-8'))||'{}');}
- if(path==='/health')return ok({version:2,resident:true,visible:residentVisible,paired:!!session});
+ if(path==='/health')return ok({cloudTransport:1,cloudConfigured:typeof petCloud!=='undefined'&&petCloud.configured(),version:2,resident:true,visible:residentVisible,paired:!!session});
  if(path==='/resume'&&method==='POST'){
   if(badPins>=6)return bad('认证失败过多，请重启脚本');
   if(typeof obj.deviceKey!=='string'||obj.deviceKey!==deviceKey){badPins++;return respond(socket,'401 Unauthorized',{ok:false,error:'设备绑定已失效，请重新输入配对码'},origin);}
@@ -251,10 +265,11 @@ function handle(socket){var origin='';try{socket.setSoTimeout(5000);var inp=new 
  if(path==='/pair'&&method==='POST'){if(badPins>=6)return bad('配对失败过多，请重启脚本');if(String(obj.pin)!==pin){badPins++;return bad('配对码错误');}session=token();badPins=0;lastWatch=Date.now();return ok({token:session,deviceKey:deviceKey,version:2,resident:true,visible:residentVisible,binding:bindingInfo()});}
  if(!session||key!==session)return respond(socket,'401 Unauthorized',{ok:false,error:'pair first'},origin);
  lastWatch=Date.now();
+ if(path==='/cloud'&&method==='POST'){petCloud.configure(obj);return ok();}
  if(path==='/show'&&method==='POST'){if(!payload||obj.revision!==payload.revision||renderState.revision!==payload.revision||renderState.status!=='ready')return bad('模型尚未同步完成');setPetVisible(true);return ok({visible:true});}
  if(path==='/hide'&&method==='POST'){setPetVisible(false);return ok({visible:false});}
  if(path==='/exit'&&method==='POST'){setPetVisible(false);ok();setTimeout(stopResident,150);return;}
- if(path==='/forget'&&method==='POST'){deviceKey=token();files.write(deviceFile,deviceKey);session='';return ok();}
+ if(path==='/forget'&&method==='POST'){if(typeof petCloud!=='undefined')petCloud.configure({enabled:false});deviceKey=token();files.write(deviceFile,deviceKey);session='';return ok();}
  if(path==='/sync/begin'&&method==='POST'){if(typeof obj.id!=='string'||!isFinite(obj.chars)||obj.chars<1||obj.chars>48*1024*1024)return bad('sync size');upload={id:obj.id,chars:obj.chars,text:'',at:Date.now()};return ok();}
  if(path==='/sync/chunk'&&method==='POST'){if(!upload||upload.id!==obj.id||Date.now()-upload.at>180000||obj.offset!==upload.text.length||typeof obj.text!=='string'||obj.text.length>24000||upload.text.length+obj.text.length>upload.chars)return bad('同步已过期或分片顺序错误');upload.text+=obj.text;return ok();}
  if(path==='/sync/commit'&&method==='POST'){if(!upload||upload.id!==obj.id||upload.text.length!==upload.chars)return bad('模型不完整');var text=upload.text;upload=null;apply(JSON.parse(text));return ok({revision:payload.revision});}
@@ -266,12 +281,13 @@ function handle(socket){var origin='';try{socket.setSoTimeout(5000);var inp=new 
  return bad('unknown endpoint');
  }catch(e){try{respond(socket,'500 Internal Server Error',{ok:false,error:String(e.message||e).slice(0,150)},origin);}catch(_){}}finally{try{socket.close();}catch(_){}}}
 try{server=new java.net.ServerSocket(18347,8,java.net.InetAddress.getByName('127.0.0.1'));server.setSoTimeout(1000);}catch(e){toastLog('18347端口被占用，请停止旧版桌宠后重试');win.close();exit();}
+threads.start(function(){while(!ended){petCloud.step();sleep(300);}});
 var slots=new java.util.concurrent.Semaphore(6);
 threads.start(function(){while(!ended){try{var sock=server.accept();if(!slots.tryAcquire()){sock.close();continue;}threads.start((function(s){return function(){try{handle(s);}finally{slots.release();}};})(sock));}catch(e){if(!ended&&!String(e).includes('SocketTimeout'))sleep(300);}}});
 var draining=false,drainCb=new JavaAdapter(android.webkit.ValueCallback,{onReceiveValue:function(raw){draining=false;try{var event=JSON.parse(String(raw));if(event)interaction(event);}catch(_){}}});
 setInterval(function(){if(ended||!residentVisible||draining)return;draining=true;ui.run(function(){try{win.pet.evaluateJavascript('window.PetPreview&&window.PetPreview.popOutgoing?window.PetPreview.popOutgoing():null',drainCb);}catch(_){draining=false;}});},250);
 setInterval(dispatchBurst,200);
-setInterval(function(){if(pendingUntil&&Date.now()>pendingUntil){pendingUntil=0;busy=false;apiPending=false;speak('等待回复超时，请到糯米机桌宠App查看连接状态。');}if(!residentVisible||!payload||!payload.binding.autoEnabled||renderState.status!=='ready'||renderState.revision!==payload.revision)return;var now=Date.now();if(now<nextTimer)return;nextTimer=now+payload.binding.intervalMinutes*60000;if(busy||apiPending||chatOpen||panelOpen||now-lastInteraction<15000)return;if(payload.binding.apiEnabled){if(session&&now-lastWatch<30000)emit('timer');}else chooseLine('auto');},1000);
+setInterval(function(){if(pendingUntil&&Date.now()>pendingUntil&&(typeof petCloud==='undefined'||!petCloud.pending())){pendingUntil=0;busy=false;apiPending=false;speak('等待回复超时，请到糯米机桌宠App查看连接状态。');}if(!residentVisible||!payload||!payload.binding.autoEnabled||renderState.status!=='ready'||renderState.revision!==payload.revision)return;var now=Date.now();if(now<nextTimer)return;nextTimer=now+payload.binding.intervalMinutes*60000;if(busy||apiPending||chatOpen||panelOpen||now-lastInteraction<15000)return;if(payload.binding.apiEnabled){if(cloudReady()||session&&now-lastWatch<30000)emit('timer');}else chooseLine('auto');},1000);
 events.on('exit',function(){ended=true;try{server.close();}catch(_){}try{win.close();}catch(_){}});
 toastLog('🐾 桌宠V2连接脚本已运行\n糯米机 → 桌宠App → 输入六位配对码：'+pin+'\n双击聊天，长按1秒松手打开设置，拖动移动，按住5秒关闭显示，脚本后台待命。');
 setInterval(function(){},1000);

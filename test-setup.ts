@@ -43,3 +43,10 @@ for (const [name, value] of Object.entries(BUILD_DEFINES)) {
     (globalThis as any)[name] = value;
   }
 }
+
+// Unit tests must explicitly mock transport. Background timers can outlive a test's
+// vi.stubGlobal('fetch'); restoring that stub must never expose the real network.
+// This is a test-only base implementation; browser fixtures run their own server.
+globalThis.fetch = async () => {
+  throw new TypeError('Unit tests: network disabled; mock fetch explicitly');
+};

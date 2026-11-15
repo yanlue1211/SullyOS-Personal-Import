@@ -1,3 +1,4 @@
+import {orderPetCloudBackfill,petCoveredIds,petCloudNamespace} from './tapnestCloud';
 import {receivedCloudOccurrences} from './amsgFirePack';
 import { usesHumanStyle, usesInnerVoice, INNER_VOICE_FORMAT_REMINDER, CHAT_EXPRESSION_TAIL_REMINDER, IM_FRAGMENTED_CHAT_TAIL } from './chatPromptPreferences';
 import { buildChatOutputStylePrompt, readChatTranslationConfig } from './chatOutputStylePrompt';
@@ -790,6 +791,7 @@ export const buildFirePack = async (
     templateStub?: boolean;
   },
 ): Promise<AmsgFirePack> => {
+  await (await import('./tapnestCloudHistory')).recoverPetCloudHistory(char.id);
   const templateStub = opts?.templateStub === true;
   // 请求内副本：门牌常驻但内容会变，每次从本机重读，不能沿用 UI 挂着的旧注入。
   char = { ...char, roomPlatesInjection: '' };
@@ -799,7 +801,7 @@ export const buildFirePack = async (
   }
   const [{ lastUserMessageAt, lastCharMessageAt, recentMessages: activityMessages }, recentMessages, library, schedule] = await Promise.all([
     buildTimeGapHint(char.id),
-    templateStub ? Promise.resolve([]) : loadCharacterContextMessages(char),
+    templateStub ? Promise.resolve([]) : loadCharacterContextMessages(char).then(orderPetCloudBackfill),
     // 表情库只喂系统提示词/近史渲染：占位模板路径整库都不用读（表情记录带图片数据，
     // 全表 getAll 不便宜）。
     templateStub
@@ -985,6 +987,7 @@ export const buildFirePack = async (
     // 每打一次包都是新值。
     builtAt: Date.now(),
     receivedCloudOccurrences: receivedCloudOccurrences(recentMessages),
+    petCloudCoveredIds: petCoveredIds(recentMessages),
     // 角色级 2.0 开关随包上云：关着的角色即便走即时对话（全局开关是另一颗），云端
     // fire 也不给排程能力——本地的 amsg2ToolsInjected 闸门在云端的对应物就是它。
     selfScheduleEnabled: isAmsg2EnabledForChar(char),
@@ -2001,6 +2004,21 @@ const OUTBOX_MAX_PAGES = 20;
 const OUTBOX_ACK_BATCH_SIZE = 200;
 
 export const ActiveMsgClient = {
+  async registerPetCloud(payload:unknown):Promise<{workerUrl:string;capability:string;expiresAt:number}> {
+    const config=await ensureWorkerReady();
+    const probe=await fetchWithAuth('config-check',config,{method:'GET',signal:AbortSignal.timeout(10000)},'桌宠通道检查');
+    if(probe?.data?.tapnestCloud!==1)throw Error('请先在设置里更新Worker，再启用桌宠专用云端通道');
+    const client=await initializeClient(config),encrypted=await encryptPayload(client,payload);
+    const {status,body}=await fetchWithAuthRaw('tapnest-cloud/register',config,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(encrypted)},'桌宠云端同步');
+    if(status!==200||!body?.success)throw Error(typeof body?.error==='string'?body.error:'桌宠云端同步失败');
+    return {workerUrl:normalizeWorkerBase(config.workerUrl),...body.data};
+  },
+  async readPetCloudState(charId:string):Promise<Array<{key:string;value:string}>> {
+    const client=await initializeClient(await ensureWorkerReady());
+    const response=await client.getClientState(petCloudNamespace(charId));
+    if(!response?.success)throw Error('桌宠云端聊天尚未取回，请联网后重试');
+    return (response.data?.entries||[]) as Array<{key:string;value:string}>;
+  },
   /** 独立测试配置只存在加密任务里；不重建订阅、不覆盖任何角色凭据。 */
   async scheduleReproduction(runId: string, api: { baseUrl: string; apiKey: string; model: string; temperature?: number }, delaySeconds: number): Promise<{ uuid: string; dueAt: number }> {
     const config = await ensureWorkerReady();
@@ -3498,6 +3516,7 @@ export const ActiveMsgClient = {
       const firePack = await buildFirePack(
         item.char, item.userProfile, item.groups, item.realtimeConfig, emojiLibrary,
       );
+      await (await import('../features/tapnest/cloud')).refreshPetCloudContext(item.char.id,{apiConfig:JSON.parse(localStorage.getItem('os_api_config')||'{}'),userProfile:item.userProfile,groups:item.groups,realtimeConfig:item.realtimeConfig} as any);
       // 大值由 amsg-server 2.6.0-next.4+ 在 worker 存储层透明分块，整条直传，
       // 内容一个字不裁；老 worker 拒超限条目 → 设置页 capabilities 探测亮牌。
       entries.push(...(await buildCharStateEntries(item.char, firePack, now)));

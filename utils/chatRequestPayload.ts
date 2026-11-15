@@ -1,3 +1,4 @@
+import {orderPetCloudBackfill} from './tapnestCloud';
 import {momentsEnabled} from '../features/moments/gate';
 import {oracleContext} from '../features/experience/oracle';
 import { materializeAudioDescriptions } from './audioApi';
@@ -268,7 +269,7 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
     );
     // 正文、召回、世界书扫描和识图共用可见范围；UI 近窗可能仍缓存着范围外旧消息。
     const contextHighWaterMark = input.contextHighWaterMark ?? getMemoryPalaceHighWaterMarkForContext(char.id);
-    const selectedHistory = selectCharacterContextMessages(historyMsgs, char, contextHighWaterMark);
+    const selectedHistory = orderPetCloudBackfill(selectCharacterContextMessages(historyMsgs, char, contextHighWaterMark));
     const visibleIds = new Set(selectedHistory.map(message => message.id));
     const rawRecentMsgsHint = input.recentMsgsHint && !isChatConversationEntry(input.recallEntryPoint)
         ? input.recentMsgsHint.filter(message => visibleIds.has(message.id))

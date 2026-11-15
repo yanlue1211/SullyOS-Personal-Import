@@ -231,6 +231,10 @@ import type { ActiveMsg2TaskRecord } from '../../../types';
 import { createHybridPushTransport, isFcmConfigured, type NativeFcmEnv } from './nativeFcm';
 import { configureSkipDiagnostics, isDebugFlagOn, logSkipDiagnostic } from './skipDiagnostics';
 
+import {handlePetCloud,admitPetCloud,type PetRouteArgs} from './tapnestCloud';
+import {settlePetCloud} from './tapnestFire';
+import {PET_CLOUD_KIND,PET_CLOUD_CONFIG,petCloudNamespace,parsePetRecords,petContextRecords,renderPetContext} from '../../../utils/tapnestCloud';
+
 interface Env extends NativeFcmEnv {
   AMSG_MASTER_KEY: string;
   VAPID_EMAIL: string;
@@ -1163,6 +1167,7 @@ export const amsgFireSettled = async (
     writeState: WriteState;
   },
 ): Promise<void> => {
+  if (await settlePetCloud(info)) return;
   if (await settleReproduction(info)) return;
   const stash = getFireStash(info.scratch);
   if (!stash) return;   // onBeforeFire 没走到挂 stash 那步（比如取 fire_pack 就失败了）
@@ -1274,6 +1279,14 @@ export const amsgFireSettled = async (
       .filter((message) => message.trim())
       .join('\n');
     const entryId = `${stash.clientTaskId || 'task'}@${stash.occurrenceMs}`;
+    try{if(stash.readState){
+      const petRows=await stash.readState(petCloudNamespace(stash.charId));
+      const petConfigRow=petRows.find(r=>r.key===PET_CLOUD_CONFIG);
+      if(petConfigRow&&JSON.parse(petConfigRow.value).enabled===true){
+        await info.writeState(petCloudNamespace(stash.charId),[{key:'record:proactive:'+`${stash.taskUuid||stash.clientTaskId}@${stash.occurrenceMs}`,value:JSON.stringify({id:'proactive:'+`${stash.taskUuid||stash.clientTaskId}@${stash.occurrenceMs}`,at:Date.now(),role:'assistant',content:text,source:'proactive'})}]);
+      }
+    }
+    }catch(error){console.warn('[amsg:pet-journal] 桌宠补充记录写入失败，原主动消息账本继续保存');}
     // 同一次触发重跑（前一跳部分失败）时日志里已经有这一条：条目同 id 覆盖，
     // 重复任务的「连续没回」计数也不能再加一次。
     const rerun = stash.selfLog.entries.some((e) => e.id === entryId);
@@ -2074,6 +2087,7 @@ export const amsgHooks = {
       } catch (error) {
         throw fail(error instanceof Error ? error.message : String(error), { kind: taskKind });
       }
+      if ('defer' in plan)return {defer:plan.defer};
       if ('skip' in plan) {
         // 不写 last_skip：那份留痕说的是「这条**主动消息**到点为什么没响」，主动消息
         // 面板照它给用户解释。后台任务的跳过跟主动消息毫无关系，写进去面板就会说谎。
@@ -2216,9 +2230,14 @@ export const amsgHooks = {
     // charId 校验——别拿别的角色的对话当锚点。
     // 到点时对方在不在聊天不拦发送：说不说由角色看着最新对话自己判（提示词里那段
     // 「开口之前」），这个时刻只是给它的事实之一。
+    const petRows = await ctx.readState(petCloudNamespace(charId));
+    const petRecords = parsePetRecords(petRows).filter(r=>r.source==='pet');
+    const petLastCharAt = petRecords.filter(r=>r.role==='assistant').reduce<number|null>((a,r)=>a==null?r.at:Math.max(a,r.at),null);
+    const petLastUserAt = petRecords.filter(r=>r.role==='user').reduce<number|null>((a,r)=>a==null?r.at:Math.max(a,r.at),null);
+    const petNewContext = renderPetContext(petContextRecords(petRecords,pack.petCloudCoveredIds));
     const presenceLastUserMessageAt = presence?.charId === charId ? presence.lastUserMessageAt : null;
     const committedUserAt = readAmsgUserTurnAt(charRows.find(r=>r.key===AMSG_USER_TURN_KEY)?.value,charId);
-    const lastUserMessageAt = laterOf(laterOf(pack.lastUserMessageAt ?? null, presenceLastUserMessageAt),committedUserAt);
+    const lastUserMessageAt = laterOf(laterOf(laterOf(pack.lastUserMessageAt ?? null, presenceLastUserMessageAt),committedUserAt),petLastUserAt);
     // 两个来源分别留一行，便于排查 fire_pack / presence 是否落后于真实对话。
     // 字段全是时间戳与枚举，不含正文、不含角色名。
     if (!instant) {
@@ -2246,7 +2265,8 @@ export const amsgHooks = {
     // A lightweight user-presence stamp can arrive before the full transcript.
     // Away tasks must wait for that transcript, never generate against the previous turn.
     if (!instant && away && lastUserMessageAt != null
-        && (pack.lastUserMessageAt == null || lastUserMessageAt > pack.lastUserMessageAt)) {
+        && (pack.lastUserMessageAt == null || lastUserMessageAt > pack.lastUserMessageAt)
+        && !(petLastUserAt!=null && petLastUserAt>=lastUserMessageAt)) {
       return { defer: { afterMs: 45_000 } } as const;
     }
 
@@ -2288,7 +2308,7 @@ export const amsgHooks = {
       // 临时沿用用户锚点。不要改变 lastUserMessageAt 在预约连发账本里的语义。
       const lastCharMessageAt = pack.lastCharMessageAt === undefined
         ? lastUserMessageAt : pack.lastCharMessageAt;
-      const awayAnchor = laterOf(lastCharMessageAt, endAt);
+      const awayAnchor = laterOf(laterOf(lastCharMessageAt,petLastCharAt), endAt);
       if (awayAnchor == null && pack.lastCharMessageAt !== undefined) {
         // 新版快照明确没有 Char 发言时不生成空闲提醒；旧快照缺此字段，
         // 保留原有 null 锚点兼容行为，不让老的已排任务永久陷入 defer。
@@ -2793,6 +2813,7 @@ export const amsgHooks = {
         blocks: [
           realtimeWorldBlock,
           renderSelfLogBlock(selfLog, ctx.now.getTime(), tz, maxUnansweredSends, pack.receivedCloudOccurrences),
+          petNewContext,
           taskListBlock, mcpBlock, scheduleBlock, replyScopeBlock,
         ],
       });
@@ -2873,7 +2894,7 @@ export const amsgHooks = {
       // B方案每一节拍只是一次发言机会，沿用作者原生【开口之前】自主静默判断。
       // 到点的自动续排、禁发零LLM均已在 onBeforeFire 完成；这里绝不额外调用模型。
       mustSpeak: dateLeave,
-    }), userHoliday) + mcpBlock + scheduleBlock + replyScopeBlock
+    }), userHoliday) + mcpBlock + scheduleBlock + replyScopeBlock + petNewContext
       // 放在动态尾段，同时适用于旧版 fire_pack；不更改稳定前缀、不多调一次模型。
       + (!away && !dateLeave && policy === 'expire' ? '\n\n' + buildAmsgInPersonContext(
         (limitsRecord?.awaySceneLock !== undefined ? limitsRecord.awaySceneLock : pack.awaySceneLock) === 'date',
@@ -3025,7 +3046,9 @@ export const amsgHooks = {
       const presenceRows = await ctx.readState(amsgStateNamespace(stash.charId), { key: AMSG_CHAT_PRESENCE_KEY });
       const presence = parseAmsgChatPresence(presenceRows.find((r) => r.key === AMSG_CHAT_PRESENCE_KEY)?.value);
       const userRows = stash.away ? await ctx.readState(amsgStateNamespace(stash.charId),{key:AMSG_USER_TURN_KEY}) : [];
-      const userAt=readAmsgUserTurnAt(userRows.find(r=>r.key===AMSG_USER_TURN_KEY)?.value,stash.charId);
+      const cloudUserRows=await ctx.readState(petCloudNamespace(stash.charId));
+      const cloudUserAt=parsePetRecords(cloudUserRows).filter(r=>r.role==='user').reduce<number|null>((a,r)=>a==null?r.at:Math.max(a,r.at),null);
+      const userAt=laterOf(readAmsgUserTurnAt(userRows.find(r=>r.key===AMSG_USER_TURN_KEY)?.value,stash.charId),cloudUserAt);
       if ((presence?.scene !== 'date' || ctx.metadata?.[AMSG_DATE_LEAVE_META] === true)
           && (chattedDuringFire(presence, stash.charId, Date.now(), stash.overlapGuard.lastUserMessageAt)
             || (userAt!=null&&(stash.overlapGuard.lastUserMessageAt==null||userAt>stash.overlapGuard.lastUserMessageAt)))) {
@@ -3481,7 +3504,7 @@ export const buildWorkerConfig = (env: Env) => {
     // 用户主动触发的即时对话：生成失败本轮就结束，由用户决定是否重发。
     // 策略由上游在 onBeforeFire 前解析，读取上下文失败也覆盖；整批入箱后仍可补推原文。
     maxGenerationRetries: (task: { metadata?: Record<string, unknown> | null }) =>
-      isInstantChatTask(task.metadata) || readTaskKind(task.metadata) === 'diagnostic' || (task.metadata?.[AMSG_AWAY_MESSAGE_META] === true || task.metadata?.[AMSG_DATE_LEAVE_META] === true) ? 0 : undefined,
+      isInstantChatTask(task.metadata) || readTaskKind(task.metadata) === PET_CLOUD_KIND || readTaskKind(task.metadata) === 'diagnostic' || (task.metadata?.[AMSG_AWAY_MESSAGE_META] === true || task.metadata?.[AMSG_DATE_LEAVE_META] === true) ? 0 : undefined,
     // 取消通过租约心跳通知执行中的 Worker；1 秒检测一次，TTL 仍由上游管理。
     // 收尾回执 + 过期跳过回执（config 级 hook）。
     // onFireSettled: 无论这次 fire 是发出去了、跳过了还是抛错了都会调一次，self_log
@@ -3512,7 +3535,7 @@ export const amsgSerializeKey = (task: { metadata?: Record<string, unknown> | nu
   const charId = typeof task.metadata?.charId === 'string' ? task.metadata.charId : null;
   if (!charId) return null;
   const kind = readTaskKind(task.metadata);
-  return kind ? `${charId}#${kind}` : charId;
+  return kind && kind !== PET_CLOUD_KIND ? `${charId}#${kind}` : charId;
 };
 
 /** 环境自检的结论。missing 为空就能正常干活，warnings 是「能跑但有一块是哑的」。 */
@@ -3929,6 +3952,9 @@ const inspectSchema = async (env: Env): Promise<{ schema: SchemaProbe; error: Am
  * cron 仍然留着：它是所有定时任务的正常投递通道，同时也是这一跳万一没跑成时的兜底。
  */
 export class InstantTickDO extends DurableObject<Env> {
+  async petAdmit(args:PetRouteArgs):Promise<unknown> {
+    return this.ctx.blockConcurrencyWhile(() => admitPetCloud(args,this.env,upstream));
+  }
   /**
    * 叫醒：记下要跑哪条、设一个立刻到期的 alarm，然后马上返回——调用方还等着回 202。
    *
@@ -4005,6 +4031,11 @@ export default {
     const pathname = new URL(request.url).pathname.replace(/\/+$/, '') || '/';
     const method = request.method.toUpperCase();
 
+    if (pathname.includes('/tapnest-cloud/')) {
+      if(method==='OPTIONS')return new Response(null,{status:204,headers:CORS_HEADERS});
+      return handlePetCloud(request,env,upstream,jsonWithCors);
+    }
+
     if (pathname.endsWith('/config-check')) {
       if (method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS_HEADERS });
       // 刻意不校验 X-Client-Token：worker 配了口令而前端没填正是要诊断的情形之一，
@@ -4029,6 +4060,7 @@ export default {
         data: {
           ...inspectWorkerEnv(env),
           instantChat: true,
+          tapnestCloud: !!env.INSTANT_TICK ? 1 : 0,
           anthropicMessages: true,
           geminiNative: true,
           instantTick: !!env.INSTANT_TICK,

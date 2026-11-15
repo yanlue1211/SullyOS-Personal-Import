@@ -1,3 +1,4 @@
+import {recoverPetCloudHistory} from './tapnestCloudHistory';
 import type { CharacterProfile, Message } from '../types';
 import { DB } from './db';
 import { getReliableMemoryPalaceHighWaterMark } from './memoryPalace/highWaterMark';
@@ -159,6 +160,7 @@ export const loadCharacterContextRange = async (
     char: CharacterProfile,
     onTiming?: (stage: string, ms: number) => void,
 ): Promise<ContextRangeSnapshot> => {
+    await recoverPetCloudHistory(char.id);
     let started = performance.now();
     await DB.ensureHomeContextMessages(char.id);
     onTiming?.("家园历史同步检查", Math.round(performance.now()-started));

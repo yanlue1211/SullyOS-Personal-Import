@@ -37,6 +37,7 @@ export async function resolveSullyCloudOwnership(input: SullyCloudResourceInput)
     : diagnosticRunId(record(record(input.payload).metadata)) ?? diagnosticRunId(record(record(input.task).metadata));
   if (diagnosticId) return { owner: { type: 'diagnostic', id: diagnosticId, label: '主动消息复现' }, kind: 'diagnostic' };
   if (input.type === 'state') {
+    if(input.namespace?.startsWith('amsg:char:')&&input.namespace.endsWith(':pet'))return character(input.namespace.slice('amsg:char:'.length,-4),'desktop-channel');
     if (input.namespace === INSTANT_INPUT_NAMESPACE && typeof input.value === 'string') {
       const envelope = parseInstantInputEnvelope(input.value);
       return envelope ? character(envelope.charId, 'instant-input') : null;
