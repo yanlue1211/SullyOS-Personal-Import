@@ -1,5 +1,5 @@
 // Existing-voice adapter. Fixed official endpoints; no captured credentials or IDs.
-const META = { app_name: 'goat', app_name_cn: '海绵音乐', aid: '588628', app_id: '588628', region: 'CN', language: 'zh', app_version: '1.0.0.1685', channel: 'online', device_platform: 'web' };
+const META = { app_name: 'goat', app_name_cn: '海绵音乐', aid: '588628', app_id: '588628', region: 'CN', language: 'zh', app_version: '1.0.0.1723', channel: 'online', device_platform: 'web' };
 const numeric = value => typeof value === 'string' && /^\d{1,24}$/.test(value);
 const taskId = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(value);
 function fail(code) { throw new Error(code); }
@@ -72,14 +72,15 @@ export async function musicOperation(action, input, cookie, upstreamFetch = fetc
       : !['Pop','Folk','Rock','R&B','Electronic','Jazz'].includes(input.genre) ? 'genre' : null;
     if (invalidField) { const error = new Error('invalid_input'); error.field = invalidField; throw error; }
     const d = await api('/jd/api/v1/generate/music', {}, {
-      prompt: input.prompt, lyrics: input.lyrics.replace(/\r\n?/g, '\n'),
-      is_original_prompt: false, voice_id: Number(input.voiceId),
-      task_type: 1, biz_type: 7, batch_size: 1,
-      title: input.title || '糯米原创测试', genre: input.genre,
+      prompt: input.prompt + '，' + ({Pop:'流行',Folk:'民谣',Rock:'摇滚','R&B':'R&B',Electronic:'电子',Jazz:'爵士'}[input.genre]), lyrics: input.lyrics.replace(/\r\n?/g, '\n'),
+      is_original_prompt: true, voice_id: Number(input.voiceId),
+      task_type: 1, biz_type: 0, batch_size: 1,
+      title: input.title || '糯米原创测试',
     });
-    const id = d.task_id || d.task_ids?.[0] || d.task?.task_id;
+    const tasks = Array.isArray(d.tasks) ? d.tasks : [];
+    const id = tasks[0]?.task_id || d.task_id || d.task_ids?.[0] || d.task?.task_id;
     if (!taskId(id)) fail('upstream_invalid_response');
-    return { songTaskId: id, note: '已提交原创生成，请保存任务 ID。' };
+    return { songTaskId: id, tasks: tasks.map(t => ({songTaskId:t.task_id})), deductedCredit: d.deducted_credit ?? null, totalBalance: d.total_balance ?? null, note: '已提交原创生成，请保存任务 ID。' };
   }
   if (action === 'original-status' || action === 'original-download') {
     if (!taskId(input.songTaskId)) fail('invalid_input');
@@ -92,8 +93,8 @@ export async function musicOperation(action, input, cookie, upstreamFetch = fetc
     const state = complete ? 'complete' : failed ? 'failed' : 'processing';
     if (action === 'original-status') return { state, songStatus: d.status, progress: payload?.progress ?? null, songTaskId: input.songTaskId, title: payload?.title || '', deductedCredit: d.deducted_credit ?? null };
     if (!complete) fail('song_not_complete');
-    const result = await api('/jd/api/v1/video/video_urls/get', {}, { vid: [payload.vid], format_type: 1 });
-    const info = result.video_urls?.[payload.vid];
+    const result = await api('/jd/api/v1/misc/download', {}, { task_id: input.songTaskId });
+    const info = result.video_info;
     const mediaUrl = safeMedia(info?.origin_video_url);
     if (!mediaUrl) fail('unsupported_media_url');
     return { mediaUrl, expiresAt: info.expire_at ?? null };
@@ -165,7 +166,7 @@ export async function handleMusic(request, env, upstreamFetch = fetch) {
 
 const MUSIC_PAGE = `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>糯米 · 已有音色创作</title>
 <style>body{margin:0;background:#edf7f3;color:#284d49;font:16px system-ui}main{max-width:560px;margin:24px auto;padding:24px;background:white;border-radius:24px}input,textarea,select,button{box-sizing:border-box;width:100%;padding:13px;margin:8px 0 18px;border:1px solid #add4cc;border-radius:12px;font:inherit}button{background:#d7eee7;color:#234d47}button:disabled{opacity:.45}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#eef5fb;padding:16px;border-radius:12px}small{display:block;line-height:1.7}audio{width:100%}a{color:#284d49}</style>
-<main><h2>把歌词唱给你听</h2><p>原创谱曲 · 直连测试版 3</p><small>填写自己的歌词和曲风，使用已有音色生成原创歌曲，无需画布 ID。点击提交生成会按海绵规则消耗积分；每次仅提交一首。本页尚待实际生成验证。凭证仅保留在本页内存。</small>
+<main><h2>把歌词唱给你听</h2><p>原创谱曲 · 直连测试版 4</p><small>填写自己的歌词和曲风，使用已有音色生成原创歌曲，无需画布 ID。点击提交生成会按海绵规则消耗积分；每次仅提交一首。已按官网成功抓包适配，Worker 生成仍待实测。凭证仅保留在本页内存。</small>
 <label>专用连接密钥<input id="token" type="password" autocomplete="off"></label><label>海绵 Cookie<input id="cookie" type="password" autocomplete="off"></label>
 <button id="load">读取积分与已有音色</button><p id="balance"></p><label>已有音色<select id="voice"><option value="">请先读取音色</option></select></label>
 <label>歌名<input id="title" maxlength="100" value="晚风里的小狗"></label><label>曲风<select id="genre"><option value="Folk">民谣</option><option value="Pop">流行</option><option value="Rock">摇滚</option><option value="R&B">R&amp;B</option><option value="Electronic">电子</option><option value="Jazz">爵士</option></select></label><label>演唱与编曲描述<textarea id="prompt" rows="3" maxlength="2000">轻快温暖的民谣，清亮自然的人声，木吉他伴奏，旋律流畅</textarea></label>
@@ -185,3 +186,4 @@ run('status',async()=>{if(!$('task').value.trim())throw Error('还没有生成�
 run('download',async()=>{if(!songTaskId)throw Error('请先查询到生成完成');const d=await call('/music/original-download',{songTaskId});$('audio').src=d.mediaUrl;$('audio').hidden=false;$('link').href=d.mediaUrl;$('link').hidden=false;show('音频已就绪，点击播放；下载地址可能会过期。')});
 try{$('task').value=localStorage.getItem('nuomi-haimian-original-task')||''}catch{}\nfunction clear(){$('token').value='';$('cookie').value=''}$('clear').onclick=()=>{clear();show('凭证已清空')};window.addEventListener('pagehide',clear);
 </script></html>`;
+
