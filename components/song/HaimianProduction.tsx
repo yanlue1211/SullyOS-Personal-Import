@@ -1,3 +1,5 @@
+import { fetchSongFile } from '../../features/songwriting/download';
+import { shareOrDownloadBlob } from '../../utils/shareExport';
 import HaimianCredentials, { useHaimianCredentials } from './HaimianCredentials';
 import { loadVoiceClone } from "../../features/songwriting/voiceClone";
 import React, { useEffect, useRef, useState } from 'react';
@@ -10,6 +12,7 @@ export default function HaimianProduction({ song, onUpdate }: {
     song: SongSheet;
     onUpdate: (s: SongSheet) => void;
 }) {
+    const [download, setDownload] = useState<{ taskId: string; blob: Blob; fileName: string } | null>(null);
     const os = useOS();
     const connection = useHaimianCredentials();
     const { credentials } = connection;
@@ -103,7 +106,8 @@ export default function HaimianProduction({ song, onUpdate }: {
  {task.state === 'complete' && <button disabled={!!busy} onClick={() => void run('获取成品音频', async () => { const d = await haimianCall('/music/original-download', credentials, { songTaskId: task.id }); const saved = await mutateSong(song.id, s => { if (s.production?.task?.id !== task.id)
             throw Error('任务已变化'); const recorded = s.production.task.completionRecorded; return { song: { ...s, production: { ...s.production, task: { ...s.production.task, mediaUrl: d.mediaUrl, completionRecorded: true } } }, ...(!recorded ? { card: { kind: 'completed' as const, songId: s.id, title: task.title, label: '海绵原创歌曲生成完成', author: os.characters.find(c => c.id === s.collaboratorId)?.name || '创作伙伴', version: s.lyricRevisions?.length || 1, after: task.lyrics, at: Date.now(), audio: '海绵音乐' } } : {}) }; }); if (active.current)
             onUpdate(saved); })}>获取播放与下载地址</button>}
- {task.mediaUrl && <><audio controls src={task.mediaUrl}/><a href={task.mediaUrl} target="_blank" rel="noreferrer">打开并下载成品</a><p className="sw-note">链接会过期，可再次获取。旧任务使用提交时保存的歌词与说明。</p></>}</div>}
+ {task.state === 'complete' && <><button disabled={!!busy} onClick={() => void run('正在下载成品文件', async () => { const result = await fetchSongFile(task.id, credentials); if (active.current) setDownload({ taskId: task.id, blob: result.blob, fileName: (task.title || '原创歌曲').replace(/[\\/:*?"<>|]/g, '_').slice(0, 80) + '.' + result.extension }); })}>下载成品文件</button>{download?.taskId === task.id && <><p>文件已准备好，点击保存到本机。</p><button disabled={!!busy} onClick={() => void run('保存成品', async () => { await shareOrDownloadBlob({ blob: download.blob, fileName: download.fileName }); })}>保存成品到本机</button></>}</>}
+ {task.mediaUrl && <><audio controls src={task.mediaUrl}/><a href={task.mediaUrl} target="_blank" rel="noreferrer">打开音频链接</a><p className="sw-note">链接会过期，可再次获取。旧任务使用提交时保存的歌词与说明。</p></>}</div>}
  </div>
  {!!song.production?.taskHistory?.length && <details><summary>历史生成任务（{song.production.taskHistory.length}）</summary>{song.production.taskHistory.map(t => <details key={t.id}><summary>{t.title} · {t.id} · {t.state}</summary><pre>{t.lyrics}</pre><p>{t.prompt}</p></details>)}</details>}
  {busy && <p role="status">{busy}…</p>}{info && <p>{info}</p>}{error && <div className="sw-error" role="alert">{error}</div>}
