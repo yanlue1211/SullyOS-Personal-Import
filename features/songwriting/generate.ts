@@ -130,6 +130,7 @@ export async function generateStudioReply(
     title: song.title,
     genre: song.genre,
     mood: song.mood,
+    creativeVision: song.production?.vision || "",
     structure: song.lyricTemplate,
     customStructure: song.customLyricTemplate,
     lines: finalLines(song).map((l, index) => ({

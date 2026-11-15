@@ -402,3 +402,18 @@ it("reply and candidate commit together, and repeated response saves do not repl
     (await studioMessages(song)).some((m) => m.content === "过期候选"),
   ).toBe(false);
 });
+
+it('production summary preserves lyrics, uses character context, and never submits music',async()=>{
+ const {generateProductionText,productionFingerprint}=await import('../features/songwriting/production');
+ song.production={vision:'主歌轻快，副歌表现期待',prompt:''};const before=JSON.stringify(song.lines);const base=productionFingerprint(song);
+ const fetcher=vi.fn(async()=>Response.json({choices:[{finish_reason:'stop',message:{content:'轻快民谣，木吉他，主歌自然叙述，副歌稍饱满，干净人声。'}}]}));vi.stubGlobal('fetch',fetcher);
+ const result=await generateProductionText(song,{api:{baseUrl:'https://a.invalid/v1',model:'m'} as any,user:{name:'我'} as any,context:{groups:[],emojis:[],categories:[]}},new AbortController().signal,'prompt');
+ expect(result).toContain('木吉他');expect(fetcher).toHaveBeenCalledTimes(1);const sent=JSON.parse((fetcher.mock.calls[0] as any)[1].body);expect(JSON.stringify(sent.messages)).toContain('主歌轻快');expect(JSON.stringify(sent.messages)).toContain('原来的副歌');expect(JSON.stringify(song.lines)).toBe(before);expect(productionFingerprint({...song,title:'新歌名'})).not.toBe(base);expect(productionFingerprint({...song,production:{...song.production,prompt:'编辑制作说明'}})).toBe(base);
+});
+it('Haimian generation does not retry on timeout and credentials are only sent to fixed Worker',async()=>{
+ const {haimianCall}=await import('../features/songwriting/production');const fetcher=vi.fn(async()=>{throw Error('timeout')});vi.stubGlobal('fetch',fetcher);
+ await expect(haimianCall('/music/original',{token:'test-token',cookie:'session=fake'},{confirmSpend:true})).rejects.toThrow('timeout');expect(fetcher).toHaveBeenCalledTimes(1);expect((fetcher.mock.calls[0] as any)[0]).toBe('https://nuomi-haimian.yanlue.workers.dev/music/original');
+});
+it('production snapshots survive existing backup without creating a second memory history',async()=>{
+ song.production={vision:'自由曲风',prompt:'轻快',task:{id:'fakeTask',state:'processing',title:song.title,lyrics:'原版歌词',prompt:'原版说明',voiceId:'123'}};await DB.saveSong(song);const backup=await DB.exportFullData();await DB.importFullData(backup as any);expect((await getSong(song.id)).production).toEqual(song.production);expect(await studioMessages(song)).toHaveLength(0);
+});

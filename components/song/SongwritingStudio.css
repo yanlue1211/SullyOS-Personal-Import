@@ -651,3 +651,10 @@
   padding: 8px 11px;
   font-size: 11px;
 }
+
+/* Production remains inside the existing mobile studio theme. */
+.sw-tabs { overflow-x:auto; flex-shrink:0; }
+.sw-tabs button { white-space:nowrap; flex-shrink:0; }
+.sw-panel input:not([type="checkbox"]) { box-sizing:border-box; width:100%; padding:12px; margin:8px 0; border:1px solid var(--sw-border); border-radius:12px; color:var(--sw-ink); background:var(--sw-bg); }
+.sw-panel audio { width:100%; margin:12px 0; }
+.sw-panel pre { white-space:pre-wrap; overflow-wrap:anywhere; }

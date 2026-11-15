@@ -2137,6 +2137,7 @@ export interface SongAudio {
 }
 
 export interface SongSheet {
+    production?: import('./features/songwriting/production').SongProduction;
     lyricProposal?: import('./features/songwriting/model').LyricProposal;
     lyricRevisions?: import('./features/songwriting/model').LyricRevision[];
     completionCardId?: number;
