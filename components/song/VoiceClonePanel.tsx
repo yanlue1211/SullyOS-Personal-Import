@@ -1,4 +1,4 @@
-import HaimianCredentials, { useHaimianCredentials } from './HaimianCredentials';
+import { useHaimianCredentials } from './HaimianCredentials';
 import React, { useEffect, useRef, useState } from 'react';
 import { createVoiceClone, inspectVoiceClone, loadVoiceClone, mutateVoiceClone, type VoiceCloneRecord } from '../../features/songwriting/voiceClone';
 export default function VoiceClonePanel({ charId, sample, script }: {
@@ -37,7 +37,7 @@ export default function VoiceClonePanel({ charId, sample, script }: {
     } };
     const confirmationView = confirmation && <div className="sw-note" role="group" aria-label="音色操作确认"><p>{confirmation === 'upload' ? '将当前朗读转换为 WAV，并上传到海绵创建音色？' : '请先核对海绵官网，确认本次没有创建出音色，再解除提交锁。'}</p><button disabled={busy} onClick={() => { const action = confirmation; setConfirmation(null); void run(async () => { if (action === 'upload') { if (sample) await createVoiceClone(charId, sample, script, credentials); } else { await mutateVoiceClone(charId, old => { if (!old || old.id !== record?.id || !['unknown', 'submitting'].includes(old.state)) throw Error('任务已变化，请重新查询'); return { ...old, state: 'failed' }; }); } }); }}>确认{confirmation === 'upload' ? '上传' : '解除锁定'}</button><button disabled={busy} onClick={() => setConfirmation(null)}>取消</button></div>;
     return <div className="sw-production sw-clone"><div className="sw-production-step"><div className="sw-production-step-heading"><span>02</span><div><h4>上传朗读，创建音色</h4><p>直接发送音频文件，不经过外放录音。</p></div></div>
- <HaimianCredentials connection={connection}/>
+ <p className="sw-production-hint">连接密钥与 Cookie 在「总设置 → 海绵音乐」中统一填写，专属歌声仍按角色独立绑定。</p>
  <p className="sw-production-hint">先试听上面的朗读，确认是你想要的角色声音，再上传一次。</p>
  <button className="sw-primary sw-production-submit" disabled={busy || !sample || !!record && record.state !== 'failed'} onClick={() => { setError(''); setConfirmation('upload'); }}>上传当前朗读，创建音色</button>
  {confirmation === 'upload' && confirmationView}
