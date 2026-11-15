@@ -1,4 +1,5 @@
 import SongwritingStudio from '../components/song/SongwritingStudio';
+import HaimianProduction from '../components/song/HaimianProduction';
 import {ThemeSwitch, StudioMascot} from '../components/song/StudioTheme';
 import type {StudioTheme} from '../features/songwriting/model';
 import { ContextBuilder } from '../utils/context';
@@ -192,6 +193,7 @@ const SongwritingApp: React.FC = () => {
 
     // Navigation
     const [view, setView] = useState<'shelf' | 'create' | 'partner' | 'write' | 'preview'>('shelf');
+    const [studioEntryTab, setStudioEntryTab] = useState<'lyrics' | 'production'>('lyrics');
     const [activeSong, setActiveSong] = useState<SongSheet | null>(null);
 
     // Create Form State
@@ -257,6 +259,7 @@ const SongwritingApp: React.FC = () => {
     const [voicePresetId, setVoicePresetIdState] = useState<string>('auto');
     // Unified "AI 出歌引导" modal — entry point now lives on the big button
     const [showCustomPrompt, setShowCustomPrompt] = useState(false);
+    const [showHaimianProvider, setShowHaimianProvider] = useState(false);
     const [promptGuidance, setPromptGuidance] = useState('');
     const [promptDraft, setPromptDraft] = useState('');
     const [isAiWritingPrompt, setIsAiWritingPrompt] = useState(false);
@@ -415,6 +418,7 @@ const SongwritingApp: React.FC = () => {
         setActiveSong(newSong);
         setWorkMode('notebook');
         setLineDrafts({});
+        setStudioEntryTab('lyrics');
         setView('write');
         trackEvent('进入乐谱写作模式', {
             genre: newSong.genre,
@@ -1359,6 +1363,7 @@ const SongwritingApp: React.FC = () => {
         const current = activeSong.aceStepCustomTags || buildAceStepTags(activeSong, voicePresetId);
         setPromptDraft(current);
         setPromptGuidance('');
+        setShowHaimianProvider(!!activeSong.production?.task);
         setShowCustomPrompt(true);
         trackEvent('打开 AI 出歌引导弹窗');
     };
@@ -1631,8 +1636,11 @@ const SongwritingApp: React.FC = () => {
 
     // --- Shelf View ---
     if (view === 'shelf') {
-        const drafts = songs.filter(s => s.status === 'draft');
-        const completed = songs.filter(s => s.status === 'completed');
+        // A Haimian full-song result is a finished audio work even if its lyrics were not separately finalized.
+        // Keep the original lyric status intact, only change the bookshelf grouping.
+        const hasHaimianResult = (s: SongSheet) => s.production?.task?.state === 'complete' || !!s.production?.taskHistory?.some(t => t.state === 'complete');
+        const drafts = songs.filter(s => s.status === 'draft' && !hasHaimianResult(s));
+        const completed = songs.filter(s => s.status === 'completed' || hasHaimianResult(s));
 
         return (
             <div
@@ -1718,6 +1726,7 @@ const SongwritingApp: React.FC = () => {
                                                     setActiveSong(song);
                                                     setLineDrafts({});
                                                     setWorkMode('notebook');
+                                                    setStudioEntryTab('lyrics');
                                                     setView('write');
                                                 }}
                                                 className="flex items-stretch cursor-pointer active:scale-[0.99] transition-transform rounded-lg overflow-hidden border border-stone-200/80 bg-white shadow-sm"
@@ -1778,6 +1787,7 @@ const SongwritingApp: React.FC = () => {
                                                 </div>
                                                 <div className="flex-1 p-3.5 min-w-0">
                                                     <h3 className="font-semibold text-sm text-stone-700 truncate" style={{ fontFamily: 'Georgia, "Noto Serif SC", serif' }}>{song.title}</h3>
+                                                    {song.status === 'draft' && hasHaimianResult(song) && <p className="text-[10px] text-emerald-700 mt-1">♫ 海绵已出歌 · 歌词未单独定稿</p>}
                                                     <div className="flex items-center gap-2 mt-1.5">
                                                         <span className="text-[10px] text-stone-400">{genreInfo?.label}</span>
                                                         <span className="text-stone-300">·</span>
@@ -2503,6 +2513,10 @@ const SongwritingApp: React.FC = () => {
                         />
                     )}
 
+                    <div className="relative px-4 pt-3 flex gap-2">
+                        <button type="button" onClick={() => { setStudioEntryTab('lyrics'); setView('write'); }} className="flex-1 min-w-0 py-2 rounded-xl text-[11px] font-semibold bg-white/65 border border-white/80" style={{ color: MusicC.primary }}>✎ 歌词与创作</button>
+                        <button type="button" onClick={() => { setStudioEntryTab('production'); setView('write'); }} className="flex-1 min-w-0 py-2 rounded-xl text-[11px] font-semibold bg-white/65 border border-white/80" style={{ color: MusicC.primary }}>♫ 海绵出歌 / 成品</button>
+                    </div>
                     <div className="relative px-4 py-3.5">
                         {/* Floating sparkle decorations — pointer-none */}
                         <div className="pointer-events-none absolute inset-0 overflow-hidden">
@@ -2938,7 +2952,7 @@ const SongwritingApp: React.FC = () => {
                     isOpen={showCustomPrompt}
                     title="✦ 让 AI 把它唱出来"
                     onClose={() => setShowCustomPrompt(false)}
-                    footer={
+                    footer={showHaimianProvider ? undefined : (
                         <>
                             <button
                                 onClick={() => setShowCustomPrompt(false)}
@@ -2988,7 +3002,7 @@ const SongwritingApp: React.FC = () => {
                                 </span>
                             </button>
                         </>
-                    }
+                    )}
                 >
                     <div className="space-y-4">
                         {/* ── Provider picker — segmented ── */}
@@ -2998,20 +3012,21 @@ const SongwritingApp: React.FC = () => {
                                 <label className="text-[10px] font-bold uppercase tracking-[0.2em]" style={{ color: MusicC.primary }}>选生成器</label>
                             </div>
                             {(() => {
-                                const opts: { id: MusicProvider; title: string; sub: string; available: boolean; needs: string }[] = [
+                                const opts: { id: MusicProvider | 'haimian'; title: string; sub: string; available: boolean; needs: string }[] = [
                                     { id: 'minimax-free', title: 'MiniMax 免费版', sub: '不花钱 · 完整长歌', available: hasMiniMaxKey, needs: 'MiniMax Key' },
                                     { id: 'minimax-paid', title: 'MiniMax 付费版', sub: 'Token Plan · 完整长歌', available: hasMiniMaxKey, needs: 'MiniMax Key' },
                                     { id: 'ace-step',     title: 'ACE-Step',       sub: '~$0.015 · 完整长歌', available: hasReplicateKey, needs: 'Replicate Token' },
+                                    { id: 'haimian',      title: '海绵音乐',         sub: '专属音色 · 完整歌曲', available: true, needs: '' },
                                 ];
                                 return (
-                                    <div className="grid grid-cols-3 gap-1.5">
+                                    <div className="grid grid-cols-2 gap-1.5">
                                         {opts.map(opt => {
-                                            const isActive = opt.id === provider;
-                                            const Ico = PROVIDER_ICONS[opt.id] || Heart;
+                                            const isActive = showHaimianProvider ? opt.id === 'haimian' : opt.id === provider;
+                                            const Ico = opt.id === 'haimian' ? Heart : PROVIDER_ICONS[opt.id] || Heart;
                                             return (
                                                 <button
                                                     key={opt.id}
-                                                    onClick={() => { setProvider(opt.id); trackEvent('切换出歌生成器', { provider: opt.id }); }}
+                                                    onClick={() => { if (opt.id === 'haimian') setShowHaimianProvider(true); else { setShowHaimianProvider(false); setProvider(opt.id); } trackEvent('切换出歌生成器', { provider: opt.id }); }}
                                                     disabled={!opt.available}
                                                     className="relative text-left p-2 rounded-xl border transition-all active:scale-95 disabled:cursor-not-allowed"
                                                     style={isActive ? {
@@ -3045,7 +3060,8 @@ const SongwritingApp: React.FC = () => {
                                 );
                             })()}
                             <p className="text-[10px] leading-relaxed pl-1" style={{ color: MusicC.muted }}>
-                                {provider === 'ace-step'
+                                {showHaimianProvider ? '使用海绵音乐的原创生成、专属声线、创作设想与最终生成说明；积分消耗会在提交前再次确认。'
+                                    : provider === 'ace-step'
                                     ? '完整长歌（最长 4 分钟）— 自费走 Replicate，约 ¥0.1-0.3/首'
                                     : provider === 'minimax-paid'
                                         ? '完整长歌（最长 4-6 分钟）— 出歌更快、不易排队'
@@ -3053,6 +3069,9 @@ const SongwritingApp: React.FC = () => {
                             </p>
                         </div>
 
+                        {showHaimianProvider ? (
+                            <div className="sw-production-modal"><HaimianProduction key={activeSong.id} song={activeSong} onUpdate={setActiveSong} /></div>
+                        ) : (<>
                         {/* Section I — Quick voice preset chips */}
                         <div className="space-y-2">
                             <div className="flex items-center gap-2 pl-1">
@@ -3193,6 +3212,7 @@ const SongwritingApp: React.FC = () => {
                             </span>
                         </div>
 
+                        </>)}
                     </div>
                 </Modal>
             </div>
@@ -3200,7 +3220,7 @@ const SongwritingApp: React.FC = () => {
     }
 
     if (view === 'write' && activeSong) {
-        return <SongwritingStudio key={activeSong.id} song={activeSong} theme={studioTheme} onTheme={changeStudioTheme} onBack={handlePause} onPreview={song=>{setActiveSong(song);setView('preview');}} />;
+        return <SongwritingStudio key={activeSong.id} song={activeSong} theme={studioTheme} onTheme={changeStudioTheme} initialTab={studioEntryTab} onBack={handlePause} onPreview={song=>{setActiveSong(song);setView('preview');}} />;
     }
 
     return null;
