@@ -51,3 +51,28 @@ test('auth, origin, invalid input and business errors fail without leaking crede
   assert.equal(calls,1);assert.ok(!(await r.text()).includes(cookie));
   await assert.rejects(musicOperation('generate',{canvasId:'123',revision:'4',nodeId:'12',confirmSpend:true},cookie,async()=>Response.json({status_code:10,status_info:{status_msg:cookie}})),/upstream_business_error/);
 });
+test('original submits exactly one song without reference or canvas, with numeric voice ID', async()=>{
+ let calls=0;
+ const input={confirmSpend:true,voiceId:'456',lyrics:'[Verse]\n晚风轻轻吹过\n小狗跑向山坡',prompt:'轻快民谣',title:'测试',genre:'Folk'};
+ const d=await musicOperation('original',input,cookie,async(url,opts)=>{
+  calls++;assert.equal(new URL(url).pathname,'/jd/api/v1/generate/music');
+  const body=JSON.parse(opts.body);assert.equal(body.voice_id,456);assert.equal(body.batch_size,1);
+  assert.equal(body.source_item,undefined);assert.equal(body.canvas_id,undefined);
+  assert.equal(body.genre,'Folk');return Response.json({status_code:0,data:{task_id:'originalTest'}});
+ });
+ assert.equal(calls,1);assert.equal(d.songTaskId,'originalTest');
+ await assert.rejects(musicOperation('original',{...input,confirmSpend:false},cookie,async()=>{throw Error('must not call')}),/invalid_input/);
+ calls=0;await assert.rejects(musicOperation('original',input,cookie,async()=>{calls++;throw Error('timeout')}));assert.equal(calls,1);
+});
+test('original completion requires progress and vid; download uses generated vid array and never reference transcoding',async()=>{
+ for(const status of [2,3]){
+  const r=await musicOperation('original-status',{songTaskId:'originalTest'},cookie,async()=>Response.json({status_code:0,data:{status,payload:JSON.stringify({progress:100,vid:'vTest'})}}));
+  assert.equal(r.state,'complete');
+ }
+ const incomplete=await musicOperation('original-status',{songTaskId:'originalTest'},cookie,async()=>Response.json({status_code:0,data:{status:2,payload:JSON.stringify({progress:90})}}));assert.equal(incomplete.state,'processing');
+ const r=await musicOperation('original-download',{songTaskId:'originalTest'},cookie,async(url,opts)=>{
+  if(new URL(url).pathname.includes('/generate/task/'))return Response.json({status_code:0,data:{status:2,payload:JSON.stringify({progress:100,vid:'vTest'})}});
+  assert.equal(new URL(url).pathname,'/jd/api/v1/video/video_urls/get');assert.deepEqual(JSON.parse(opts.body),{vid:['vTest'],format_type:1});
+  return Response.json({status_code:0,data:{video_urls:{vTest:{origin_video_url:'https://v3-swing.haimianyinyue.com/final.wav',transcoding_video_url:'https://v3-swing.haimianyinyue.com/original.mp3'}}}});
+ });assert.ok(r.mediaUrl.endsWith('final.wav'));
+});
