@@ -46,7 +46,7 @@
 
 ## 当前进行中 / 尚未并入正式版
 
-- **Char 自主谱曲试用**：正式整合 PR [#146](https://github.com/yanlue1211/SullyOS-Personal-Import/pull/146) 已合并进 `personal/audio-listening`（功能合并提交 `1eee407de24b66500a1de1c7619c9472ba9955e4`）。写歌页追加「自主谱曲」：八小节逐音谱写、abcjs 五线谱与 WAV/MIDI、本版音频 API **纯客观描述**、Char 局部修订、版本选择。**独立八小节试听页已在用户 HarmonyOS 手机上确认能正常播放**；实际 Char 谱曲 + 音频 API + 修订尚需用户从正式页面逐步验收；海绵参考旋律上传未接。旧实验草稿 [#145](https://github.com/yanlue1211/SullyOS-Personal-Import/pull/145) 仅供历史回退参考，不能拿旧分支覆盖正式版。当前仍使用远程脚本/音色，应在真机验证后考虑随包打包。
+- **Char 自主谱曲试用**：正式整合 PR [#146](https://github.com/yanlue1211/SullyOS-Personal-Import/pull/146) 已合并进 `personal/audio-listening`（功能合并提交 `1eee407de24b66500a1de1c7619c9472ba9955e4`）。写歌页追加「自主谱曲」：八小节逐音谱写、abcjs 五线谱与 WAV/MIDI、本版音频 API **纯客观描述**、Char 局部修订、版本选择。后续 PR #147 将谱曲讨论接入原「创作对话」同一条角色私聊与输入栏（歌词/旋律模式可切换），新谱保存同时写入角色谱曲完成/旋律调整卡；未修改仅保留自然聊天回复，不强制产生卡。**独立八小节试听页已在用户 HarmonyOS 手机上确认能正常播放**；实际 Char 谱曲 + 音频 API + 修订尚需用户从正式页面逐步验收；海绵参考旋律上传未接。旧实验草稿 [#145](https://github.com/yanlue1211/SullyOS-Personal-Import/pull/145) 仅供历史回退参考，不能拿旧分支覆盖正式版。当前仍使用远程脚本/音色，应在真机验证后考虑随包打包。
 - **其他旧功能分支与待合并 PR**：仓库存在大量历史分支，名称不代表是否已经实现或合并。例如 [#108](https://github.com/yanlue1211/SullyOS-Personal-Import/pull/108) 仍是开放状态。先比较最新正式 HEAD 与候选分支的提交和代码，判断是否有独立成果或只是已落地的历史修复。**不能批量删除、批量合并，更不能简单认定「旧分支里所有新功能都没有了」**。
 - 其他客户端的点点栖 APK、AMSG Cloudflare Worker、小红书 MCP，分别按自己的仓库/工作流/部署状态判断，不随网页自动更新。
 
