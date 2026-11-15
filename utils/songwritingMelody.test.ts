@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { melodyToAbc, validateBars, makeVersion } from '../features/songwriting/melody';
+import { melodyToAbc, validateBars, makeVersion, type MelodyBar } from '../features/songwriting/melody';
 
-const eight = () => Array.from({ length: 8 }, () => ({
+const eight = (): MelodyBar[] => Array.from({ length: 8 }, () => ({
   notes: [
     { pitch: 'C4', beats: 1, lyric: '我' },
     { pitch: 'D4', beats: 1, lyric: '想' },
