@@ -1,5 +1,6 @@
 import SongwritingStudio from '../components/song/SongwritingStudio';
 import HaimianProduction from '../components/song/HaimianProduction';
+import { mutateSong, songPerformanceChange } from '../features/songwriting/storage';
 import {ThemeSwitch, StudioMascot} from '../components/song/StudioTheme';
 import type {StudioTheme} from '../features/songwriting/model';
 import { ContextBuilder } from '../utils/context';
@@ -1264,17 +1265,22 @@ const SongwritingApp: React.FC = () => {
                 tagsUsed: styleStr,
                 lyricsLineCount: finalLines.length,
             };
-            const audioVersions = [...(activeSong.audioVersions || (activeSong.audio ? [activeSong.audio] : [])), audioMeta];
-            const updated = { ...activeSong, audio: audioMeta, audioVersions, musicProvider: providerArg };
-            setActiveSong(updated);
-            await updateSong(activeSong.id, { audio: audioMeta, audioVersions, musicProvider: providerArg });
+            // Persist audio and its character-facing performance card in the SAME
+            // transaction. A second recording is a distinct take even when a
+            // provider reuses its cache key for the new audio blob.
+            const saved = await mutateSong(activeSong.id, latest => {
+                const audioVersions = [...(latest.audioVersions || (latest.audio ? [latest.audio] : [])), audioMeta];
+                const recorded = { ...latest, audio: audioMeta, audioVersions, musicProvider: providerArg };
+                return songPerformanceChange(recorded, `audio:${assetKey}:${audioMeta.generatedAt}`, collaborator?.name || '创作伙伴', buildMinimaxMusicLyrics(latest.lines));
+            });
+            setActiveSong(saved);
             addToast(cached ? '已命中之前生成的版本' : '出歌完成！', 'success');
 
             // ── 默认 like 点亮 ── 一生成出来就自动加入「一起写的歌」相册，
             // 用 char 头像作默认封面。用户依然可以点 ❤︎ 改封面 / 移除 / 去音乐 App 听。
             const authorNames = [
                 userProfile?.name || '我',
-                collaborator?.name || 'AI',
+                collaborator?.name || '创作伙伴',
             ].filter(Boolean).join(' & ');
             const localSong: MusicSong = {
                 id: localId,

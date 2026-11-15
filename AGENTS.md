@@ -20,6 +20,7 @@
 | **Anthropic 原生接口 / Prompt Caching** | [`docs/anthropic-messages.md`](./docs/anthropic-messages.md) | 改 Messages 转换、SSE、缓存或 amsg 原生模型调用前必读；原生端点随整套凭据保存，不新增代理，旧 Worker 先更新并验证能力 |
 | **Gemini 原生接口 / 自动缓存** | [`docs/gemini-native.md`](./docs/gemini-native.md) | 改 Gemini 转换、SSE、工具签名或缓存计数前必读；动态提示保留位置，原生能力按当前 Worker 地址确认 |
 | **ElevenLabs 角色语音** | [`docs/elevenlabs-tts.md`](./docs/elevenlabs-tts.md) | 改 v4 / Turbo 语音、Audio Tags、模型参数或字幕前必读；v4 保留开放式标签，只发送稳定度与相似度，不自动降级 |
+| **角色可读系统卡片的叙述视角** | [`docs/character-facing-cards.md`](./docs/character-facing-cards.md) | 改任何发给角色／写入私聊与记忆上下文的成果卡、活动卡、完成卡前必读；只写角色本人完成的行为与结果，不将后台 AI／模型／API 生成过程说给角色。技术成本和任务状态仍在用户设置与操作界面真实展示 | 
 | **角色统计 / 上下文字数与 Token 估算** | [`docs/character-statistics.md`](./docs/character-statistics.md) | 改神经链接角色统计前必读；可读范围不等于实际请求，概率预览不得抽签，宫殿缓存单列 |
 | **世界书管线、分组与角色绑定** | [`docs/worldbook-management.md`](./docs/worldbook-management.md) | 新增 App／角色生成请求或改世界书前必读；新入口使用 ContextBuilder.buildCharacterRequest，世界书自动随角色装载；绑定按 ID，库与角色缓存同事务更新 |
 | **协同工作私聊衔接与转发** | [`docs/collaboration-chat-bridge.md`](./docs/collaboration-chat-bridge.md) | 改协同读取 ChatApp 范围或转发消息前必读；每轮读 DB，空范围不回退，多选只发当前窗口 |

@@ -2141,6 +2141,8 @@ export interface SongSheet {
     lyricProposal?: import('./features/songwriting/model').LyricProposal;
     lyricRevisions?: import('./features/songwriting/model').LyricRevision[];
     completionCardId?: number;
+    /** One card per completed recorded take; separate from lyric finalization. */
+    performanceRecords?: { key: string; at: number; cardId?: number }[];
     completedLyricFingerprint?: string;
     audioVersions?: SongAudio[];
     id: string;

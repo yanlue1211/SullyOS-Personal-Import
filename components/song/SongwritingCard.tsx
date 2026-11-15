@@ -16,14 +16,14 @@ export default function SongwritingCard({ card }: { card: Card }) {
     >
       <summary style={{ cursor: "pointer", listStyle: "none" }}>
         <span style={{ fontSize: 10, letterSpacing: 2, color: "#678e85" }}>
-          {card.kind === "lyrics" ? "LYRIC LETTER" : "A SONG, FINALLY"}
+          {card.kind === "lyrics" ? "LYRIC LETTER" : card.kind === "performed" ? "THE SONG, SUNG" : "A SONG, FINALLY"}
         </span>
         <strong style={{ display: "block", fontSize: 14, margin: "5px 0" }}>
           {" "}
-          {card.kind === "lyrics" ? "🎼" : "🎵"} {card.title}
+          {card.kind === "lyrics" ? "🎼" : card.kind === "performed" ? "🎤" : "🎵"} {card.title}
         </strong>
         <span style={{ fontSize: 11 }}>
-          {card.kind === "completed" ? "歌曲完成" : card.label} · 第{card.version}版 · 展开查看
+          {card.kind === "completed" ? "歌曲完成" : card.kind === "performed" ? "演唱完成" : card.label} · 第{card.version}版 · 展开查看
         </span>
       </summary>
       <div
@@ -44,7 +44,8 @@ export default function SongwritingCard({ card }: { card: Card }) {
             <p>{card.before || "（空）"}</p>
           </>
         )}
-        <b>{card.kind === "lyrics" ? "修改后" : "完成歌词"}</b>
+        {card.kind === "performed" && <p>{card.author}已完成这首歌的演唱。</p>}
+        <b>{card.kind === "lyrics" ? "修改后" : card.kind === "performed" ? "演唱歌词" : "完成歌词"}</b>
         <p>{card.after || "（空）"}</p>
         {card.kind === "completed" && (
           <small>

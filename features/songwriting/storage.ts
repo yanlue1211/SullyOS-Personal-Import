@@ -85,6 +85,15 @@ export async function mutateSong(
                   { ...update.revision, cardId: Number(add.result) },
                 ],
               };
+            else if (update.card.kind === "performed" && update.card.performanceKey)
+              result = {
+                ...result,
+                performanceRecords: (result.performanceRecords || []).map((record) =>
+                  record.key === update.card?.performanceKey
+                    ? { ...record, cardId: Number(add.result) }
+                    : record,
+                ),
+              };
             else result = { ...result, completionCardId: Number(add.result) };
             songs.put(result);
           };
@@ -102,6 +111,41 @@ export async function mutateSong(
   notifySongwriting(saved.collaboratorId);
   return saved;
 }
+/**
+ * A finished recording is an action by the character in the story, independent
+ * of lyric finalization. The internal take key prevents duplicate cards across
+ * repeated status checks, refreshes and retries, without a second memory system.
+ * Only the character's creative outcome is written into chat and memory context.
+ */
+export function songPerformanceChange(
+  song: SongSheet,
+  key: string,
+  author: string,
+  lyrics = lyricsText(song.lines),
+): { song: SongSheet; card?: SongwritingCard } {
+  if (!key.trim()) throw Error("演唱作品标识不能为空");
+  if (song.performanceRecords?.some((record) => record.key === key))
+    return { song };
+  const at = Date.now();
+  return {
+    song: {
+      ...song,
+      performanceRecords: [...(song.performanceRecords || []), { key, at }],
+    },
+    card: {
+      kind: "performed",
+      songId: song.id,
+      title: song.title,
+      label: "演唱完成",
+      author,
+      version: song.lyricRevisions?.length || 1,
+      after: lyrics,
+      at,
+      performanceKey: key,
+    },
+  };
+}
+
 export const saveProposal = (id: string, proposal: LyricProposal | undefined) =>
   mutateSong(id, (song) => {
     if (proposal && proposal.base !== lyricFingerprint(song.lines))

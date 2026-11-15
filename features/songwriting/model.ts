@@ -23,7 +23,7 @@ export interface LyricRevision {
   cardId: number;
 }
 export interface SongwritingCard {
-  kind: "lyrics" | "completed";
+  kind: "lyrics" | "completed" | "performed";
   songId: string;
   title: string;
   label: string;
@@ -33,6 +33,8 @@ export interface SongwritingCard {
   version: number;
   at: number;
   audio?: string;
+  /** Internal idempotency key, never printed to character context. */
+  performanceKey?: string;
 }
 export const finalLines = (song: Pick<SongSheet, "lines">) =>
   song.lines.filter((l) => !l.isDraft);
@@ -139,6 +141,9 @@ export function createProposal(
 export function cardText(card: SongwritingCard) {
   if (card.kind === "lyrics") {
     return `🎼 歌词修改卡 · ${card.title}\n${card.label} · 第${card.version}版 · ${card.author}\n修改前：\n${card.before || "（空）"}\n修改后：\n${card.after || "（空）"}\n歌曲引用：${card.songId}`;
+  }
+  if (card.kind === "performed") {
+    return `🎤 演唱完成卡 · ${card.title}\n${card.author}已完成这首歌的演唱。\n${card.after ? `歌词：\n${card.after}\n` : ""}歌曲引用：${card.songId}`;
   }
   return `🎵 歌曲完成卡 · ${card.title}\n${card.author}完成了这首歌。\n${card.after || ""}\n歌曲引用：${card.songId}`;
 }
