@@ -174,7 +174,7 @@ export function completeSong(id: string, author: string): Promise<SongSheet> {
         kind: "completed",
         songId: id,
         title: song.title,
-        label: "歌词正式完成",
+        label: "歌曲完成",
         author,
         version: song.lyricRevisions?.length || 1,
         after: lyricsText(song.lines),

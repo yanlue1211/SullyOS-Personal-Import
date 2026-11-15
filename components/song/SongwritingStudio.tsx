@@ -547,7 +547,7 @@ export default function SongwritingStudio({
                   void run("正在保存完成作品", async () => {
                     const saved = await completeSong(
                       song.id,
-                      `${userProfile.name} & ${char?.name || "创作伙伴"}`,
+                      `${char?.name || "创作伙伴"}`,
                     );
                     setSong(saved);
                     await refresh();
