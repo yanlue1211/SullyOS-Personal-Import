@@ -84,7 +84,7 @@ export default function SingingLab({ char }: { char?: CharacterProfile }) {
         <small>A VOICE THAT FEELS LIKE YOU</small>
       </div>
       <p className="sw-lab-copy">
-        先让说话的声音，试着走向一首歌。海绵歌声仍待实际验证，目前可以准备角色的
+        原创歌曲可在「海绵出歌」生成；这里先准备角色的
         MiniMax 测试朗读。
       </p>
       <div className="sw-lab-info">
@@ -154,7 +154,7 @@ export default function SingingLab({ char }: { char?: CharacterProfile }) {
         打开海绵音乐 ↗
       </a>
       <p className="sw-note">
-        目前未接入海绵生成服务；不会自动上传声音、克隆音色或扣除海绵额度。
+        本页只准备朗读素材，不自动上传或克隆。音色上传仍在独立测试页验证；已有音色可直接到「海绵出歌」使用。
       </p>
     </section>
   );
