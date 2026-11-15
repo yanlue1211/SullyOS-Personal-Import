@@ -12,6 +12,8 @@ import {
   acceptProposal,
   commitStudioReply,
   completeSong,
+  mutateSong,
+  songPerformanceChange,
   getSong,
   saveProposal,
   writeTurn,
@@ -435,4 +437,45 @@ it("song completion card credits the character and never calls the song AI-gener
   expect(text).toContain("阿源完成了这首歌");
   expect(text).toContain("第一句");
   expect(text).not.toMatch(/生成|AI|海绵|音频尚未/);
+});
+
+it("records one natural singing card when a provider confirms completed audio", async () => {
+  const key = "haimian:finished-task";
+  const write = () => mutateSong(song.id, (current) =>
+    songPerformanceChange(current, key, "阿源", "[verse]\\n第一句")
+  );
+  await Promise.all([write(), write()]);
+  const saved = await getSong(song.id);
+  expect(saved.performanceRecords).toHaveLength(1);
+  expect(saved.performanceRecords?.[0].key).toBe(key);
+  expect(saved.performanceRecords?.[0].cardId).toBeTypeOf("number");
+  expect(saved.completionCardId).toBeUndefined();
+  const messages = await studioMessages(saved);
+  expect(messages).toHaveLength(1);
+  expect(messages[0].role).toBe("assistant");
+  expect(messages[0].metadata?.songwritingCard?.kind).toBe("performed");
+  expect(messages[0].content).toContain("阿源已完成这首歌的演唱");
+  expect(messages[0].content).not.toMatch(/生成|AI|模型|海绵|MiniMax|ACE-Step/);
+  expect(formatMessageForPrompt(messages[0], "阿源", "User")).toContain("阿源已完成这首歌的演唱");
+  // Both the normal chat view and memory extraction read this stored message.
+  await write();
+  expect(await studioMessages(saved)).toHaveLength(1);
+});
+
+it("keeps lyric finalization card and new recording cards independent, including later takes", async () => {
+  await completeSong(song.id, "阿源");
+  let rows = await studioMessages(song);
+  expect(rows).toHaveLength(1);
+  expect(rows[0].content).toContain("阿源完成了这首歌");
+  const lyricCardId = (await getSong(song.id)).completionCardId;
+  expect(lyricCardId).toBeTypeOf("number");
+  await mutateSong(song.id, (current) => songPerformanceChange(current, "audio:test-1", "阿源"));
+  await mutateSong(song.id, (current) => songPerformanceChange(current, "audio:test-2", "阿源"));
+  rows = await studioMessages(song);
+  expect(rows).toHaveLength(3);
+  expect(rows.filter((m) => m.content.includes("已完成这首歌的演唱"))).toHaveLength(2);
+  const stored = await getSong(song.id);
+  expect(stored.completionCardId).toBe(lyricCardId);
+  expect(stored.performanceRecords?.length).toBe(2);
+  expect(stored.performanceRecords?.every((r) => typeof r.cardId === "number")).toBe(true);
 });
