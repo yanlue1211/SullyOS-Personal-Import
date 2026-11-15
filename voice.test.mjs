@@ -33,3 +33,8 @@ test('official storage address variants normalize without allowing other domains
  for(const host of ['tos-d-ct-hl.snssdk.com','https://tos-d-ct-hl.snssdk.com','tos-d-ct-hl.snssdk.com:443'])assert.equal(voiceUploadUrl(host,'/tos-cn-v-test/fakeKey'),'https://tos-d-ct-hl.snssdk.com/upload/v1/tos-cn-v-test/fakeKey');
  for(const host of ['https://evil.example','tos-test.snssdk.com.evil.example','https://u:p@tos-test.snssdk.com','http://tos-test.snssdk.com'])assert.throws(()=>voiceUploadUrl(host,'tos-cn-v-test/fakeKey'),e=>e.safeToRetry&&e.message==='unsupported_media_url');
 });
+test('observed Haimian VOD upload host is allowed exactly, without widening to unrelated hosts',async()=>{
+ const {voiceUploadUrl}=await import('./voice.mjs');
+ assert.equal(voiceUploadUrl('tos-mya2hl.vodupload.com','tos-cn-v-test/fakeKey'),'https://tos-mya2hl.vodupload.com/upload/v1/tos-cn-v-test/fakeKey');
+ for(const h of ['tos-mya2hl.vodupload.com.evil.example','evil.vodupload.com','https://user:pass@tos-mya2hl.vodupload.com'])assert.throws(()=>voiceUploadUrl(h,'tos-cn-v-test/fakeKey'),/unsupported_media_url/);
+});
