@@ -2,7 +2,7 @@ import { useMusic } from '../../context/MusicContext';
 import { addProducedSong } from '../../features/songwriting/musicLibrary';
 import { fetchSongFile } from '../../features/songwriting/download';
 import { shareOrDownloadBlob } from '../../utils/shareExport';
-import HaimianCredentials, { useHaimianCredentials } from './HaimianCredentials';
+import { useHaimianCredentials } from './HaimianCredentials';
 import { loadVoiceClone } from "../../features/songwriting/voiceClone";
 import React, { useEffect, useRef, useState } from 'react';
 import type { SongSheet } from '../../types';
@@ -94,7 +94,7 @@ export default function HaimianProduction({ song, onUpdate }: {
  <div className="sw-production-step"><div className="sw-production-step-heading"><span>02</span><div><h4>生成说明</h4><p>整理成音乐要求，歌词保持原样。</p></div></div><button className="sw-production-outline" disabled={!!busy || !song.lines.some(l => !l.isDraft)} onClick={() => generateText('prompt')}>整理海绵创作说明</button>
  <label>预览与修改<textarea aria-label="海绵创作说明" rows={6} value={prompt} maxLength={2000} onChange={e => setPrompt(e.target.value)}/></label>
  <details><summary>本次完整歌词（不会由整理步骤改写）</summary><pre>{lyricsText(song.lines) || '请先保存歌词'}</pre></details></div>
- <details className="sw-production-step sw-production-connection"><summary><span className="sw-production-number">03</span>海绵连接与音色</summary><HaimianCredentials connection={connection}/>
+ <details className="sw-production-step sw-production-connection"><summary><span className="sw-production-number">03</span>海绵演唱音色</summary><p className="sw-production-hint">连接密钥与 Cookie 请在「总设置 → 海绵音乐」中统一管理。</p>
  <button disabled={!!busy} onClick={() => void run('读取积分与音色', async () => { const b = await haimianCall('/probe/balance', credentials); if (b.data?.status_code !== 0)
         throw Error('积分查询失败'); const v = await haimianCall('/probe/voices', credentials); if (v.data?.status_code !== 0)
         throw Error('音色查询失败'); const items = [...(v.data.data.voices || []), ...(v.data.data.campaign_voices || [])].filter((v: any) => v.status === 2); setVoices([...new Map(items.map((v: any) => [String(v.id), { id: String(v.id), title: v.title || String(v.id) }])).values()] as {
