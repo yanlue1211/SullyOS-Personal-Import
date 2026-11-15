@@ -50,7 +50,7 @@ export async function musicOperation(action, input, cookie, upstreamFetch = fetc
     let data; try { data = JSON.parse(await boundedText(response.body, 1048576)); } catch { fail('upstream_invalid_response'); }
     if (data.status_code !== 0) { const error = new Error('upstream_business_error'); if (Number.isSafeInteger(data.status_code)) error.businessCode = data.status_code;
       // Only return fixed classifications, never raw upstream text or credentials.
-      const message = String(data.status_info?.status_msg || '');
+      const message = String(data.status_info?.status_msg || '').split(cookie).join('');
       error.businessHint = /积分|余额|credit|balance/i.test(message) ? '海绵提示积分或余额问题。'
         : /登录|登陆|cookie|session|unauthor/i.test(message) ? '海绵提示登录状态问题。'
         : /参数|parameter|invalid.*param/i.test(message) ? '海绵提示请求参数不符合要求。'
