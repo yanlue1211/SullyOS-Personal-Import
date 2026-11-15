@@ -1,3 +1,4 @@
+import ShareSongPanel from './music/ShareSongPanel';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useOS } from '../context/OSContext';
@@ -39,6 +40,7 @@ const MusicApp: React.FC = () => {
     playMode, setPlayMode,
     regeneratingId, regeneratingStatus,
   } = useMusic();
+  const [sharingSong, setSharingSong] = useState<Song | null>(null);
   const isCurrentRegenerating = !!current && current.id === regeneratingId;
   // 把对轴入口和单曲循环按钮移到 SubActions 里，避免散乱
   // 下载本地生成的歌曲到本地文件系统
@@ -438,6 +440,7 @@ const MusicApp: React.FC = () => {
           </div>
 
           <div className="shrink-0 mt-3 w-full">
+            <button className="w-full py-2 text-xs" onClick={() => setSharingSong(current)}>分享给角色</button>
             <SubActions
               liked={liked}
               onLike={() => { toggleLike(); trackEvent('收藏或取消收藏当前歌', { action: liked ? 'unlike' : 'like' }); }}
@@ -739,6 +742,7 @@ const MusicApp: React.FC = () => {
         );
       })()}
 
+      {sharingSong && <div className="absolute inset-0 z-50 bg-white/90 overflow-auto p-5"><ShareSongPanel song={sharingSong} onClose={()=>setSharingSong(null)}/></div>}
       {view === 'visit_char' && visitCharId && (
         <CharVisitPage
           charId={visitCharId}

@@ -145,9 +145,14 @@ export async function shareOrDownloadBlob(options: ShareOrDownloadBlobOptions): 
     anchor.href = url;
     anchor.download = fileName;
     document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    // Some Android browsers inject a download-name hook but omit its native method.
+    const bridge = (window as any).Android;
+    const repair = bridge && typeof bridge.captureDownloadName !== 'function';
+    const previousHook = bridge ? Object.getOwnPropertyDescriptor(bridge, 'captureDownloadName') : undefined;
+    let patched = false;
+    if (repair) { try { bridge.captureDownloadName = () => {}; patched = true; } catch {} }
+    try { anchor.click(); } finally { if (patched) { try { if (previousHook) Object.defineProperty(bridge, 'captureDownloadName', previousHook); else delete bridge.captureDownloadName; } catch {} } anchor.remove(); }
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
     return 'downloaded';
 }
 

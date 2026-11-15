@@ -12,6 +12,8 @@
 import { VOICE_FAVORITE_AUDIO_PREFIX, VOICE_FAVORITES_INDEX_ASSET_ID } from './voiceFavorites';
 import { isCompanionVoiceAssetId } from './companionVoiceAssets';
 
+export const PRODUCED_MUSIC_PREFIX = 'songwriting:haimian-audio:';
+export const PRODUCED_MUSIC_BACKUP_DIR = 'assets/produced-music';
 export const VOICE_MESSAGE_ASSET_PREFIX = 'voice_msg_';
 export const VOICE_BACKUP_DIR = 'assets/voice-favorites';
 export const COMPANION_VOICE_BACKUP_DIR = 'assets/companion-voices';
@@ -39,6 +41,7 @@ type ReadBinaryFile = (path: string) => Promise<Uint8Array | null>;
 
 const isVoiceAsset = (asset: AssetRecord): asset is AssetRecord & { id: string } => {
     if (typeof asset?.id !== 'string') return false;
+    if (asset.id.startsWith(PRODUCED_MUSIC_PREFIX)) return true;
     if (isCompanionVoiceAssetId(asset.id)) return true;
     if (asset.id.startsWith(VOICE_FAVORITE_AUDIO_PREFIX)) return true;
     return asset.id.startsWith(VOICE_MESSAGE_ASSET_PREFIX) && asset.data?.favorite === true;
@@ -46,7 +49,7 @@ const isVoiceAsset = (asset: AssetRecord): asset is AssetRecord & { id: string }
 
 const isRestorableVoiceAsset = (asset: AssetRecord): asset is AssetRecord & { id: string } => (
     typeof asset?.id === 'string'
-    && (isCompanionVoiceAssetId(asset.id) || asset.id.startsWith(VOICE_FAVORITE_AUDIO_PREFIX) || asset.id.startsWith(VOICE_MESSAGE_ASSET_PREFIX))
+    && (asset.id.startsWith(PRODUCED_MUSIC_PREFIX) || isCompanionVoiceAssetId(asset.id) || asset.id.startsWith(VOICE_FAVORITE_AUDIO_PREFIX) || asset.id.startsWith(VOICE_MESSAGE_ASSET_PREFIX))
 );
 
 /**
@@ -57,6 +60,7 @@ const isRestorableVoiceAsset = (asset: AssetRecord): asset is AssetRecord & { id
 export const shouldIncludeVoiceRelatedAssetInBackup = (value: unknown, includeFavorites = true): boolean => {
     const asset = value as AssetRecord | null | undefined;
     if (!asset || typeof asset.id !== 'string') return true;
+    if (asset.id.startsWith(PRODUCED_MUSIC_PREFIX)) return includeFavorites;
     if (asset.id.startsWith('tts_')) return false;
     if (isCompanionVoiceAssetId(asset.id)) return includeFavorites;
     if (asset.id === VOICE_FAVORITES_INDEX_ASSET_ID || asset.id.startsWith(VOICE_FAVORITE_AUDIO_PREFIX)) return includeFavorites;
@@ -69,7 +73,7 @@ export const isVoiceBackupBlobMarker = (value: unknown): value is VoiceBackupBlo
     const marker = value as Partial<VoiceBackupBlobMarker>;
     return marker[VOICE_BACKUP_MARKER] === true
         && typeof marker.path === 'string'
-        && (marker.path.startsWith(`${VOICE_BACKUP_DIR}/`)
+        && (marker.path.startsWith(`${PRODUCED_MUSIC_BACKUP_DIR}/`) || marker.path.startsWith(`${VOICE_BACKUP_DIR}/`)
             || marker.path.startsWith(`${COMPANION_VOICE_BACKUP_DIR}/`)
             || marker.path.startsWith(`${LEGACY_VOICE_BACKUP_DIR}/`))
         && typeof marker.mimeType === 'string'
@@ -92,7 +96,7 @@ export function externalizeVoiceMessageBlob(
     const asset = value as AssetRecord;
     if (!isVoiceAsset(asset) || !asset.data || !(asset.data.blob instanceof Blob)) return;
     const blob = asset.data.blob;
-    const backupDir = isCompanionVoiceAssetId(asset.id) ? COMPANION_VOICE_BACKUP_DIR : VOICE_BACKUP_DIR;
+    const backupDir = asset.id.startsWith(PRODUCED_MUSIC_PREFIX) ? PRODUCED_MUSIC_BACKUP_DIR : isCompanionVoiceAssetId(asset.id) ? COMPANION_VOICE_BACKUP_DIR : VOICE_BACKUP_DIR;
     const path = `${backupDir}/${safeVoiceFilename(asset.id, index)}`;
     writeBlob(path, blob);
     asset.data.blob = { [VOICE_BACKUP_MARKER]: true, path, mimeType: blob.type || 'audio/mpeg', size: blob.size } satisfies VoiceBackupBlobMarker;
@@ -115,7 +119,7 @@ export async function externalizeVoiceMessageBlobs(
         if (!isVoiceAsset(asset) || !asset.data || !(asset.data.blob instanceof Blob)) continue;
 
         const blob = asset.data.blob;
-        const backupDir = isCompanionVoiceAssetId(asset.id) ? COMPANION_VOICE_BACKUP_DIR : VOICE_BACKUP_DIR;
+        const backupDir = asset.id.startsWith(PRODUCED_MUSIC_PREFIX) ? PRODUCED_MUSIC_BACKUP_DIR : isCompanionVoiceAssetId(asset.id) ? COMPANION_VOICE_BACKUP_DIR : VOICE_BACKUP_DIR;
         const path = `${backupDir}/${safeVoiceFilename(asset.id, index)}`;
         await writeFile(path, new Uint8Array(await blob.arrayBuffer()));
         asset.data.blob = {
