@@ -21,3 +21,10 @@ test('untrusted upload hosts are rejected before sending audio',async()=>{
  const api=async()=>({access_key:'fake',secret_key:'fake',auth_token:'fake'});let calls=0;
  await assert.rejects(uploadVoice({audioBase64:Buffer.alloc(1000).toString('base64'),lyrics:'测试',confirmUpload:true},api,async()=>{calls++;return Response.json({Result:{InnerUploadAddress:{UploadNodes:[{SessionKey:'s',UploadHost:'evil.example',StoreInfos:[{StoreUri:'x',Auth:'a'}]}]}}})}),/unsupported_media_url/);assert.equal(calls,1);
 });
+test('voice routes require authorization and return training state without payload',async()=>{
+ const {handleMusic}=await import('./music.mjs');const env={AUTH_TOKEN:'x'.repeat(32)};
+ const request=(auth)=>new Request('https://test/music/voice-status',{method:'POST',headers:{Authorization:auth,'X-Haimian-Cookie':'session=fake'},body:JSON.stringify({voiceId:'123'})});
+ let calls=0;const upstream=async()=>{calls++;return Response.json({status_code:0,data:{status:2,payload:'private'}})};
+ assert.equal((await handleMusic(request('wrong'),env,upstream)).status,401);assert.equal(calls,0);
+ const r=await handleMusic(request('Bearer '+env.AUTH_TOKEN),env,upstream);assert.deepEqual(await r.json(),{voiceId:'123',state:'ready'});assert.equal(calls,1);
+});
