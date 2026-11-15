@@ -147,7 +147,7 @@ export async function musicOperation(action, input, cookie, upstreamFetch = fetc
 }
 export async function handleMusic(request, env, upstreamFetch = fetch) {
   const u = new URL(request.url); const origin = request.headers.get('Origin');
-  const reply = (data, status = 200) => Response.json(data, { status, headers: { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', ...(origin ? {'Access-Control-Allow-Origin': origin, 'Vary':'Origin'} : {}) } });
+  const reply = (data, status = 200) => Response.json(data, { status, headers: { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'X-Voice-Upload-Version':'2', ...(origin ? {'Access-Control-Allow-Origin': origin, 'Vary':'Origin'} : {}) } });
   if (origin && origin !== u.origin && origin !== (env.APP_ORIGIN || 'https://yanlue1211.github.io')) return reply({ error: 'origin_denied' }, 403);
   if (u.search) return reply({ error: 'route_not_found' }, 404);
   if (request.method === 'GET' && u.pathname === '/music') return new Response(MUSIC_PAGE, { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'Content-Security-Policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; media-src https://*.haimianyinyue.com; base-uri 'none'; frame-ancestors 'none'; form-action 'none'" } });
