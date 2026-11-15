@@ -23,7 +23,7 @@ export default function SongwritingCard({ card }: { card: Card }) {
           {card.kind === "lyrics" ? "🎼" : "🎵"} {card.title}
         </strong>
         <span style={{ fontSize: 11 }}>
-          {card.label} · 第{card.version}版 · 展开查看
+          {card.kind === "completed" ? "歌曲完成" : card.label} · 第{card.version}版 · 展开查看
         </span>
       </summary>
       <div
@@ -48,9 +48,7 @@ export default function SongwritingCard({ card }: { card: Card }) {
         <p>{card.after || "（空）"}</p>
         {card.kind === "completed" && (
           <small>
-            {card.audio
-              ? "音频：" + card.audio
-              : "歌词已完成 · 可以稍后生成音频"}
+            {"作品已保存"}
           </small>
         )}
       </div>
