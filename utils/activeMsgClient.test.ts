@@ -134,6 +134,42 @@ describe('putClientStateOrThrow', () => {
     expect(put).toHaveBeenCalledTimes(3);
   });
 
+  it('浏览器只读 message 的网络异常不能遮盖真正的上传失败', async () => {
+    // 某些浏览器的 DOMException.message 是只读 getter；这里用只读 TypeError
+    // 稳定复现相同语义（避免受测试运行环境的 DOMException 原型差异影响）。
+    const source = Object.defineProperty(new TypeError('Failed to fetch'), 'message', {
+      configurable: true,
+      get: () => 'Failed to fetch',
+    });
+    const put = vi.fn().mockRejectedValue(source);
+    let received: any;
+    try {
+      await runWithTimers(putClientStateOrThrow(clientWith(put), ENTRIES, '上传云端状态'));
+    } catch (error) {
+      received = error;
+    }
+    expect(put).toHaveBeenCalledTimes(3);
+    expect(received).toBeInstanceOf(Error);
+    expect(received.message).toContain('连不上你的 Worker');
+    expect(received.message).not.toContain('Cannot set property message');
+    expect(received.cause).toBe(source);
+    expect(readAmsgFailKind(received)).toBe('网络失败');
+  });
+
+  it('体检遇到只读 DOMException.message 时保留实际错误类别', async () => {
+    const source = new DOMException('The operation was aborted.', 'AbortError');
+    const put = vi.fn().mockRejectedValue(source);
+    let received: any;
+    try {
+      await runWithTimers(putClientStateOrThrow(clientWith(put), ENTRIES, '上传云端状态'));
+    } catch (error) {
+      received = error;
+    }
+    expect(received).toBeInstanceOf(Error);
+    expect(received.message).toContain('上传云端状态');
+    expect(received.message).not.toContain('only a getter');
+  });
+
   it('条目被 worker 点名 rejected → 立刻抛错、不重试（重试不会变好）', async () => {
     const put = vi.fn().mockResolvedValue({
       success: true,
