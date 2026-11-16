@@ -109,8 +109,6 @@ describe('主动消息 2.0 全局总开关（amsgGlobalSwitch）', () => {
       workerUrl: 'https://amsg-test.workers.dev',
       serverToken: 'srv-token-keep',
       masterKey: 'dGVzdC1tYXN0ZXIta2V5LTMzLWJ5dGVzLWxvbmctenp6',
-      useRelay: true,
-      relayToken: 'rly_test_token',
       pushMode: 'third-party',
       thirdPartyPush: { provider: 'wxpusher', token: 'AT_xxx|UID_yyy' },
       instantChatEnabled: true,
@@ -139,7 +137,7 @@ describe('主动消息 2.0 全局总开关（amsgGlobalSwitch）', () => {
     // 在途即时对话等待已在本地销账
     expect(listInstantChatPendings()).toEqual([]);
 
-    // 已存连接配置、密钥、中转、第三方推送全部原样保留，仅 enabled 变为 false
+    // 已存连接配置、密钥、第三方推送全部原样保留，仅 enabled 变为 false
     const saved = await ActiveMsgStore.getGlobalConfig();
     expect(saved.enabled).toBe(false);
     expect(isAmsg2GloballyEnabled(saved)).toBe(false);
@@ -147,8 +145,6 @@ describe('主动消息 2.0 全局总开关（amsgGlobalSwitch）', () => {
     expect(saved.workerUrl).toBe('https://amsg-test.workers.dev');
     expect(saved.serverToken).toBe('srv-token-keep');
     expect(saved.masterKey).toBe('dGVzdC1tYXN0ZXIta2V5LTMzLWJ5dGVzLWxvbmctenp6');
-    expect(saved.useRelay).toBe(true);
-    expect(saved.relayToken).toBe('rly_test_token');
     expect(saved.pushMode).toBe('third-party');
     expect(saved.thirdPartyPush?.token).toBe('AT_xxx|UID_yyy');
     expect(saved.initializedAt).toBe(1_700_000_000_000);
