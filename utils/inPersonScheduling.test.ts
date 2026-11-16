@@ -72,7 +72,7 @@ it('云端失败不报预约成功，仍保留正常正文',async()=>{
     const context=await prepareInPersonScheduling([a],true);
     vi.mocked(ActiveMsgClient.scheduleCharacterTask).mockRejectedValue(new Error('offline'));
     expect(await applyInPersonSchedules(`正文\n${call()}`,context,base,report)).toBe('正文');
-    expect(report).toHaveBeenCalledWith(false);
+    expect(report).toHaveBeenCalledWith(false,expect.stringContaining('云端创建任务失败'));
     expect(updates).not.toHaveBeenCalled();
 });
 
@@ -114,7 +114,7 @@ it('连发不限时三条旧预约不会被误判为三次上限',async()=>{
     const ctx=await prepareInPersonScheduling([ch],true);
     await applyInPersonSchedules(call(),ctx,base,report);
     expect(ActiveMsgClient.scheduleCharacterTask).toHaveBeenCalledTimes(1);
-    expect(report).toHaveBeenCalledWith(true,undefined);
+    expect(report).toHaveBeenCalledWith(true);
 });
 it('同轮超过两次预约明确反馈，而不是静默忽略第三次',async()=>{
     const ctx=await prepareInPersonScheduling([a],true);

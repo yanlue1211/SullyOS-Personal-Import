@@ -110,7 +110,8 @@ export async function applyInPersonSchedules(
                 send_at: call.args.send_at, mode: call.args.mode, prompt_hint: call.args.prompt_hint,
                 expire_policy: call.args.expire_policy, recurrence: 'none', __dateExitEncounterId: encounter,
             }, session);
-            report(outcome.status === 'done', outcome.status === 'done' ? undefined : explainInPersonScheduleFailure(outcome));
+            if (outcome.status === 'done') report(true);
+            else report(false, explainInPersonScheduleFailure(outcome));
         } catch { report(false, '预约执行中断，请检查云端连接'); }
     }
     // 旧版把第 3 条及以后静默抛掉：用户只见到“没预约上”，完全看不到是
