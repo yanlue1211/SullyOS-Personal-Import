@@ -9,6 +9,7 @@ import {
   createAmsg2StallTracker,
   extractToolRoundLeadIn,
   mergeToolRoundLeadIns,
+  shouldFinishAmsg2ScheduleInOneCall,
   TOOL_ROUND_PLACEHOLDER,
 } from './amsg2ToolLoop';
 
@@ -55,5 +56,36 @@ describe('排程连着撞墙就收尾', () => {
     tracker.record([rejected]);
     expect(tracker.record([])).toBe(false);
     expect(tracker.stalledRounds).toBe(1);
+  });
+});
+
+
+describe('纯预约成功且第一轮已有正文可省一轮 API', () => {
+  const done = { tool: 'schedule_active_message', status: 'done' as const };
+  const base = { toolNames: ['schedule_active_message'], outcomes: [done] };
+
+  it('预约真正成功 + 模型已经说完 → 不必再调用模型', () => {
+    expect(shouldFinishAmsg2ScheduleInOneCall({ ...base, content: '行呀，过一会儿我再来找你～' })).toBe(true);
+    expect(shouldFinishAmsg2ScheduleInOneCall({
+      toolNames: ['schedule_active_message', 'schedule_active_message'],
+      outcomes: [done, done], content: '午饭和晚饭我都记着啦。',
+    })).toBe(true);
+  });
+
+  it('模型只给 tool_calls 或只给心声、占位 → 仍需第二轮生成正文', () => {
+    expect(shouldFinishAmsg2ScheduleInOneCall({ ...base, content: null })).toBe(false);
+    expect(shouldFinishAmsg2ScheduleInOneCall({ ...base, content: '(调用工具中)' })).toBe(false);
+    expect(shouldFinishAmsg2ScheduleInOneCall({ ...base, content: '<心声>得记着约好时间</心声>' })).toBe(false);
+    expect(shouldFinishAmsg2ScheduleInOneCall({ ...base, content: '<think>let me plan the time</think>' })).toBe(false);
+  });
+
+  it('预约打回 / 没完成 / 其他工具参与不能提前收尾', () => {
+    expect(shouldFinishAmsg2ScheduleInOneCall({ ...base, outcomes: [{ ...done, status: 'rejected' }], content: '我安排好了哦' })).toBe(false);
+    expect(shouldFinishAmsg2ScheduleInOneCall({ ...base, hasOtherTools: true, content: '已安排，一会找你' })).toBe(false);
+    expect(shouldFinishAmsg2ScheduleInOneCall({
+      toolNames: ['schedule_active_message', 'list_active_messages'],
+      outcomes: [done, { tool: 'list_active_messages', status: 'done' }], content: '查一下再说哦',
+    })).toBe(false);
+    expect(shouldFinishAmsg2ScheduleInOneCall({ ...base, content: 'schedule_active_message({"send_at":"tomorrow"})' })).toBe(false);
   });
 });
