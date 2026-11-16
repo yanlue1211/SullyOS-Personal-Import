@@ -601,7 +601,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
               <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm border ${isDiscordStyle ? 'bg-slate-800 text-violet-300 border-violet-400/20' : 'bg-violet-50 text-violet-500 border-violet-100'}`}>
                 <ChatCircleDots className="w-6 h-6" weight="bold" />
               </div>)}
-              {awayMessageOn && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full border-2 bg-violet-500 border-white" />}
+              {awayMessageOn && <span className="sully-chat-badge-dot absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full border-2 bg-violet-500 border-white" />}
             </div>
             <span className="text-xs font-bold">离开后消息</span>
         </button>,

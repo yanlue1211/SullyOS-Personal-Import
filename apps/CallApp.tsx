@@ -4231,16 +4231,16 @@ ${sentencePlan}`;
               onClick={()=>void toggleCallRecording()}
               disabled={handsFreeEnabled || sendingBusy || isTranscribing}
               title={isTranscribing ? '正在识别语音…' : isListening ? '停止录音' : callInputMode==='real'?'点击录音 · 音频 API':`按一下开始说话（${getSttProviderLabel(activeSttProvider)}）`}
-              className="w-9 h-9 rounded-full flex items-center justify-center shrink-0 transition active:scale-90 disabled:opacity-40"
+              className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 transition active:scale-90 disabled:opacity-40 ${!isListening && !isTranscribing ? 'bg-white/[0.08]' : ''}`}
               style={
                 isListening
                   ? { background: '#f0569f', boxShadow: '0 0 14px #f0569f99' }
                   : isTranscribing
                     ? { background: `${accentColor}55`, boxShadow: `0 0 12px ${accentColor}66` }
-                    : { background: 'rgba(255,255,255,0.08)' }
+                    : undefined
               }
             >
-              <Microphone size={18} weight="fill" className={isListening || isTranscribing ? 'text-white animate-pulse' : 'text-white/70'} />
+              <Microphone size={18} weight="fill" className={isListening ? 'keep-white text-white animate-pulse' : isTranscribing ? 'text-white animate-pulse' : 'text-white/70'} />
             </button>}
             <input
               ref={draftInputRef}
@@ -4274,17 +4274,17 @@ ${sentencePlan}`;
         >
           {/* mic */}
           <button onClick={() => { if(showInputPanel){const capture=manualCallCapture.current;if(capture){capture.stop?capture.stop():capture.controller.abort();}sttSessionRef.current?.stop();}setShowInputPanel(prev => !prev); }} className={`flex flex-col items-center transition active:scale-95 ${callMode === 'video' ? 'gap-0.5' : 'gap-1.5'}`}>
-            <span className={`${callControlSize} rounded-full border flex items-center justify-center backdrop-blur-md transition mx-auto`}
-              style={showInputPanel ? { background: `${accentColor}33`, borderColor: `${accentColor}88`, boxShadow: `0 0 18px ${accentColor}55` } : { background: 'rgba(255,255,255,0.06)', borderColor: 'rgba(255,255,255,0.15)' }}>
+            <span className={`${callControlSize} rounded-full border flex items-center justify-center backdrop-blur-md transition mx-auto ${showInputPanel ? '' : 'bg-white/[0.06] border-white/15'}`}
+              style={showInputPanel ? { background: `${accentColor}33`, borderColor: `${accentColor}88`, boxShadow: `0 0 18px ${accentColor}55` } : undefined}>
               <ChatText size={22} weight="fill" className="text-white/90" />
             </span>
             <span className="text-[10px] text-white/70">输入</span>
-            {callMode !== 'video' && <span className="text-[8px] tracking-[0.15em]" style={{ color: showInputPanel ? accentColor : 'rgba(255,255,255,0.3)' }}>{showInputPanel ? 'ON' : 'OFF'}</span>}
+            {callMode !== 'video' && <span className={`text-[8px] tracking-[0.15em] ${showInputPanel ? '' : 'text-white/30'}`} style={showInputPanel ? { color: accentColor } : undefined}>{showInputPanel ? 'ON' : 'OFF'}</span>}
           </button>
           {callMode === 'video' && (
             <button onClick={() => setShowUserCameraModePicker(true)} title="选择用户摄像头方式" className="flex flex-col items-center gap-0.5 transition active:scale-95">
-              <span className={`${callControlSize} rounded-full border flex items-center justify-center backdrop-blur-md transition mx-auto`}
-                style={userCameraMode !== 'off' ? { background: `${accentColor}33`, borderColor: `${accentColor}88`, boxShadow: `0 0 18px ${accentColor}55` } : { background: 'rgba(255,255,255,0.06)', borderColor: 'rgba(255,255,255,0.15)' }}>
+              <span className={`${callControlSize} rounded-full border flex items-center justify-center backdrop-blur-md transition mx-auto ${userCameraMode !== 'off' ? '' : 'bg-white/[0.06] border-white/15'}`}
+                style={userCameraMode !== 'off' ? { background: `${accentColor}33`, borderColor: `${accentColor}88`, boxShadow: `0 0 18px ${accentColor}55` } : undefined}>
                 {userCameraMode !== 'off'
                   ? <VideoCamera size={21} weight="fill" className="text-white/90" />
                   : <VideoCameraSlash size={21} weight="fill" className={userCameraLoading ? 'animate-pulse text-white/70' : 'text-white/48'} />}
