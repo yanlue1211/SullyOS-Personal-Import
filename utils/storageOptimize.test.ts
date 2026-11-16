@@ -692,7 +692,7 @@ describe('优化资源存储（一次性批量迁移）', () => {
         await DB.saveEmoji('本地表情', TINY_GIF, undefined);
 
         const first = await optimizeResourceStorage();
-        expect(first.converted).toBe(2);
+        expect(first.converted).toBe(3);
 
         const second = await optimizeResourceStorage();
         expect(second.converted).toBe(0);
@@ -827,7 +827,7 @@ describe('优化资源存储（一次性批量迁移）', () => {
         await DB.saveUserProfile({ name: '小明', avatar: TINY_JPEG, perCharAvatars: { c1: TINY_GIF } } as any);
 
         const first = await optimizeResourceStorage();
-        expect(first.converted).toBe(3);
+        expect(first.converted).toBe(2);
 
         const second = await optimizeResourceStorage();
         expect(second.converted).toBe(0);
