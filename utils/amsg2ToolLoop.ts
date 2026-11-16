@@ -71,3 +71,32 @@ export const createAmsg2StallTracker = () => {
     },
   };
 };
+
+
+/**
+ * Native function calling normally has a follow-up model round for tool results.
+ * Only pure schedules that ALL succeeded, when the initial reply already has
+ * user-visible content, can end immediately without a second paid model call.
+ * Query/renew/cancel/MCP/commerce responses must still be shown to the model.
+ */
+export const shouldFinishAmsg2ScheduleInOneCall = (input: {
+  toolNames: readonly string[];
+  outcomes: readonly Amsg2ToolOutcome[];
+  content: unknown;
+  hasOtherTools?: boolean;
+}): boolean => {
+  if (input.hasOtherTools || input.toolNames.length === 0
+    || input.outcomes.length !== input.toolNames.length
+    || !input.toolNames.every((name) => name === 'schedule_active_message')
+    || !input.outcomes.every((o) => o.tool === 'schedule_active_message' && o.status === 'done')) {
+    return false;
+  }
+  const raw = extractToolRoundLeadIn(input.content);
+  const visible = raw
+    .replace(/<(think|thinking|thought|心声|状态)(?:\s[^>]*)?>[\s\S]*?<\/\1\s*>/gi, '')
+    .replace(/<(think|thinking|thought|心声|状态)(?:\s[^>]*)?>[\s\S]*$/gi, '')
+    .replace(/<[^>]*>/g, '')
+    .trim();
+  if (/\b(?:schedule_active_message|cancel_active_message|renew_active_message)\s*\(/.test(visible)) return false;
+  return visible.length >= 4 && /[\p{L}\p{N}]/u.test(visible);
+};

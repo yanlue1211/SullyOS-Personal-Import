@@ -56,7 +56,7 @@ import { announceInstantChatRoute, getInstantChatPending, resolveInstantChatRead
 import { INSTANT_TOTAL_TIMEOUT_MS } from '../worker/amsg/src/instantChat';
 import { appendInstantTraceEntry } from '../utils/instantTraceLog';
 import { AMSG2_TOOL_NAMES, buildAmsg2Tools, createAmsg2ToolSession, executeAmsg2ToolWithOutcome, isAmsg2GlobalReady, type Amsg2ToolOutcome } from '../utils/amsg2ToolBridge';
-import { AMSG2_EMPTY_REPLY_PROMPT, AMSG2_WRAP_UP_PROMPT, createAmsg2StallTracker, extractToolRoundLeadIn, mergeToolRoundLeadIns } from '../utils/amsg2ToolLoop';
+import { AMSG2_EMPTY_REPLY_PROMPT, AMSG2_WRAP_UP_PROMPT, createAmsg2StallTracker, extractToolRoundLeadIn, mergeToolRoundLeadIns, shouldFinishAmsg2ScheduleInOneCall } from '../utils/amsg2ToolLoop';
 import { buildReplyScopeRule } from '../utils/replyScope';
 import { buildLimitsBrief, resolveAmsgLimits } from '../utils/amsgLimits';
 import { shouldSendThinkingParams } from '../utils/thinkingGate';
@@ -1809,6 +1809,7 @@ export const useChatAI = ({
                 const amsg2Stall = createAmsg2StallTracker();
                 let amsg2ToolRounds = 0;
                 let wrapUpKind: 'none' | 'hard-limit' | 'stalled' | 'amsg2-stalled' = 'none';
+                let scheduleFinishedInOneCall = false;
                 for (let it = 0; it < MAX_LOOPS; it++) {
                     const toolCalls = normalizeToolCallsForCompat(
                         data.choices?.[0]?.message?.tool_calls,
@@ -1936,6 +1937,27 @@ export const useChatAI = ({
                             if (leadIn) amsg2LeadIns.push(leadIn);
                         }
                     }
+                    // 纯预约工具：模型已在同一个响应写完聊天正文、且预约真正成功时，
+                    // 直接用这段回复，不再额外请求一次续答。空正文、失败及其他工具仍续答。
+                    if (shouldFinishAmsg2ScheduleInOneCall({
+                        toolNames: toolCalls.map((tc: any) => tc.function?.name || ''),
+                        outcomes: amsg2Outcomes,
+                        content: data.choices?.[0]?.message?.content,
+                        hasOtherTools: !!mcpToolResolve || !!payload.flags.luckinChatActive || !!payload.flags.luckinActive || !!payload.flags.mcdActive,
+                    })) {
+                        scheduleFinishedInOneCall = true;
+                        data = {
+                            ...data,
+                            choices: (data.choices || []).map((choice: any, index: number) => index === 0
+                                ? {
+                                    ...choice,
+                                    finish_reason: 'stop',
+                                    message: { ...choice.message, tool_calls: [] },
+                                }
+                                : choice),
+                        };
+                        break;
+                    }
                     const amsg2Stalled = amsg2Stall.record(amsg2Outcomes);
                     // 转到上限还在要工具的话，最后那份响应里只有 tool_calls、没有正文——所以只要
                     // 挂着主动消息工具，到上限也得收尾，不能只管 MCP。
@@ -2009,6 +2031,7 @@ export const useChatAI = ({
                         toolRounds: amsg2ToolRounds,
                         wrapUp: wrapUpKind,
                         emptyRescued,
+                        scheduleFinishedInOneCall,
                         leadIns: amsg2LeadIns.length,
                         replyChars: mergeToolRoundLeadIns(amsg2LeadIns, data.choices?.[0]?.message?.content || '').length,
                     });
