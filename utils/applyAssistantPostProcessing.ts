@@ -61,6 +61,7 @@ import {
 import { getLocalDateKey } from './localDate';
 import { normalizeAssistantActionFormatting } from './assistantActionFormat';
 import { markAmsgStateDirty } from './amsgStateSync';
+import { readAssistantThinking, splitInlineThinking } from './assistantThinking';
 import { announceScheduleChanges, applyAssistantScheduleChanges } from './scheduleChange';
 import { isBlobRef } from './blobRef';
 import { consumeSARChatSurfaceChunk, type SARModuleSurfaceMeta } from './vrWorld/sarModuleRuntime';
@@ -95,8 +96,7 @@ const normalizeAiContent = (raw: string): string => {
     if (status) return `<回应状态>${JSON.stringify(status)}</回应状态>`;
     let cleaned = normalizeAssistantActionFormatting(extractInnerVoice(raw || '').text.replace(/<回应状态\s*>[\s\S]*?(?:<\/回应状态\s*>|$)/g, ''));
     // Strip hidden chain-of-thought blocks: <think> / <thinking> / <thought>
-    cleaned = cleaned.replace(/<(think|thinking|thought)>[\s\S]*?<\/\1>/gi, '');
-    cleaned = cleaned.replace(/<(?:think|thinking|thought)>[\s\S]*$/gi, '');
+    cleaned = splitInlineThinking(cleaned).content;
     cleaned = cleaned.replace(/\[\d{4}[-/年]\d{1,2}[-/月]\d{1,2}.*?\]/g, '');
     cleaned = cleaned.replace(/^[\w一-龥]+:\s*/, '');
     // Strip source tags leaked from history context, including model-mutated forms such as [聊chat].
@@ -600,6 +600,12 @@ export async function applyAssistantPostProcessing(
         messageTimestamp,
         sarModuleSurface,
     } = ctx;
+    // Keep the raw first-turn response for the visible thinking card, even after
+    // thinking has been removed from the dialogue side-effect / <心声> pipeline.
+    // <心声> is the character's explicit fictional inner voice; never merge it
+    // with provider-labelled thinking or change its context/memory behavior.
+    const firstTurnMessage = initialData?.choices?.[0]?.message || { content: rawAiContent };
+    rawAiContent = splitInlineThinking(rawAiContent).content;
     let commerceResponseData = initialData;
     // Local catalogue access runs only after an explicit browse request, including cloud instant replies.
     // Keep it before all side effects so intermediate shopping/heart text is never persisted.
@@ -823,6 +829,10 @@ export async function applyAssistantPostProcessing(
     }
 
     // ─── Step 1: 初次粗洗 ───
+    // A second-pass or a tool reply can still contain an explicitly tagged block.
+    // Strip it before any action/inner voice processing; the original round is
+    // kept in data for the separate thinking card.
+    rawAiContent = splitInlineThinking(rawAiContent).content;
     rawAiContent = await replyStep(() => consumeHomeVisitReply(char.id, rawAiContent,
         (directives || []).flatMap(d=>d.type==='home_visit_reply'?[d.action]:[])));
     rawAiContent = await replyStep(() => consumeFriendFeedMainReply(char.id, rawAiContent,
@@ -857,25 +867,11 @@ export async function applyAssistantPostProcessing(
     // 抽取思考链 (showThinkingChain 开启时): reasoning_content + 内联 <think> 块。
     const extractThinkingChain = (dataObj: any, reasoningOverride?: string): string | null => {
         if (!(char as any).showThinkingChain) return null;
-        const lastRaw = dataObj?.choices?.[0]?.message?.content || '';
-        const lastReasoning = (
-            (reasoningOverride && reasoningOverride.trim())
-            || dataObj?.choices?.[0]?.message?.reasoning_content
-            || ''
-        ).trim();
-        const thinkBlocks: string[] = [];
-        const thinkPat = /<(think|thinking|thought)>([\s\S]*?)<\/\1>/gi;
-        let tm: RegExpExecArray | null;
-        while ((tm = thinkPat.exec(lastRaw)) !== null) {
-            const t = tm[2].trim();
-            if (t) thinkBlocks.push(t);
-        }
-        if (!/<\/(?:think|thinking|thought)>/i.test(lastRaw)) {
-            const openOnly = lastRaw.match(/<(?:think|thinking|thought)>([\s\S]*$)/i);
-            if (openOnly && openOnly[1].trim()) thinkBlocks.push(openOnly[1].trim());
-        }
-        const chain = [lastReasoning, ...thinkBlocks].filter(s => !!s).join('\n\n').trim();
-        return chain || null;
+        // The data may be an empty cloud envelope (push path); fall back only
+        // to the first turn's captured response, never to another model round.
+        const message = dataObj?.choices?.[0]?.message
+            || (dataObj === initialData ? firstTurnMessage : undefined);
+        return readAssistantThinking(message, reasoningOverride) || null;
     };
 
     // 把一段文本 (parseAndExecuteActions / HTML 之外的部分) 渲染成气泡并落库 —— 双语 / 表情 / 引用 / 分段

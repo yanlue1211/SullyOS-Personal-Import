@@ -17,6 +17,7 @@
 import { ChatParser } from './chatParser';
 import {extractFriendFeedReplyTags} from './friendFeedReplyFormat';
 import type { Message } from '../types';
+import { splitInlineThinking } from './assistantThinking';
 
 /** 跨行块规则：open 命中进入抑制态，直到 close 命中（含闭合行本身）。 */
 const BLOCK_RULES: Array<{ open: RegExp; close: RegExp }> = [
@@ -25,8 +26,6 @@ const BLOCK_RULES: Array<{ open: RegExp; close: RegExp }> = [
     { open: /\[\[(?:FS_)?DIARY_START/i, close: /\[\[(?:FS_)?DIARY_END\]\]/i },
     // HTML 卡片块
     { open: /\[html\]/i, close: /\[\/html\]/i },
-    // 思考链（content 内嵌形态；reasoning_content 通道根本不进正文）
-    { open: /<(?:think|thinking|thought)>/i, close: /<\/(?:think|thinking|thought)>/i },
     // 语音 / 字幕 / 双语翻译标签 —— 由最终管线成对解析渲染，预览一律不碰
     { open: /<[语語]音[^>]*>/, close: /<\/\s*[语語]音\s*>/ },
     { open: /<字幕>/, close: /<\/字幕>/ },
@@ -50,10 +49,14 @@ function isLinePreviewable(line: string): boolean {
  * 这类控制标记前截断，避免半截指令或标签泄漏到聊天气泡。
  */
 export function computeStreamPreviewBubbles(fullText: string): string[] {
-    // A status replaces the entire response; never preview its JSON or trailing speech.
-    const withoutThinking = fullText.replace(/<(think|thinking|thought)>[\s\S]*?(?:<\/\1>|$)/gi, '');
-    if (/<回应(?:状(?:态)?)?(?:>|$)/.test(withoutThinking)) return [];
     if (!fullText) return [];
+    // Share the exact parser with final persistence: multiple explicit thought
+    // blocks on the same line cannot expose their trailing lines in preview.
+    fullText = splitInlineThinking(fullText).content;
+    // An incomplete opening tag may be spread over several SSE chunks/lines.
+    fullText = fullText.replace(/<(?:think|thinking|thought)(?=\s|>)[^>]*$/i, '');
+    // A status replaces the entire response; never preview its JSON or trailing speech.
+    if (/<回应(?:状(?:态)?)?(?:>|$)/.test(fullText)) return [];
     fullText = fullText.replace(/<造物间\s*>[\s\S]*?(?:<\/造物间\s*>|$)/g, '');
     fullText = extractFriendFeedReplyTags(extractFriendFeedReplyTags(fullText).text,'HOME_VISIT_REPLY').text;
     const lastNl = fullText.lastIndexOf('\n');
@@ -104,21 +107,7 @@ export function computeStreamPreviewBubbles(fullText: string): string[] {
 
 /** 提取普通 content 通道里已闭合或仍在增长的内嵌思考块。 */
 export function extractStreamingEmbeddedThinking(fullText: string): string {
-    if (!fullText) return '';
-    const blocks: string[] = [];
-    const closed = /<(think|thinking|thought)>([\s\S]*?)<\/\1>/gi;
-    let match: RegExpExecArray | null;
-    let lastClosedEnd = 0;
-    while ((match = closed.exec(fullText)) !== null) {
-        const text = match[2].trim();
-        if (text) blocks.push(text);
-        lastClosedEnd = closed.lastIndex;
-    }
-
-    const tail = fullText.slice(lastClosedEnd);
-    const open = tail.match(/<(?:think|thinking|thought)>([\s\S]*)$/i);
-    if (open?.[1].trim()) blocks.push(open[1].trim());
-    return blocks.join('\n\n').trim();
+    return splitInlineThinking(fullText || '').reasoning;
 }
 
 /**
