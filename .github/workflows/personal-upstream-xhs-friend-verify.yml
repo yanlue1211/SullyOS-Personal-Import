@@ -1,0 +1,43 @@
+name: Personal upstream XHS and friend feed safety
+
+on:
+  pull_request:
+    branches: [personal/audio-listening]
+    paths:
+      - 'apps/Chat.tsx'
+      - 'components/chat/MessageItem.tsx'
+      - 'utils/webpageExtractor*'
+      - 'utils/xhsNoteLink*'
+      - 'utils/xhsMcpClient*'
+      - 'utils/friendFeedRefresh.ts'
+      - 'utils/friendFeedPublic.test.ts'
+      - '.github/workflows/personal-upstream-xhs-friend-verify.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: XHS parser, note card and social feed integration
+        run: >-
+          pnpm vitest run
+          utils/xhsNoteLink.test.ts
+          utils/xhsMcpClient.test.ts
+          utils/webpageExtractor.test.ts
+          utils/friendFeedPublic.test.ts
+          utils/personalChatMedia.test.ts
+      - name: Build
+        run: pnpm run build
