@@ -1,218 +1,46 @@
-import React, { useEffect, useRef, useState } from 'react';
-import type { SongSheet } from '../../types';
-import { mutateSong } from '../../features/songwriting/storage';
-import {
-  getMelody, melodyToAbc,
-  type MelodyProject, type MelodyVersion, type SongWithMelody,
-} from '../../features/songwriting/melody';
-import { describeMelodyWithAudioApi, songAudioToPayload } from '../../utils/audioApi';
-import { loadAudioApiConfig } from '../../utils/songListening';
+import React,{useEffect,useRef,useState} from 'react';
+import type {SongSheet,SongLine} from '../../types';
+import {getMelody,melodyToAbc,type SongWithMelody} from '../../features/songwriting/melody';
+import {vocalTarget,vocalPhrases,selectVocalRange,type VocalTarget} from '../../features/songwriting/vocalMelody';
+import {loadAbcjs,renderMelodyAudio} from '../../features/songwriting/melodyAudio';
+import {mutateSong} from '../../features/songwriting/storage';
+import {finalLines,sectionNames} from '../../features/songwriting/model';
+import {useVocalPlayback} from './useVocalPlayback';
 import './MelodyPanel.css';
-
-interface Props {
-  song: SongSheet;
-  onUpdate: (song: SongSheet) => void;
-  onCompose: (instruction: string) => void;
-  composing: boolean;
-}
-type SoundFile = { versionId: string; blob: Blob; url: string };
-const ABCJS_URL = 'https://cdn.jsdelivr.net/npm/abcjs@6.7.2/dist/abcjs-basic-min.js';
-let abcScript: Promise<any> | undefined;
-/** Version-pinned temporary prototype. Replace with a bundled dependency after mobile acceptance. */
-function loadAbcjs(): Promise<any> {
-  const existing = (window as any).ABCJS;
-  if (existing?.renderAbc && existing?.synth?.CreateSynth) return Promise.resolve(existing);
-  if (!abcScript) abcScript = new Promise((resolve, reject) => {
-    const node = document.createElement('script');
-    node.src = ABCJS_URL;
-    node.async = true;
-    node.onload = () => {
-      const library = (window as any).ABCJS;
-      library?.renderAbc && library?.synth?.CreateSynth ? resolve(library) : reject(Error('乐谱播放器未正确加载'));
-    };
-    node.onerror = () => reject(Error('无法加载 abcjs，请检查网络'));
-    document.head.appendChild(node);
-  }).catch(error => {
-    abcScript = undefined; // allow a later manual retry
-    throw error;
-  });
-  return abcScript;
-}
-function revoke(file: SoundFile | null) {
-  if (file?.url) URL.revokeObjectURL(file.url);
-}
-function safeFileName(title: string): string {
-  return title.replace(/[\\/:*?"<>|]/g, '_').slice(0, 70) || '人声旋律';
-}
-export default function MelodyPanel({ song, onUpdate, onCompose, composing }: Props) {
-  const paper = useRef<HTMLDivElement>(null);
-  const [busy, setBusy] = useState('');
-  const locked = useRef(false);
-  const [error, setError] = useState('');
-  const [info, setInfo] = useState('');
-  const [selected, setSelected] = useState<string>('');
-  const [wav, setWav] = useState<SoundFile | null>(null);
-  const [midi, setMidi] = useState<SoundFile | null>(null);
-  const wavRef = useRef<SoundFile | null>(null);
-  const midiRef = useRef<SoundFile | null>(null);
-  const [abcReady, setAbcReady] = useState(false);
-  const [showAbc, setShowAbc] = useState(false);
-  const activeProject: MelodyProject | undefined = getMelody(song);
-  const latest = activeProject?.versions.find(v => v.id === activeProject.activeId);
-  const current = activeProject?.versions.find(v => v.id === selected) || latest;
-  useEffect(() => setSelected(activeProject?.activeId || ''), [activeProject?.activeId]);
-
-  const setSound = (kind: 'wav' | 'midi', next: SoundFile | null) => {
-    if (kind === 'wav') {
-      revoke(wavRef.current); wavRef.current = next; setWav(next);
-    } else {
-      revoke(midiRef.current); midiRef.current = next; setMidi(next);
-    }
-  };
-  useEffect(() => () => {
-    revoke(wavRef.current);
-    revoke(midiRef.current);
-  }, []);
-  useEffect(() => {
-    let alive = true;
-    setAbcReady(false);
-    if (!current || !paper.current) return;
-    loadAbcjs().then(abc => {
-      if (!alive || !paper.current) return;
-      abc.renderAbc(paper.current, melodyToAbc(current, song.title), { responsive: 'resize', staffwidth: 540 });
-      setAbcReady(true);
-    }).catch(e => {
-      if (alive) setError(e.message || '乐谱显示失败');
-    });
-    return () => { alive = false; };
-  }, [current?.id, song.title]);
-
-  const execute = async (label: string, action: () => Promise<void>) => {
-    if (locked.current) return;
-    locked.current = true; setBusy(label); setError(''); setInfo('');
-    try { await action(); }
-    catch (e: any) {
-      if (e?.name !== 'AbortError') setError(e?.message || '操作失败，原谱已保留');
-    }
-    finally { locked.current = false; setBusy(''); }
-  };
-  const chooseVersion = (id: string) => void execute('切换旋律版本', async () => {
-    if (!activeProject?.versions.some(v => v.id === id)) return;
-    const saved = await mutateSong(song.id, original => {
-      const p = getMelody(original);
-      if (!p?.versions.some(v => v.id === id)) throw Error('旋律版本已发生变化');
-      return { song: { ...original, melody: { ...p, activeId: id } } as SongWithMelody };
-    });
-    setSelected(id);
-    onUpdate(saved);
-    setSound('wav', null);
-    setSound('midi', null);
-  });
-  /** A deliberate user click creates the WebAudio context (browser gesture requirement). */
-  const synthesize = () => void execute('正在合成试听', async () => {
-    if (!current) throw Error('请先谱曲');
-    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-    if (!AudioCtx) throw Error('当前浏览器不支持 Web Audio');
-    const audioContext: AudioContext = new AudioCtx();
-    try {
-      await audioContext.resume();
-      const abc = await loadAbcjs();
-      if (!abc.synth.supportsAudio()) throw Error('当前浏览器不支持 abcjs 音频合成');
-      const elements = abc.renderAbc('*', melodyToAbc(current, song.title));
-      if (!elements?.[0]) throw Error('乐谱无法演奏');
-      const synth = new abc.synth.CreateSynth();
-      const sounds = await synth.init({ visualObj: elements[0], audioContext, options: { chordsOff: true } });
-      if (sounds?.error?.length) throw Error('部分钢琴音色加载失败，请检查网络');
-      await synth.prime();
-      // abcjs CreateSynth.download() returns a blob: URL, not a byte array.
-      const temporaryUrl: string = synth.download();
-      if (!temporaryUrl?.startsWith('blob:')) throw Error('abcjs 未返回有效 WAV 地址');
-      let blob: Blob;
-      try {
-        const response = await fetch(temporaryUrl);
-        if (!response.ok) throw Error('abcjs WAV 读取失败');
-        blob = await response.blob();
-      } finally { URL.revokeObjectURL(temporaryUrl); }
-      if (blob.size < 44) throw Error('音频文件为空');
-      setSound('wav', { versionId: current.id, blob, url: URL.createObjectURL(blob) });
-      const binary = abc.synth.getMidiFile(elements[0], { midiOutputType: 'binary', chordsOff: true });
-      if (binary) {
-        const midiBlob = binary instanceof Blob ? binary : new Blob([binary], { type: 'audio/midi' });
-        setSound('midi', { versionId: current.id, blob: midiBlob, url: URL.createObjectURL(midiBlob) });
-      }
-      setInfo('WAV / MIDI 已在糯米机页面准备好；钢琴演奏的是人声主旋律，不是伴奏。');
-    } finally {
-      await audioContext.close().catch(() => {});
-    }
-  });
-  const listen = () => void execute('音频模型正在客观试听', async () => {
-    if (!current) throw Error('请先谱曲');
-    if (current.listening) {
-      setInfo('这版旋律已经分析过，直接复用已保存的客观描述，不重复调用音频 API。');
-      return;
-    }
-    if (wav?.versionId !== current.id) throw Error('请先点击「合成试听」，准备当前版本的 WAV');
-    const config = loadAudioApiConfig();
-    if (!config?.enabled) throw Error('请先在总设置配置并开启独立的音频识别 API');
-    const payload = await songAudioToPayload(wav.blob, 'melody.wav');
-    const report = await describeMelodyWithAudioApi(payload, config);
-    const saved = await mutateSong(song.id, original => {
-      const p = getMelody(original);
-      if (!p?.versions.some(v => v.id === current.id)) throw Error('旋律版本已发生变化，未写入试听');
-      return { song: { ...original, melody: { ...p, versions: p.versions.map(v =>
-        v.id === current.id ? { ...v, listening: v.listening || report } : v,
-      ) } } as SongWithMelody };
-    });
-    onUpdate(saved);
-    setInfo('客观声音描述已保存；角色下一轮调整旋律时可阅读这份分析。');
-  });
-  return (
-    <section className="sw-melody" aria-label="自主谱曲">
-      <h3>🎼 角色自主谱曲 · 八小节试验</h3>
-      <p className="sw-note">在下方对话中和角色讨论旋律；他写出音符后，这里会显示乐谱和试听。音频模型只客观描述声音，不替角色做决定。</p>
-      <p className="sw-note">首轮暂限 C 大调、4/4 拍、八小节。每次保存或调整旋律，都会保留旧版本并在共同创作对话中留下记录。</p>
-      <div className="sw-melody-actions">
-        {!latest
-          ? <button className="sw-primary" disabled={!!busy || composing} onClick={() => onCompose('你来给《' + song.title + '》写一段八小节的人声主旋律吧，我想听听你的第一版。')}>让角色谱第一版</button>
-          : <button className="sw-primary" disabled={!!busy || composing} onClick={() => onCompose('你看看这首歌现在的旋律，结合已经有的试听描述，按你的想法决定是保留还是调整；如果想改，请只改需要的地方。')}>和角色一起检查 / 调整旋律</button>}
-        {composing && <span className="sw-note">角色正在聊天和谱曲，回复会保存到下方共同创作对话。</span>}
-      </div>
-      {!!activeProject?.versions.length && <label className="sw-melody-select">作品版本
-        <select value={current?.id || ''} disabled={!!busy || composing} onChange={e => setSelected(e.target.value)}>
-          {activeProject.versions.map((v, index) =>
-            <option key={v.id} value={v.id}>第 {index + 1} 版 · {v.bpm} BPM{v.id === activeProject.activeId ? ' · 当前' : ''}</option>)}
-        </select>
-        {current && current.id !== activeProject.activeId &&
-          <button disabled={!!busy || composing} onClick={() => chooseVersion(current.id)}>使用这一版继续创作</button>}
-      </label>}
-      {current && <>
-        <div className="sw-melody-paper" ref={paper} aria-label="人声主旋律五线谱" />
-        {!abcReady && <p className="sw-note">正在准备乐谱显示，需要加载一次 abcjs…</p>}
-        <details className="sw-melody-source" open={showAbc} onToggle={e => setShowAbc((e.currentTarget as HTMLDetailsElement).open)}>
-          <summary>查看 / 复制 ABC 乐谱</summary>
-          <pre>{melodyToAbc(current, song.title)}</pre>
-        </details>
-        <div className="sw-melody-actions">
-          <button disabled={!!busy || composing} onClick={synthesize}>▶ 合成试听 · WAV / MIDI</button>
-        </div>
-        {wav?.versionId === current.id && <div className="sw-melody-player">
-          <audio controls preload="metadata" src={wav.url}/>
-          <a href={wav.url} download={safeFileName(song.title) + '-人声主旋律.wav'}>下载 WAV</a>
-          {midi?.versionId === current.id &&
-            <a href={midi.url} download={safeFileName(song.title) + '-旋律.mid'}>下载 MIDI</a>}
-          <p className="sw-note">这些是糯米机内部的本地音频链接，不是永久公开直链。以后可以直接将 WAV Blob 交给海绵上传适配层。</p>
-        </div>}
-        <div className="sw-melody-listen">
-          <button disabled={!!busy || composing || !!current.listening || wav?.versionId !== current.id} onClick={listen}>
-            {current.listening ? '这版已听过 · 复用描述' : '🎧 让音频 API 客观试听一次'}
-          </button>
-          {current.listening ? <details open><summary>本版实际听感（客观描述）</summary><pre>{current.listening}</pre></details> :
-            <p className="sw-note">试听消耗独立音频 API 额度；只在点击时调用，同一版本不会重复分析。</p>}
-        </div>
-      </>}
-      {info && <p role="status" className="sw-melody-info">{info}</p>}
-      {error && <p role="alert" className="sw-error">{error}</p>}
-      {busy && <p role="status">{busy}…</p>}
-    </section>
-  );
+interface Props {song:SongSheet;onUpdate:(s:SongSheet)=>void;onCompose:(text:string,target?:VocalTarget,listen?:boolean)=>void;composing:boolean}
+export default function MelodyPanel({song,onUpdate,onCompose,composing}:Props){
+ const project=getMelody(song),lines=finalLines(song),paper=useRef<HTMLDivElement>(null);
+ const [section,setSection]=useState<SongLine['section']>('verse');
+ const [selected,setSelected]=useState(''),[scope,setScope]=useState<VocalTarget['scope']>('song'),[position,setPosition]=useState(0),[phraseId,setPhraseId]=useState('');
+ const [error,setError]=useState(''),[busy,setBusy]=useState(false),[file,setFile]=useState<{key:string;wav:string;midi?:string}|null>(null);
+ const lock=useRef(false),mounted=useRef(true);const playback=useVocalPlayback(song);
+ const current=project?.versions.find(v=>v.id===selected)||project?.versions.find(v=>v.id===project.activeId);
+ useEffect(()=>setSelected(project?.activeId||''),[project?.activeId]);
+ useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;};},[]);
+ useEffect(()=>()=>{if(file){URL.revokeObjectURL(file.wav);if(file.midi)URL.revokeObjectURL(file.midi);}},[file]);
+ const target:VocalTarget=lines.length?vocalTarget(song,scope,position):{scope,lineIds:[],section,phraseIds:scope==='song'?undefined:scope==='section'?(current?vocalPhrases(current).filter(p=>p.section===section).map(p=>p.id):[]):[phraseId||vocalPhrases(current||{id:'',bars:[]} as any)[0]?.id].filter(Boolean)};
+ const targetLabel=scope==='song'?'整首歌曲':lines.length?target.lineIds.map(id=>{const index=lines.findIndex(l=>l.id===id);return `第${index+1}句《${lines[index]?.content||''}》`;}).join('、'):scope==='section'?`${sectionNames[section]}的未填词乐句`:'所选未填词乐句';
+ let range:ReturnType<typeof selectVocalRange>|undefined;
+ try{if(current)range=selectVocalRange(song,current,target);}catch{}
+ const rangeKey=current?.id+':'+range?.key;
+ useEffect(()=>{let alive=true;if(!paper.current||!range)return;loadAbcjs().then(abc=>{if(alive&&paper.current)abc.renderAbc(paper.current,melodyToAbc(range!.version,song.title),{responsive:'resize',staffwidth:540});}).catch(e=>{if(alive)setError(e.message);});return()=>{alive=false;};},[rangeKey,song.title]);
+ const run=async(fn:()=>Promise<void>)=>{if(lock.current)return;lock.current=true;setBusy(true);setError('');try{await fn();}catch(e:any){if(mounted.current)setError(e.message||'操作失败');}finally{lock.current=false;if(mounted.current)setBusy(false);}};
+ const activate=()=>void run(async()=>{if(!current)return;const saved=await mutateSong(song.id,s=>{const p=getMelody(s);if(!p?.versions.some(v=>v.id===current.id))throw Error('版本已变化');return {song:{...s,melody:{...p,activeId:current.id}} as SongWithMelody};});onUpdate(saved);});
+ const bind=(id:string,lineId:string)=>void run(async()=>{const saved=await mutateSong(song.id,s=>{const p=getMelody(s),version=p?.versions.find(v=>v.id===current?.id),line=finalLines(s).find(l=>l.id===lineId);if(!p||!version)throw Error('版本已变化');const phrases=vocalPhrases(version).map(part=>part.id===id?{...part,lineId:line?.id,lyricText:line?.content,section:line?.section||part.section}:part.lineId===lineId&&lineId?{...part,lineId:undefined,lyricText:undefined}:part);const next={...version,id:crypto.randomUUID(),createdAt:Date.now(),sourceId:version.id,phrases};return {song:{...s,melody:{activeId:next.id,versions:[...p.versions,next]}} as SongWithMelody};});onUpdate(saved);});
+ const prepare=()=>void run(async()=>{if(!range)return;const result=await renderMelodyAudio(range.version,song.title);const next={key:rangeKey,wav:URL.createObjectURL(result.wav),midi:result.midi?URL.createObjectURL(result.midi):undefined};if(mounted.current)setFile(next);else{URL.revokeObjectURL(next.wav);if(next.midi)URL.revokeObjectURL(next.midi);}});
+ return <section className="sw-melody" aria-label="人声曲谱">
+  <h3>♫ 人声曲谱</h3><p className="sw-note">选一句、一段或整首来写、听和调整。所有交流都在「创作对话」。一个字可以对应多个音符、转音和延长音。</p>
+  <div className="sw-vocal-range"><label>范围<select aria-label="旋律范围" value={scope} onChange={e=>setScope(e.target.value as any)}><option value="line">逐句</option><option value="section">逐段</option><option value="song">整首</option></select></label>
+  {scope!=='song'&&(lines.length?<label>从哪句<select aria-label="旋律歌词句子" value={position} onChange={e=>setPosition(Number(e.target.value))}>{lines.map((l,i)=><option key={l.id} value={i}>{i+1}. {l.content}</option>)}</select></label>:scope==='section'?<label>哪一段<select aria-label="未填词段落" value={section} onChange={e=>setSection(e.target.value as SongLine['section'])}>{Object.entries(sectionNames).map(([id,name])=><option key={id} value={id}>{name}</option>)}</select></label>:current?<label>未填词乐句<select aria-label="旋律片段" value={phraseId||vocalPhrases(current)[0]?.id} onChange={e=>setPhraseId(e.target.value)}>{vocalPhrases(current).map((p,i)=><option key={p.id} value={p.id}>第{i+1}乐句 · {p.count}小节</option>)}</select></label>:<p className="sw-note">还没有歌词，可以先写一个人声乐句。</p>)}</div>
+  <div className="sw-melody-actions"><button className="sw-primary" disabled={busy||composing} onClick={()=>onCompose(`请为${targetLabel}谱写或调整人声旋律，其他已有片段保持不变。`,target)}>为所选范围谱曲</button><button disabled={busy||composing} onClick={()=>onCompose('我想和你聊聊这首歌的人声曲调。',target)}>去创作对话</button></div>
+  {!!project?.versions.length&&<label className="sw-melody-select">旋律版本<select aria-label="旋律版本" value={current?.id} disabled={busy||composing} onChange={e=>{playback.stop();setSelected(e.target.value);}}>{project.versions.map((v,i)=><option key={v.id} value={v.id}>第{i+1}版 · {v.bars.length}小节 · {v.bpm} BPM{project.activeId===v.id?' · 当前':''}</option>)}</select>{current?.id!==project.activeId&&<button onClick={activate}>使用这一版继续创作</button>}</label>}
+  {current&&<>
+   {range?<><div className="sw-melody-paper" ref={paper} aria-label="人声主旋律五线谱"/><div className="sw-melody-actions"><button disabled={busy||composing||current.id!==project?.activeId} onClick={()=>void playback.play(target)}>🔊 试听所选曲调</button>{playback.playing&&<button onClick={playback.stop}>停止</button>}<button disabled={busy||composing} onClick={prepare}>准备 WAV / MIDI</button><button disabled={busy||composing||current.id!==project?.activeId} onClick={()=>onCompose(`你听听${targetLabel}的人声旋律，结合歌词按自己的想法聊聊，需要时只修改这个范围。`,target,true)}>让 Char 听所选范围</button></div><details className="sw-melody-source"><summary>ABC 乐谱</summary><pre>{melodyToAbc(range.version,song.title)}</pre></details></>:<p className="sw-note">所选范围还没有关联曲调；可以先谱这一句，或在下方关联已有乐句。</p>}
+   {file?.key===rangeKey&&<div className="sw-melody-player"><audio controls src={file.wav}/><a href={file.wav} download={song.title+'-人声旋律.wav'}>下载 WAV</a>{file.midi&&<a href={file.midi} download={song.title+'-人声旋律.mid'}>下载 MIDI</a>}</div>}
+   <details className="sw-melody-source"><summary>歌词与乐句对应 · 先曲后词也可在这里关联</summary><p className="sw-note">整句对应完整乐句，不按字数强行分音。改词后可重新关联或让 Char 调整。</p>{vocalPhrases(current).map((p,i)=><label className="sw-vocal-binding" key={p.id}>乐句 {i+1} · {p.count} 小节<select aria-label={`乐句${i+1}关联歌词`} disabled={busy||composing} value={lines.some(l=>l.id===p.lineId)?p.lineId:''} onChange={e=>bind(p.id,e.target.value)}><option value="">未填词 / 保留纯曲调</option>{lines.map((l,n)=><option key={l.id} value={l.id}>{n+1}. {l.content}</option>)}</select>{p.lyricText&&!lines.some(l=>l.id===p.lineId&&l.content===p.lyricText)&&<small>原词：{p.lyricText} · 词已变化，待重新对应</small>}</label>)}</details>
+   {(current.listening||current.listeningReports?.length)&&<details className="sw-melody-source"><summary>已保存的客观试听描述</summary>{current.listening&&<pre>整首：{current.listening}</pre>}{current.listeningReports?.map(r=><pre key={r.key}>{r.label}：{r.description}</pre>)}</details>}
+   <p className="sw-note">给 Char 试听使用独立音频 API，同版同范围复用已保存描述；钢琴只演奏人声曲调，不是演唱成品或伴奏。</p>
+  </>}
+  {(error||playback.error)&&<p role="alert" className="sw-error">{error||playback.error}</p>}{busy&&<p role="status">正在准备…</p>}
+ </section>;
 }

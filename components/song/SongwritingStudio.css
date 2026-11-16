@@ -733,3 +733,35 @@
 
 .sw-modal label { display:block; color:var(--sw-ink); font-size:13px; margin:12px 0; }
 .sw-modal input:not([type="checkbox"]) { width:100%; box-sizing:border-box; display:block; min-height:44px; padding:12px 14px; margin-top:8px; border:1px solid var(--sw-border); border-radius:14px; background:var(--sw-bg); color:var(--sw-ink); font:inherit; }
+/* One shared production dialog, same compact visual grammar for all music providers. */
+.sw-unified-production {color:var(--sw-ink);font-size:13px;}
+.sw-unified-production .sw-production-modal {--sw-bg:inherit;--sw-ink:inherit;--sw-muted:inherit;--sw-accent:inherit;--sw-border:inherit;--sw-light:inherit;}
+.sw-unified-production .sw-production {display:grid;gap:18px;padding:0;}
+.sw-unified-production .sw-production-intro {display:none;}
+.sw-unified-production .sw-production-step {background:transparent;border:0;box-shadow:none;padding:0;margin:0;border-radius:0;}
+.sw-unified-production .sw-production-step-heading {display:flex;align-items:center;gap:8px;margin-bottom:10px;}
+.sw-unified-production .sw-production-step-heading>span,.sw-unified-production .sw-production-number {background:none;color:var(--sw-accent);width:auto;min-width:0;height:auto;padding:0;font:italic 15px Georgia,serif;}
+.sw-unified-production .sw-production-step-heading h4 {font-size:12px;letter-spacing:.08em;color:var(--sw-accent);}
+.sw-unified-production .sw-production-step-heading p {display:none;}
+.sw-unified-production .sw-production label {display:grid;gap:8px;color:var(--sw-muted);font-size:12px;}
+.sw-unified-production .sw-production textarea,.sw-unified-production textarea {background:rgba(255,255,255,.7);border:1px solid var(--sw-border);border-radius:14px;padding:12px;font:inherit;line-height:1.8;box-shadow:none;}
+.sw-unified-production .sw-production button,.sw-unified-production .sw-production-result button {font:inherit;font-size:12px;border:1px solid var(--sw-border);border-radius:14px;background:rgba(255,255,255,.7);color:var(--sw-accent);padding:11px 13px;min-height:42px;width:auto;}
+.sw-unified-production .sw-production button.sw-primary {background:var(--sw-accent);color:white;}
+.sw-unified-production .sw-actions {display:flex;flex-wrap:wrap;gap:8px;}
+.sw-unified-production .sw-actions button {flex:1;}
+.sw-unified-production .sw-production-hint,.sw-unified-production .sw-note {font-size:11px;line-height:1.8;color:var(--sw-muted);}
+.sw-production-result {display:grid;gap:12px;padding:14px;background:var(--sw-light);border:1px solid var(--sw-border);border-radius:18px;}
+.sw-production-result audio {width:100%;min-width:0;}
+.sw-lyric-row {position:relative;}
+.sw-lyric-row>button.sw-line-listen {position:absolute;right:8px;bottom:14px;width:34px;min-height:34px;padding:5px;display:grid;place-items:center;border-radius:50%;background:var(--sw-light);}
+.sw-lyric-row>button:first-of-type {padding-right:45px;}
+.sw-unified-production .sw-production .sw-actions button {width:auto;}
+.sw-provider-grid {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;}
+.sw-voice-grid {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;}
+.sw-unified-production button.sw-provider-option,.sw-unified-production button.sw-voice-option {min-width:0;border:1px solid var(--sw-border);border-radius:14px;background:#fff;color:var(--sw-ink);padding:11px 9px;font:inherit;text-align:left;}
+.sw-unified-production button.sw-provider-option[aria-pressed="true"],.sw-unified-production button.sw-voice-option[aria-pressed="true"] {background:linear-gradient(135deg,var(--sw-accent),#a1c3a8);color:#fff!important;border-color:transparent;}
+.sw-unified-production button.sw-voice-option {text-align:center;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:7px;min-height:76px;}
+.sw-production-footer {display:flex;align-items:stretch;gap:10px;min-width:0;width:100%;}
+.sw-production-footer button.sw-production-cancel {flex:1 1 0;min-width:64px;white-space:nowrap;min-height:46px;border:1px solid #d4e2db;border-radius:14px;background:#fff;padding:12px;font-size:13px;}
+.sw-production-footer button.sw-production-submit {flex:2 1 0;min-width:0;min-height:46px;border-radius:14px;padding:12px;font-size:13px;}
+.sw-unified-production .sw-production .sw-actions button:last-child {background:var(--sw-accent);color:#fff;}

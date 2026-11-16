@@ -1,3 +1,5 @@
+import {useLocalBackHandler} from '../hooks/useLocalBackHandler';
+import {shareOrDownloadBlob} from '../utils/shareExport';
 import SongwritingStudio from '../components/song/SongwritingStudio';
 import HaimianProduction from '../components/song/HaimianProduction';
 import { mutateSong, songPerformanceChange } from '../features/songwriting/storage';
@@ -254,6 +256,7 @@ const SongwritingApp: React.FC = () => {
     const [audioGenStatus, setAudioGenStatus] = useState<string>('');
     const [audioError, setAudioError] = useState<string | null>(null);
     const audioAbortRef = useRef<AbortController | null>(null);
+    const productionSubmitLock = useRef(false);
     // Track which song the current blob: URL belongs to so we can revoke it on switch
     const currentAudioOwnerRef = useRef<string | null>(null);
     // Voice preset (per-song, persisted in localStorage)
@@ -1363,8 +1366,8 @@ const SongwritingApp: React.FC = () => {
     // ── Prompt modal: entry point + AI helper + confirm ──
 
     /** Open the unified "AI 出歌引导" modal — also the entry point for generation. */
-    const openCustomPromptModal = () => {
-        if (!activeSong) return;
+    const openProductionForSong = (song: SongSheet) => {
+        const activeSong = song;
         // Pre-fill the editable tags with whatever would be sent right now
         const current = activeSong.aceStepCustomTags || buildAceStepTags(activeSong, voicePresetId);
         setPromptDraft(current);
@@ -1373,13 +1376,14 @@ const SongwritingApp: React.FC = () => {
         setShowCustomPrompt(true);
         trackEvent('打开 AI 出歌引导弹窗');
     };
+    const openCustomPromptModal = () => {if(activeSong)openProductionForSong(activeSong);};
 
     /**
      * Modal "开始录制" — persist the final tags then kick off synth with them
      * passed directly (so we don't have to wait for state to flush).
      */
     const handleConfirmAndGenerate = async () => {
-        if (!activeSong) return;
+        if (!activeSong || isGeneratingAudio || productionSubmitLock.current) return;
         if (cooldownSecsLeft > 0) {
             addToast(`冷却中，再等 ${cooldownSecsLeft}s`, 'info');
             return;
@@ -1389,12 +1393,14 @@ const SongwritingApp: React.FC = () => {
             addToast('风格描述不能为空。', 'error');
             return;
         }
-        const updatedSong = { ...activeSong, aceStepCustomTags: tags };
-        setActiveSong(updatedSong);
-        await updateSong(activeSong.id, { aceStepCustomTags: tags });
-        setShowCustomPrompt(false);
-        runSynth(provider, tags);
-        trackEvent('确认出歌并开始生成');
+        productionSubmitLock.current=true;
+        try {
+            const updatedSong = { ...activeSong, aceStepCustomTags: tags };
+            setActiveSong(updatedSong);
+            await updateSong(activeSong.id, { aceStepCustomTags: tags });
+            trackEvent('确认出歌并开始生成');
+            await runSynth(provider, tags);
+        } finally { productionSubmitLock.current=false; }
     };
 
     const handleAiWritePrompt = async () => {
@@ -1528,6 +1534,7 @@ const SongwritingApp: React.FC = () => {
         // Prefer the user's artwork when this song already has one.
         setCoverMode(activeSong.coverImage ? 'upload' : 'char');
         setDualCoverUrl(null);
+        setShowCustomPrompt(false);
         setShowCoverConfirm(true);
     };
 
@@ -1637,6 +1644,467 @@ const SongwritingApp: React.FC = () => {
         setVoicePresetId(presetId);
         setPromptDraft(buildAceStepTags(activeSong, presetId));
     };
+
+    useLocalBackHandler(()=>{if(showCoverConfirm){setShowCoverConfirm(false);return true;}if(showCustomPrompt){setShowCustomPrompt(false);return true;}return false;},60,showCustomPrompt||showCoverConfirm);
+    const renderCoverModal = () => activeSong ? (
+                <Modal isOpen={showCoverConfirm} title="给这首歌选个封面" onClose={() => setShowCoverConfirm(false)}>
+                    <div className="space-y-4">
+                        {/* 封面大预览 */}
+                        <div className="flex items-center justify-center">
+                            <div
+                                className="relative w-44 h-44 rounded-2xl overflow-hidden"
+                                style={{
+                                    boxShadow: `0 8px 32px ${MusicC.glow}50, inset 0 1px 0 rgba(255,255,255,0.5)`,
+                                    border: `1px solid ${MusicC.glow}40`,
+                                }}
+                            >
+                                {coverMode === 'char' && collaborator?.avatar && (
+                                    <TokenImg value={collaborator.avatar} alt="" className="w-full h-full object-cover" />
+                                )}
+                                {coverMode === 'user' && userProfile?.avatar && (
+                                    <TokenImg value={userProfile.avatar} alt="" className="w-full h-full object-cover" />
+                                )}
+                                {coverMode === 'dual' && (
+                                    isBuildingDual ? (
+                                        <div className="w-full h-full flex items-center justify-center"
+                                            style={{ background: `linear-gradient(135deg, ${MusicC.sakura}, ${MusicC.lavender}, ${MusicC.glow})` }}>
+                                            <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                        </div>
+                                    ) : dualCoverUrl ? (
+                                        <img src={dualCoverUrl} alt="" className="w-full h-full object-cover" />
+                                    ) : (
+                                        <div className="w-full h-full flex items-center justify-center text-white text-xs"
+                                            style={{ background: `linear-gradient(135deg, ${MusicC.sakura}, ${MusicC.lavender})` }}>
+                                            合影封面
+                                        </div>
+                                    )
+                                )}
+                                {coverMode === 'upload' && (
+                                    uploadedCoverUrl ? (
+                                        <img src={uploadedCoverUrl} alt="" className="w-full h-full object-cover" />
+                                    ) : (
+                                        <button
+                                            onClick={() => coverUploadRef.current?.click()}
+                                            className="w-full h-full flex flex-col items-center justify-center gap-2"
+                                            style={{ background: `linear-gradient(135deg, ${MusicC.bgDeep}, ${MusicC.soft})`, color: MusicC.primary }}
+                                        >
+                                            <UploadSimple size={24} />
+                                            <span className="text-[11px]">上传图片</span>
+                                        </button>
+                                    )
+                                )}
+                                {/* 黑胶反光 */}
+                                <div className="absolute inset-0 pointer-events-none"
+                                    style={{ background: 'linear-gradient(45deg, transparent 40%, rgba(255,255,255,0.18) 50%, transparent 60%)' }} />
+                            </div>
+                        </div>
+
+                        <input
+                            ref={coverUploadRef}
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={event => {
+                                const file = event.target.files?.[0];
+                                if (file) handleCoverUpload(file);
+                                event.currentTarget.value = '';
+                            }}
+                        />
+
+                        {/* 封面来源 */}
+                        <div className="grid grid-cols-4 gap-2">
+                            {([
+                                { id: 'char' as CoverMode, label: collaborator?.name || '搭档', src: collaborator?.avatar || '' },
+                                { id: 'user' as CoverMode, label: userProfile?.name || '我', src: userProfile?.avatar || '' },
+                                { id: 'dual' as CoverMode, label: '合影', src: dualCoverUrl || '' },
+                                { id: 'upload' as CoverMode, label: uploadedCoverUrl ? '我的图片' : '上传', src: uploadedCoverUrl || '' },
+                            ]).map(opt => {
+                                const active = opt.id === coverMode;
+                                return (
+                                    <button
+                                        key={opt.id}
+                                        onClick={() => {
+                                            if (opt.id === 'upload' && !uploadedCoverUrl) {
+                                                coverUploadRef.current?.click();
+                                            } else {
+                                                setCoverMode(opt.id);
+                                                trackEvent('选择加入音乐 App 的封面样式', { coverMode: opt.id });
+                                            }
+                                        }}
+                                        className="rounded-xl p-2 border transition-all active:scale-95 flex flex-col items-center gap-1"
+                                        style={active ? {
+                                            background: `linear-gradient(135deg, ${MusicC.primary}, ${MusicC.accent})`,
+                                            color: 'white',
+                                            borderColor: 'transparent',
+                                            boxShadow: `0 3px 14px ${MusicC.glow}50`,
+                                        } : {
+                                            background: 'rgba(255,255,255,0.7)',
+                                            color: MusicC.text,
+                                            borderColor: `${MusicC.faint}50`,
+                                        }}
+                                    >
+                                        <div className="w-12 h-12 rounded-lg overflow-hidden shrink-0"
+                                            style={{
+                                                border: `1.5px solid ${active ? 'rgba(255,255,255,0.6)' : `${MusicC.faint}50`}`,
+                                            }}>
+                                            {opt.src ? (
+                                                <TokenImg value={opt.src} alt="" className="w-full h-full object-cover" />
+                                            ) : (
+                                                <div className="w-full h-full flex items-center justify-center"
+                                                    style={{ background: `linear-gradient(135deg, ${MusicC.sakura}, ${MusicC.lavender})` }}>
+                                                    {opt.id === 'dual' && (isBuildingDual ? (
+                                                        <div className="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin" />
+                                                    ) : (
+                                                        <SparkleP size={14} weight="fill" color="white" />
+                                                    ))}
+                                                    {opt.id === 'upload' && <UploadSimple size={16} color="white" />}
+                                                </div>
+                                            )}
+                                        </div>
+                                        <span className="text-[10px] font-medium leading-tight">{opt.label}</span>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                        {coverMode === 'upload' && uploadedCoverUrl && (
+                            <button
+                                onClick={() => coverUploadRef.current?.click()}
+                                className="w-full text-[10px] py-1.5 underline underline-offset-4"
+                                style={{ color: MusicC.muted }}
+                            >
+                                换一张图片
+                            </button>
+                        )}
+
+                        {/* 元信息 */}
+                        <div className="rounded-xl px-3 py-2 text-[11px] leading-relaxed"
+                            style={{
+                                background: `linear-gradient(135deg, ${MusicC.glow}15, ${MusicC.sakura}10)`,
+                                border: `1px solid ${MusicC.glow}25`,
+                                color: MusicC.muted,
+                            }}>
+                            <div><span style={{ color: MusicC.primary }}>♪ </span>《{activeSong.title}》</div>
+                            <div className="mt-0.5">作者：{userProfile?.name || '我'} & {collaborator?.name || 'AI'}</div>
+                            <div className="mt-0.5">专辑：一起写的歌</div>
+                        </div>
+
+                        {/* 按钮 */}
+                        <div className="flex gap-2">
+                            <button
+                                onClick={() => setShowCoverConfirm(false)}
+                                className="flex-1 py-3 rounded-xl text-[11px] font-medium tracking-wider transition-all active:scale-[0.98]"
+                                style={{
+                                    background: 'rgba(255,255,255,0.7)',
+                                    color: MusicC.muted,
+                                    border: `1px solid ${MusicC.faint}50`,
+                                }}
+                            >
+                                取消
+                            </button>
+                            {isLikedToMusic && (
+                                <button
+                                    onClick={handleRemoveFromAlbum}
+                                    className="flex-1 py-3 rounded-xl text-[11px] font-medium tracking-wider transition-all active:scale-[0.98]"
+                                    style={{
+                                        background: 'rgba(255,255,255,0.7)',
+                                        color: MusicC.danger,
+                                        border: `1px solid ${MusicC.danger}40`,
+                                    }}
+                                >
+                                    移除
+                                </button>
+                            )}
+                            <button
+                                onClick={handleConfirmAddToAlbum}
+                                disabled={isBuildingDual && coverMode === 'dual'}
+                                className="flex-[2] py-3 rounded-xl text-[12px] font-bold tracking-[0.18em] transition-all active:scale-[0.98] disabled:opacity-50 relative overflow-hidden"
+                                style={{
+                                    background: `linear-gradient(135deg, ${MusicC.sakura}, ${MusicC.lavender})`,
+                                    color: 'white',
+                                    boxShadow: `0 4px 18px ${MusicC.sakura}60, 0 0 50px ${MusicC.sakura}25`,
+                                    fontFamily: 'Georgia, serif',
+                                }}
+                            >
+                                ❤︎ {isLikedToMusic ? '保存并去听' : '加入并去听'}
+                            </button>
+                        </div>
+                    </div>
+                </Modal>
+    ) : null;
+    const renderProductionModal = () => activeSong ? (
+                <Modal
+                    isOpen={showCustomPrompt}
+                    title="✦ 出歌 · 成品 · 下载"
+                    onClose={() => setShowCustomPrompt(false)}
+                    footer={showHaimianProvider ? (<div className="sw-production-footer"><button className="sw-production-cancel" onClick={()=>setShowCustomPrompt(false)} style={{color:MusicC.primary,borderColor:MusicC.faint+'50'}}>关闭</button></div>) : (
+                        <div className="sw-production-footer">
+                            <button
+                                onClick={() => setShowCustomPrompt(false)}
+                                className="sw-production-cancel flex-1 py-3 rounded-xl text-[12px] font-medium tracking-wider transition-all active:scale-[0.98]"
+                                style={{
+                                    background: 'rgba(255,255,255,0.7)',
+                                    color: MusicC.muted,
+                                    border: `1px solid ${MusicC.faint}50`,
+                                }}
+                            >
+                                取消
+                            </button>
+                            <button
+                                onClick={handleConfirmAndGenerate}
+                                disabled={isGeneratingAudio || cooldownSecsLeft > 0 || !promptDraft.trim()}
+                                className="sw-production-submit flex-[2] py-3.5 rounded-xl text-[12px] font-bold tracking-[0.25em] transition-all active:scale-[0.98] disabled:opacity-50 relative overflow-hidden"
+                                style={{
+                                    background: cooldownSecsLeft > 0
+                                        ? `linear-gradient(135deg, ${MusicC.faint}, ${MusicC.muted})`
+                                        : `linear-gradient(135deg, ${MusicC.primary} 0%, ${MusicC.accent} 60%, ${MusicC.lavender} 100%)`,
+                                    color: 'white',
+                                    boxShadow: cooldownSecsLeft > 0
+                                        ? 'none'
+                                        : `0 6px 22px ${MusicC.glow}70, 0 0 60px ${MusicC.lavender}30, inset 0 1px 0 rgba(255,255,255,0.35)`,
+                                    fontFamily: 'Georgia, "Noto Serif SC", serif',
+                                }}
+                            >
+                                {/* Moving sheen */}
+                                {cooldownSecsLeft === 0 && (
+                                    <span className="absolute inset-0 pointer-events-none"
+                                        style={{
+                                            background: `linear-gradient(105deg, transparent 30%, rgba(255,255,255,0.28) 50%, transparent 70%)`,
+                                            backgroundSize: '200% 100%',
+                                            animation: 'shizuku-shimmer 4s ease-in-out infinite',
+                                        }} />
+                                )}
+                                <span className="relative inline-flex items-center justify-center gap-2">
+                                    {cooldownSecsLeft > 0 ? (
+                                        `冷却中 ${cooldownSecsLeft}s`
+                                    ) : (
+                                        <>
+                                            <CrossStar size={11} color="white" delay={0} solid />
+                                            开始录制
+                                            <CrossStar size={11} color="white" delay={0.5} solid />
+                                        </>
+                                    )}
+                                </span>
+                            </button>
+                        </div>
+                    )}
+                >
+                    <div className="space-y-4 sw-unified-production" style={{'--sw-bg':MusicC.bg,'--sw-ink':MusicC.text,'--sw-muted':MusicC.muted,'--sw-accent':MusicC.primary,'--sw-border':MusicC.faint+'50','--sw-light':MusicC.soft} as React.CSSProperties}>
+                        {isGeneratingAudio && <p role="status" className="sw-production-status">{audioGenStatus || '正在录制…'}</p>}
+                        {audioError && <p role="alert" className="sw-error">{audioError}</p>}
+                        {!showHaimianProvider && audioUrl && <section className="sw-production-result"><h4>已完成的演唱</h4>{!!activeSong.audioVersions?.length&&<select aria-label="成品演唱版本" value={activeSong.audio?.assetKey||''} disabled={isGeneratingAudio} onChange={e=>{const audio=activeSong.audioVersions?.find(v=>v.assetKey===e.target.value);if(audio){setActiveSong({...activeSong,audio});void updateSong(activeSong.id,{audio});}}}>{activeSong.audioVersions.map((v,i)=><option key={v.assetKey+'-'+i} value={v.assetKey}>音频 {i+1} · {v.provider}</option>)}</select>}<audio controls src={audioUrl}/><div className="sw-actions"><button onClick={handleSendToMusicApp}>加入歌单 / 选封面</button><button onClick={async()=>{try{const response=await fetch(audioUrl);if(!response.ok)throw Error('读取音频失败');await shareOrDownloadBlob({blob:await response.blob(),fileName:activeSong.title+(activeSong.audio?.mimeType.includes('wav')?'.wav':'.mp3')});}catch(e){addToast('下载失败，请重试','error');}}}>下载成品</button></div></section>}
+                        {/* ── Provider picker — segmented ── */}
+                        <div className="space-y-2">
+                            <div className="flex items-center gap-2 pl-1">
+                                <Sparkle size={8} color={MusicC.accent} delay={0.2} />
+                                <label className="text-[10px] font-bold uppercase tracking-[0.2em]" style={{ color: MusicC.primary }}>选生成器</label>
+                            </div>
+                            {(() => {
+                                const opts: { id: MusicProvider | 'haimian'; title: string; sub: string; available: boolean; needs: string }[] = [
+                                    { id: 'minimax-free', title: 'MiniMax 免费版', sub: '不花钱 · 完整长歌', available: hasMiniMaxKey, needs: 'MiniMax Key' },
+                                    { id: 'minimax-paid', title: 'MiniMax 付费版', sub: 'Token Plan · 完整长歌', available: hasMiniMaxKey, needs: 'MiniMax Key' },
+                                    { id: 'ace-step',     title: 'ACE-Step',       sub: '~$0.015 · 完整长歌', available: hasReplicateKey, needs: 'Replicate Token' },
+                                    { id: 'haimian',      title: '海绵音乐',         sub: '专属音色 · 完整歌曲', available: true, needs: '' },
+                                ];
+                                return (
+                                    <div className="sw-provider-grid grid grid-cols-2 gap-1.5">
+                                        {opts.map(opt => {
+                                            const isActive = showHaimianProvider ? opt.id === 'haimian' : opt.id === provider;
+                                            const Ico = opt.id === 'haimian' ? Heart : PROVIDER_ICONS[opt.id] || Heart;
+                                            return (
+                                                <button
+                                                    key={opt.id}
+                                                    aria-pressed={isActive}
+                                                    onClick={() => { if (opt.id === 'haimian') setShowHaimianProvider(true); else { setShowHaimianProvider(false); setProvider(opt.id); } trackEvent('切换出歌生成器', { provider: opt.id }); }}
+                                                    disabled={!opt.available || isGeneratingAudio}
+                                                    className="sw-provider-option relative text-left p-2 rounded-xl border transition-all active:scale-95 disabled:cursor-not-allowed"
+                                                    style={isActive ? {
+                                                        background: `linear-gradient(135deg, ${MusicC.primary}, ${MusicC.accent})`,
+                                                        color: 'white',
+                                                        borderColor: 'transparent',
+                                                        boxShadow: `0 3px 14px ${MusicC.glow}50`,
+                                                    } : opt.available ? {
+                                                        background: 'rgba(255,255,255,0.7)',
+                                                        color: MusicC.text,
+                                                        borderColor: `${MusicC.faint}50`,
+                                                    } : {
+                                                        background: 'rgba(0,0,0,0.03)',
+                                                        color: MusicC.faint,
+                                                        borderColor: `${MusicC.faint}30`,
+                                                        opacity: 0.55,
+                                                    }}
+                                                >
+                                                    <div className="flex items-center gap-1.5 mb-0.5">
+                                                        <Ico size={14} weight={isActive ? 'fill' : 'duotone'} />
+                                                        <span className="text-[10.5px] font-bold leading-none">{opt.title}</span>
+                                                    </div>
+                                                    <div className="text-[9px] opacity-80 leading-tight">{opt.sub}</div>
+                                                    {!opt.available && (
+                                                        <div className="text-[8.5px] mt-0.5 leading-tight" style={{ color: MusicC.danger }}>需填 {opt.needs}</div>
+                                                    )}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                );
+                            })()}
+                            <p className="text-[10px] leading-relaxed pl-1" style={{ color: MusicC.muted }}>
+                                {showHaimianProvider ? '使用海绵音乐的原创生成、专属声线、创作设想与最终生成说明；积分消耗会在提交前再次确认。'
+                                    : provider === 'ace-step'
+                                    ? '完整长歌（最长 4 分钟）— 自费走 Replicate，约 ¥0.1-0.3/首'
+                                    : provider === 'minimax-paid'
+                                        ? '完整长歌（最长 4-6 分钟）— 出歌更快、不易排队'
+                                        : '完整长歌（最长 4-6 分钟）— 完全免费 · 用你已填的 MiniMax Key'}
+                            </p>
+                        </div>
+
+                        {showHaimianProvider ? (
+                            <div className="sw-production-modal"><HaimianProduction key={activeSong.id} song={activeSong} onUpdate={setActiveSong} /></div>
+                        ) : (<>
+                        {/* Section I — Quick voice preset chips */}
+                        <div className="space-y-2">
+                            <div className="flex items-center gap-2 pl-1">
+                                <span className="font-bold italic" style={{ fontFamily: 'Georgia, serif', color: MusicC.accent, fontSize: 15, letterSpacing: '0.05em' }}>I</span>
+                                <CrossStar size={7} color={MusicC.glow} delay={0} />
+                                <label className="text-[10px] font-bold uppercase tracking-[0.25em]" style={{ color: MusicC.primary }}>快速选声线</label>
+                                <div className="flex-1 h-px" style={{ background: `linear-gradient(to right, ${MusicC.glow}55, transparent)` }} />
+                            </div>
+                            <div className="sw-voice-grid grid grid-cols-3 gap-1.5">
+                                {VOICE_PRESETS.map(preset => {
+                                    const isActive = preset.id === voicePresetId;
+                                    const Ico = VOICE_ICONS[preset.id] || SparkleP;
+                                    return (
+                                        <button
+                                            key={preset.id}
+                                            aria-pressed={isActive}
+                                            onClick={() => { applyVoicePreset(preset.id); trackEvent('选择声线预设', { preset: preset.id }); }}
+                                            className="sw-voice-option text-[11px] py-2.5 rounded-xl border transition-all active:scale-95 flex flex-col items-center justify-center gap-1 relative overflow-hidden"
+                                            style={isActive ? {
+                                                background: `linear-gradient(135deg, ${MusicC.primary}, ${MusicC.accent})`,
+                                                color: 'white',
+                                                borderColor: 'transparent',
+                                                boxShadow: `0 3px 14px ${MusicC.glow}50`,
+                                            } : {
+                                                background: 'rgba(255,255,255,0.7)',
+                                                color: MusicC.primary,
+                                                borderColor: `${MusicC.faint}50`,
+                                            }}
+                                        >
+                                            <Ico size={18} weight={isActive ? 'fill' : 'duotone'} />
+                                            <span className="font-medium leading-tight">{preset.label}</span>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
+
+                        {/* Section II — Natural language guidance */}
+                        <div className="space-y-2">
+                            <div className="flex items-center gap-2 pl-1">
+                                <span className="font-bold italic" style={{ fontFamily: 'Georgia, serif', color: MusicC.accent, fontSize: 15, letterSpacing: '0.05em' }}>II</span>
+                                <CrossStar size={7} color={MusicC.sakura} delay={0.4} />
+                                <label className="text-[10px] font-bold uppercase tracking-[0.25em]" style={{ color: MusicC.primary }}>或描述更细的风格</label>
+                                <div className="flex-1 h-px" style={{ background: `linear-gradient(to right, ${MusicC.sakura}55, transparent)` }} />
+                            </div>
+                            <textarea
+                                value={promptGuidance}
+                                onChange={(e) => setPromptGuidance(e.target.value)}
+                                placeholder="慵懒的爵士女声，钢琴和萨克斯为主，60bpm，雨夜的感觉…"
+                                rows={3}
+                                className="w-full rounded-xl px-3 py-2 text-[13px] focus:outline-none transition-colors resize-none shizuku-glass"
+                                style={{
+                                    color: MusicC.text,
+                                    border: `1px solid ${MusicC.faint}50`,
+                                    fontFamily: `'Noto Serif SC', Georgia, serif`,
+                                }}
+                            />
+                            <button
+                                onClick={handleAiWritePrompt}
+                                disabled={isAiWritingPrompt}
+                                className="w-full py-2.5 rounded-xl text-[12px] font-medium tracking-[0.15em] transition-all active:scale-[0.98] disabled:opacity-40 flex items-center justify-center gap-2 relative overflow-hidden"
+                                style={{
+                                    background: `linear-gradient(135deg, ${MusicC.lavender}, ${MusicC.sakura})`,
+                                    color: 'white',
+                                    boxShadow: `0 3px 14px ${MusicC.sakura}40`,
+                                    fontFamily: 'Georgia, serif',
+                                }}
+                            >
+                                {isAiWritingPrompt ? (
+                                    <>
+                                        <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                        AI 思考中…
+                                    </>
+                                ) : (
+                                    <>
+                                        <SparkleP size={14} weight="fill" />
+                                        {promptGuidance.trim()
+                                            ? `让 AI 结合${collaborator?.name || '角色'}的气质改`
+                                            : `让 AI 凭${collaborator?.name || '角色'}的气质写一段`}
+                                    </>
+                                )}
+                            </button>
+                            <p className="text-[10px] leading-relaxed pl-1" style={{ color: MusicC.muted }}>
+                                AI 会读{collaborator ? `「${collaborator.name}」` : '这首歌'}的人设，**自己拿主意**——你不用懂音乐。
+                            </p>
+                        </div>
+
+                        {/* Section III — Final editable tag string */}
+                        <div className="space-y-2">
+                            <div className="flex items-center justify-between pl-1 gap-2">
+                                <div className="flex items-center gap-2 min-w-0 flex-1">
+                                    <span className="font-bold italic shrink-0" style={{ fontFamily: 'Georgia, serif', color: MusicC.accent, fontSize: 15, letterSpacing: '0.05em' }}>III</span>
+                                    <CrossStar size={7} color={MusicC.lavender} delay={0.8} />
+                                    <label className="text-[10px] font-bold uppercase tracking-[0.25em] truncate" style={{ color: MusicC.primary }}>最终风格描述（发给 AI）</label>
+                                </div>
+                                <button
+                                    onClick={handleResetCustomPrompt}
+                                    className="text-[10px] underline transition-colors"
+                                    style={{ color: MusicC.muted }}
+                                >
+                                    重置默认
+                                </button>
+                            </div>
+                            <textarea
+                                value={promptDraft}
+                                onChange={(e) => setPromptDraft(e.target.value)}
+                                placeholder={provider === 'ace-step'
+                                    ? 'female vocal, breathy, dreamy pop, soft piano, 75 bpm, c minor'
+                                    : '女声, 气声, 梦幻流行, 钢琴轻柔, 黑胶噪点, 75bpm, c 小调'}
+                                rows={3}
+                                className="w-full rounded-xl px-3 py-2 text-[12px] font-mono focus:outline-none transition-colors resize-none"
+                                style={{
+                                    background: '#0d1418',
+                                    color: '#9bcbf8',
+                                    border: `1px solid ${MusicC.primary}40`,
+                                }}
+                            />
+                            <p className="text-[10px] leading-relaxed pl-1" style={{ color: MusicC.muted }}>
+                                {provider === 'ace-step'
+                                    ? '逗号分隔的英文 tag。常用 vocal 类：female/male vocal、breathy/husky/sweet；风格：pop/rock/jazz/lo-fi；情绪：dreamy/upbeat/melancholy。'
+                                    : '逗号分隔的中文描述（MiniMax 中文模型，自然中文最好用）。例：女声 / 气声 / 慵懒哼唱 / 爵士 / 钢琴 / 黑胶噪点 / 60bpm / e 小调。'}
+                            </p>
+                        </div>
+
+                        {/* Hint strip — content depends on provider */}
+                        <div
+                            className="rounded-xl px-3 py-2 flex items-center gap-2 text-[10.5px] leading-relaxed"
+                            style={{
+                                background: `linear-gradient(135deg, ${MusicC.glow}15, ${MusicC.sakura}10)`,
+                                border: `1px solid ${MusicC.glow}25`,
+                                color: MusicC.muted,
+                            }}
+                        >
+                            <Sparkle size={9} color={MusicC.accent} delay={0} />
+                            <span>
+                                {provider === 'ace-step'
+                                    ? '约 30-60s 出歌 · ~¥0.1-0.3/首'
+                                    : '约 30-60s 出歌 · 免费完整长歌'}
+                            </span>
+                        </div>
+
+                        </>)}
+                    </div>
+                </Modal>
+    ) : null;
 
     // ==================== RENDER ====================
 
@@ -2521,7 +2989,6 @@ const SongwritingApp: React.FC = () => {
 
                     <div className="relative px-4 pt-3 flex gap-2">
                         <button type="button" onClick={() => { setStudioEntryTab('lyrics'); setView('write'); }} className="flex-1 min-w-0 py-2 rounded-xl text-[11px] font-semibold bg-white/65 border border-white/80" style={{ color: MusicC.primary }}>✎ 歌词与创作</button>
-                        <button type="button" onClick={() => { setStudioEntryTab('production'); setView('write'); }} className="flex-1 min-w-0 py-2 rounded-xl text-[11px] font-semibold bg-white/65 border border-white/80" style={{ color: MusicC.primary }}>♫ 海绵出歌 / 成品</button>
                     </div>
                     <div className="relative px-4 py-3.5">
                         {/* Floating sparkle decorations — pointer-none */}
@@ -2769,464 +3236,16 @@ const SongwritingApp: React.FC = () => {
                 </Modal>
 
                 {/* ─── 封面确认 Modal — 喜欢按钮 → 跳转音乐 App 之间的中间步骤 ─── */}
-                <Modal isOpen={showCoverConfirm} title="给这首歌选个封面" onClose={() => setShowCoverConfirm(false)}>
-                    <div className="space-y-4">
-                        {/* 封面大预览 */}
-                        <div className="flex items-center justify-center">
-                            <div
-                                className="relative w-44 h-44 rounded-2xl overflow-hidden"
-                                style={{
-                                    boxShadow: `0 8px 32px ${MusicC.glow}50, inset 0 1px 0 rgba(255,255,255,0.5)`,
-                                    border: `1px solid ${MusicC.glow}40`,
-                                }}
-                            >
-                                {coverMode === 'char' && collaborator?.avatar && (
-                                    <TokenImg value={collaborator.avatar} alt="" className="w-full h-full object-cover" />
-                                )}
-                                {coverMode === 'user' && userProfile?.avatar && (
-                                    <TokenImg value={userProfile.avatar} alt="" className="w-full h-full object-cover" />
-                                )}
-                                {coverMode === 'dual' && (
-                                    isBuildingDual ? (
-                                        <div className="w-full h-full flex items-center justify-center"
-                                            style={{ background: `linear-gradient(135deg, ${MusicC.sakura}, ${MusicC.lavender}, ${MusicC.glow})` }}>
-                                            <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                                        </div>
-                                    ) : dualCoverUrl ? (
-                                        <img src={dualCoverUrl} alt="" className="w-full h-full object-cover" />
-                                    ) : (
-                                        <div className="w-full h-full flex items-center justify-center text-white text-xs"
-                                            style={{ background: `linear-gradient(135deg, ${MusicC.sakura}, ${MusicC.lavender})` }}>
-                                            合影封面
-                                        </div>
-                                    )
-                                )}
-                                {coverMode === 'upload' && (
-                                    uploadedCoverUrl ? (
-                                        <img src={uploadedCoverUrl} alt="" className="w-full h-full object-cover" />
-                                    ) : (
-                                        <button
-                                            onClick={() => coverUploadRef.current?.click()}
-                                            className="w-full h-full flex flex-col items-center justify-center gap-2"
-                                            style={{ background: `linear-gradient(135deg, ${MusicC.bgDeep}, ${MusicC.soft})`, color: MusicC.primary }}
-                                        >
-                                            <UploadSimple size={24} />
-                                            <span className="text-[11px]">上传图片</span>
-                                        </button>
-                                    )
-                                )}
-                                {/* 黑胶反光 */}
-                                <div className="absolute inset-0 pointer-events-none"
-                                    style={{ background: 'linear-gradient(45deg, transparent 40%, rgba(255,255,255,0.18) 50%, transparent 60%)' }} />
-                            </div>
-                        </div>
-
-                        <input
-                            ref={coverUploadRef}
-                            type="file"
-                            accept="image/*"
-                            className="hidden"
-                            onChange={event => {
-                                const file = event.target.files?.[0];
-                                if (file) handleCoverUpload(file);
-                                event.currentTarget.value = '';
-                            }}
-                        />
-
-                        {/* 封面来源 */}
-                        <div className="grid grid-cols-4 gap-2">
-                            {([
-                                { id: 'char' as CoverMode, label: collaborator?.name || '搭档', src: collaborator?.avatar || '' },
-                                { id: 'user' as CoverMode, label: userProfile?.name || '我', src: userProfile?.avatar || '' },
-                                { id: 'dual' as CoverMode, label: '合影', src: dualCoverUrl || '' },
-                                { id: 'upload' as CoverMode, label: uploadedCoverUrl ? '我的图片' : '上传', src: uploadedCoverUrl || '' },
-                            ]).map(opt => {
-                                const active = opt.id === coverMode;
-                                return (
-                                    <button
-                                        key={opt.id}
-                                        onClick={() => {
-                                            if (opt.id === 'upload' && !uploadedCoverUrl) {
-                                                coverUploadRef.current?.click();
-                                            } else {
-                                                setCoverMode(opt.id);
-                                                trackEvent('选择加入音乐 App 的封面样式', { coverMode: opt.id });
-                                            }
-                                        }}
-                                        className="rounded-xl p-2 border transition-all active:scale-95 flex flex-col items-center gap-1"
-                                        style={active ? {
-                                            background: `linear-gradient(135deg, ${MusicC.primary}, ${MusicC.accent})`,
-                                            color: 'white',
-                                            borderColor: 'transparent',
-                                            boxShadow: `0 3px 14px ${MusicC.glow}50`,
-                                        } : {
-                                            background: 'rgba(255,255,255,0.7)',
-                                            color: MusicC.text,
-                                            borderColor: `${MusicC.faint}50`,
-                                        }}
-                                    >
-                                        <div className="w-12 h-12 rounded-lg overflow-hidden shrink-0"
-                                            style={{
-                                                border: `1.5px solid ${active ? 'rgba(255,255,255,0.6)' : `${MusicC.faint}50`}`,
-                                            }}>
-                                            {opt.src ? (
-                                                <TokenImg value={opt.src} alt="" className="w-full h-full object-cover" />
-                                            ) : (
-                                                <div className="w-full h-full flex items-center justify-center"
-                                                    style={{ background: `linear-gradient(135deg, ${MusicC.sakura}, ${MusicC.lavender})` }}>
-                                                    {opt.id === 'dual' && (isBuildingDual ? (
-                                                        <div className="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin" />
-                                                    ) : (
-                                                        <SparkleP size={14} weight="fill" color="white" />
-                                                    ))}
-                                                    {opt.id === 'upload' && <UploadSimple size={16} color="white" />}
-                                                </div>
-                                            )}
-                                        </div>
-                                        <span className="text-[10px] font-medium leading-tight">{opt.label}</span>
-                                    </button>
-                                );
-                            })}
-                        </div>
-                        {coverMode === 'upload' && uploadedCoverUrl && (
-                            <button
-                                onClick={() => coverUploadRef.current?.click()}
-                                className="w-full text-[10px] py-1.5 underline underline-offset-4"
-                                style={{ color: MusicC.muted }}
-                            >
-                                换一张图片
-                            </button>
-                        )}
-
-                        {/* 元信息 */}
-                        <div className="rounded-xl px-3 py-2 text-[11px] leading-relaxed"
-                            style={{
-                                background: `linear-gradient(135deg, ${MusicC.glow}15, ${MusicC.sakura}10)`,
-                                border: `1px solid ${MusicC.glow}25`,
-                                color: MusicC.muted,
-                            }}>
-                            <div><span style={{ color: MusicC.primary }}>♪ </span>《{activeSong.title}》</div>
-                            <div className="mt-0.5">作者：{userProfile?.name || '我'} & {collaborator?.name || 'AI'}</div>
-                            <div className="mt-0.5">专辑：一起写的歌</div>
-                        </div>
-
-                        {/* 按钮 */}
-                        <div className="flex gap-2">
-                            <button
-                                onClick={() => setShowCoverConfirm(false)}
-                                className="flex-1 py-3 rounded-xl text-[11px] font-medium tracking-wider transition-all active:scale-[0.98]"
-                                style={{
-                                    background: 'rgba(255,255,255,0.7)',
-                                    color: MusicC.muted,
-                                    border: `1px solid ${MusicC.faint}50`,
-                                }}
-                            >
-                                取消
-                            </button>
-                            {isLikedToMusic && (
-                                <button
-                                    onClick={handleRemoveFromAlbum}
-                                    className="flex-1 py-3 rounded-xl text-[11px] font-medium tracking-wider transition-all active:scale-[0.98]"
-                                    style={{
-                                        background: 'rgba(255,255,255,0.7)',
-                                        color: MusicC.danger,
-                                        border: `1px solid ${MusicC.danger}40`,
-                                    }}
-                                >
-                                    移除
-                                </button>
-                            )}
-                            <button
-                                onClick={handleConfirmAddToAlbum}
-                                disabled={isBuildingDual && coverMode === 'dual'}
-                                className="flex-[2] py-3 rounded-xl text-[12px] font-bold tracking-[0.18em] transition-all active:scale-[0.98] disabled:opacity-50 relative overflow-hidden"
-                                style={{
-                                    background: `linear-gradient(135deg, ${MusicC.sakura}, ${MusicC.lavender})`,
-                                    color: 'white',
-                                    boxShadow: `0 4px 18px ${MusicC.sakura}60, 0 0 50px ${MusicC.sakura}25`,
-                                    fontFamily: 'Georgia, serif',
-                                }}
-                            >
-                                ❤︎ {isLikedToMusic ? '保存并去听' : '加入并去听'}
-                            </button>
-                        </div>
-                    </div>
-                </Modal>
+                {renderCoverModal()}
 
                 {/* ─── Unified AI 出歌引导 Modal — shizuku theme ─── */}
-                <Modal
-                    isOpen={showCustomPrompt}
-                    title="✦ 让 AI 把它唱出来"
-                    onClose={() => setShowCustomPrompt(false)}
-                    footer={showHaimianProvider ? undefined : (
-                        <>
-                            <button
-                                onClick={() => setShowCustomPrompt(false)}
-                                className="flex-1 py-3 rounded-xl text-[12px] font-medium tracking-wider transition-all active:scale-[0.98]"
-                                style={{
-                                    background: 'rgba(255,255,255,0.7)',
-                                    color: MusicC.muted,
-                                    border: `1px solid ${MusicC.faint}50`,
-                                }}
-                            >
-                                取消
-                            </button>
-                            <button
-                                onClick={handleConfirmAndGenerate}
-                                disabled={cooldownSecsLeft > 0 || !promptDraft.trim()}
-                                className="flex-[2] py-3.5 rounded-xl text-[12px] font-bold tracking-[0.25em] transition-all active:scale-[0.98] disabled:opacity-50 relative overflow-hidden"
-                                style={{
-                                    background: cooldownSecsLeft > 0
-                                        ? `linear-gradient(135deg, ${MusicC.faint}, ${MusicC.muted})`
-                                        : `linear-gradient(135deg, ${MusicC.primary} 0%, ${MusicC.accent} 60%, ${MusicC.lavender} 100%)`,
-                                    color: 'white',
-                                    boxShadow: cooldownSecsLeft > 0
-                                        ? 'none'
-                                        : `0 6px 22px ${MusicC.glow}70, 0 0 60px ${MusicC.lavender}30, inset 0 1px 0 rgba(255,255,255,0.35)`,
-                                    fontFamily: 'Georgia, "Noto Serif SC", serif',
-                                }}
-                            >
-                                {/* Moving sheen */}
-                                {cooldownSecsLeft === 0 && (
-                                    <span className="absolute inset-0 pointer-events-none"
-                                        style={{
-                                            background: `linear-gradient(105deg, transparent 30%, rgba(255,255,255,0.28) 50%, transparent 70%)`,
-                                            backgroundSize: '200% 100%',
-                                            animation: 'shizuku-shimmer 4s ease-in-out infinite',
-                                        }} />
-                                )}
-                                <span className="relative inline-flex items-center justify-center gap-2">
-                                    {cooldownSecsLeft > 0 ? (
-                                        `冷却中 ${cooldownSecsLeft}s`
-                                    ) : (
-                                        <>
-                                            <CrossStar size={11} color="white" delay={0} solid />
-                                            开始录制
-                                            <CrossStar size={11} color="white" delay={0.5} solid />
-                                        </>
-                                    )}
-                                </span>
-                            </button>
-                        </>
-                    )}
-                >
-                    <div className="space-y-4">
-                        {/* ── Provider picker — segmented ── */}
-                        <div className="space-y-2">
-                            <div className="flex items-center gap-2 pl-1">
-                                <Sparkle size={8} color={MusicC.accent} delay={0.2} />
-                                <label className="text-[10px] font-bold uppercase tracking-[0.2em]" style={{ color: MusicC.primary }}>选生成器</label>
-                            </div>
-                            {(() => {
-                                const opts: { id: MusicProvider | 'haimian'; title: string; sub: string; available: boolean; needs: string }[] = [
-                                    { id: 'minimax-free', title: 'MiniMax 免费版', sub: '不花钱 · 完整长歌', available: hasMiniMaxKey, needs: 'MiniMax Key' },
-                                    { id: 'minimax-paid', title: 'MiniMax 付费版', sub: 'Token Plan · 完整长歌', available: hasMiniMaxKey, needs: 'MiniMax Key' },
-                                    { id: 'ace-step',     title: 'ACE-Step',       sub: '~$0.015 · 完整长歌', available: hasReplicateKey, needs: 'Replicate Token' },
-                                    { id: 'haimian',      title: '海绵音乐',         sub: '专属音色 · 完整歌曲', available: true, needs: '' },
-                                ];
-                                return (
-                                    <div className="grid grid-cols-2 gap-1.5">
-                                        {opts.map(opt => {
-                                            const isActive = showHaimianProvider ? opt.id === 'haimian' : opt.id === provider;
-                                            const Ico = opt.id === 'haimian' ? Heart : PROVIDER_ICONS[opt.id] || Heart;
-                                            return (
-                                                <button
-                                                    key={opt.id}
-                                                    onClick={() => { if (opt.id === 'haimian') setShowHaimianProvider(true); else { setShowHaimianProvider(false); setProvider(opt.id); } trackEvent('切换出歌生成器', { provider: opt.id }); }}
-                                                    disabled={!opt.available}
-                                                    className="relative text-left p-2 rounded-xl border transition-all active:scale-95 disabled:cursor-not-allowed"
-                                                    style={isActive ? {
-                                                        background: `linear-gradient(135deg, ${MusicC.primary}, ${MusicC.accent})`,
-                                                        color: 'white',
-                                                        borderColor: 'transparent',
-                                                        boxShadow: `0 3px 14px ${MusicC.glow}50`,
-                                                    } : opt.available ? {
-                                                        background: 'rgba(255,255,255,0.7)',
-                                                        color: MusicC.text,
-                                                        borderColor: `${MusicC.faint}50`,
-                                                    } : {
-                                                        background: 'rgba(0,0,0,0.03)',
-                                                        color: MusicC.faint,
-                                                        borderColor: `${MusicC.faint}30`,
-                                                        opacity: 0.55,
-                                                    }}
-                                                >
-                                                    <div className="flex items-center gap-1.5 mb-0.5">
-                                                        <Ico size={14} weight={isActive ? 'fill' : 'duotone'} />
-                                                        <span className="text-[10.5px] font-bold leading-none">{opt.title}</span>
-                                                    </div>
-                                                    <div className="text-[9px] opacity-80 leading-tight">{opt.sub}</div>
-                                                    {!opt.available && (
-                                                        <div className="text-[8.5px] mt-0.5 leading-tight" style={{ color: MusicC.danger }}>需填 {opt.needs}</div>
-                                                    )}
-                                                </button>
-                                            );
-                                        })}
-                                    </div>
-                                );
-                            })()}
-                            <p className="text-[10px] leading-relaxed pl-1" style={{ color: MusicC.muted }}>
-                                {showHaimianProvider ? '使用海绵音乐的原创生成、专属声线、创作设想与最终生成说明；积分消耗会在提交前再次确认。'
-                                    : provider === 'ace-step'
-                                    ? '完整长歌（最长 4 分钟）— 自费走 Replicate，约 ¥0.1-0.3/首'
-                                    : provider === 'minimax-paid'
-                                        ? '完整长歌（最长 4-6 分钟）— 出歌更快、不易排队'
-                                        : '完整长歌（最长 4-6 分钟）— 完全免费 · 用你已填的 MiniMax Key'}
-                            </p>
-                        </div>
-
-                        {showHaimianProvider ? (
-                            <div className="sw-production-modal"><HaimianProduction key={activeSong.id} song={activeSong} onUpdate={setActiveSong} /></div>
-                        ) : (<>
-                        {/* Section I — Quick voice preset chips */}
-                        <div className="space-y-2">
-                            <div className="flex items-center gap-2 pl-1">
-                                <span className="font-bold italic" style={{ fontFamily: 'Georgia, serif', color: MusicC.accent, fontSize: 15, letterSpacing: '0.05em' }}>I</span>
-                                <CrossStar size={7} color={MusicC.glow} delay={0} />
-                                <label className="text-[10px] font-bold uppercase tracking-[0.25em]" style={{ color: MusicC.primary }}>快速选声线</label>
-                                <div className="flex-1 h-px" style={{ background: `linear-gradient(to right, ${MusicC.glow}55, transparent)` }} />
-                            </div>
-                            <div className="grid grid-cols-3 gap-1.5">
-                                {VOICE_PRESETS.map(preset => {
-                                    const isActive = preset.id === voicePresetId;
-                                    const Ico = VOICE_ICONS[preset.id] || SparkleP;
-                                    return (
-                                        <button
-                                            key={preset.id}
-                                            onClick={() => { applyVoicePreset(preset.id); trackEvent('选择声线预设', { preset: preset.id }); }}
-                                            className="text-[11px] py-2.5 rounded-xl border transition-all active:scale-95 flex flex-col items-center justify-center gap-1 relative overflow-hidden"
-                                            style={isActive ? {
-                                                background: `linear-gradient(135deg, ${MusicC.primary}, ${MusicC.accent})`,
-                                                color: 'white',
-                                                borderColor: 'transparent',
-                                                boxShadow: `0 3px 14px ${MusicC.glow}50`,
-                                            } : {
-                                                background: 'rgba(255,255,255,0.7)',
-                                                color: MusicC.primary,
-                                                borderColor: `${MusicC.faint}50`,
-                                            }}
-                                        >
-                                            <Ico size={18} weight={isActive ? 'fill' : 'duotone'} />
-                                            <span className="font-medium leading-tight">{preset.label}</span>
-                                        </button>
-                                    );
-                                })}
-                            </div>
-                        </div>
-
-                        {/* Section II — Natural language guidance */}
-                        <div className="space-y-2">
-                            <div className="flex items-center gap-2 pl-1">
-                                <span className="font-bold italic" style={{ fontFamily: 'Georgia, serif', color: MusicC.accent, fontSize: 15, letterSpacing: '0.05em' }}>II</span>
-                                <CrossStar size={7} color={MusicC.sakura} delay={0.4} />
-                                <label className="text-[10px] font-bold uppercase tracking-[0.25em]" style={{ color: MusicC.primary }}>或描述更细的风格</label>
-                                <div className="flex-1 h-px" style={{ background: `linear-gradient(to right, ${MusicC.sakura}55, transparent)` }} />
-                            </div>
-                            <textarea
-                                value={promptGuidance}
-                                onChange={(e) => setPromptGuidance(e.target.value)}
-                                placeholder="慵懒的爵士女声，钢琴和萨克斯为主，60bpm，雨夜的感觉…"
-                                rows={3}
-                                className="w-full rounded-xl px-3 py-2 text-[13px] focus:outline-none transition-colors resize-none shizuku-glass"
-                                style={{
-                                    color: MusicC.text,
-                                    border: `1px solid ${MusicC.faint}50`,
-                                    fontFamily: `'Noto Serif SC', Georgia, serif`,
-                                }}
-                            />
-                            <button
-                                onClick={handleAiWritePrompt}
-                                disabled={isAiWritingPrompt}
-                                className="w-full py-2.5 rounded-xl text-[12px] font-medium tracking-[0.15em] transition-all active:scale-[0.98] disabled:opacity-40 flex items-center justify-center gap-2 relative overflow-hidden"
-                                style={{
-                                    background: `linear-gradient(135deg, ${MusicC.lavender}, ${MusicC.sakura})`,
-                                    color: 'white',
-                                    boxShadow: `0 3px 14px ${MusicC.sakura}40`,
-                                    fontFamily: 'Georgia, serif',
-                                }}
-                            >
-                                {isAiWritingPrompt ? (
-                                    <>
-                                        <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                                        AI 思考中…
-                                    </>
-                                ) : (
-                                    <>
-                                        <SparkleP size={14} weight="fill" />
-                                        {promptGuidance.trim()
-                                            ? `让 AI 结合${collaborator?.name || '角色'}的气质改`
-                                            : `让 AI 凭${collaborator?.name || '角色'}的气质写一段`}
-                                    </>
-                                )}
-                            </button>
-                            <p className="text-[10px] leading-relaxed pl-1" style={{ color: MusicC.muted }}>
-                                AI 会读{collaborator ? `「${collaborator.name}」` : '这首歌'}的人设，**自己拿主意**——你不用懂音乐。
-                            </p>
-                        </div>
-
-                        {/* Section III — Final editable tag string */}
-                        <div className="space-y-2">
-                            <div className="flex items-center justify-between pl-1 gap-2">
-                                <div className="flex items-center gap-2 min-w-0 flex-1">
-                                    <span className="font-bold italic shrink-0" style={{ fontFamily: 'Georgia, serif', color: MusicC.accent, fontSize: 15, letterSpacing: '0.05em' }}>III</span>
-                                    <CrossStar size={7} color={MusicC.lavender} delay={0.8} />
-                                    <label className="text-[10px] font-bold uppercase tracking-[0.25em] truncate" style={{ color: MusicC.primary }}>最终风格描述（发给 AI）</label>
-                                </div>
-                                <button
-                                    onClick={handleResetCustomPrompt}
-                                    className="text-[10px] underline transition-colors"
-                                    style={{ color: MusicC.muted }}
-                                >
-                                    重置默认
-                                </button>
-                            </div>
-                            <textarea
-                                value={promptDraft}
-                                onChange={(e) => setPromptDraft(e.target.value)}
-                                placeholder={provider === 'ace-step'
-                                    ? 'female vocal, breathy, dreamy pop, soft piano, 75 bpm, c minor'
-                                    : '女声, 气声, 梦幻流行, 钢琴轻柔, 黑胶噪点, 75bpm, c 小调'}
-                                rows={3}
-                                className="w-full rounded-xl px-3 py-2 text-[12px] font-mono focus:outline-none transition-colors resize-none"
-                                style={{
-                                    background: '#0d1418',
-                                    color: '#9bcbf8',
-                                    border: `1px solid ${MusicC.primary}40`,
-                                }}
-                            />
-                            <p className="text-[10px] leading-relaxed pl-1" style={{ color: MusicC.muted }}>
-                                {provider === 'ace-step'
-                                    ? '逗号分隔的英文 tag。常用 vocal 类：female/male vocal、breathy/husky/sweet；风格：pop/rock/jazz/lo-fi；情绪：dreamy/upbeat/melancholy。'
-                                    : '逗号分隔的中文描述（MiniMax 中文模型，自然中文最好用）。例：女声 / 气声 / 慵懒哼唱 / 爵士 / 钢琴 / 黑胶噪点 / 60bpm / e 小调。'}
-                            </p>
-                        </div>
-
-                        {/* Hint strip — content depends on provider */}
-                        <div
-                            className="rounded-xl px-3 py-2 flex items-center gap-2 text-[10.5px] leading-relaxed"
-                            style={{
-                                background: `linear-gradient(135deg, ${MusicC.glow}15, ${MusicC.sakura}10)`,
-                                border: `1px solid ${MusicC.glow}25`,
-                                color: MusicC.muted,
-                            }}
-                        >
-                            <Sparkle size={9} color={MusicC.accent} delay={0} />
-                            <span>
-                                {provider === 'ace-step'
-                                    ? '约 30-60s 出歌 · ~¥0.1-0.3/首'
-                                    : '约 30-60s 出歌 · 免费完整长歌'}
-                            </span>
-                        </div>
-
-                        </>)}
-                    </div>
-                </Modal>
+                {renderProductionModal()}
             </div>
         );
     }
 
     if (view === 'write' && activeSong) {
-        return <SongwritingStudio key={activeSong.id} song={activeSong} theme={studioTheme} onTheme={changeStudioTheme} initialTab={studioEntryTab} onBack={handlePause} onPreview={song=>{setActiveSong(song);setView('preview');}} />;
+        return <><SongwritingStudio key={activeSong.id} song={activeSong} theme={studioTheme} onTheme={changeStudioTheme} initialTab={studioEntryTab} onBack={handlePause} onPreview={song=>{setActiveSong(song);setView('preview');}} onProduction={song=>{setActiveSong(song);openProductionForSong(song);}} />{renderProductionModal()}{renderCoverModal()}</>;
     }
 
     return null;

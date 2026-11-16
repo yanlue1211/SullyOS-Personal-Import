@@ -553,3 +553,18 @@ it('manual title and lyric edits commit together, keep recordings, and reject st
   const renameOnly=createProposal(saved,'song','手动编辑歌词',0,saved.lines.length,saved.lines,'user');
   expect((await acceptProposal(song.id,renameOnly,'我',{title:'只改歌名',baseTitle:'新歌名'})).title).toBe('只改歌名');
 });
+
+it('partial vocal melody and later lyrics keep phrase bindings, history and text backups',async()=>{
+ const {mergeVocalReply}=await import('../features/songwriting/melody');
+ const {vocalTarget,phraseForLine}=await import('../features/songwriting/vocalMelody');
+ const current=await getSong(song.id),line=current.lines.find(l=>!l.isDraft)!;
+ const version=mergeVocalReply(current,undefined,{reply:'先写这一句',bpm:84,phrases:[{lineId:line.id,bars:[{notes:[{pitch:'C4',beats:1,lyric:'我'},{pitch:'D4',beats:1},{pitch:'E4',beats:2}]}]}]},vocalTarget(current,'line',0));
+ const saved=await commitMelodyTurn(song.id,'partial1','先写这一句',version,undefined,lyricFingerprint(current.lines),'阿源');
+ expect((await studioMessages(saved)).find(m=>m.metadata?.songwritingCard?.kind==='melody')?.content).toContain('1小节');
+ expect(phraseForLine(saved,getMelody(saved)?.versions[0],line.id)).toBeDefined();
+ const backup=await DB.exportFullData();await DB.importFullData(backup as any);
+ expect(getMelody(await getSong(song.id))?.versions[0].phrases?.[0].lineId).toBe(line.id);
+ const proposal=createProposal(saved,'song','改词',0,saved.lines.filter(l=>!l.isDraft).length,parseLyrics(lyricsText(saved.lines),'user'),'user');
+ const next=await acceptProposal(song.id,proposal,'我');
+ expect(phraseForLine(next,getMelody(next)?.versions[0],next.lines[0].id)).toBeDefined();
+});

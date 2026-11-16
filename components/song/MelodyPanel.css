@@ -18,3 +18,7 @@
 .sw-melody-player audio {width:100%;max-width:100%;}
 .sw-melody-player a {display:inline-flex;justify-content:center;align-items:center;border:1px solid var(--sw-border);color:var(--sw-ink);background:#fff;border-radius:12px;min-height:40px;text-decoration:none;}
 .sw-melody-info {font-size:13px;line-height:1.8;background:var(--sw-light);border-radius:12px;padding:12px;white-space:pre-wrap;}
+.sw-vocal-range {display:flex;gap:10px;flex-wrap:wrap;min-width:0;}
+.sw-vocal-range label {display:grid;gap:7px;min-width:0;flex:1;font-size:12px;}
+.sw-vocal-range select,.sw-vocal-binding select {width:100%;min-width:0;padding:11px;border:1px solid var(--sw-border);border-radius:12px;background:#ffffffc5;color:var(--sw-ink);}
+.sw-vocal-binding {display:grid;gap:8px;margin-top:14px;font-size:12px;}
