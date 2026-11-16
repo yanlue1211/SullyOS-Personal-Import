@@ -227,7 +227,7 @@ export const parseLyric = (txt: string): LyricLine[] => {
 
 export const normalizeCookie = (raw: string): string => {
   const s = (raw || '').trim(); if (!s) return '';
-  if (s.toUpperCase().startsWith('MUSIC_U=')) return s;
+  if (/(?:^|;\s*)MUSIC_U=/i.test(s)) return s;
   return `MUSIC_U=${s}`;
 };
 
@@ -286,7 +286,19 @@ export const musicApi = {
         elapsedMs: Date.now() - started,
       });
     }
-    if (!res.ok) throw new Error(j?.error || j?.message || `HTTP ${res.status}`);
+    if (!res.ok) {
+      const rawErr = j?.error || j?.message || `HTTP ${res.status}`;
+      const detail = typeof j?.detail === 'string' ? j.detail.trim() : '';
+      if (/risk-control|code=-460|code=-7/i.test(detail)) {
+        throw new Error('网易云接口触发风控，请稍后再试');
+      }
+      throw new Error(rawErr === 'netease upstream fetch failed (all sources)' && detail
+        ? `${rawErr} (${detail})`
+        : rawErr);
+    }
+    if (j?.code === -460 || j?.code === -7) {
+      throw new Error(j?.message || j?.msg || '网易云接口触发风控，请稍后再试');
+    }
     return j;
   },
   // 对外：默认走 TTL 缓存 + in-flight 去重；无匹配规则的 path 会透传
@@ -943,13 +955,21 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         return;
       }
 
-      const [urlRes, lyricRes] = await Promise.all([
+      // 上游播放直链失败不能阻止歌词独立显示；保留个人版的地址刷新与错误重试。
+      const [urlOutcome, lyricOutcome] = await Promise.allSettled([
         opts.freshUrl
           ? musicApi.songUrlFresh(cfgRef.current, song.id)
           : musicApi.songUrl(cfgRef.current, song.id),
-        musicApi.lyric(cfgRef.current, song.id).catch(() => null),
+        musicApi.lyric(cfgRef.current, song.id),
       ]);
       if(attempt!==playAttemptRef.current)return;
+      if (lyricOutcome.status === 'fulfilled' && lyricOutcome.value) {
+        const lyricRes = lyricOutcome.value;
+        setLyric(parseLyric(lyricRes?.lrc?.lyric || ''));
+        setTlyric(parseLyric(lyricRes?.tlyric?.lyric || ''));
+      }
+      if (urlOutcome.status === 'rejected') throw urlOutcome.reason;
+      const urlRes = urlOutcome.value;
       const url: string | null = urlRes?.data?.[0]?.url || null;
       if (!url) {
         const error=new Error(urlRes?.data?.[0]?.fee && !cfgRef.current.cookie ? '需要会员 cookie' : '暂无播放地址') as Error & { missingSongUrl?: boolean };
@@ -961,10 +981,6 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       activeAudioSourceRef.current = a.src;
       failedHandlerRef.current=failed;
       a.play().catch(failed);
-      if (lyricRes) {
-        setLyric(parseLyric(lyricRes?.lrc?.lyric || ''));
-        setTlyric(parseLyric(lyricRes?.tlyric?.lyric || ''));
-      }
       // 媒体会话（锁屏 / 通知栏）
       if ('mediaSession' in navigator) {
         try {

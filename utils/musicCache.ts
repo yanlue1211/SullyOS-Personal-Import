@@ -149,11 +149,16 @@ if (typeof window !== 'undefined') {
 const makeKey = (path: string, body: any, cookie?: string) =>
   `${cookieSalt(cookie)}|${path}|${stableStringify(body ?? {})}`;
 
-/** A successful HTTP response is not necessarily a playable song URL. */
+/** Cache only successful results: reject 200 HTTP responses with application errors,
+ * empty audio URLs, and VIP trial clips. Keep existing personal negative-cache recovery. */
 const isUsableSongUrlResponse = (path: string, result: any): boolean =>
-  path !== '/song/url' || (
-    typeof result?.data?.[0]?.url === 'string' && result.data[0].url.trim().length > 0
-  );
+  !!result && typeof result === 'object'
+  && (typeof result.code !== 'number' || result.code === 200)
+  && (path !== '/song/url' || (
+    typeof result?.data?.[0]?.url === 'string'
+    && result.data[0].url.trim().length > 0
+    && result.data[0].freeTrialInfo == null
+  ));
 
 /**
  * 包装实际请求。不在缓存规则里的 path → 直接打网络。
@@ -186,7 +191,7 @@ export async function cachedCall<T = any>(
   const p = doCall().then(
     (res) => {
       // Don't cache an empty/unplayable song URL (possibly caused by a temporary
-      // upstream failure). Other endpoint cache behavior is unchanged.
+      // upstream failure). Other endpoints also reject application-level error responses.
       if (isUsableSongUrlResponse(path, res)) {
         MEM.set(key, { data: res, expires: Date.now() + ttl });
         schedulePersist();

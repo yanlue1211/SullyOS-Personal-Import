@@ -1,0 +1,48 @@
+name: Personal Nov 16 author safety sync verification
+
+on:
+  pull_request:
+    branches: [personal/audio-listening]
+    paths:
+      - 'apps/Chat.tsx'
+      - 'apps/GroupChat.tsx'
+      - 'apps/MusicApp.tsx'
+      - 'apps/music/NeteaseLoginPanel.tsx'
+      - 'components/PhoneShell.tsx'
+      - 'components/os/RecalledSoundNotice.tsx'
+      - 'context/MusicContext.tsx'
+      - 'hooks/useChatNotificationSound.ts'
+      - 'utils/musicCache.ts'
+      - 'utils/musicNeteaseGuard.test.ts'
+      - 'utils/whiteboxSound.ts'
+      - 'utils/recalledNotificationSound*'
+      - 'utils/chatNotificationSoundHook.test.ts'
+      - 'worker/index.js'
+      - 'worker/neteaseProxy.test.ts'
+      - '.github/workflows/personal-upstream-nov16-verify.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  targeted-upstream-guards:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install without changing the lockfile
+        run: pnpm install --frozen-lockfile
+      - name: Test music proxy, local cache, and recalled notification sound
+        run: >-
+          pnpm vitest run
+          utils/musicNeteaseGuard.test.ts
+          worker/neteaseProxy.test.ts
+          utils/recalledNotificationSound.test.ts
+          utils/chatNotificationSoundHook.test.ts
