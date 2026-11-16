@@ -15,6 +15,8 @@ import {
   type InstantChatGateInput,
 } from '../../utils/amsgDiagnostics';
 import { ActiveMsgStore, maskActiveMsgUserId } from '../../utils/activeMsgStore';
+import { AMSG_GLOBAL_CONFIG_EVENT, isAmsg2GloballyEnabled, isAmsg2WorkerActive } from '../../utils/amsgGlobalGate';
+import { setAmsg2GlobalEnabled } from '../../utils/amsgGlobalSwitch';
 import { formatTaskTime } from '../../utils/amsg2Tasks';
 import { isWorkerUrlCleared } from '../../utils/amsgStateSync';
 import { rememberDetachedWorker } from '../../utils/amsgDetachedWorkers';
@@ -238,6 +240,8 @@ interface ActiveMsgGlobalSettingsModalProps {
   onOpenVapid?: () => void;
   /** 打开「云端数据」清点页（跟 onOpenVapid 一样，由设置页负责渲染那个面板）。 */
   onOpenCloudData?: () => void;
+  onToggleGlobalEnabled?: (enabled: boolean) => Promise<void>;
+  onReenabledAfterConnect?: () => void;
 }
 
 const ActiveMsgGlobalSettingsModal: React.FC<ActiveMsgGlobalSettingsModalProps> = ({
@@ -247,12 +251,15 @@ const ActiveMsgGlobalSettingsModal: React.FC<ActiveMsgGlobalSettingsModalProps> 
   realtimeConfig,
   onOpenVapid,
   onOpenCloudData,
+  onToggleGlobalEnabled,
+  onReenabledAfterConnect,
 }) => {
   const [config, setConfig] = useState<ActiveMsg2GlobalConfig | null>(null);
   const [configLoadError, setConfigLoadError] = useState('');
   const configRequestIdRef = useRef(0);
   const pushRequestIdRef = useRef(0);
   const [loading, setLoading] = useState(false);
+  const [masterToggling, setMasterToggling] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [deployOpen, setDeployOpen] = useState(false);
   // 手动粘贴部署：给没有 GitHub 账号的人留的退路，默认收着不干扰主流程。
@@ -409,6 +416,7 @@ const ActiveMsgGlobalSettingsModal: React.FC<ActiveMsgGlobalSettingsModalProps> 
   };
 
   const refreshPushStatus = async (nextConfig: ActiveMsg2GlobalConfig) => {
+    if (!isAmsg2WorkerActive(nextConfig)) { setPushStatus(null); setCheckingPush(false); return; }
     const requestId = ++pushRequestIdRef.current;
     setCheckingPush(true);
     setPushCheckError('');
@@ -458,16 +466,18 @@ const ActiveMsgGlobalSettingsModal: React.FC<ActiveMsgGlobalSettingsModalProps> 
     savedWorkerUrlRef.current = nextConfig.workerUrl || '';
     // 先交出表单，推送就绪与否只影响推送区域，不挡住整个面板。
     setConfig(nextConfig);
-    void refreshPushStatus(nextConfig);
-    void probeWorkerCaps(Boolean(nextConfig.workerUrl?.trim()));
-    if (nextConfig.workerUrl?.trim()) {
+    if (isAmsg2WorkerActive(nextConfig)) {
+      void refreshPushStatus(nextConfig);
+      void probeWorkerCaps(true);
       void ActiveMsgClient.probeWorkerVersion().then(setWorkerVersion);
       void runDiagnostics();
       // 已连接才问定时触发开没开：没连上的时候这事还轮不到操心。
       if (nextConfig.initializedAt) void ActiveMsgClient.getCronTriggerState().then(applyCronTriggerState);
       else setCronState(null);
     } else {
-      setInstantChatSupported(false);
+      setCheckingPush(false);
+      setWorkerOutdated(false);
+      setInstantChatSupported(Boolean(nextConfig.instantChatSupported));
       setDiagnosticsProbe(null);
       setTickReportResult(null);
       setWorkerVersion(null);
@@ -477,6 +487,11 @@ const ActiveMsgGlobalSettingsModal: React.FC<ActiveMsgGlobalSettingsModalProps> 
 
   useEffect(() => {
     if (!isOpen) return;
+    const onGlobalConfig = (ev: Event) => {
+      const next = (ev as CustomEvent).detail as ActiveMsg2GlobalConfig | undefined;
+      if (next) setConfig(prev => prev ? { ...prev, enabled: next.enabled } : prev);
+    };
+    window.addEventListener(AMSG_GLOBAL_CONFIG_EVENT, onGlobalConfig);
     setConfig(null);
     setPushStatus(null);
     setInstantChatSupported(false);
@@ -505,6 +520,7 @@ const ActiveMsgGlobalSettingsModal: React.FC<ActiveMsgGlobalSettingsModalProps> 
     return () => {
       ++configRequestIdRef.current;
       ++pushRequestIdRef.current;
+      window.removeEventListener(AMSG_GLOBAL_CONFIG_EVENT, onGlobalConfig);
     };
   }, [isOpen]);
 
@@ -561,6 +577,37 @@ const ActiveMsgGlobalSettingsModal: React.FC<ActiveMsgGlobalSettingsModalProps> 
     const timer = setTimeout(() => { void persistGlobalConfig(); }, 1000);
     return () => clearTimeout(timer);
   }, [config?.workerUrl, config?.serverToken, isOpen]);
+
+  const handleToggleMasterSwitch = async () => {
+    if (!config || masterToggling) return;
+    const next = !isAmsg2GloballyEnabled(config);
+    setMasterToggling(true);
+    try {
+      if (onToggleGlobalEnabled) await onToggleGlobalEnabled(next);
+      else {
+        const result = await setAmsg2GlobalEnabled(next);
+        addToast(result.cronNotice || (next ? '已恢复主动消息 2.0。' : '主动消息 2.0 已暂停，配置和预约均保留。'), result.cronNotice ? 'info' : 'success');
+      }
+      // 总开关事件触发后仅从本地刷新，不在暂停态做任何 Worker 探测。
+      const nextConfig = await ActiveMsgStore.getGlobalConfig();
+      setConfig(nextConfig);
+      if (isAmsg2WorkerActive(nextConfig)) {
+        void refreshPushStatus(nextConfig);
+        void probeWorkerCaps(true);
+      } else {
+        ++pushRequestIdRef.current;
+        setPushStatus(null);
+        setCheckingPush(false);
+        setWorkerOutdated(false);
+        setDiagnosticsProbe(null);
+        setTickReportResult(null);
+      }
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : '切换主动消息总开关失败。', 'error');
+    } finally {
+      setMasterToggling(false);
+    }
+  };
 
   const patchConfig = (updates: Partial<ActiveMsg2GlobalConfig>) => {
     setConfig((prev) => ({
@@ -769,7 +816,9 @@ const ActiveMsgGlobalSettingsModal: React.FC<ActiveMsgGlobalSettingsModalProps> 
         return;
       }
       setProvisionStep('正在建表…');
+      const wasDisabled = !isAmsg2GloballyEnabled(config);
       const { warnings } = await ActiveMsgClient.connect();
+      if (wasDisabled) onReenabledAfterConnect?.();
       await refresh();
       warnings.forEach((warning) => addToast(warning.message, 'info'));
       addToast('已连接成功，主动消息 2.0 可以用了。', 'success');
@@ -791,6 +840,7 @@ const ActiveMsgGlobalSettingsModal: React.FC<ActiveMsgGlobalSettingsModalProps> 
 
     setLoading(true);
     try {
+      const wasDisabled = !isAmsg2GloballyEnabled(config);
       await ActiveMsgStore.saveGlobalConfig({
         workerUrl: config.workerUrl,
         serverToken: config.serverToken,
@@ -799,6 +849,7 @@ const ActiveMsgGlobalSettingsModal: React.FC<ActiveMsgGlobalSettingsModalProps> 
         thirdPartyPush: config.thirdPartyPush,
       });
       const { warnings } = await ActiveMsgClient.connect();
+      if (wasDisabled) onReenabledAfterConnect?.();
       await refresh();
       addToast('已连接成功，主动消息 2.0 可以用了。', 'success');
       // 连上了但有一块是哑的（最典型是 VAPID 没配齐：任务建得成、到点一条都推不出去，
@@ -1094,12 +1145,16 @@ const ActiveMsgGlobalSettingsModal: React.FC<ActiveMsgGlobalSettingsModalProps> 
     : [];
   const diagnosticLevel = diagnosticRows.length ? summarizeAmsgDiagnostics(diagnosticRows) : 'unknown';
 
+  const globallyEnabled = isAmsg2GloballyEnabled(config);
+  const globallyPaused = !globallyEnabled && Boolean(config.workerUrl?.trim());
   const instantChatBlocker = resolveInstantChatBlocker({
     connected: isConnected,
     pushSubscribed: Boolean(pushStatus?.hasSubscription),
     workerSupportsInstantChat: instantChatSupported,
   });
-  const instantChatBlockedReason = isConnected && checkingPush
+  const instantChatBlockedReason = globallyPaused
+    ? '总开关已暂停；聊天暂时在本机生成，原有即时对话设置未被改动。'
+    : isConnected && checkingPush
     ? '正在检查推送状态…'
     : isConnected && pushCheckError
       ? '暂时无法确认推送状态，请先重试推送检查。'
@@ -1129,8 +1184,25 @@ const ActiveMsgGlobalSettingsModal: React.FC<ActiveMsgGlobalSettingsModalProps> 
             </button>
           </div>
         ) : null}
+        {config.workerUrl?.trim() ? (
+          <div className={`flex items-center justify-between gap-3 rounded-2xl border px-4 py-3 ${globallyPaused ? 'bg-amber-50 border-amber-200' : 'bg-white border-slate-200'}`}>
+            <div className="min-w-0">
+              <p className="text-xs font-bold text-slate-700">主动消息 2.0 总开关 · {globallyPaused ? '已暂停' : '运行中'}</p>
+              <p className="mt-1 text-xs leading-relaxed text-slate-500">
+                {globallyPaused
+                  ? '本机云端请求与同步暂停，连接、角色配置和已有预约保留。若云端定时触发未能暂停，任务仍可能到点执行。'
+                  : '关闭后本机立即停用云端请求；会尽力暂停云端定时触发，不删除角色配置或预约。'}
+              </p>
+            </div>
+            <button type="button" role="switch" aria-label="主动消息 2.0 总开关"
+              aria-checked={globallyEnabled} disabled={masterToggling || loading || provisioning}
+              onClick={() => void handleToggleMasterSwitch()}
+              className={`relative h-7 w-12 shrink-0 rounded-full transition-colors disabled:opacity-40 ${globallyEnabled ? 'bg-emerald-500' : 'bg-slate-300'}`}
+            ><span className={`absolute left-0.5 top-0.5 h-6 w-6 rounded-full bg-white shadow transition-transform ${globallyEnabled ? 'translate-x-5' : ''}`} /></button>
+          </div>
+        ) : null}
         {/* 后台任务暂停着的时候常驻这一条：下面的按钮在折叠区里，不然一眼看不出角色为什么都不响。 */}
-        {cronState?.kind === 'known' && !cronState.enabled ? (
+        {globallyEnabled && cronState?.kind === 'known' && !cronState.enabled ? (
           <div className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 text-xs leading-relaxed text-amber-700">
             后台任务已暂停，到点的消息先攒着，恢复后一起补发。
           </div>
@@ -2097,7 +2169,7 @@ const ActiveMsgGlobalSettingsModal: React.FC<ActiveMsgGlobalSettingsModalProps> 
           <button
             type="button"
             onClick={() => void handleToggleInstantChat()}
-            disabled={loading || (!config.instantChatEnabled && !!instantChatBlockedReason)}
+            disabled={loading || globallyPaused || (!config.instantChatEnabled && !!instantChatBlockedReason)}
             className={`w-full py-3 font-bold rounded-2xl active:scale-95 transition-transform disabled:opacity-40 ${
               config.instantChatEnabled ? 'bg-slate-200 text-slate-600' : 'bg-slate-900 text-white'
             }`}

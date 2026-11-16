@@ -324,6 +324,8 @@ export const cancelCloudAwayTasks = async (char: CharacterProfile, updateCharact
     ...remote.filter(t => t.status === 'pending' && t.clientTaskId?.startsWith('away-')).map(t => t.uuid),
   ]);
   if (!targets.size) return;
+  // 总开关关闭期间不打 Worker：记录留在本地清单，待恢复开启或重开设置时再同步取消。
+  if (!await isAmsg2GlobalReady()) return;
   const cancelled = new Set<string>();
   for (const taskUuid of targets) {
     try {

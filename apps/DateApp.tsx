@@ -29,6 +29,8 @@ import { trackEvent } from '../utils/analytics';
 import { markAmsgStateDirty, startAmsgChatPresence, stopAmsgChatPresence } from '../utils/amsgStateSync';
 import { setAmsgActiveDate, getAmsgActiveDateEncounterId } from '../utils/amsgInteractionGuard';
 import { ActiveMsgClient } from '../utils/activeMsgClient';
+import { ActiveMsgStore } from '../utils/activeMsgStore';
+import { AMSG_GLOBAL_CONFIG_EVENT, isAmsg2GloballyEnabled } from '../utils/amsgGlobalGate';
 import { rearmCloudAwayAfterSceneExit } from '../utils/awayMessage';
 import { isAmsg2EnabledForChar } from '../utils/amsg2Tasks';
 import { prepareInPersonScheduling, applyInPersonSchedules } from '../utils/inPersonScheduling';
@@ -212,6 +214,17 @@ const DateApp: React.FC = () => {
         document.addEventListener('visibilitychange', onVisibility);
         return () => document.removeEventListener('visibilitychange', onVisibility);
     }, []);
+    // 总开关关闭时撤掉见面云端在场租约；本地离开提醒仍保留原运行方式。
+    const [amsgGlobalEnabled, setAmsgGlobalEnabled] = useState(true);
+    useEffect(() => {
+        let alive = true;
+        void ActiveMsgStore.getGlobalConfig().then(cfg => {
+            if (alive) setAmsgGlobalEnabled(isAmsg2GloballyEnabled(cfg));
+        }).catch(() => {});
+        const onGlobalCfg = (event: Event) => setAmsgGlobalEnabled(isAmsg2GloballyEnabled((event as CustomEvent).detail));
+        window.addEventListener(AMSG_GLOBAL_CONFIG_EVENT, onGlobalCfg);
+        return () => { alive = false; window.removeEventListener(AMSG_GLOBAL_CONFIG_EVENT, onGlobalCfg); };
+    }, []);
     const reminderKey = mode === 'session' && pageVisible && char?.dateLeaveReminder?.enabled
         ? `${char.id}:${char.dateLeaveReminder.delayMinutes ?? 5}:${!!char.activeMsg2Config?.enabled}` : '';
     useEffect(() => {
@@ -219,11 +232,11 @@ const DateApp: React.FC = () => {
         const deps = {char, apiConfig, userProfile, groups, realtimeConfig, updateCharacter};
         let alive = true;
         void isDateLeaveCloudReady(char).then(cloud => {
-            if (alive && cloud) startAmsgChatPresence(char.id, null, 'date');
+            if (alive && amsgGlobalEnabled && cloud) startAmsgChatPresence(char.id, null, 'date');
         }).catch(() => {});
         void armDateLeaveReminder(deps);
         return () => { alive = false; stopAmsgChatPresence(char.id, 'date'); };
-    }, [reminderKey]);
+    }, [reminderKey, amsgGlobalEnabled]);
 
     // 切换应用只挂起画面，不代表剧情中分开；只有显式打开离开提醒时才建立计时。
     const snapshotRef = useRef<DateState | null>(null);

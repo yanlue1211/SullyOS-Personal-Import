@@ -8,6 +8,9 @@ on:
       - 'utils/activeMsgClient.ts'
       - 'utils/activeMsgClient.testPush.test.ts'
       - 'utils/activeMsgSettingsModal.test.ts'
+      - 'utils/amsgGlobalGate.ts'
+      - 'utils/amsgGlobalSwitch.ts'
+      - 'utils/amsgGlobalSwitch.test.ts'
       - '.github/workflows/personal-upstream-amsg-ui-verify.yml'
   workflow_dispatch:
 
@@ -33,6 +36,7 @@ jobs:
           pnpm vitest run
           utils/activeMsgClient.testPush.test.ts
           utils/activeMsgSettingsModal.test.ts
+          utils/amsgGlobalSwitch.test.ts
           utils/activeMsgClient.wiring.test.ts
           utils/amsgBundleVersion.test.ts
           worker/amsg/src/index.test.ts

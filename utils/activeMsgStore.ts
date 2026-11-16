@@ -4,6 +4,8 @@ import {
   Amsg2ExpiredNoticeRecord,
 } from '../types';
 
+import { AMSG_GLOBAL_CONFIG_EVENT } from './amsgGlobalGate';
+
 const DB_NAME = 'ActiveMsg';
 // MUST be kept in sync with worker/sw-keep-alive.ts:ACTIVE_MSG_DB_VERSION.
 // IMPORTANT: once a client opens v2, downgrade to a v1 codebase will fail to open this DB.
@@ -332,6 +334,9 @@ export const ActiveMsgStore = {
       updatedAt: Date.now(),
     };
     await setKv(GLOBAL_CONFIG_KEY, next);
+    if (typeof window !== 'undefined' && typeof CustomEvent === 'function') {
+      try { window.dispatchEvent(new CustomEvent(AMSG_GLOBAL_CONFIG_EVENT, { detail: next })); } catch { /* 非浏览器环境 */ }
+    }
     return next;
   },
 
@@ -515,7 +520,8 @@ export const ActiveMsgStore = {
  * 读得到哪一份数据（数据按它分区），共享密钥是端点的门禁。少一样都连不成，所以要摘
  * 就得一起摘。
  */
-const BACKEND_CONNECTION_KEYS = ['workerUrl', 'serverToken', 'masterKey', 'userId', 'pushMode', 'thirdPartyPush'] as const;
+// 本机总开关与后端连接绑定；普通分享备份不把暂停态强加给接收方。
+const BACKEND_CONNECTION_KEYS = ['enabled', 'workerUrl', 'serverToken', 'masterKey', 'userId', 'pushMode', 'thirdPartyPush'] as const;
 
 /** 这份备份里带着后端连接吗（带了的话，谁拿到这个文件谁就能连上那台 Worker）。 */
 export const backupHasBackendConnection = (
@@ -577,6 +583,9 @@ export async function importAmsg2GlobalConfig(
     anthropicMessagesSupported: _droppedAnthropic, anthropicMessagesWorkerUrl: _droppedAnthropicUrl, ...restorable } = config;
   if (!options.allowBackendConnection) {
     for (const key of BACKEND_CONNECTION_KEYS) delete restorable[key];
+  } else if (backupHasBackendConnection(config)) {
+    // 旧备份的 enabled 缺省按原来的开启态处理；仅用户明确还原连接时一并恢复。
+    restorable.enabled = restorable.enabled !== false;
   }
   if (Object.keys(restorable).length === 0) return;
   await ActiveMsgStore.saveGlobalConfig({ ...restorable, instantChatSupported: undefined, workerBundleVersion: undefined,

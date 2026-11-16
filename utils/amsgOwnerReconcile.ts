@@ -6,6 +6,7 @@ import type { CloudOwnerState } from '@rei-standard/amsg-client';
 import { ActiveMsgClient } from './activeMsgClient';
 import { ActiveMsgStore } from './activeMsgStore';
 import { CloudDataError } from './amsgCloudData';
+import { isAmsg2WorkerActive } from './amsgGlobalGate';
 import { pendingCloudRetirements } from './amsgCloudRetirement';
 import { readCloudOwnerGeneration } from './amsgCloudOwnerGeneration';
 
@@ -33,7 +34,7 @@ export function diffCloudOwners(
 /** No write; skip old Workers without owner support. Partial cloud registry means unknown, not safe-to-ignore. */
 export async function findCloudOwnerConflicts(characters: ReadonlyArray<Character>): Promise<CloudOwnerConflict[]> {
   if (characters.length === 0) return [];
-  if (!(await ActiveMsgStore.getGlobalConfig()).workerUrl?.trim()) return [];
+  if (!isAmsg2WorkerActive(await ActiveMsgStore.getGlobalConfig())) return [];
   let session: Awaited<ReturnType<typeof ActiveMsgClient.openCloudDataSession>>;
   try {
     session = await ActiveMsgClient.openCloudDataSession();
