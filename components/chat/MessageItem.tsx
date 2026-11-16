@@ -17,6 +17,7 @@ import { avatarDecorationImageStyle, isAnniversaryFrame } from '../../utils/anni
 
 
 import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 const AivenFishSaleReceipt = React.lazy(() => import('../../apps/vrWorld/AivenFishSaleReceipt').then(module => ({ default: module.AivenFishSaleReceipt })));
 import { Message, ChatTheme } from '../../types';
 import { phoneFieldToText } from '../../utils/phoneEvidence';
@@ -388,7 +389,7 @@ export const ThinkingChainBlock: React.FC<{
                     >
                         {spec.titleZh}
                     </span>
-                    <span className="text-[8.5px] tracking-[0.32em] opacity-70" style={{ color: spec.text }}>
+                    <span className="sully-psyche-subtitle text-[8.5px] tracking-[0.32em] opacity-70" style={{ color: spec.text }}>
                         {spec.titleEn}
                     </span>
                     {spec.showCorners && (
@@ -449,6 +450,12 @@ export const ThinkingChainBlock: React.FC<{
 };
 
 // --- Forward Card with expand/collapse ---
+const renderChatOverlayPortal = (node: React.ReactNode, anchorEl: HTMLElement | null) => {
+    if (typeof document === 'undefined') return node;
+    const mountTarget = anchorEl?.closest('.home-phone-screen') || document.body;
+    return createPortal(node, mountTarget);
+};
+
 const ForwardCard: React.FC<{
     forwardData: any;
     commonLayout: (content: React.ReactNode) => JSX.Element;
@@ -456,6 +463,7 @@ const ForwardCard: React.FC<{
     selectionMode: boolean;
 }> = ({ forwardData, commonLayout, selectionMode }) => {
     const [expanded, setExpanded] = useState(false);
+    const cardRef = useRef<HTMLDivElement | null>(null);
 
     const handleCardClick = (e: React.MouseEvent) => {
         if (selectionMode) return;
@@ -468,7 +476,7 @@ const ForwardCard: React.FC<{
     return (
         <>
             {commonLayout(
-                <div className="w-64 bg-white rounded-2xl overflow-hidden shadow-sm border border-slate-100 active:scale-[0.98] transition-transform cursor-pointer" onClick={handleCardClick}>
+                <div ref={cardRef} className="w-64 bg-white rounded-2xl overflow-hidden shadow-sm border border-slate-100 active:scale-[0.98] transition-transform cursor-pointer" onClick={handleCardClick}>
                     <div className="px-4 pt-3 pb-2 border-b border-slate-50">
                         <div className="flex items-center gap-2 text-xs font-bold text-slate-700">
                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 text-primary"><path strokeLinecap="round" strokeLinejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 0 1 .865-.501 48.172 48.172 0 0 0 3.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0 0 12 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018Z" /></svg>
@@ -488,8 +496,8 @@ const ForwardCard: React.FC<{
             )}
 
             {/* Expanded Full-screen Overlay */}
-            {expanded && (
-                <div className="fixed inset-0 z-[100] bg-slate-50 flex flex-col animate-fade-in" style={{ paddingBottom: 'var(--safe-bottom)' }} onClick={(e) => e.stopPropagation()}>
+            {expanded && renderChatOverlayPortal(
+                <div className="fixed inset-0 z-[100] bg-slate-50 text-slate-800 flex flex-col animate-fade-in" style={{ paddingBottom: 'var(--safe-bottom)' }} onClick={(e) => e.stopPropagation()}>
                     {/* Header */}
                     <div className="pt-[calc(var(--safe-top)+0.75rem)] pb-3 px-4 bg-white border-b border-slate-100 shrink-0 flex items-center gap-3">
                         <button onClick={() => setExpanded(false)} className="p-2 -ml-2 rounded-full hover:bg-slate-100 text-slate-600">
@@ -520,7 +528,8 @@ const ForwardCard: React.FC<{
                             );
                         })}
                     </div>
-                </div>
+                </div>,
+                cardRef.current
             )}
         </>
     );
@@ -713,7 +722,7 @@ const TransferCard: React.FC<{
             {open && (
                 <div className="sully-chat-transfer-overlay fixed inset-0 z-[100] bg-black/40 backdrop-blur-sm flex items-center justify-center p-6 animate-fade-in" onClick={(e) => { e.stopPropagation(); setOpen(false); }}>
                     <div
-                        className="sully-chat-transfer-dialog w-full max-w-[320px] bg-white rounded-3xl overflow-hidden shadow-2xl"
+                        className="sully-chat-transfer-dialog w-full max-w-[320px] bg-white text-slate-800 rounded-3xl overflow-hidden shadow-2xl"
                         onClick={(e) => e.stopPropagation()}
                     >
                         {/* 顶部金额区 */}
@@ -783,6 +792,7 @@ const TransferCard: React.FC<{
 
 const Like520ChatCard: React.FC<{ data: any }> = ({ data }) => {
     const [open, setOpen] = useState(false);
+    const cardRef = useRef<HTMLDivElement | null>(null);
     const stop = (e: React.MouseEvent | React.TouchEvent) => e.stopPropagation();
     const dateStr = (() => {
         try {
@@ -795,6 +805,7 @@ const Like520ChatCard: React.FC<{ data: any }> = ({ data }) => {
         <>
             {/* 拍立得 / 复古剪贴本：照片 + 胶带 + 手写感落款 */}
             <div
+                ref={cardRef}
                 onClick={() => setOpen(true)}
                 style={{
                     width: 256,
@@ -916,8 +927,9 @@ const Like520ChatCard: React.FC<{ data: any }> = ({ data }) => {
                 </div>
             </div>
 
-            {open && (
+            {open && renderChatOverlayPortal(
                 <div
+                    className="fixed"
                     onClick={() => setOpen(false)}
                     style={{
                         position: 'fixed', inset: 0, zIndex: 9999,
@@ -994,7 +1006,8 @@ const Like520ChatCard: React.FC<{ data: any }> = ({ data }) => {
                             </div>
                         </div>
                     </div>
-                </div>
+                </div>,
+                cardRef.current
             )}
         </>
     );
@@ -1557,7 +1570,7 @@ const MessageItem = React.memo(({
                                     <div className="flex items-center gap-2">
                                         <span className="text-[9px] font-bold shrink-0" style={{ color: '#9b8a8e' }}>好感度</span>
                                         <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(230,220,225,0.6)' }}>
-                                            <div className="h-full rounded-full" style={{ width: `${Math.min(Math.max((scoreData.finalAffinity + 100) / 200 * 100, 2), 100)}%`, background: isPositive ? 'linear-gradient(90deg, #c9b1bd, #b8909a)' : 'linear-gradient(90deg, #c8a0a8, #b87880)' }} />
+                                            <div className="sully-chat-meter-fill h-full rounded-full" style={{ width: `${Math.min(Math.max((scoreData.finalAffinity + 100) / 200 * 100, 2), 100)}%`, background: isPositive ? 'linear-gradient(90deg, #c9b1bd, #b8909a)' : 'linear-gradient(90deg, #c8a0a8, #b87880)' }} />
                                         </div>
                                         <span className="text-[9px] font-mono font-bold shrink-0" style={{ color: '#8b7a7e' }}>{scoreData.finalAffinity}</span>
                                     </div>
@@ -2937,7 +2950,7 @@ const MessageItem = React.memo(({
                         <div className="flex items-center gap-2">
                             <span className="text-[9px] font-bold shrink-0" style={{ color: '#9b8a8e' }}>好感度</span>
                             <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(230,220,225,0.6)' }}>
-                                <div className="h-full rounded-full transition-all" style={{ width: `${Math.min(Math.max((scoreData.finalAffinity + 100) / 200 * 100, 2), 100)}%`, background: isPositive ? 'linear-gradient(90deg, #c9b1bd, #b8909a)' : 'linear-gradient(90deg, #c8a0a8, #b87880)' }} />
+                                <div className="sully-chat-meter-fill h-full rounded-full transition-all" style={{ width: `${Math.min(Math.max((scoreData.finalAffinity + 100) / 200 * 100, 2), 100)}%`, background: isPositive ? 'linear-gradient(90deg, #c9b1bd, #b8909a)' : 'linear-gradient(90deg, #c8a0a8, #b87880)' }} />
                             </div>
                             <span className="text-[9px] font-mono font-bold shrink-0" style={{ color: '#8b7a7e' }}>{scoreData.finalAffinity}</span>
                         </div>
