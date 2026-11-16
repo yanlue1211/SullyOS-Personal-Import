@@ -1,0 +1,36 @@
+name: Personal upstream bifang public client safety
+
+on:
+  pull_request:
+    branches: [personal/audio-listening]
+    paths:
+      - 'utils/vrWorld/bifangConfig.ts'
+      - 'utils/vrWorld/signalRecovery*'
+      - 'utils/vrWorld/postOffice.ts'
+      - 'utils/vrWorld/signal.ts'
+      - 'apps/VRWorldApp.tsx'
+      - 'context/OSContext.tsx'
+      - '.github/workflows/personal-upstream-bifang-verify.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Verify public address and original device ownership safety
+        run: pnpm vitest run utils/vrWorld/signalRecovery.test.ts
+      - name: Production build
+        run: pnpm run build
