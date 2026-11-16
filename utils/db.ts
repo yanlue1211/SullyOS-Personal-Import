@@ -1671,12 +1671,12 @@ export const DB = {
     transaction.objectStore(STORE_THEMES).delete(id);
   },
 
-  getAllAssets: async (): Promise<{id: string, data: string}[]> => {
+  getAllAssets: async (prefix?: string): Promise<{id: string, data: string}[]> => {
     const db = await openDB();
     return new Promise((resolve, reject) => {
       const transaction = db.transaction(STORE_ASSETS, 'readonly');
       const store = transaction.objectStore(STORE_ASSETS);
-      const request = store.getAll();
+      const request = store.getAll(prefix ? IDBKeyRange.bound(prefix, prefix + '\uffff') : undefined);
       request.onsuccess = () => resolve(request.result || []);
       request.onerror = () => reject(request.error);
     });

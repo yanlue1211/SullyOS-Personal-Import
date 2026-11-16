@@ -541,3 +541,15 @@ it("stale melody versions cannot overwrite a newer version, and a failed commit 
   expect(rows.some(m => m.content.includes("这不应保存"))).toBe(false);
   expect(getMelody(await getSong(song.id))?.versions).toHaveLength(1);
 });
+
+it('manual title and lyric edits commit together, keep recordings, and reject stale title atomically', async () => {
+  const before = await getSong(song.id);
+  const p = createProposal(before, 'song', '手动编辑歌词', 0, before.lines.length, parseLyrics('新的歌词', 'user'), 'user');
+  const saved = await acceptProposal(song.id, p, '我', {title:'新歌名',baseTitle:before.title});
+  expect(saved.title).toBe('新歌名');expect(lyricsText(saved.lines)).toContain('新的歌词');
+  const next = createProposal(saved, 'song', '手动编辑歌词', 0, saved.lines.length, parseLyrics('不该保存', 'user'), 'user');
+  await expect(acceptProposal(song.id,next,'我',{title:'覆盖',baseTitle:before.title})).rejects.toThrow('歌名已在别处更新');
+  expect((await getSong(song.id)).title).toBe('新歌名');expect(lyricsText((await getSong(song.id)).lines)).not.toContain('不该保存');
+  const renameOnly=createProposal(saved,'song','手动编辑歌词',0,saved.lines.length,saved.lines,'user');
+  expect((await acceptProposal(song.id,renameOnly,'我',{title:'只改歌名',baseTitle:'新歌名'})).title).toBe('只改歌名');
+});

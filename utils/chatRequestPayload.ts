@@ -1,3 +1,4 @@
+import { buildSongArchiveKeywordBlock } from '../features/personal/songArchive/keywords';
 import {orderPetCloudBackfill} from './tapnestCloud';
 import {momentsEnabled} from '../features/moments/gate';
 import {oracleContext} from '../features/experience/oracle';
@@ -468,6 +469,11 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
       volatileTail += buildSongSearchGuide();
     }
 
+
+    if (!input.appPrompt && isChatConversationEntry(input.recallEntryPoint)) {
+      try { volatileTail += await buildSongArchiveKeywordBlock(chronologicalHistory, char.id); }
+      catch (error) { console.warn('[song-archive] 关键词档案读取失败', error); }
+    }
 
     // Explicit current state overrides earlier listening messages after pause/stop.
     const livePlayback = loadMusicPlaybackSnapshot() ?? input.musicSnapshot;

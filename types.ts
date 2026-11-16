@@ -2024,7 +2024,7 @@ export interface CustomCreatorPart {
 }
 
 // --- SONGWRITING APP TYPES ---
-export type SongMood = 'happy' | 'sad' | 'romantic' | 'angry' | 'chill' | 'epic' | 'nostalgic' | 'dreamy';
+export type SongMood = 'free' | 'happy' | 'sad' | 'romantic' | 'angry' | 'chill' | 'epic' | 'nostalgic' | 'dreamy';
 export type SongGenre = 'pop' | 'rock' | 'ballad' | 'rap' | 'folk' | 'electronic' | 'jazz' | 'rnb' | 'free';
 export type LyricCoWritingStyle =
     | 'adaptive'

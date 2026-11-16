@@ -730,3 +730,6 @@
 .sw-chat-mode button { border:1px solid var(--sw-border);border-radius:13px;background:#fff;color:var(--sw-ink);padding:9px 13px;min-height:38px;font-size:12px; }
 .sw-chat-mode button[aria-pressed="true"] { background:var(--sw-light);border-color:var(--sw-accent);font-weight:650; }
 .sw-scroll > .sw-melody { margin:0 0 12px; }
+
+.sw-modal label { display:block; color:var(--sw-ink); font-size:13px; margin:12px 0; }
+.sw-modal input:not([type="checkbox"]) { width:100%; box-sizing:border-box; display:block; min-height:44px; padding:12px 14px; margin-top:8px; border:1px solid var(--sw-border); border-radius:14px; background:var(--sw-bg); color:var(--sw-ink); font:inherit; }

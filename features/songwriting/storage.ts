@@ -156,8 +156,14 @@ export function acceptProposal(
   id: string,
   p: LyricProposal,
   author: string,
+  rename?: { title: string; baseTitle: string },
 ): Promise<SongSheet> {
   return mutateSong(id, (song) => {
+    if (rename) {
+      if (!rename.title.trim()) throw Error("歌名不能为空");
+      if (song.title !== rename.baseTitle) throw Error("歌名已在别处更新，请重新核对");
+      song = { ...song, title: rename.title.trim() };
+    }
     if (song.lyricRevisions?.some((r) => r.id === p.id)) return { song };
     if (song.lyricProposal && song.lyricProposal.id !== p.id)
       throw Error("当前候选已变化，请重新核对");

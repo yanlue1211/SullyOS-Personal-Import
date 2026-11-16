@@ -106,8 +106,8 @@ export async function askCharForMelody(
   const range = await loadCharacterContextRange(char);
   const scene = {
     title: song.title,
-    genre: song.genre,
-    mood: song.mood,
+    genre: song.genre === "free" ? "不限曲风，根据讨论自由发挥" : song.genre,
+    mood: song.mood === "free" ? "根据讨论自由发挥，可随段落变化" : song.mood,
     vision: song.production?.vision || '',
     lyrics: lyricsText(song.lines),
     action: source ? '根据 user 的本轮表达决定聊天、保留当前曲谱或局部修订' : '根据 user 的本轮表达决定聊天还是开始八小节谱曲',

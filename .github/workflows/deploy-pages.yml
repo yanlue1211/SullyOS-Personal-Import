@@ -61,6 +61,9 @@ jobs:
       - name: Verify Gemini native transport and API configuration
         run: pnpm vitest run utils/geminiApi.test.ts utils/characterApiPanel.test.ts utils/characterApi.test.ts utils/apiPresetSwitch.test.ts utils/amsgLlmCredentials.test.ts utils/amsgInstantChat.test.ts
 
+      - name: Verify songwriting and sound archive keyword cards
+        run: pnpm vitest run utils/songwriting.test.ts utils/songwritingMelody.test.ts utils/songwritingProductionUI.test.tsx utils/songwritingMusicLibrary.test.ts utils/songwritingDownload.test.ts utils/songArchiveKeywords.test.ts utils/playlistSongButton.test.tsx utils/personalMusicLibrary.test.ts utils/songPrompts.test.ts
+
       - name: Build
         run: pnpm run build
 

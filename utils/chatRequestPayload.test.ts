@@ -495,3 +495,21 @@ it.each(['pause', 'switch', 'disable'])('discards sound analysis when playback c
       expect(text).not.toContain('不应继续注入的音迹分析');
     } finally {vi.restoreAllMocks();}
 });
+
+it.each([false,true])('song keyword archive stays exclusively in volatile tail before local/worker reply (worker=%s)',async timelyByWorker=>{
+ const {setSongKeywordsEnabled}=await import('../features/personal/songArchive/keywords');
+ await (await import('./db')).DB.saveAsset('personal_song_sound_v1_987654',JSON.stringify({songName:'缓存测试曲',artists:'测试歌手',description:'独特的已存声音细节',isTrial:false,updatedAt:1}));
+ await setSongKeywordsEnabled(true);
+ try{
+  const input={...baseInput(),recallEntryPoint:'chat_app' as const,timelyByWorker};
+  input.char={...input.char,id:'keyword-request-'+timelyByWorker};
+  input.historyMsgs=input.historyMsgs.map(m=>({...m,charId:input.char.id}));
+  input.historyMsgs[0].content='想聊聊缓存测试曲';
+  const payload=await buildChatRequestPayload(input);
+  expect(payload.fullMessages.find(m=>m.name==='sully_live_context')?.content).toContain('独特的已存声音细节');
+  expect(payload.fullMessages.filter(m=>m.name!=='sully_live_context').some(m=>String(m.content).includes('独特的已存声音细节'))).toBe(false);
+  const native=toAnthropicRequest({model:'c',messages:payload.fullMessages});
+  const block=native.messages.flatMap((m:any)=>m.content).find((b:any)=>b.text?.includes('独特的已存声音细节'));
+  expect(block).toBeDefined();expect(block).not.toHaveProperty('cache_control');
+ }finally{await setSongKeywordsEnabled(false);}
+});

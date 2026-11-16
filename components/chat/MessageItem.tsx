@@ -1,3 +1,4 @@
+import SongArchiveRecallCard from './SongArchiveRecallCard';
 import SongwritingCard from '../song/SongwritingCard';
 import MessageDetailEditor from '../../features/personal/messageEditing/MessageDetailEditor';
 import RealMediaView from '../../features/experience/RealMediaView';
@@ -1412,6 +1413,10 @@ const MessageItem = React.memo(({
     if (m.type === 'moments_card') return <div className="w-full px-4 py-2 relative" {...interactionProps}>
         {selectionMode && <button type="button" aria-label="选择朋友圈记录" aria-pressed={isSelected} onClick={()=>onToggleSelect(m.id)}>{isSelected?'☑':'□'}</button>}
         <ChatCardSurface message={m}><details className="p-3 text-sm"><summary className="cursor-pointer text-slate-600">朋友圈 · 一段新见闻</summary><p className="whitespace-pre-wrap mt-3">{m.content}</p></details></ChatCardSurface>
+    </div>;
+    if (m.metadata?.source === 'song-archive-recall') return <div className="w-full px-4 py-2 relative" {...interactionProps}>
+        {selectionMode && <button type="button" aria-label="选择音迹卡片" aria-pressed={isSelected} onClick={()=>onToggleSelect(m.id)}>{isSelected?'☑':'□'}</button>}
+        <ChatCardSurface message={m}><SongArchiveRecallCard message={m}/></ChatCardSurface>
     </div>;
     // --- SYSTEM MESSAGE RENDERING ---
     if (isSystem) {
