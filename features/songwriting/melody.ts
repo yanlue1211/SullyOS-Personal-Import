@@ -180,7 +180,7 @@ const vocalRules = `你正在糯米机写歌 App 与 user 共同创作人声主�
 export function mergeVocalReply(song:SongSheet, source:MelodyVersion|undefined, json:any, target:VocalTarget):MelodyVersion {
   if(!json.phrases.length||json.phrases.length>64)throw Error('旋律片段数量无效');
   const lines=song.lines.filter(l=>!l.isDraft),seen=new Set<string>();
-  const incoming=json.phrases.map((item:any)=>{
+  const incoming: {phrase:VocalPhrase;bars:MelodyBar[]}[]=json.phrases.map((item:any)=>{
     const line=item.lineId?lines.find(l=>l.id===item.lineId):undefined;
     if(item.lineId&&!line)throw Error('旋律引用了不存在的歌词句子');
     if(line&&target.scope!=='song'&&!target.lineIds.includes(line.id))throw Error('旋律超出所选歌词范围');
