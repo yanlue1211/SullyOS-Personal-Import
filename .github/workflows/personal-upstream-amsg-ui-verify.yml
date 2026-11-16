@@ -1,0 +1,40 @@
+name: Personal upstream AMSG UI and push diagnostics safety
+
+on:
+  pull_request:
+    branches: [personal/audio-listening]
+    paths:
+      - 'components/settings/ActiveMsgGlobalSettingsModal.tsx'
+      - 'utils/activeMsgClient.ts'
+      - 'utils/activeMsgClient.testPush.test.ts'
+      - 'utils/activeMsgSettingsModal.test.ts'
+      - '.github/workflows/personal-upstream-amsg-ui-verify.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  targeted-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Test upstream AMSG UI and push diagnostics plus existing Worker regression
+        run: >-
+          pnpm vitest run
+          utils/activeMsgClient.testPush.test.ts
+          utils/activeMsgSettingsModal.test.ts
+          utils/activeMsgClient.wiring.test.ts
+          utils/amsgBundleVersion.test.ts
+          worker/amsg/src/index.test.ts
+      - name: Build frontend
+        run: pnpm run build
