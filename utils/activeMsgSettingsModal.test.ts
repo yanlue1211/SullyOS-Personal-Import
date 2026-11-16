@@ -125,6 +125,19 @@ describe('主动消息 2.0 配置入口', () => {
     expect(host.textContent).toContain('正在检查推送状态');
   });
 
+  it('共享密钥默认折叠且不会自动修改；只有手动展开时才能触碰「随机」', async () => {
+    client.getGlobalConfig.mockResolvedValue({ ...initialConfig, serverToken: 'deployed-token' });
+    await render();
+    expect(host.querySelector('input[placeholder="worker 配了 AMSG_SERVER_TOKEN 才需要填"]')).toBeNull();
+    expect(Array.from(host.querySelectorAll('button')).some((item) => item.textContent === '随机')).toBe(false);
+    expect(host.textContent).toContain('共享密钥 · 已填好');
+    const expand = Array.from(host.querySelectorAll('button')).find((item) => item.textContent?.includes('共享密钥'));
+    expect(expand).toBeTruthy();
+    await act(async () => { expand!.click(); });
+    expect(host.querySelector<HTMLInputElement>('input[placeholder="worker 配了 AMSG_SERVER_TOKEN 才需要填"]')?.value).toBe('deployed-token');
+    expect(Array.from(host.querySelectorAll('button')).some((item) => item.textContent === '随机')).toBe(true);
+  });
+
   it('推送检查失败后保留配置，并能单独重试', async () => {
     client.getPushStatus.mockRejectedValueOnce(new Error('Push service failed'));
     await render();
