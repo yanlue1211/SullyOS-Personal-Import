@@ -476,9 +476,16 @@ let lastKnownWorkerUrl = '';
 
 const normalizeActiveMsgApiError = (error: unknown, phase: string, workerUrl?: string | null) => {
   const described = describeAmsgFetchFailure(error, phase, workerUrl || lastKnownWorkerUrl);
-  // 尽量沿用原来那个异常对象（调用方可能还看它别的字段），只把给人看的那句话换掉。
-  const normalized = error instanceof Error ? error : new Error(described.message);
-  normalized.message = described.message;
+  // 原生 DOMException（如网络 AbortError）可能把 message 做成只读 getter。
+  // 直接覆写会再抛一条 TypeError，反而遮住原始网络/超时故障，连体检也无法显示原因。
+  // 普通 Error 沿用原对象以保留调用方依赖的额外字段；只读错误则用 cause 包一层。
+  let normalized: Error = error instanceof Error ? error : new Error(described.message, { cause: error });
+  try {
+    normalized.message = described.message;
+  } catch {
+    normalized = new Error(described.message, { cause: error });
+    if (error instanceof Error) normalized.name = error.name;
+  }
   return withFailKind(normalized, described.kind);
 };
 
