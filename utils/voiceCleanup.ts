@@ -4,7 +4,8 @@ import {reclaimUnreferencedVoiceBlobs} from './voiceBlobBatchCleanup';
 import {listUserRecordings,clearUserRecordings,type UserRecording} from '../features/personal/chatMedia/cleanup';
 import {currentMaintenanceHolder,tryAcquireMaintenanceLock,releaseMaintenanceLock} from './maintenanceLock';
 
-const voiceId=(id:string)=>['tts_','voice_msg_','voice_favorite_audio_','companion-startup-voice:','companion-touch-voice:','yueqi:audio:'].some(prefix=>id.startsWith(prefix));
+// Manually saved voice favorites have a dedicated audio row and must survive bulk cleanup.
+const voiceId=(id:string)=>['tts_','voice_msg_','companion-startup-voice:','companion-touch-voice:','yueqi:audio:'].some(prefix=>id.startsWith(prefix));
 const bytes=(value:any):number=>value instanceof Blob?value.size:value?.blob instanceof Blob?value.blob.size:typeof value==='string'&&value.startsWith('data:audio/')?Math.floor((value.length-value.indexOf(',')-1)*.75):0;
 export interface VoiceCleanupPlan {assets:{store:'assets'|'blob_assets';id:string;bytes:number}[];recordings:UserRecording[];inlineSessions:string[];looseAudio:{id:string;ref:string;bytes:number}[];estimatedBytes:number;}
 /** Bounded pages; speech IDs only. Music, BGM and image assets are not MIME-wide deletion targets. */
@@ -15,8 +16,8 @@ export async function inspectAllVoices():Promise<VoiceCleanupPlan>{
   let after:IDBValidKey|null=null;
   for(;;){const page=await DB.getStoreRowsPage(store,after,20);
    for(const row of page.rows){
-    if(store==='blob_assets'&&!voiceId(row.id)&&!recordingRefs.has(BLOBREF_PREFIX+row.id)&&row.blob instanceof Blob&&row.blob.type.startsWith('audio/'))result.looseAudio.push({id:row.id,ref:BLOBREF_PREFIX+row.id,bytes:row.blob.size});
-    if(voiceId(row.id)&&(!row.id.startsWith('voice_msg_')||row.data?.blob||row.data?.remoteUrl||row.data?.url||row.data?.audio))result.assets.push({store,id:row.id,bytes:bytes(store==='assets'?row.data:row.blob)});
+    if(store==='blob_assets'&&!voiceId(row.id)&&!row.id.startsWith('voice_favorite_audio_')&&!recordingRefs.has(BLOBREF_PREFIX+row.id)&&row.blob instanceof Blob&&row.blob.type.startsWith('audio/'))result.looseAudio.push({id:row.id,ref:BLOBREF_PREFIX+row.id,bytes:row.blob.size});
+    if(voiceId(row.id)&&row.data?.favorite!==true&&(!row.id.startsWith('voice_msg_')||row.data?.blob||row.data?.remoteUrl||row.data?.url||row.data?.audio))result.assets.push({store,id:row.id,bytes:bytes(store==='assets'?row.data:row.blob)});
     if(store==='assets'&&row.id.startsWith('yueqi:session:')&&Array.isArray(row.data?.clips)){
      result.inlineSessions.push(row.id);
      result.estimatedBytes+=row.data.clips.reduce((n:number,c:any)=>n+bytes(c.audio),0);
@@ -50,6 +51,8 @@ export async function clearAllVoices(plan:VoiceCleanupPlan,onProgress?:(label:st
       req.onsuccess=()=>{
        if(!req.result||!voiceId(candidate.id))return;
        const row=req.result;
+       // Recheck at deletion time: the user may have favorited a voice after scanning.
+       if(storeName==='assets'&&row.data?.favorite===true)return;
        const removedBytes=bytes(storeName==='assets'?row.data:row.blob);
        if(storeName==='assets'&&candidate.id.startsWith('voice_msg_')){
         const {blob,remoteUrl,url,audio,...text}=row.data||{};
