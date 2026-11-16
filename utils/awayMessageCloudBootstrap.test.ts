@@ -3,11 +3,12 @@ import { DB } from './db';
 import { ActiveMsgClient } from './activeMsgClient';
 import { ActiveMsgStore } from './activeMsgStore';
 import {
-  isAwayCloudRoute, runLocalAwayMessages, syncCloudAwayTask, cancelCloudAwayTasks,
+  isAwayCloudRoute, runLocalAwayMessages, syncCloudAwayTask, rearmCloudAwayAfterSceneExit, cancelCloudAwayTasks,
   pauseCloudAwaySyncForSettings, resumeCloudAwaySyncForSettings, waitForCloudAwaySync,
   isLatestCloudAwaySettings, enqueueCloudAwaySettingsUpdate,
 } from './awayMessage';
 import type { CharacterProfile } from '../types';
+import { setAmsgActiveDate, setAmsgActiveCall } from './amsgInteractionGuard';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
@@ -392,5 +393,72 @@ describe('reply-complete cloud away rearm wiring', () => {
     expect(runtime).toContain('instantReplyFinished: isInstantReply && isFinalInstantSegment && looksLikeAssistantText');
     expect(runtime).toContain('if (isFinalInstantSegment && clearInstantChatPending(message.charId))');
     expect(runtime).toMatch(/const isInstantReply = message.source === 'instant'/);
+  });
+});
+
+describe('author meet/call presence with personal B-mode cloud rearm', () => {
+  const makeLocalStore = () => {
+    const db = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => db.get(key) ?? null,
+      setItem: (key: string, value: string) => { db.set(key, value); },
+      removeItem: (key: string) => { db.delete(key); },
+    });
+  };
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('date exit changes only idle due time, not the user-only or self-scheduled tasks', async () => {
+    makeLocalStore();
+    const char = makeChar();
+    const endAt = NOW - 10 * 60_000;
+    setAmsgActiveDate(char.id, true, 'date-1');
+    setAmsgActiveDate(char.id, false, undefined, endAt);
+    vi.spyOn(DB, 'getRecentMessagesByCharId').mockResolvedValue([
+      {role:'assistant', timestamp: NOW - 8 * HOUR},
+      {role:'user',timestamp: NOW - 12 * 60_000, metadata:{ source: 'date' }},
+    ] as any);
+    vi.mocked(ActiveMsgClient.listRemoteTasksForChar).mockResolvedValue([
+      {uuid:'appointment-keep', clientTaskId:'user-appointment', status:'pending',
+        nextSendAt:new Date(NOW + HOUR).toISOString()},
+      {uuid:'away-keep', clientTaskId:'away-keep', status:'pending',
+        nextSendAt:new Date(NOW + HOUR).toISOString()},
+    ] as any);
+    const { lastCharAt: _unused, ...deps } = createDeps(char);
+    expect(await rearmCloudAwayAfterSceneExit(deps)).toBe(true);
+    const expectedDue = new Date(endAt + 4 * HOUR).toISOString();
+    expect(ActiveMsgClient.updatePendingTasksRemote).toHaveBeenCalledWith(['away-keep'],
+      {nextSendAt:expectedDue});
+    expect(ActiveMsgClient.cancelTask).not.toHaveBeenCalled();
+    expect(ActiveMsgClient.scheduleCharacterTask).not.toHaveBeenCalled();
+  });
+
+  it('explicit hangup defers idle chain even if call-end system record failed to save', async () => {
+    makeLocalStore();
+    const char = makeChar();
+    const endAt = NOW - 25 * 60_000;
+    setAmsgActiveCall(char.id, true);
+    setAmsgActiveCall(char.id, false, endAt);
+    vi.spyOn(DB, 'getRecentMessagesByCharId').mockResolvedValue([
+      { role: 'assistant', timestamp: NOW - 6 * HOUR },
+      { role: 'user', timestamp: NOW - HOUR, metadata: { source: 'call' } },
+    ] as any);
+    const { lastCharAt: _unused, ...deps } = createDeps(char);
+    expect(await rearmCloudAwayAfterSceneExit(deps)).toBe(true);
+    const task=vi.mocked(ActiveMsgClient.scheduleCharacterTask).mock.calls[0][0].task;
+    expect(task.firstSendTime).toBe(new Date(endAt + 4 * HOUR).toISOString());
+    expect(task.away).toEqual({delayMinutes: 240});
+  });
+
+  it('no existing genuine Char reply means no new paid/remote idle task', async () => {
+    makeLocalStore();
+    const char = makeChar();
+    setAmsgActiveDate(char.id, false, undefined, NOW - 20 * 60_000);
+    vi.spyOn(DB, 'getRecentMessagesByCharId').mockResolvedValue([
+      {role:'user',timestamp:NOW - 30 * 60_000,metadata:{source:'date'}},
+    ] as any);
+    const {lastCharAt:_unused,...deps} = createDeps(char);
+    expect(await rearmCloudAwayAfterSceneExit(deps)).toBe(false);
+    expect(ActiveMsgClient.listRemoteTasksForChar).not.toHaveBeenCalled();
+    expect(ActiveMsgClient.scheduleCharacterTask).not.toHaveBeenCalled();
   });
 });
