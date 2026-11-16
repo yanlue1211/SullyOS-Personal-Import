@@ -700,20 +700,19 @@ describe('优化资源存储（一次性批量迁移）', () => {
         expect(second.failed).toBe(0);
     });
 
-    it('角色头像：base64 转成令牌，Blob 字节与原图逐字节一致', async () => {
+    it('角色头像：base64 保留原样以支持立即显示', async () => {
         await DB.saveCharacter({ id: 'c1', name: '角色', avatar: TINY_PNG } as any);
 
         const r = await optimizeResourceStorage();
 
         const c = (await DB.getAllCharacters()).find(x => x.id === 'c1')!;
-        expect(isBlobRef(c.avatar)).toBe(true);
-        expect(await blobBytes(c.avatar)).toEqual(new Uint8Array(await dataUrlToBlob(TINY_PNG).arrayBuffer()));
-        expect(r.converted).toBe(1);
-        expect(r.uniqueBlobs).toBe(1);
+        expect(c.avatar).toBe(TINY_PNG);
+        expect(r.converted).toBe(0);
+        expect(r.uniqueBlobs).toBe(0);
         expect(r.failed).toBe(0);
     });
 
-    it('角色头像与小屋图一趟遍历里一起转，互不影响', async () => {
+    it('角色头像保持原样，同时继续优化小屋图', async () => {
         await DB.saveCharacter({
             id: 'c1', name: '角色', avatar: TINY_PNG,
             roomConfig: { wallImage: TINY_JPEG, items: [] },
@@ -722,12 +721,12 @@ describe('优化资源存储（一次性批量迁移）', () => {
         const r = await optimizeResourceStorage();
 
         const c = (await DB.getAllCharacters()).find(x => x.id === 'c1') as any;
-        expect(isBlobRef(c.avatar)).toBe(true);
+        expect(c.avatar).toBe(TINY_PNG);
         expect(isBlobRef(c.roomConfig.wallImage)).toBe(true);
-        expect(r.converted).toBe(2);
+        expect(r.converted).toBe(1);
     });
 
-    it('角色头像：emoji 与 http 外链原样保留，只有 data: 才转', async () => {
+    it('角色头像：emoji 与 http 外链也保持原样', async () => {
         // 头像是两用字段，用户可以只填一个 emoji；外链是别人服务器上的地址，本机没有二进制
         await DB.saveCharacter({ id: 'c1', name: '表情头像', avatar: '🐱' } as any);
         await DB.saveCharacter({ id: 'c2', name: '外链头像', avatar: 'https://img.host/a.png' } as any);
