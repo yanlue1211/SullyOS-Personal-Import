@@ -4084,6 +4084,30 @@ describe('worker 入口 — 配置不全时的响应', () => {
     expect(response.headers.get('Access-Control-Allow-Headers')).toContain('Content-Encoding');
   });
 
+  it('配置齐全时 /client-state PUT 的 gzip 预检由包装层统一放行', async () => {
+    const response = await call('https://w.example/client-state', {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'https://yanlue1211.github.io',
+        'Access-Control-Request-Method': 'PUT',
+        'Access-Control-Request-Headers': 'content-type,content-encoding,x-user-id,x-payload-encrypted,x-encryption-version,x-client-token',
+      },
+    }, fullEnv);
+    expect(response.status).toBe(204);
+    expect(response.headers.get('Access-Control-Allow-Origin')).toBe('*');
+    expect(response.headers.get('Access-Control-Allow-Methods')).toContain('PUT');
+    const allowed = response.headers.get('Access-Control-Allow-Headers')?.toLowerCase() ?? '';
+    for (const required of ['content-type','content-encoding','x-user-id','x-payload-encrypted','x-encryption-version','x-client-token']) {
+      expect(allowed).toContain(required);
+    }
+  });
+
+  it('转发上游 404 仍带 CORS，保留原本的 HTTP 语义', async () => {
+    const response = await call('https://w.example/unknown-url', {}, fullEnv);
+    expect(response.status).toBe(404);
+    expect(response.headers.get('Access-Control-Allow-Origin')).toBe('*');
+  });
+
   it('/config-check 在配置缺一半时也要能答，否则前端没法告诉用户缺的是哪一样', async () => {
     const response = await call('https://w.example/config-check');
     expect(response.status).toBe(200);

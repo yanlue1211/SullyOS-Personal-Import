@@ -14798,7 +14798,7 @@ function buildScheduledPush(message, build, extraMeta, bannerBody) {
 }
 
 // utils/amsgBundleVersion.ts
-var AMSG_BUNDLE_VERSION = "2026-11-15.1";
+var AMSG_BUNDLE_VERSION = "2026-11-16.1";
 
 // worker/amsg/src/reproduction.ts
 async function writeDiagnosticStage(writeState, runId, event, fields = {}) {
@@ -22060,6 +22060,7 @@ var src_default = {
         error: { code: result.code, message: result.message }
       });
     }
+    if (method === "OPTIONS") return new Response(null, { status: 204, headers: CORS_HEADERS });
     const report = inspectWorkerEnv(env);
     if (!report.ok) {
       if (method === "OPTIONS") return new Response(null, { status: 204, headers: CORS_HEADERS });
@@ -22179,7 +22180,23 @@ var src_default = {
         error: { code: "VAPID_NOT_CONFIGURED", message: "Worker \u672A\u914D\u7F6E VAPID \u5BC6\u94A5\u5BF9\uFF0C\u6D4F\u89C8\u5668 Web Push \u4E0D\u53EF\u7528\uFF08\u53EF\u4F7F\u7528\u7B2C\u4E09\u65B9\u63A8\u9001 App\uFF09\u3002" }
       });
     }
-    return upstream.fetch(request, env);
+    try {
+      const response = await upstream.fetch(request, env);
+      const headers2 = new Headers(response.headers);
+      for (const [key, value] of Object.entries(CORS_HEADERS)) headers2.set(key, value);
+      return new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: headers2
+      });
+    } catch (error) {
+      const errorType = error instanceof Error ? error.name : typeof error;
+      console.error(`[amsg:upstream] ${method} ${pathname} failed (${errorType})`);
+      return jsonWithCors(500, {
+        success: false,
+        error: { code: "UPSTREAM_REQUEST_FAILED", message: "Worker \u5904\u7406\u63A5\u53E3\u65F6\u53D1\u751F\u5185\u90E8\u9519\u8BEF\uFF0C\u8BF7\u67E5\u770B Cloudflare Workers \u65E5\u5FD7\u3002" }
+      });
+    }
   },
   async scheduled(event, env) {
     const report = inspectWorkerEnv(env);

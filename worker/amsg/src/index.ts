@@ -4201,6 +4201,10 @@ export default {
       });
     }
 
+    // 对全部上游路由统一处理预检。/client-state 的 PUT 常带 Content-Encoding，
+    // 若旧上游在错误分支漏了 CORS，浏览器只报 Failed to fetch，连真正请求都不会发。
+    if (method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS_HEADERS });
+
     const report = inspectWorkerEnv(env);
     if (!report.ok) {
       // 预检也得放行：带自定义头的请求会先发 OPTIONS，这一步被挡住的话正式请求
@@ -4337,7 +4341,27 @@ export default {
       });
     }
 
-    return upstream.fetch(request, env);
+    // 上游偶发内部异常可能回一个没有 CORS 头的 500，导致浏览器把真实状态
+    // 遮成 TypeError: Failed to fetch。透传原状态码/正文，只补统一的 CORS 头；
+    // 不改鉴权、加密、client_state 写入及业务回执。
+    try {
+      const response = await upstream.fetch(request, env);
+      const headers = new Headers(response.headers);
+      for (const [key, value] of Object.entries(CORS_HEADERS)) headers.set(key, value);
+      return new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers,
+      });
+    } catch (error) {
+      // 日志不输出 body/凭据/异常 message，避免 SQL/加密上下文泄漏。
+      const errorType = error instanceof Error ? error.name : typeof error;
+      console.error(`[amsg:upstream] ${method} ${pathname} failed (${errorType})`);
+      return jsonWithCors(500, {
+        success: false,
+        error: { code: 'UPSTREAM_REQUEST_FAILED', message: 'Worker 处理接口时发生内部错误，请查看 Cloudflare Workers 日志。' },
+      });
+    }
   },
 
   async scheduled(event: CfScheduledEvent, env: Env): Promise<void> {
