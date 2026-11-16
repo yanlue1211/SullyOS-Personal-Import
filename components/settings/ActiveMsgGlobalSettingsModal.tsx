@@ -816,7 +816,9 @@ const ActiveMsgGlobalSettingsModal: React.FC<ActiveMsgGlobalSettingsModalProps> 
         return;
       }
       setProvisionStep('正在建表…');
+      const wasDisabled = !isAmsg2GloballyEnabled(config);
       const { warnings } = await ActiveMsgClient.connect();
+      if (wasDisabled) onReenabledAfterConnect?.();
       await refresh();
       warnings.forEach((warning) => addToast(warning.message, 'info'));
       addToast('已连接成功，主动消息 2.0 可以用了。', 'success');
@@ -838,6 +840,7 @@ const ActiveMsgGlobalSettingsModal: React.FC<ActiveMsgGlobalSettingsModalProps> 
 
     setLoading(true);
     try {
+      const wasDisabled = !isAmsg2GloballyEnabled(config);
       await ActiveMsgStore.saveGlobalConfig({
         workerUrl: config.workerUrl,
         serverToken: config.serverToken,
@@ -846,6 +849,7 @@ const ActiveMsgGlobalSettingsModal: React.FC<ActiveMsgGlobalSettingsModalProps> 
         thirdPartyPush: config.thirdPartyPush,
       });
       const { warnings } = await ActiveMsgClient.connect();
+      if (wasDisabled) onReenabledAfterConnect?.();
       await refresh();
       addToast('已连接成功，主动消息 2.0 可以用了。', 'success');
       // 连上了但有一块是哑的（最典型是 VAPID 没配齐：任务建得成、到点一条都推不出去，
@@ -1143,7 +1147,7 @@ const ActiveMsgGlobalSettingsModal: React.FC<ActiveMsgGlobalSettingsModalProps> 
 
   const globallyEnabled = isAmsg2GloballyEnabled(config);
   const globallyPaused = !globallyEnabled && Boolean(config.workerUrl?.trim());
-  const instantChatBlocker = globallyPaused ? null : resolveInstantChatBlocker({
+  const instantChatBlocker = resolveInstantChatBlocker({
     connected: isConnected,
     pushSubscribed: Boolean(pushStatus?.hasSubscription),
     workerSupportsInstantChat: instantChatSupported,

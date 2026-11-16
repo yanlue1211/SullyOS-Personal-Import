@@ -95,6 +95,7 @@ describe('主动消息 2.0 配置入口', () => {
   });
 
   it('推送检查一直没返回也能编辑配置', async () => {
+    client.getGlobalConfig.mockResolvedValue({ ...initialConfig, workerUrl: 'https://worker.invalid' });
     client.getPushStatus.mockReturnValue(new Promise(() => {}));
     await render();
     expect(host.querySelector('input[placeholder="https://amsg.你的账号.workers.dev"]')).not.toBeNull();
@@ -139,6 +140,7 @@ describe('主动消息 2.0 配置入口', () => {
   });
 
   it('推送检查失败后保留配置，并能单独重试', async () => {
+    client.getGlobalConfig.mockResolvedValue({ ...initialConfig, workerUrl: 'https://worker.invalid' });
     client.getPushStatus.mockRejectedValueOnce(new Error('Push service failed'));
     await render();
     expect(host.textContent).toContain('推送状态读取失败');
@@ -149,6 +151,7 @@ describe('主动消息 2.0 配置入口', () => {
   });
 
   it('推送检查超时后可重试，迟到的旧结果不覆盖新状态', async () => {
+    client.getGlobalConfig.mockResolvedValue({ ...initialConfig, workerUrl: 'https://worker.invalid' });
     const pending = deferred<typeof subscribedPush>();
     client.getPushStatus.mockReturnValueOnce(pending.promise);
     await render();
@@ -194,6 +197,7 @@ describe('主动消息 2.0 配置入口', () => {
   });
 
   it('关闭再打开时不会接收上次打开的迟到推送状态', async () => {
+    client.getGlobalConfig.mockResolvedValue({ ...initialConfig, workerUrl: 'https://worker.invalid' });
     const pending = deferred<typeof subscribedPush>();
     client.getPushStatus.mockReturnValueOnce(pending.promise);
     await render();
@@ -204,41 +208,35 @@ describe('主动消息 2.0 配置入口', () => {
   });
 
   it('重试推送检查不会重新载入并替换当前表单', async () => {
+    client.getGlobalConfig.mockResolvedValue({ ...initialConfig, workerUrl: 'https://worker.invalid' });
     client.getPushStatus.mockRejectedValueOnce(new Error('Push service failed'));
     await render();
     client.getGlobalConfig.mockResolvedValue({ userId: 'other', workerUrl: 'https://other.invalid' });
     await click('重试推送检查');
     const input = host.querySelector<HTMLInputElement>('input[placeholder="https://amsg.你的账号.workers.dev"]');
-    expect(input?.value).toBe('');
+    expect(input?.value).toBe('https://worker.invalid');
     expect(host.textContent).toContain('已开启');
   });
 
-  it('总开关暂停时打开面板不向 Worker 发任何探测请求，且保留已有连接配置', async () => {
+  it('总开关暂停时打开面板不向 Worker 发探测请求，并保留连接和密钥', async () => {
     client.getCapabilities.mockClear();
     client.probeWorkerVersion.mockClear();
     client.probeInstantChatSupport.mockClear();
     client.getCronTriggerState.mockClear();
     client.getGlobalConfig.mockResolvedValue({
-      ...connected,
-      enabled: false,
-      serverToken: 'saved-token',
+      ...initialConfig, workerUrl: 'https://worker.invalid', initializedAt: 1,
+      enabled: false, serverToken: 'saved-token',
     });
     await render();
     expect(host.textContent).toContain('主动消息 2.0 总开关 · 已暂停');
-    expect(host.textContent).toContain('后端 Worker已暂停');
     expect(client.getCapabilities).not.toHaveBeenCalled();
     expect(client.probeWorkerVersion).not.toHaveBeenCalled();
     expect(client.probeInstantChatSupport).not.toHaveBeenCalled();
     expect(client.getCronTriggerState).not.toHaveBeenCalled();
     expect(fetchWorkerDiagnostics).not.toHaveBeenCalled();
-    // 暂停是用户主动选的，不把「后端 Worker」当故障自动弹开。
-    expect(host.querySelector('input[placeholder="https://amsg.你的账号.workers.dev"]')).toBeNull();
-    await expand('后端 Worker');
     expect(host.querySelector<HTMLInputElement>('input[placeholder="https://amsg.你的账号.workers.dev"]')?.value)
       .toBe('https://worker.invalid');
-    // 展开即时对话：暂停态只报总开关暂停，绝不误报「更新 Worker」或「Worker 过旧」。
-    await expand('即时对话（防杀后台）');
-    expect(host.textContent).toContain('总开关已暂停，当前聊天在本机生成');
-    expect(host.textContent).not.toContain('点上面的「更新 Worker」');
+    expect(host.textContent).toContain('共享密钥 · 已填好');
+    expect(host.textContent).toContain('总开关已暂停');
   });
 });
