@@ -15,7 +15,7 @@ import { resolveDialogueApi } from '../utils/characterApi';
 import { setAmsgActiveCall } from '../utils/amsgInteractionGuard';
 import { syncAmsgCallPresence } from '../utils/amsgCallPresenceSync';
 import { ActiveMsgClient } from '../utils/activeMsgClient';
-import { syncCloudAwayTask } from '../utils/awayMessage';
+import { rearmCloudAwayAfterSceneExit } from '../utils/awayMessage';
 import { isAmsg2EnabledForChar } from '../utils/amsg2Tasks';
 import { loadCharacterContextMessages } from '../utils/chatContextRange';
 import { canAnalyzeVoiceSource, isVoiceAudioPriming, primeVoiceAudio, voicePlaybackErrorMessage } from '../utils/voicePlayback';
@@ -1815,6 +1815,7 @@ const CallApp: React.FC = () => {
   };
   const finishCall = async () => {
     const finishingChar = selectedChar;
+    const explicitHangupAt = Date.now();
     let saved = !finishingChar;
     try {
       if (finishingChar) {
@@ -1848,12 +1849,20 @@ const CallApp: React.FC = () => {
     } finally {
       // 显式挂断必须解除锁；即便记录保存失败也不得把状态永久留给2.0。
       if (finishingChar) {
-        setAmsgActiveCall(finishingChar.id, false);
+        setAmsgActiveCall(finishingChar.id, false, explicitHangupAt);
         void syncAmsgCallPresence(finishingChar, false).catch(error => console.warn('[CallApp] 云端挂断租约同步失败', error));
-        void ((isAmsg2EnabledForChar(finishingChar) || finishingChar.awayMessage?.enabled)
-          ? ActiveMsgClient.putCharLimits(finishingChar) : Promise.resolve())
-          .catch(error => console.warn('[CallApp] 云端挂断状态同步失败', error));
         markCallTurnDirty();
+        void (async () => {
+          // 先同步挂断锚点与通话锁，再补建/改期仅属于自动离开提醒的链条。
+          if (isAmsg2EnabledForChar(finishingChar) || finishingChar.awayMessage?.enabled) {
+            await ActiveMsgClient.putCharLimits(finishingChar);
+          }
+          if (finishingChar.awayMessage?.enabled) {
+            await rearmCloudAwayAfterSceneExit({
+              char: finishingChar, userProfile, groups, realtimeConfig, apiConfig, updateCharacter,
+            });
+          }
+        })().catch(error => console.warn('[CallApp] 通话结束后空闲节拍同步失败', error));
       }
       clearSuspendedCall();
       resetCurrentCall();
@@ -2817,9 +2826,8 @@ ${sentencePlan}`;
         });
         setBubbles(prev => prev.map(b => (b.id === userBubble.id ? { ...b, dbId: userDbId } : b)));
         markCallTurnDirty();
-        if (selectedChar?.awayMessage?.enabled) void syncCloudAwayTask({
-          char: selectedChar, lastUserAt: Date.now(), userProfile, groups, realtimeConfig, apiConfig, updateCharacter,
-        });
+        // 通话中有云端场景锁，用户单独讲话不重置个人 B 模式角色发言节拍；
+        // 挂断时才以明确的通话结束时刻重算下一次自动空闲联系。
       } else if (newSnapshotRef) {
         const previousSnapshotRef = retryBubble?.cameraSnapshotRef;
         try {
