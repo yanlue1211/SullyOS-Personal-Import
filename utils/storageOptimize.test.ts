@@ -700,20 +700,19 @@ describe('优化资源存储（一次性批量迁移）', () => {
         expect(second.failed).toBe(0);
     });
 
-    it('角色头像：base64 转成令牌，Blob 字节与原图逐字节一致', async () => {
+    it('角色头像：base64 保留原样以支持立即显示', async () => {
         await DB.saveCharacter({ id: 'c1', name: '角色', avatar: TINY_PNG } as any);
 
         const r = await optimizeResourceStorage();
 
         const c = (await DB.getAllCharacters()).find(x => x.id === 'c1')!;
-        expect(isBlobRef(c.avatar)).toBe(true);
-        expect(await blobBytes(c.avatar)).toEqual(new Uint8Array(await dataUrlToBlob(TINY_PNG).arrayBuffer()));
-        expect(r.converted).toBe(1);
-        expect(r.uniqueBlobs).toBe(1);
+        expect(c.avatar).toBe(TINY_PNG);
+        expect(r.converted).toBe(0);
+        expect(r.uniqueBlobs).toBe(0);
         expect(r.failed).toBe(0);
     });
 
-    it('角色头像与小屋图一趟遍历里一起转，互不影响', async () => {
+    it('角色头像保持原样，同时继续优化小屋图', async () => {
         await DB.saveCharacter({
             id: 'c1', name: '角色', avatar: TINY_PNG,
             roomConfig: { wallImage: TINY_JPEG, items: [] },
@@ -722,12 +721,12 @@ describe('优化资源存储（一次性批量迁移）', () => {
         const r = await optimizeResourceStorage();
 
         const c = (await DB.getAllCharacters()).find(x => x.id === 'c1') as any;
-        expect(isBlobRef(c.avatar)).toBe(true);
+        expect(c.avatar).toBe(TINY_PNG);
         expect(isBlobRef(c.roomConfig.wallImage)).toBe(true);
-        expect(r.converted).toBe(2);
+        expect(r.converted).toBe(1);
     });
 
-    it('角色头像：emoji 与 http 外链原样保留，只有 data: 才转', async () => {
+    it('角色头像：emoji 与 http 外链也保持原样', async () => {
         // 头像是两用字段，用户可以只填一个 emoji；外链是别人服务器上的地址，本机没有二进制
         await DB.saveCharacter({ id: 'c1', name: '表情头像', avatar: '🐱' } as any);
         await DB.saveCharacter({ id: 'c2', name: '外链头像', avatar: 'https://img.host/a.png' } as any);
@@ -749,10 +748,10 @@ describe('优化资源存储（一次性批量迁移）', () => {
         const r = await optimizeResourceStorage();
 
         const c = (await DB.getAllCharacters()).find(x => x.id === 'c1') as any;
-        expect(isBlobRef(c.avatar)).toBe(true);             // 头像照转
+        expect(c.avatar).toBe(TINY_PNG);                 // 角色头像保持即时显示
         expect(c.chibiStudio.like520.img).toBe(TINY_JPEG);  // 刻意保持 dataURL，见 docs/chibi-studio.md
         expect(c.personality).toBe('话很少');
-        expect(r.converted).toBe(1);
+        expect(r.converted).toBe(0);
     });
 
     it('我方头像：整体头像与分角色头像两处都转，外链与文本字段不动', async () => {
@@ -796,9 +795,10 @@ describe('优化资源存储（一次性批量迁移）', () => {
     it('头像被抄进帖子 / 群资料 / 剧场面具后，孤儿清理不会把图删掉', async () => {
         // 头像会被抄进这些面长期留着。用户之后换了头像，characters 那边就不再指着原图，
         // 只剩这些副本还引用它——GC 看不见哪一面，那一面上的头像就会碎成空白，且不可逆。
-        await DB.saveCharacter({ id: 'c1', name: '甲', avatar: TINY_PNG } as any);
-        await DB.saveCharacter({ id: 'c2', name: '乙', avatar: TINY_JPEG } as any);
-        await DB.saveCharacter({ id: 'c3', name: '丙', avatar: TINY_GIF } as any);
+        // 旧版已经迁移到 Blob 的角色头像仍然可以继续引用；不再主动把新头像转进去。
+        await DB.saveCharacter({ id: 'c1', name: '甲', avatar: await putImageBlob(dataUrlToBlob(TINY_PNG)) } as any);
+        await DB.saveCharacter({ id: 'c2', name: '乙', avatar: await putImageBlob(dataUrlToBlob(TINY_JPEG)) } as any);
+        await DB.saveCharacter({ id: 'c3', name: '丙', avatar: await putImageBlob(dataUrlToBlob(TINY_GIF)) } as any);
         await optimizeResourceStorage();
 
         const chars = await DB.getAllCharacters();
@@ -822,12 +822,12 @@ describe('优化资源存储（一次性批量迁移）', () => {
         expect(await getBlobForRef(maskToken)).not.toBeNull();   // 剧场面具上的头像
     });
 
-    it('头像幂等：第一遍转完，第二遍零转换', async () => {
+    it('保护角色头像，同时保留其他头像转换的幂等性', async () => {
         await DB.saveCharacter({ id: 'c1', name: '角色', avatar: TINY_PNG } as any);
         await DB.saveUserProfile({ name: '小明', avatar: TINY_JPEG, perCharAvatars: { c1: TINY_GIF } } as any);
 
         const first = await optimizeResourceStorage();
-        expect(first.converted).toBe(3);
+        expect(first.converted).toBe(2);
 
         const second = await optimizeResourceStorage();
         expect(second.converted).toBe(0);
@@ -964,9 +964,9 @@ describe('换图即删的字段：令牌独占，衣柜不裂', () => {
         await optimizeResourceStorage();
 
         const c: any = (await DB.getAllCharacters()).find(x => x.id === 'c1');
-        expect(isBlobRef(c.avatar)).toBe(true);
+        expect(c.avatar).toBe(TINY_PNG);
         expect(isBlobRef(c.companionAvatar.imageRef)).toBe(true);
-        // 内容一样，令牌必须是两个：换掉桌面形象时它会把自己那份 Blob 直接删掉
+        // 角色头像仍是可直接显示的 data URL；桌面形象必须独占自己的 Blob。
         expect(c.companionAvatar.imageRef).not.toBe(c.avatar);
     });
 
@@ -1328,7 +1328,7 @@ describe('分页读表：跨页不漏行，进度条对得上', () => {
         const expectedRows = 2 + 3 + 1 + 2 + 4 + 5 + 6 + 2 + 1 + 7 + 8 + 9;
 
         // 只收十二面自己报的那几档：扫库 / 合并 / 向量三段各有各的进度口径，混进来会算错
-        const faceLabels = new Set(['系统外观', '角色头像与小屋', '歌曲封面', '捏人器部件', '相册', '气泡主题', '聊天图片', '表情包', '我的头像', '社交帖子', '群头像', '生活模拟']);
+        const faceLabels = new Set(['系统外观', '角色素材与小屋', '歌曲封面', '捏人器部件', '相册', '气泡主题', '聊天图片', '表情包', '我的头像', '社交帖子', '群头像', '生活模拟']);
         const events: Array<{ done: number; total: number }> = [];
         await optimizeResourceStorage(p => {
             if (faceLabels.has(p.label)) events.push({ done: p.done, total: p.total });
@@ -1381,10 +1381,9 @@ describe('气泡主题导出：分享文件里不能留令牌', () => {
     });
 });
 
-describe('头像上传：新存进去的就是令牌', () => {
-    // 存量迁移只管库里已经躺着的那些。写端要是没接上，用户每传一张新头像就又落一份 base64，
-    // 一键优化跑完照样长回来，而界面上一点区别都看不出来。真渲染一遍这几个界面代价太大，
-    // 这里用源码锚：四个上传点里哪个漏了 migrateDataUrlToRef，这组就红。
+describe('头像上传：角色头像即时显示，其他头像保持原生令牌优化', () => {
+    // 角色头像因用户明确选择即时显示，保持 data URL；个人/群聊等其他头像仍按原作者
+    // 的令牌优化路径写入，使用源码锚保护这几条不同的数据契约。
     const readSrc = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8');
 
     /** 截出某个 handler 的函数体（到最近的一处收尾 `};` 为止；各文件缩进不同，2/4 空格都认）。 */
@@ -1398,8 +1397,8 @@ describe('头像上传：新存进去的就是令牌', () => {
 
     it('角色头像（角色资料页）', () => {
         const body = handlerBody(readSrc('../apps/Character.tsx'), 'const handleFileChange');
-        expect(body).toMatch(/handleChange\('avatar', await migrateDataUrlToRef\(/);
-        expect(body).not.toMatch(/handleChange\('avatar', processedBase64\)/);
+        expect(body).toMatch(/handleChange\('avatar', processedBase64\)/);
+        expect(body).not.toMatch(/handleChange\('avatar', await migrateDataUrlToRef\(/);
     });
 
     it('我的整体头像（个人档案）', () => {

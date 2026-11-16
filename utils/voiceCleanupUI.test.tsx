@@ -12,7 +12,7 @@ it('shows the full scope and estimate, cancellation never deletes speech and use
  await act(async()=>root.render(<VoiceCleanupPanel/>));
  expect(host.textContent).toContain('角色语音');expect(host.textContent).toContain('音乐与 BGM 保留');
  await act(async()=>host.querySelector('button')!.click());
- expect(host.textContent).toContain('1.0 KB');expect(host.textContent).toContain('收藏语音和未转写录音');
+ expect(host.textContent).toContain('1.0 KB');expect(host.textContent).toContain('手动收藏的语音会完整保留');
  const cancel=[...host.querySelectorAll('button')].find(b=>b.textContent==='取消')!;
  await act(async()=>cancel.click());expect(mocks.clear).not.toHaveBeenCalled();expect(native).not.toHaveBeenCalled();
  await act(async()=>root.unmount());host.remove();native.mockRestore();
