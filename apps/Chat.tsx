@@ -1698,6 +1698,12 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
         }
 
         await reloadMessages(visibleCountRef.current);
+        // 最新用户消息（或替换它的小红书/网页卡片）已全部落库。
+        // 交给原有的 1.5s 合批队列刷新主动消息云端上下文；
+        // 不在发送按钮里强行 await 一次 PUT，避免和自动回复的 finally、
+        // 凭据同步及其他角色的刷新重复发送。只有确实存在待触发任务才会上传，
+        // 即时对话未销账时的 fire_pack 保护由 amsgStateSync 原有逻辑负责。
+        markAmsgStateDirty({ char, userProfile, groups, realtimeConfig });
         // 自动回复模式下允许连续挑表情，用户主动收起加号等面板后才计时。
         if (!inputPreferences.autoReply) setShowPanel('none');
 
