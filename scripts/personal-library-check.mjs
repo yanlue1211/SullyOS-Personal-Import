@@ -38,7 +38,7 @@ async function fulfillSmokeAudio(route){
    'access-control-allow-origin':'*',
    'accept-ranges':'bytes',
    'content-length':String(chunk.length),
-   ...(match?{'content-range':\`bytes \${start}-\${Math.max(start,end)}/\${smokeAudio.length}\`}:{}),
+   ...(match?{'content-range':'bytes '+start+'-'+Math.max(start,end)+'/'+smokeAudio.length}:{}),
   },
   body:chunk,
  });
