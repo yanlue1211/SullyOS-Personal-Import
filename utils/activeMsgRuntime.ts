@@ -381,7 +381,7 @@ export const startLateEmotionPoll = (
     if (!(await isGloballyEnabledNow())) {
       if (lateEmotionPolls.get(charId) === entry) {
         lateEmotionPolls.delete(charId);
-        settleLateCloudEmotionEvalLog(opts?.taskUuid, false);
+        // 个人版情绪补落仅需熄灯；没有作者独立的云端情绪日志对象。
         announceEmotionDone(charId);
       }
       return;
@@ -394,7 +394,7 @@ export const startLateEmotionPoll = (
       if (isAmsgGlobalDisabledError(error)) {
         if (lateEmotionPolls.get(charId) === entry) {
           lateEmotionPolls.delete(charId);
-          settleLateCloudEmotionEvalLog(opts?.taskUuid, false);
+          // 个人版情绪补落仅需熄灯；没有作者独立的云端情绪日志对象。
           announceEmotionDone(charId);
         }
         return;
@@ -2859,7 +2859,7 @@ export const pauseActiveMsgRuntime = (): void => {
   for (const [charId, entry] of [...lateEmotionPolls.entries()]) {
     clearTimeout(entry.timer);
     lateEmotionPolls.delete(charId);
-    settleLateCloudEmotionEvalLog(entry.taskUuid, false);
+    // 个人版没有单独的晚投情绪 API 日志，保留原有熄灯与停轮询行为。
     announceEmotionDone(charId);
   }
 };

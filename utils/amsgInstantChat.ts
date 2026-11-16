@@ -980,9 +980,7 @@ export const abortAllInstantChatPendingsLocally = async (): Promise<string[]> =>
       .catch(() => {});
     announceEmotionDone(pending.charId);
     settleCloudApiCall({ id: cloudApiCallLogId(pending.uuid), ok: false });
-    if (consumeEmotionEvalInFlight(pending.uuid)) {
-      settleCloudApiCall({ id: cloudEmotionApiCallLogId(pending.uuid), ok: false });
-    }
+    // 个人版不维护独立的 cloudEmotionApiCallLogId；上面的当前轮日志已收尾。
     uuids.push(pending.uuid);
     await stageStoppedReplyReceipt(pending.charId, pending.uuid, (async () => {
       try {
