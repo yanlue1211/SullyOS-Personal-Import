@@ -2989,7 +2989,6 @@ const SongwritingApp: React.FC = () => {
 
                     <div className="relative px-4 pt-3 flex gap-2">
                         <button type="button" onClick={() => { setStudioEntryTab('lyrics'); setView('write'); }} className="flex-1 min-w-0 py-2 rounded-xl text-[11px] font-semibold bg-white/65 border border-white/80" style={{ color: MusicC.primary }}>✎ 歌词与创作</button>
-                        <button type="button" onClick={openCustomPromptModal} className="flex-1 min-w-0 py-2 rounded-xl text-[11px] font-semibold bg-white/65 border border-white/80" style={{ color: MusicC.primary }}>♫ 出歌 / 成品 / 下载</button>
                     </div>
                     <div className="relative px-4 py-3.5">
                         {/* Floating sparkle decorations — pointer-none */}
