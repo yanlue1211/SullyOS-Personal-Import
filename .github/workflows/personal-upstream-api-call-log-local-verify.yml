@@ -1,5 +1,7 @@
 name: Verify personal API call log local coverage
 on:
+  push:
+    branches: [personal/upstream-api-call-log-local-20261116]
   pull_request:
     branches: [personal/audio-listening]
     types: [opened, synchronize, reopened, ready_for_review]
