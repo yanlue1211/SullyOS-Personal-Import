@@ -191,7 +191,7 @@ export function mergeVocalReply(song:SongSheet, source:MelodyVersion|undefined, 
     if(!line&&old&&target.scope!=='song'&&!target.phraseIds?.includes(old.id))throw Error('旋律超出所选片段');
     const identity=line?.id||old?.id||crypto.randomUUID();if(seen.has(identity))throw Error('旋律句子重复');seen.add(identity);
     if(!Array.isArray(item.bars)||item.bars.length<1||item.bars.length>16)throw Error('每句旋律需要1至16小节');
-    return {phrase:{id:old?.id||crypto.randomUUID(),lineId:line?.id||old?.lineId,lyricText:line?.content||old?.lyricText,section:line?.section||old?.section||target.section||'free',start:0,count:item.bars.length} as VocalPhrase,bars:validateBars(item.bars,item.bars.length)};
+    return {phrase:{id:old?.id||crypto.randomUUID(),lineId:line?.id||old?.lineId,lyricText:line?.content||old?.lyricText,section:line?.section||old?.section||target.section||(['intro','verse','pre-chorus','chorus','bridge','outro','free'].includes(item.section)?item.section:'free'),start:0,count:item.bars.length} as VocalPhrase,bars:validateBars(item.bars,item.bars.length)};
   });
   // Keep untouched phrases and exact notes; replacement may have a different phrase length.
   const replacesWholeLegacy=target.scope==='song'&&lines.length>0&&lines.every(l=>incoming.some(part=>part.phrase.lineId===l.id));

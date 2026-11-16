@@ -21,6 +21,7 @@ try{
   await page.getByRole('button',{name:'人声曲谱',exact:true}).click();
   if(await page.getByLabel('创作聊天').count())throw Error('score page duplicates chat');
   await page.getByLabel('旋律范围').selectOption('line');await page.getByLabel('旋律歌词句子').selectOption('1');
+  await page.locator('.sw-scroll').evaluate(n=>n.scrollTop=0);
   await page.screenshot({path:`test-results/song-production/vocal-score-${width}.png`});
   await page.getByRole('button',{name:'去创作对话',exact:true}).click();
   if(await page.getByLabel('创作聊天').count()!==1)throw Error('expected exactly one creative composer');

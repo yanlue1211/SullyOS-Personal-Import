@@ -85,6 +85,8 @@ export default function SongwritingStudio({
   const [editorTitle, setEditorTitle] = useState("");
   const [editorBaseTitle, setEditorBaseTitle] = useState("");
   const vocalPlayback = useVocalPlayback(song);
+  const mainRef = useRef<HTMLElement>(null);
+  useEffect(()=>{vocalPlayback.stop();if(tab!=="chat")mainRef.current?.scrollTo?.({top:0});},[tab]);
   useEffect(()=>{if(initialTab === "production") (onProduction || onPreview)(initial);},[initial.id]);
   const [editorBase, setEditorBase] = useState(""),
     [lastRequest, setLastRequest] = useState<{
@@ -282,10 +284,13 @@ export default function SongwritingStudio({
     const value = text.trim();
     setText("");
     const request = { text: value, id: crypto.randomUUID() };
-    if (chatFocus === "melody" || /谱曲|曲调|旋律|小节|音符|转音/.test(value)) {
+    const explicitLyrics = /填.{0,4}词|写.{0,4}歌词|修改歌词|重写歌词|改词/.test(value);
+    if (!explicitLyrics && (chatFocus === "melody" || /谱曲|曲调|旋律|小节|音符|转音/.test(value))) {
+      setChatFocus("melody");
       void generateMelody(request);
       return;
     }
+    setChatFocus("lyrics");
     setTab("chat");
     void generate(request);
   };
@@ -430,7 +435,7 @@ export default function SongwritingStudio({
           </button>
         ))}
       </nav>
-      <main className="sw-scroll">
+      <main className="sw-scroll" ref={mainRef}>
         {error && (
           <div className="sw-error" role="alert">
             {error}

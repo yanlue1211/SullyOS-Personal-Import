@@ -1836,11 +1836,11 @@ const SongwritingApp: React.FC = () => {
                     isOpen={showCustomPrompt}
                     title="✦ 出歌 · 成品 · 下载"
                     onClose={() => setShowCustomPrompt(false)}
-                    footer={showHaimianProvider ? undefined : (
-                        <>
+                    footer={showHaimianProvider ? (<div className="sw-production-footer"><button className="sw-production-cancel" onClick={()=>setShowCustomPrompt(false)} style={{color:MusicC.primary,borderColor:MusicC.faint+'50'}}>关闭</button></div>) : (
+                        <div className="sw-production-footer">
                             <button
                                 onClick={() => setShowCustomPrompt(false)}
-                                className="flex-1 py-3 rounded-xl text-[12px] font-medium tracking-wider transition-all active:scale-[0.98]"
+                                className="sw-production-cancel flex-1 py-3 rounded-xl text-[12px] font-medium tracking-wider transition-all active:scale-[0.98]"
                                 style={{
                                     background: 'rgba(255,255,255,0.7)',
                                     color: MusicC.muted,
@@ -1852,7 +1852,7 @@ const SongwritingApp: React.FC = () => {
                             <button
                                 onClick={handleConfirmAndGenerate}
                                 disabled={isGeneratingAudio || cooldownSecsLeft > 0 || !promptDraft.trim()}
-                                className="flex-[2] py-3.5 rounded-xl text-[12px] font-bold tracking-[0.25em] transition-all active:scale-[0.98] disabled:opacity-50 relative overflow-hidden"
+                                className="sw-production-submit flex-[2] py-3.5 rounded-xl text-[12px] font-bold tracking-[0.25em] transition-all active:scale-[0.98] disabled:opacity-50 relative overflow-hidden"
                                 style={{
                                     background: cooldownSecsLeft > 0
                                         ? `linear-gradient(135deg, ${MusicC.faint}, ${MusicC.muted})`
@@ -1885,7 +1885,7 @@ const SongwritingApp: React.FC = () => {
                                     )}
                                 </span>
                             </button>
-                        </>
+                        </div>
                     )}
                 >
                     <div className="space-y-4 sw-unified-production" style={{'--sw-bg':MusicC.bg,'--sw-ink':MusicC.text,'--sw-muted':MusicC.muted,'--sw-accent':MusicC.primary,'--sw-border':MusicC.faint+'50','--sw-light':MusicC.soft} as React.CSSProperties}>
@@ -1906,16 +1906,17 @@ const SongwritingApp: React.FC = () => {
                                     { id: 'haimian',      title: '海绵音乐',         sub: '专属音色 · 完整歌曲', available: true, needs: '' },
                                 ];
                                 return (
-                                    <div className="grid grid-cols-2 gap-1.5">
+                                    <div className="sw-provider-grid grid grid-cols-2 gap-1.5">
                                         {opts.map(opt => {
                                             const isActive = showHaimianProvider ? opt.id === 'haimian' : opt.id === provider;
                                             const Ico = opt.id === 'haimian' ? Heart : PROVIDER_ICONS[opt.id] || Heart;
                                             return (
                                                 <button
                                                     key={opt.id}
+                                                    aria-pressed={isActive}
                                                     onClick={() => { if (opt.id === 'haimian') setShowHaimianProvider(true); else { setShowHaimianProvider(false); setProvider(opt.id); } trackEvent('切换出歌生成器', { provider: opt.id }); }}
                                                     disabled={!opt.available || isGeneratingAudio}
-                                                    className="relative text-left p-2 rounded-xl border transition-all active:scale-95 disabled:cursor-not-allowed"
+                                                    className="sw-provider-option relative text-left p-2 rounded-xl border transition-all active:scale-95 disabled:cursor-not-allowed"
                                                     style={isActive ? {
                                                         background: `linear-gradient(135deg, ${MusicC.primary}, ${MusicC.accent})`,
                                                         color: 'white',
@@ -1967,15 +1968,16 @@ const SongwritingApp: React.FC = () => {
                                 <label className="text-[10px] font-bold uppercase tracking-[0.25em]" style={{ color: MusicC.primary }}>快速选声线</label>
                                 <div className="flex-1 h-px" style={{ background: `linear-gradient(to right, ${MusicC.glow}55, transparent)` }} />
                             </div>
-                            <div className="grid grid-cols-3 gap-1.5">
+                            <div className="sw-voice-grid grid grid-cols-3 gap-1.5">
                                 {VOICE_PRESETS.map(preset => {
                                     const isActive = preset.id === voicePresetId;
                                     const Ico = VOICE_ICONS[preset.id] || SparkleP;
                                     return (
                                         <button
                                             key={preset.id}
+                                            aria-pressed={isActive}
                                             onClick={() => { applyVoicePreset(preset.id); trackEvent('选择声线预设', { preset: preset.id }); }}
-                                            className="text-[11px] py-2.5 rounded-xl border transition-all active:scale-95 flex flex-col items-center justify-center gap-1 relative overflow-hidden"
+                                            className="sw-voice-option text-[11px] py-2.5 rounded-xl border transition-all active:scale-95 flex flex-col items-center justify-center gap-1 relative overflow-hidden"
                                             style={isActive ? {
                                                 background: `linear-gradient(135deg, ${MusicC.primary}, ${MusicC.accent})`,
                                                 color: 'white',
