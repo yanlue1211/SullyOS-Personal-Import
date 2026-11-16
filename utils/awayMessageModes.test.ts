@@ -112,4 +112,24 @@ describe('author local away mode vs personal 2.0 B mode', () => {
     await run();
     expect(safeFetchJson).not.toHaveBeenCalled();
   });
+
+  it('last voice call ended 10 minutes ago: neither native nor personal B sends, despite old chat', async () => {
+    rows.push({ id: 13, charId: char.id, role: 'system', type: 'system', content: 'call finished',
+      timestamp: NOW - 10 * 60_000, metadata: { source: 'call-end-popup' } });
+    await run();
+    expect(safeFetchJson).not.toHaveBeenCalled();
+    char.activeMsg2Config = { enabled: true, tasks: [] } as any;
+    await run();
+    expect(safeFetchJson).not.toHaveBeenCalled();
+  });
+  it('native mode uses actual after-call anchor after enough time, not the earlier chat timestamp', async () => {
+    rows.push({ id: 13, charId: char.id, role: 'system', type: 'system', content: 'call finished',
+      timestamp: NOW - 120 * 60_000, metadata: { source: 'call-end-popup' } });
+    vi.mocked(safeFetchJson).mockResolvedValue({ choices:[{message:{content:'刚结束通话，想起一件事'}}] });
+    await run();
+    expect(safeFetchJson).toHaveBeenCalledOnce();
+    const payload = JSON.parse(String(vi.mocked(safeFetchJson).mock.calls[0][1]?.body));
+    expect(payload.messages.map((m: any) => String(m.content)).join('\n')).toContain('最近一次实时通话');
+    expect(applyAssistantPostProcessing).toHaveBeenCalledOnce();
+  });
 });
