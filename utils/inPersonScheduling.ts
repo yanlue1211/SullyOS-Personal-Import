@@ -86,7 +86,7 @@ export async function prepareInPersonScheduling(
             ? [
                 `已预约的未来线上联系（${booked.length} 次；用户手动排和你自己排的都占时间）：`,
                 ...booked.map(({ task, at }) => {
-                    const hint = task.promptHint?.replace(/\\s+/g, ' ').trim().slice(0, 72);
+                    const hint = task.promptHint?.replace(/\s+/g, ' ').trim().slice(0, 72);
                     return `- ${formatTaskTime(at, tzId)} · ${describeRecurrence(task.recurrenceType)} · ${task.source === 'character' ? '你自己排的' : '用户排的'}`
                         + (hint ? ` · 方向 ${JSON.stringify(hint)}` : '');
                 }),
