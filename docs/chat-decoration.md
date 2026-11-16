@@ -114,3 +114,9 @@ HTML 卡片仍在独立 iframe 沙盒中；白框控制其外壳和排版，不�
 回归：`pnpm vitest run utils/chatWhitebox.test.ts utils/chatDecoration.test.ts utils/collaborationMakers.test.ts utils/beautyShare.test.ts`；另做手机宽度下的心象、转账、长卡片、滚动和旧预设验证。
 
 内置白框新增「星轨 · 深空」「星轨 · 雾紫」，在聊天装扮的全部/白框分类和「我的搭配」选择器中展示。入口通过 `utils/builtinWhitebox.ts` 读取 `presets/chat/*.json`，只使用本地静态素材，不写入收藏库或替换用户已有设置；应用沿用角色选择确认流程。两款源文件与构建脚本在 `art/acid-orbit`：依次执行 `build-lace.mjs`、`build.mjs`、`build-builtins.mjs`、`build-preview.mjs` 可同步 CSS、导入文件和内置包。蕾丝为用户提供的 CC0 scallop2（来源见 `art/acid-orbit/SCALLOP-LICENSE.txt`）。
+
+### 舞台隔离与深浅色对比度边界（2026-11-16 个人版适配）
+
+- `.sully-chat-root` 只包裹聊天主舞台，不向装扮编辑、角色设置、全屏转发或 520 信件等弹层继承白框文字色。面向家园小手机的展开弹层优先 Portal 到 `.home-phone-screen`，其他场景使用 `document.body`；保留手机内的定位约束。
+- 浅底弹窗与输入框须显式声明深色文字、placeholder；深底日期和下拉框明确使用深色原生控件配色。白框 CSS 要排除二维码白底、角标点、色板点、进度条和七夕/520 专属卡，不得覆盖原有自定义 CSS。
+- 本次主题专测：`utils/__tests__/themeContrastInheritance.test.ts`；正式 `pnpm run build` 会重新生成 `chatPreview.generated.css` 和 `chatRuntime.generated.css`。`art/acid-orbit/preview.bundle.js` 为独立静态样例预览脚本，需执行 `node art/acid-orbit/build-preview.mjs` 重新打包后才代表新样式，不能用旧静态预览验证用户正式网页外观。
