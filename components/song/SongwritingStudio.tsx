@@ -78,6 +78,9 @@ export default function SongwritingStudio({
     [position, setPosition] = useState(0),
     [section, setSection] = useState<SongLine["section"]>("verse"),
     [instruction, setInstruction] = useState("");
+  const [editorTitle, setEditorTitle] = useState("");
+  const [editorBaseTitle, setEditorBaseTitle] = useState("");
+  const [productionSection, setProductionSection] = useState<"haimian" | "voice">("haimian");
   const [editorBase, setEditorBase] = useState(""),
     [lastRequest, setLastRequest] = useState<{
       text: string;
@@ -337,7 +340,7 @@ export default function SongwritingStudio({
         parseLyrics(editor, "user"),
         "user",
       );
-      const saved = await acceptProposal(song.id, proposal, userProfile.name);
+      const saved = await acceptProposal(song.id, proposal, userProfile.name, { title: editorTitle, baseTitle: editorBaseTitle });
       setSong(saved);
       setEditor(null);
       await refresh();
@@ -400,8 +403,7 @@ export default function SongwritingStudio({
             ["lyrics", "歌词本"],
             ["chat", "创作对话"],
             ["history", "修改历史"],
-            ["voice", "专属歌声"],
-            ["production", "海绵出歌"],
+            ["production", "出歌与成品"],
             ["melody", "自主谱曲"],
           ] as const
         ).map(([id, title]) => (
@@ -446,6 +448,8 @@ export default function SongwritingStudio({
                 <button
                   disabled={!!busy || !!p}
                   onClick={() => {
+                    setEditorTitle(song.title);
+                    setEditorBaseTitle(song.title);
                     setEditorBase(lyricFingerprint(song.lines));
                     setEditor(lyricsText(song.lines));
                   }}
@@ -608,9 +612,9 @@ export default function SongwritingStudio({
               <button
                 className="sw-primary"
                 disabled={!!busy || !lines.length}
-                onClick={() => onPreview(song)}
+                onClick={() => { setProductionSection("haimian"); setTab("production"); }}
               >
-                试听 / 生成歌曲 →
+                出歌 / 成品 / 下载 →
               </button>
             </div>
           </>
@@ -707,7 +711,14 @@ export default function SongwritingStudio({
           </>
         )}
         {tab === "voice" && <SingingLab key={char?.id} char={char} />}
-        {tab === "production" && <HaimianProduction key={song.id} song={song} onUpdate={setSong} />}
+        {tab === "production" && <>
+          <div className="sw-chat-mode" role="group" aria-label="出歌设置">
+            <button aria-pressed={productionSection === "haimian"} onClick={() => setProductionSection("haimian")}>海绵出歌 · 成品</button>
+            <button aria-pressed={productionSection === "voice"} onClick={() => setProductionSection("voice")}>专属歌声</button>
+            <button onClick={() => onPreview(song)}>其他出歌方式 / 试听</button>
+          </div>
+          {productionSection === "voice" ? <SingingLab key={char?.id} char={char} /> : <HaimianProduction key={song.id} song={song} onUpdate={setSong} />}
+        </>}
         {tab === "history" && (
           <>
             {!(song.lyricRevisions || []).length && (
@@ -773,7 +784,8 @@ export default function SongwritingStudio({
             aria-modal="true"
             aria-label="手动编辑歌词"
           >
-            <h2>给歌词一点新的形状</h2>
+            <h2>编辑歌名与歌词</h2>
+            <label>歌曲名称<input aria-label="歌曲名称" value={editorTitle} maxLength={120} onChange={e => setEditorTitle(e.target.value)} /></label>
             <p>用 [verse]、[chorus] 等标题划分段落，保存时记录一次修改。</p>
             <textarea
               aria-label="手动歌词"

@@ -127,6 +127,7 @@ try {
     const s = await window.__songwritingQA.getSong("sw-browser");
     return s.status === "completed";
   });
+  await page.getByRole("button", { name: "出歌与成品", exact: true }).click();
   await page.getByRole("button", { name: "专属歌声", exact: true }).click();
   await page
     .getByRole("button", { name: "生成测试朗读", exact: true })

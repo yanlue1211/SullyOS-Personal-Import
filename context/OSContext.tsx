@@ -1,3 +1,4 @@
+import { SONG_RECALL_UPDATED } from '../features/personal/songArchive/keywords';
 import {syncCommittedAmsgUserTurn} from '../utils/amsgUserTurnSync';
 import {isPetControlCancellation} from '../features/tapnest/transport';
 import { dateLaunch } from '../utils/dateLaunch';
@@ -2452,6 +2453,8 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       const askWorkroom = (event:Event) => { const id=(event as CustomEvent).detail?.charId; if(typeof id==='string'){setActiveCharacterId(id);setActiveApp(AppID.Chat);} };
       window.addEventListener('workroom-chat-requested', askWorkroom);
       window.addEventListener('workroom-open-requested', openWorkroom);
+      const songRecallChanged = () => setLastMsgTimestamp(Date.now());
+      window.addEventListener(SONG_RECALL_UPDATED, songRecallChanged);
       window.addEventListener(WORKROOM_HISTORY_UPDATED, historyChanged);
       window.addEventListener('moments-history-updated', historyChanged);
       window.addEventListener(SONGWRITING_UPDATED, historyChanged);
@@ -2459,7 +2462,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       window.addEventListener(SONGWRITING_UPDATED, reloadSongs);
       document.addEventListener('visibilitychange', drain);
       drain();
-      return () => { window.removeEventListener('workroom-chat-requested', askWorkroom); window.removeEventListener('workroom-open-requested', openWorkroom); window.removeEventListener(WORKROOM_HISTORY_UPDATED, historyChanged); window.removeEventListener('moments-history-updated', historyChanged); window.removeEventListener(SONGWRITING_UPDATED, historyChanged); window.removeEventListener(SONGWRITING_UPDATED, reloadSongs); document.removeEventListener('visibilitychange', drain); };
+      return () => { window.removeEventListener(SONG_RECALL_UPDATED, songRecallChanged); window.removeEventListener('workroom-chat-requested', askWorkroom); window.removeEventListener('workroom-open-requested', openWorkroom); window.removeEventListener(WORKROOM_HISTORY_UPDATED, historyChanged); window.removeEventListener('moments-history-updated', historyChanged); window.removeEventListener(SONGWRITING_UPDATED, historyChanged); window.removeEventListener(SONGWRITING_UPDATED, reloadSongs); document.removeEventListener('visibilitychange', drain); };
   }, [isDataLoaded]);
 
 

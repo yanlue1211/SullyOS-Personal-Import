@@ -128,8 +128,8 @@ export async function generateStudioReply(
   const state = {
     id: song.id,
     title: song.title,
-    genre: song.genre,
-    mood: song.mood,
+    genre: song.genre === "free" ? "不限曲风，根据用户的讨论与创作设想自由发挥" : song.genre,
+    mood: song.mood === "free" ? "不预设情绪，根据用户的讨论与歌词自然决定，可随段落变化" : song.mood,
     creativeVision: song.production?.vision || "",
     structure: song.lyricTemplate,
     customStructure: song.customLyricTemplate,

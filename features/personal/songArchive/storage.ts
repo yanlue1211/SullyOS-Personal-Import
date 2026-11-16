@@ -91,7 +91,7 @@ export const deleteSongSoundRecord = async (songId: number): Promise<void> => {
 };
 
 export const listSongSoundRecords = async (): Promise<SongSoundRecord[]> => {
-  const rows = await DB.getAllAssets();
+  const rows = await DB.getAllAssets(SOUND_ARCHIVE_PREFIX);
   const byId = new Map<number, SongSoundRecord>();
   for (const row of rows) {
     if (!row.id.startsWith(SOUND_ARCHIVE_PREFIX)) continue;

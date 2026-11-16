@@ -1,3 +1,4 @@
+import { songKeywordsEnabled, setSongKeywordsEnabled } from '../features/personal/songArchive/keywords';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, MagnifyingGlass, MusicNotes, ArrowClockwise, PencilSimple, Trash, Check, X, FloppyDisk } from '@phosphor-icons/react';
 import { useOS } from '../context/OSContext';
@@ -13,6 +14,8 @@ import {
 const SongArchiveApp: React.FC = () => {
   const { closeApp } = useOS();
   const [rows, setRows] = useState<SongSoundRecord[]>([]);
+  const [keywords, setKeywords] = useState(false);
+  useEffect(() => { void songKeywordsEnabled().then(setKeywords).catch(() => {}); }, []);
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<number | null>(null);
   const [editing, setEditing] = useState(false);
@@ -105,6 +108,10 @@ const SongArchiveApp: React.FC = () => {
         <MusicNotes size={25} className="text-[#c68f6d]"/>
       </div>
 
+      {!active && <label className="mx-5 mt-4 rounded-2xl border border-[#e8ddd1] bg-white/80 p-4 flex items-start gap-3 text-sm">
+        <input type="checkbox" checked={keywords} onChange={async e => { const value = e.target.checked; try { await setSongKeywordsEnabled(value); setKeywords(value); } catch { setNotice('开关保存失败，请重试'); } }}/>
+        <span>聊天关键词关联<small className="block mt-1 text-xs leading-relaxed text-[#978579]">歌手全名：补充已存歌名；歌名：补充已保存的歌曲详情。只匹配本轮聊天文字，不读取人设、世界书或记忆。命中后保留详情卡片；总结前不重复弹同一张。</small></span>
+      </label>}
       {notice && <div role="status" className="mx-4 mt-3 p-3 rounded-xl bg-[#fff1dd] text-[#87613e] text-xs leading-relaxed">{notice}</div>}
 
       {!active ? (

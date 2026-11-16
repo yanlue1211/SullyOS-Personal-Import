@@ -14,10 +14,11 @@ export const SONG_GENRES: { id: SongGenre; label: string; icon: string; desc: st
     { id: 'electronic', label: '电子', icon: '🎛️', desc: '节拍强烈，氛围感足' },
     { id: 'jazz', label: '爵士', icon: '🎷', desc: '即兴优雅，自由洒脱' },
     { id: 'rnb', label: 'R&B', icon: '🎵', desc: '律动慵懒，灵魂歌唱' },
-    { id: 'free', label: '自由', icon: '✨', desc: '不限风格，随心所欲' },
+    { id: 'free', label: '自由发挥', icon: '✨', desc: '不限风格，根据我们的讨论自由发挥' },
 ];
 
 export const SONG_MOODS: { id: SongMood; label: string; icon: string }[] = [
+    { id: 'free', label: '根据讨论自由发挥', icon: '✨' },
     { id: 'happy', label: '快乐', icon: '😊' },
     { id: 'sad', label: '忧伤', icon: '🥺' },
     { id: 'romantic', label: '浪漫', icon: '💕' },
