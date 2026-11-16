@@ -2276,7 +2276,8 @@ export const ActiveMsgClient = {
 
   async sendTestPush(): Promise<{ sent: boolean }> {
     const config = await ensureWorkerReady();
-    const signal = typeof AbortSignal?.timeout === 'function' ? AbortSignal.timeout(15000) : undefined;
+    // Web Push 服务端最长等待约 30 秒，客户端留 45 秒给错误回传，不提前假报超时。
+    const signal = typeof AbortSignal?.timeout === 'function' ? AbortSignal.timeout(45_000) : undefined;
     const { status, body } = await fetchWithAuthRaw(
       'test-push',
       config,
