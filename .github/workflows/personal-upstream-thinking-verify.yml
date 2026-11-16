@@ -1,0 +1,56 @@
+name: Verify personal thinking and inner-voice isolation
+
+on:
+  pull_request:
+    branches: [personal/audio-listening]
+    paths:
+      - 'utils/assistantThinking.ts'
+      - 'utils/assistantThinking.test.ts'
+      - 'utils/safeApi.ts'
+      - 'utils/safeApi.content.test.ts'
+      - 'utils/safeApi.stream.test.ts'
+      - 'utils/streamPreview.ts'
+      - 'utils/streamPreview.test.ts'
+      - 'utils/sanitize.ts'
+      - 'utils/applyAssistantPostProcessing.ts'
+      - 'utils/applyAssistantPostProcessing.test.ts'
+      - 'components/chat/ThinkingChainSettingsModal.tsx'
+      - '.github/workflows/personal-upstream-thinking-verify.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-thinking:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install exact dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Verify provider thought channels, streaming, postprocessing, memory and cache boundaries
+        run: >-
+          pnpm vitest run
+          utils/assistantThinking.test.ts
+          utils/safeApi.content.test.ts
+          utils/safeApi.stream.test.ts
+          utils/streamPreview.test.ts
+          utils/applyAssistantPostProcessing.test.ts
+          utils/personalInnerVoice.test.ts
+          utils/innerVoiceSettings.test.tsx
+          utils/memoryPalace/innerVoiceMemory.test.ts
+          utils/anthropicApi.test.ts
+          utils/geminiApi.test.ts
+          utils/chatRequestPayload.test.ts
+          utils/amsgInstantChat.test.ts
+      - name: Build frontend without modifying Worker bundle
+        run: pnpm run build
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096

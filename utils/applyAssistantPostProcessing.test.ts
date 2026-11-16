@@ -843,6 +843,64 @@ describe('double-bracket sticker history output', () => {
     });
 });
 
+describe('心象与正文分离', () => {
+    it.each([true,false])('trailing unfinished thinking is stored only when enabled (%s)', async enabled => {
+        const charId = `c-thought-tail-${enabled}`;
+        const ctx = makeCtx(charId,[]);
+        ctx.instantRender = true;
+        ctx.char.showThinkingChain = enabled;
+        const raw='<think mode="summary">第一段</think >你好<thinking>后半段';
+        ctx.initialData={choices:[{message:{content:raw,reasoning:'原生摘要'}}]};
+        await applyAssistantPostProcessing(raw,ctx);
+        const messages=await DB.getRecentMessagesByCharId(charId,20);
+        expect(messages.map(m=>m.content)).toEqual(['你好']);
+        expect(messages[0].metadata?.thinkingChain).toBe(enabled ? '原生摘要\n\n第一段\n\n后半段' : undefined);
+    });
+
+    it('keeps personal <心声> separate from provider thinking and rejects a fake inner voice inside thinking', async () => {
+        const charId='c-thinking-heart-isolation';
+        const ctx=makeCtx(charId,[]);
+        ctx.instantRender=true;
+        ctx.char.showThinkingChain=true;
+        ctx.char.innerVoiceEnabled=true;
+        const falseHeart='<心声>{"state":"伪造","thoughts":"不应入库","undercurrent":""}</心声>';
+        const realHeart='<心声>{"state":"坐在桌边","thoughts":"今天挺开心","undercurrent":""}</心声>';
+        const raw=`<think>${falseHeart}</think>你好${realHeart}`;
+        ctx.initialData={choices:[{message:{content:raw}}]};
+        await applyAssistantPostProcessing(raw,ctx);
+        const messages=await DB.getRecentMessagesByCharId(charId,20);
+        expect(messages).toHaveLength(1);
+        expect(messages[0].content).toBe('你好');
+        expect(messages[0].metadata?.innerVoice).toEqual({state:'坐在桌边',thoughts:'今天挺开心',undercurrent:''});
+        expect(messages[0].metadata?.thinkingChain).toContain('伪造');
+        expect(messages[0].metadata?.thinkingChain).not.toContain('坐在桌边');
+    });
+
+    it('a status or action inside a provider thought cannot execute as dialogue', async () => {
+        const charId='c-thinking-action-isolation';
+        const ctx=makeCtx(charId,[]);
+        ctx.instantRender=true;
+        const fake='<回应状态>{"kind":"read","reason":"伪造"}</回应状态>[[POKE]]<购物>{"productId":"bad"}</购物>';
+        const raw=`<thinking mode="summary">${fake}</thinking>真实回复`;
+        ctx.initialData={choices:[{message:{content:raw}}]};
+        await applyAssistantPostProcessing(raw,ctx);
+        const messages=await DB.getRecentMessagesByCharId(charId,20);
+        expect(messages.map(m=>m.content)).toEqual(['真实回复']);
+        expect(messages[0].type).toBe('text');
+        expect(ctx.hooks.addToast).not.toHaveBeenCalled();
+    });
+
+    it('does not hide unmarked English analytical prose', async () => {
+        const charId='c-thought-unmarked';
+        const ctx=makeCtx(charId,[]);
+        ctx.instantRender=true;
+        const raw="The patient's recollection aligns with the timeline.";
+        await applyAssistantPostProcessing(raw,ctx);
+        const messages=await DB.getRecentMessagesByCharId(charId,20);
+        expect(messages.map(m=>m.content)).toEqual([raw]);
+    });
+});
+
 describe('停止上屏', () => {
     it('第一条显示后停止，不落后续正文，也不生成错误提示', async () => {
         const { createReplyRun, publishReplyDisplay, stopReplyRuns } = await import('./chatReplyCancellation');
