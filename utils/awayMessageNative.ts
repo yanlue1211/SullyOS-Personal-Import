@@ -9,8 +9,9 @@
 import type { CharacterProfile } from '../types';
 import type { LocalAwayDeps } from './awayMessage';
 import { DB } from './db';
-import { findAwayGapStart, planAwaySlots, resolveAwayDelayMinutes, splitAwaySegments } from './awayMessageCore';
-import { resolveAmsgInteractionLock, isAmsgActiveCall, isAmsgActiveDate } from './amsgInteractionGuard';
+import { planAwaySlots, resolveAwayDelayMinutes, splitAwaySegments } from './awayMessageCore';
+import { findNativeAwayGapStartWithPresence } from './awayPresenceAnchor';
+import { resolveAmsgInteractionLock, isAmsgActiveCall, isAmsgActiveDate, getAmsgLastSceneEndedAt } from './amsgInteractionGuard';
 import { loadCharacterContextRange } from './chatContextRange';
 import { ChatPrompts } from './chatPrompts';
 import { buildChatRequestPayload } from './chatRequestPayload';
@@ -27,7 +28,7 @@ export const generateNativeLocalAwayMessages = async (char: CharacterProfile, de
   const recent = await DB.getRecentMessagesByCharId(char.id, 50, true);
   // 历史与静默规则遵循作者原生本地模式；仍尊重个人版持久化线下/通话保护。
   if (resolveAmsgInteractionLock(recent, isAmsgActiveCall(char.id), isAmsgActiveDate(char.id))) return;
-  const lastUserAt = findAwayGapStart(recent, delayMs, now);
+  const lastUserAt = findNativeAwayGapStartWithPresence(recent, delayMs, now, getAmsgLastSceneEndedAt(char.id));
   if (lastUserAt == null) return;
   const userProfile = deps.getUserProfile();
   const api = resolveScheduledMessageApi(deps.getApiConfig(), char, char.activeMsg2Config);
@@ -71,7 +72,7 @@ export const generateNativeLocalAwayMessages = async (char: CharacterProfile, de
 
   // 生成期间对方回来说了话：这段离开已经结束，补的消息作废。
   const refreshed = await DB.getRecentMessagesByCharId(char.id, 50, true);
-  if (findAwayGapStart(refreshed, delayMs, Date.now()) !== lastUserAt
+  if (findNativeAwayGapStartWithPresence(refreshed, delayMs, Date.now(), getAmsgLastSceneEndedAt(char.id)) !== lastUserAt
       || deps.isBusyWith(char.id)
       || resolveAmsgInteractionLock(refreshed, isAmsgActiveCall(char.id), isAmsgActiveDate(char.id))) return;
 
