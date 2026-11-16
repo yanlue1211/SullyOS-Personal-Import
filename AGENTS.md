@@ -1,5 +1,7 @@
 # AGENTS.md
 
+> **糯米机个人二改：每个新开发窗口必须先读 [更新须知](./personal-maintenance/更新须知.md) 和 [更新日志](./personal-maintenance/更新日志.md)，再读 [PERSONAL_DEV_START_HERE.md](./PERSONAL_DEV_START_HERE.md)。所有代码/功能/修复/部署更新必须同步写入《更新日志》，并与改动一起提交。**
+>
 > **个人二改：所有新窗口请先读 [PERSONAL_DEV_START_HERE.md](./PERSONAL_DEV_START_HERE.md)。** 网页正式开发与部署入口是 `personal/audio-listening`（实时 HEAD），不是 GitHub 默认的 `TIAO-Capacitor`，也不是 `master`。先核对最新成功 Pages 部署，再基于正式 HEAD 开发；其他工作分支不能直接覆盖正式版。备份仓库不可清理，独立 APK 与 Worker 要各自核对版本。
 
 给 AI 编程助手（Claude Code 等）的项目导航。SullyOS 是装在浏览器里的虚拟手机系统（React + TS + Vite，local-first，IndexedDB 存储）。详细介绍见 [`README.md`](./README.md)。
