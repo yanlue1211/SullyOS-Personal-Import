@@ -1,6 +1,5 @@
 import { extractResponseStatus } from '../features/personal/responseStatus/protocol';
 import { deduplicateVoiceText } from './voiceTextDedup';
-import { splitInlineThinking } from './assistantThinking';
 import {extractFriendFeedReplyTags} from './friendFeedReplyFormat';
 /**
  * 共享 sanitize 工具 — 零依赖纯字符串处理.
@@ -150,7 +149,10 @@ const collapseWhitespace = (t: string): string => t.replace(/\n{3,}/g, '\n\n').t
 // ─── notification 专用 helper ──────────────────────────────────────────────
 
 /** `<think|thinking|thought>...</...>` 整块, 含未闭合兜底 */
-const stripThinkBlocks = (t: string): string => splitInlineThinking(t).content;
+const stripThinkBlocks = (t: string): string =>
+  t
+    .replace(/<(think|thinking|thought)>[\s\S]*?<\/\1>/gi, '')
+    .replace(/<(?:think|thinking|thought)>[\s\S]*$/gi, '');
 
 /** `[[INNER_STATE:...]]` */
 const stripInnerState = (t: string): string => t.replace(/\[\[INNER_STATE:\s*[\s\S]*?\]\]/g, '');
