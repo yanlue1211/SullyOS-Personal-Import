@@ -4,10 +4,11 @@ import {putImageBlob,getBlobForRef} from './blobRef';
 import {REF_SOURCE_STORES} from './blobGc';
 import {inspectAllVoices,clearAllVoices} from './voiceCleanup';
 beforeEach(async()=>{localStorage.clear();const db=await openDB();await new Promise<void>((resolve,reject)=>{const tx=db.transaction([...REF_SOURCE_STORES,'blob_assets'],'readwrite');for(const name of [...REF_SOURCE_STORES,'blob_assets'])tx.objectStore(name).clear();tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);});});
-it('clears user and character speech, favorites, companion and Yueqi while preserving text, music and pictures',async()=>{
+it('clears disposable speech while preserving manual favorites, text, music and pictures',async()=>{
  const audio=new Blob(['voice'],{type:'audio/wav'});
  for(const id of ['tts_test','voice_favorite_audio_fav','companion-touch-voice:a:test'])await DB.saveAssetRaw(id,{blob:audio});
  await DB.saveAssetRaw('voice_msg_1',{blob:audio,originalText:'原文',spokenText:'口语',favorite:true});
+ await DB.saveAssetRaw('voice_msg_2',{blob:audio,originalText:'未收藏原文',spokenText:'未收藏口语'});
  await DB.saveAssetRaw('voice_favorites_index_v1',{version:1,items:[{id:'fav',originalText:'收藏文字'}]});
  await DB.putBlobAsset('companion-startup-voice:a:legacy',audio);
  await DB.saveAssetRaw('yueqi:audio:clip','data:audio/wav;base64,dm9pY2U=');
@@ -20,8 +21,10 @@ it('clears user and character speech, favorites, companion and Yueqi while prese
  for(const role of ['user','assistant'] as const){const ref=await putImageBlob(audio);refs.push(ref);await DB.saveMessage({charId:'a',role,type:'audio',content:ref,metadata:{audioDescription:'识别文字',personalAudio:{transcript:'保留字幕',analysis:'轻声'}} as any});}
  const plan=await inspectAllVoices();expect(plan.recordings).toHaveLength(2);
  const result=await clearAllVoices(plan);expect(result.freedBytes).toBeGreaterThan(20);
- expect(await DB.getAssetRaw('tts_test')).toBeNull();expect(await DB.getAssetRaw('voice_favorite_audio_fav')).toBeNull();
- expect(await DB.getAssetRaw('voice_msg_1')).toEqual({originalText:'原文',spokenText:'口语',favorite:true});
+ expect(await DB.getAssetRaw('tts_test')).toBeNull();
+ expect((await DB.getAssetRaw('voice_favorite_audio_fav')).blob).toBeInstanceOf(Blob);
+ expect((await DB.getAssetRaw('voice_msg_1')).blob).toBeInstanceOf(Blob);
+ expect(await DB.getAssetRaw('voice_msg_2')).toEqual({originalText:'未收藏原文',spokenText:'未收藏口语'});
  expect(await DB.getBlobAsset('companion-startup-voice:a:legacy')).toBeNull();
  expect(await DB.getAssetRaw('yueqi:audio:clip')).toBeNull();
  expect((await DB.getAssetRaw('yueqi:session:one')).clips).toEqual([{id:'clip',text:'故事文字'}]);
@@ -31,6 +34,16 @@ it('clears user and character speech, favorites, companion and Yueqi while prese
  for(const msg of await DB.getMessagesByCharId('a',true)){expect(msg.metadata.audioCleared).toBe(true);expect(msg.metadata.audioDescription).toBe('识别文字');}
  expect(await DB.getAssetRaw('character_config')).toEqual({voiceId:'keep-model',voiceSpeed:1});
  expect((await inspectAllVoices()).estimatedBytes).toBe(0);
+});
+it('protects a voice newly favorited after scan, and keeps legacy favorite audio in blob_assets',async()=>{
+ const audio=new Blob(['fav-voice'],{type:'audio/wav'});
+ await DB.saveAssetRaw('voice_msg_12',{blob:audio,originalText:'喜欢这句'});
+ await DB.putBlobAsset('voice_favorite_audio_legacy',audio);
+ const plan=await inspectAllVoices();
+ await DB.saveAssetRaw('voice_msg_12',{blob:audio,originalText:'喜欢这句',favorite:true});
+ await clearAllVoices(plan);
+ expect((await DB.getAssetRaw('voice_msg_12')).blob).toBeInstanceOf(Blob);
+ expect(await DB.getBlobAsset('voice_favorite_audio_legacy')).not.toBeNull();
 });
 it('retains a recording file if an unrelated song still references the same blob',async()=>{
  const ref=await putImageBlob(new Blob(['voice'],{type:'audio/wav'}));await DB.saveMessage({charId:'a',role:'user',type:'audio',content:ref});
