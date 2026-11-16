@@ -1,0 +1,51 @@
+name: Verify independent user and character avatar frames
+
+on:
+  pull_request:
+    branches: [personal/audio-listening]
+    paths:
+      - 'components/appearance/BeautyShareChannel.tsx'
+      - 'components/chat/DecorationDraftEditor*'
+      - 'components/chat/DecorationPresetThumb.tsx'
+      - 'components/chat/ChatDecorationSample.tsx'
+      - 'utils/avatarFrame*'
+      - 'utils/chatDecoration.ts'
+      - 'utils/decorationApplication*'
+      - 'utils/wardrobeUsage*'
+      - 'utils/decorationPreviewScenes.ts'
+      - 'utils/decorationWorkshop.ts'
+      - '.github/workflows/personal-upstream-avatar-frames-verify.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-frames:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install exact dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Test split avatar slots, preset application, upload and wardrobe, and collaborative appearance
+        run: >-
+          pnpm vitest run
+          utils/avatarFrameTarget.test.ts
+          utils/avatarFrameUpload.test.ts
+          utils/avatarFrameWardrobe.test.ts
+          utils/wardrobeUsage.test.ts
+          utils/decorationApplication.test.ts
+          utils/collaborationBeauty.test.ts
+      - name: Build frontend and ensure unchanged Worker bundle
+        run: pnpm run build
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+      - name: Verify AMSG bundle not affected
+        run: git diff --exit-code -- worker/amsg/worker.bundle.js
