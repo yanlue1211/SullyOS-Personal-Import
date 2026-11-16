@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useOS } from '../context/OSContext';
 import Modal from './os/Modal';
+import { ActiveMsgStore } from '../utils/activeMsgStore';
+import { AMSG_GLOBAL_CONFIG_EVENT, isAmsg2GloballyEnabled, isAmsg2WorkerActive } from '../utils/amsgGlobalGate';
 import {
   AMSG_OWNER_CONFLICT_EVENT,
   findCloudOwnerConflicts,
@@ -23,6 +25,8 @@ export default function AmsgOwnerConflictNotice() {
     if (checking.current) return;
     checking.current = true;
     try {
+      const config = await ActiveMsgStore.getGlobalConfig();
+      if (!isAmsg2WorkerActive(config)) { setConflicts([]); return; }
       const rows = await findCloudOwnerConflicts(currentCharacters.current);
       setConflicts(rows);
     } catch (err) {
@@ -36,10 +40,15 @@ export default function AmsgOwnerConflictNotice() {
     if (!isDataLoaded) return;
     const timer = setTimeout(() => void check(), 3000);
     const onConflict = () => void check();
+    const onGlobalConfig = (event: Event) => {
+      if (!isAmsg2GloballyEnabled((event as CustomEvent).detail)) setConflicts([]);
+    };
     window.addEventListener(AMSG_OWNER_CONFLICT_EVENT, onConflict);
+    window.addEventListener(AMSG_GLOBAL_CONFIG_EVENT, onGlobalConfig);
     return () => {
       clearTimeout(timer);
       window.removeEventListener(AMSG_OWNER_CONFLICT_EVENT, onConflict);
+      window.removeEventListener(AMSG_GLOBAL_CONFIG_EVENT, onGlobalConfig);
     };
   }, [isDataLoaded, check]);
   if (!conflicts.length || typeof document === 'undefined') return null;
