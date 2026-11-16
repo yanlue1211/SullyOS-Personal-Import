@@ -131,7 +131,7 @@ const EmotionSettingsPanel: React.FC<EmotionSettingsPanelProps> = ({
                             onChange={e => setNewPresetName(e.target.value)}
                             onKeyDown={e => e.key === 'Enter' && handleSavePreset()}
                             placeholder="预设名称..."
-                            className="flex-1 bg-white/50 border border-slate-200/60 rounded-xl px-3 py-2 text-sm focus:bg-white transition-all"
+                            className="flex-1 bg-white/50 border border-slate-200/60 rounded-xl px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:bg-white transition-all"
                             autoFocus
                         />
                         <button
@@ -150,7 +150,7 @@ const EmotionSettingsPanel: React.FC<EmotionSettingsPanelProps> = ({
                         value={url}
                         onChange={e => { setUrl(e.target.value); setDirty(true); }}
                         placeholder="留空 = 使用主 API"
-                        className="w-full bg-white/50 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono focus:bg-white transition-all"
+                        className="w-full bg-white/50 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono text-slate-800 placeholder:text-slate-400 focus:bg-white transition-all"
                     />
                 </div>
                 <div>
@@ -160,7 +160,7 @@ const EmotionSettingsPanel: React.FC<EmotionSettingsPanelProps> = ({
                         value={key}
                         onChange={e => { setKey(e.target.value); setDirty(true); }}
                         placeholder="sk-..."
-                        className="w-full bg-white/50 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono focus:bg-white transition-all"
+                        className="w-full bg-white/50 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono text-slate-800 placeholder:text-slate-400 focus:bg-white transition-all"
                     />
                 </div>
                 <div>
@@ -170,7 +170,7 @@ const EmotionSettingsPanel: React.FC<EmotionSettingsPanelProps> = ({
                         value={model}
                         onChange={e => { setModel(e.target.value); setDirty(true); }}
                         placeholder="claude-haiku-4-5 / gpt-4o-mini / ..."
-                        className="w-full bg-white/50 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono focus:bg-white transition-all"
+                        className="w-full bg-white/50 border border-slate-200/60 rounded-xl px-4 py-2.5 text-sm font-mono text-slate-800 placeholder:text-slate-400 focus:bg-white transition-all"
                     />
                 </div>
 

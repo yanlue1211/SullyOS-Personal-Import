@@ -1,0 +1,54 @@
+name: Verify upstream theme contrast compatibility
+
+on:
+  pull_request:
+    branches: [personal/audio-listening]
+    paths:
+      - 'apps/Chat.tsx'
+      - 'apps/CallApp.tsx'
+      - 'apps/GameApp.tsx'
+      - 'components/chat/**'
+      - 'components/call/**'
+      - 'components/date/**'
+      - 'components/os/**'
+      - 'components/schedule/**'
+      - 'components/share/**'
+      - 'components/appearance/**'
+      - 'features/collaboration/**'
+      - 'scripts/chat-preview.tailwind.cjs'
+      - 'index.html'
+      - 'utils/__tests__/themeContrastInheritance.test.ts'
+      - '.github/workflows/personal-upstream-theme-contrast-verify.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-theme:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install frozen dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Theme inheritance, real chat visuals and old preset protection
+        run: >-
+          pnpm vitest run
+          utils/__tests__/themeContrastInheritance.test.ts
+          utils/chatWhitebox.test.ts
+          utils/chatDecoration.test.ts
+          utils/chatInputInteraction.test.ts
+          utils/beautyShare.test.ts
+      - name: Build real production site including regenerated chat CSS
+        run: pnpm run build
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+      - name: Worker production bundle unchanged by theme-only work
+        run: git diff --exit-code -- worker/amsg/worker.bundle.js
