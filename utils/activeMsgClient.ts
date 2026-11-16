@@ -26,7 +26,7 @@ import {
   UserProfile,
 } from '../types';
 import { getLastRealUserMessageAt, getLastRealCharMessageAt } from './amsg2ExpireGuard';
-import { resolveAmsgInteractionLock, isAmsgActiveCall, isAmsgActiveDate, getAmsgActiveDateEncounterId, getAmsgDateEndedAt } from './amsgInteractionGuard';
+import { resolveAmsgInteractionLock, isAmsgActiveCall, isAmsgActiveDate, getAmsgActiveDateEncounterId, getAmsgLastSceneEndedAt } from './amsgInteractionGuard';
 import { AMSG_BUNDLE_VERSION, compareBundleVersions } from './amsgBundleVersion';
 
 import { describeD1LimitCode } from './amsgD1Limits';
@@ -1638,7 +1638,7 @@ const buildLimitsEntry = (char: CharacterProfile, updatedAt: number) => ({
   key: AMSG_LIMITS_KEY,
   value: JSON.stringify({ ...buildAmsgLimitsRecord(char.activeMsg2Config, isAmsg2EnabledForChar(char), char.awayMessage?.quietHours, char.awayMessage,
     isAmsgActiveCall(char.id) ? 'call' : isAmsgActiveDate(char.id) ? 'date' : null,
-    getAmsgActiveDateEncounterId(char.id), getAmsgDateEndedAt(char.id)),
+    getAmsgActiveDateEncounterId(char.id), getAmsgLastSceneEndedAt(char.id)),
     dateLeaveEnabled: char.dateLeaveReminder?.enabled === true }),
   updatedAt,
 });

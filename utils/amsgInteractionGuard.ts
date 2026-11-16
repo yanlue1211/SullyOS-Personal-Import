@@ -18,6 +18,8 @@ const activeCallsInThisRuntime = new Set<string>();
 const ACTIVE_DATE_KEY = 'sully_amsg2_date_active_v1';
 const ACTIVE_DATE_ENCOUNTER_KEY = 'sully_amsg2_date_encounter_v1';
 const ACTIVE_DATE_ENDED_AT_KEY = 'sully_amsg2_date_ended_at_v1';
+/** 本次 JS 运行中显式挂断时刻；用于离开提醒，而非恢复已经结束的通话锁。 */
+const ACTIVE_CALL_ENDED_AT_KEY = 'sully_amsg2_call_ended_at_v1';
 
 /** 见面会话的身份戳；旧任务不能在新一次见面中把锁解掉。 */
 export function getAmsgActiveDateEncounterId(charId: string): string | null {
@@ -34,6 +36,23 @@ export function getAmsgDateEndedAt(charId: string): number | null {
     const value = (JSON.parse(localStorage.getItem(ACTIVE_DATE_ENDED_AT_KEY) || '{}') as Record<string, unknown>)[charId];
     return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
   } catch { return null; }
+}
+
+/** 最近一次明确挂断的时刻。重启不恢复通话锁，只读取历史挂断锚点。 */
+export function getAmsgCallEndedAt(charId: string): number | null {
+  try {
+    const value = (JSON.parse(localStorage.getItem(ACTIVE_CALL_ENDED_AT_KEY) || '{}') as Record<string, unknown>)[charId];
+    return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
+  } catch { return null; }
+}
+
+/**
+ * Worker 现有字段 awayDateEndedAt 兼容「最近一次真实线下分别」的时间；
+ * 云端仍用原字段名，不变更 Worker 协议 / bundle。
+ */
+export function getAmsgLastSceneEndedAt(charId: string): number | null {
+  const latest = Math.max(getAmsgDateEndedAt(charId) ?? 0, getAmsgCallEndedAt(charId) ?? 0);
+  return latest > 0 ? latest : null;
 }
 
 export function setAmsgActiveDate(charId: string, active: boolean, encounterId?: string, endedAt = Date.now()): void {
@@ -79,8 +98,9 @@ export function isAmsgActiveDate(charId: string): boolean {
   try { return JSON.parse(localStorage.getItem(ACTIVE_DATE_KEY) || '{}')[charId] === true; }
   catch { return false; }
 }
-export function setAmsgActiveCall(charId: string, active: boolean): void {
+export function setAmsgActiveCall(charId: string, active: boolean, endedAt = Date.now()): void {
   if (!charId) return;
+  const wasActive = activeCallsInThisRuntime.has(charId);
   if (active) activeCallsInThisRuntime.add(charId);
   else activeCallsInThisRuntime.delete(charId);
   // Keep the old best-effort marker solely for older clients; never read it back
@@ -90,6 +110,12 @@ export function setAmsgActiveCall(charId: string, active: boolean): void {
     if (active) old[charId] = true;
     else delete old[charId];
     localStorage.setItem(ACTIVE_CALL_KEY, JSON.stringify(old));
+    // 只有真正由本运行时的通话转入挂断，才产生离开锚点。重复关闭和重启不伪造挂断。
+    if (!active && wasActive) {
+      const ended = JSON.parse(localStorage.getItem(ACTIVE_CALL_ENDED_AT_KEY) || '{}') as Record<string, number>;
+      ended[charId] = Number.isFinite(endedAt) && endedAt > 0 ? endedAt : Date.now();
+      localStorage.setItem(ACTIVE_CALL_ENDED_AT_KEY, JSON.stringify(ended));
+    }
   } catch { /* 隐私浏览器回退为消息来源推断 */ }
 }
 export function isAmsgActiveCall(charId: string): boolean {

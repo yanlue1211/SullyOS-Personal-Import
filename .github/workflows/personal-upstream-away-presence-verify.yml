@@ -1,0 +1,44 @@
+name: Personal author away presence compatibility
+
+on:
+  pull_request:
+    branches: [personal/audio-listening]
+    paths:
+      - 'utils/awayPresenceAnchor*'
+      - 'utils/amsgInteractionGuard*'
+      - 'utils/awayMessage*'
+      - 'utils/activeMsgClient.ts'
+      - 'apps/CallApp.tsx'
+      - 'apps/DateApp.tsx'
+      - '.github/workflows/personal-upstream-away-presence-verify.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Author meet/call activity anchors and personal B-mode guards
+        run: >-
+          pnpm vitest run
+          utils/awayPresenceAnchor.test.ts
+          utils/amsgInteractionGuard.test.ts
+          utils/awayMessageCloudBootstrap.test.ts
+          utils/awayMessageModes.test.ts
+          utils/awayMessageCore.test.ts
+          utils/awayMessagePrompt.test.ts
+          utils/amsgAwayIsolation.test.ts
+      - name: Production frontend and Worker bundle build
+        run: pnpm run build
