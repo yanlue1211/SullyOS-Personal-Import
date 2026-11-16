@@ -39,7 +39,6 @@
 //     含内嵌的 chatThemes[] 六个字段；顺便扔掉死字段 launcherWidgetImage）
 //   assets 'room_custom_assets_list' ← RoomApp 自定义素材
 //   assets 'spark_user_bg' / 'spark_social_profile'.avatar ← 社交主页的背景与头像上传
-//   characters avatar                ← 角色资料页的头像上传（apps/Character.tsx）
 //   characters roomConfig.wallImage / floorImage / items[].image ← RoomApp
 //   songs coverImage                 ← SongwritingApp
 //   cc_custom_parts src / shadowSrc  ← creatorPartToBlobRefs（字段清单复用同一函数）
@@ -73,6 +72,8 @@
 //     ↑ 末尾这三个是「换图即删」字段，走 convertExclusive（不去重、令牌独占），
 //       衣柜里那份还得跟顶层 imageRef 同令牌。两条规矩的来由见各自函数注释。
 // 明确不碰：
+ //   · characters.avatar：角色头像保持 data URL，首次渲染不必异步查询 Blob；
+ //     这项个人定制排除在一键优化之外，不影响其他角色素材与图像字段。
 //   · 手账自己的配图，以及帖子自己的配图 social_posts.images[]——读端还不认令牌，转了就破图
 //     （帖子配图还被当成「可能是 emoji 字符串」直接渲染成文本，见 MessageItem 的 social_card）；
 //   · chibiStudio.like520.img 与 specialMomentRecords.*.customData.charChibi / userChibi——
@@ -391,11 +392,11 @@ export async function optimizeResourceStorage(
             }
         }
 
-        // ── 2) characters：角色头像 + 小屋图 ──────────────────────
+        // ── 2) characters：角色素材 + 小屋图 ──────────────────────
         // 两样东西在同一趟遍历里一起转。别拆成两趟：翻页靠主键推进，多一趟就是把整张表
         // 连同行里那些几 MB 的图再读一遍（见 iterateStoreRows 的注释）。
         for await (const c of iterateStoreRows<CharacterProfile>('characters')) {
-            tick('角色头像与小屋');
+            tick('角色素材与小屋');
             let changed = false;
             // ⚠️ 这一段必须跑在下面转立绘之前：它靠「立绘的字面值」反查情绪键，
             // 立绘一旦换成令牌就再也对不上了。
@@ -415,10 +416,8 @@ export async function optimizeResourceStorage(
                 delete saved.currentSprite;
                 changed = true;
             }
-            // 头像是两用字段：可能是图，也可能是个 emoji，还可能是 http 外链或已经是令牌。
-            // convert 只认 data:image/ 开头的值，其余一律原样不动。
-            const avatarToken = await convert(c.avatar);
-            if (avatarToken) { c.avatar = avatarToken; changed = true; }
+            // 角色头像需即时可见：旧 dataURL、新上传的 dataURL、外链或旧 blobref
+            // 在这一轮都维持原样；只优化同一角色行里的其他素材。
 
             // 桌面陪伴形象 / 视频舞台背景 / 桌面背景：这三个是「换图即删」字段，
             // 只能走 convertExclusive，理由见那个函数的注释。
