@@ -1,0 +1,46 @@
+name: Verify personal API call log local coverage
+on:
+  push:
+    branches: [personal/upstream-api-call-log-local-20261116]
+  pull_request:
+    branches: [personal/audio-listening]
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - 'apps/**'
+      - 'components/**'
+      - 'features/collaboration/**'
+      - 'hooks/useChatAI.ts'
+      - 'utils/apiCallLog*'
+      - 'utils/handbook*'
+      - 'utils/charMusicPersona.ts'
+      - 'utils/groupChat/mcp.ts'
+      - 'docs/api-call-log.md'
+      - '.github/workflows/personal-upstream-api-call-log-local-verify.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify-api-log:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: API log attribution and transport compatibility
+        run: >-
+          pnpm vitest run utils/apiCallLog.test.ts
+          utils/anthropicApi.test.ts utils/geminiApi.test.ts
+          utils/characterApi.test.ts utils/amsgInstantChat.test.ts
+          utils/personalInnerVoice.test.ts
+      - name: Build real personal front end and Worker dependencies
+        run: pnpm run build
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+      - name: Keep production Worker bundle identical to source
+        run: git diff --exit-code -- worker/amsg/worker.bundle.js

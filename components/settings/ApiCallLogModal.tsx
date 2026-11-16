@@ -173,16 +173,16 @@ const ApiCallLogModal: React.FC<ApiCallLogModalProps> = ({ isOpen, onClose }) =>
                     <div className="pt-2 border-t border-amber-200/60 space-y-2">
                         <p className="font-bold text-sky-700">带「☁️ 云端」的那些是什么</p>
                         <p>
-                            开了<span className="font-semibold">即时对话</span>之后，聊天不再由这个页面发出去，而是交给你自己那台 Worker 在云端发——发完就能关页面，回复照样回得来。这类调用一样记在这里，只是有几处看不到：
+                            主动消息 2.0 的部分请求由你自己的 Worker 发起，当前已接入本地记录的主要是<span className="font-semibold">云端即时对话与后台门牌整理</span>。云端情绪评估、定时主动消息、跳过的轮次及诊断测试仍需适配 Worker 的用量回传，<span className="font-semibold">这几类尚不能保证完整显示</span>。与本地直连有以下差别：
                         </p>
                         <p>
-                            <span className="font-semibold">「生成中」</span>：云端已经收下，回复还没回来。收到回复才会变成成功。
+                            <span className="font-semibold">「生成中」</span>：本地提交的任务云端已经收下，结果还没回来。收到结果才会变成成功。
                         </p>
                         <p>
-                            <span className="font-semibold">没有耗时、没有实际后端</span>：请求在云端发出，本地既量不到时间，也看不到对面自报的模型名。
+                            <span className="font-semibold">没有耗时、没有实际后端</span>：请求在云端发出，本地既量不到单次耗时，也不回传对面自报的模型名。
                         </p>
                         <p>
-                            <span className="font-semibold text-amber-600">「只算末轮」</span>：角色查了东西再接着说的那种，一轮里会调好几次模型，而云端只报得回最后一次的 token。这条记录上的数字<span className="font-semibold">比实际用量小</span>，别拿它去跟账单对齐。
+                            <span className="font-semibold text-amber-600">「只算末轮」</span>：当前个人 Worker 多轮工具调用只可能回传末轮 Token，用量<span className="font-semibold">可能低于真实账单</span>。等云端完整累加上线并核验后才会改成「只在缺失用量时标记」。
                         </p>
                         <p>
                             <span className="font-semibold">「已顶替」</span>：这条还没等到回复你就又发了一句，云端把两句合成一次回。这一轮不再单独等回复了。
