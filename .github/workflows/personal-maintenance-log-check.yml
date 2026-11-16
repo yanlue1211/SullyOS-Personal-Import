@@ -1,0 +1,57 @@
+# 个人二改日志守卫：阻止「功能做完却忘记记入更新日志」的 PR 直接悄悄通过。
+# 仅检查正式网页发布分支的 PR；不改构建、不动数据、不拦截其它独立 APK/Worker 分支。
+name: Personal maintenance changelog guard
+
+on:
+  pull_request:
+    branches: [personal/audio-listening]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  require-changelog-on-code-change:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ensure updates include personal-maintenance/更新日志.md
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const pull_number = context.issue.number;
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner, repo, pull_number, per_page: 100,
+            });
+            const changelog = 'personal-maintenance/更新日志.md';
+            const changedChangelog = files.some(file => file.filename === changelog);
+            // Pure docs/navigation changes are exempt to prevent recursive doc-only releases.
+            // Runtime code, assets, configuration and deployment workflows are NOT exempt.
+            const isPureDocumentation = path => (
+              path === changelog
+              || path === 'personal-maintenance/更新须知.md'
+              || path === 'PERSONAL_DEV_START_HERE.md'
+              || path === 'AGENTS.md'
+              || path === 'CLAUDE.md'
+              || path === 'README.md'
+              || path.startsWith('docs/')
+              || path.startsWith('notes/')
+              || path.startsWith('plans/')
+              || path.startsWith('更新日志/')
+              || path === '.github/workflows/personal-maintenance-log-check.yml'
+              || path.endsWith('.md')
+            );
+            const materialChanges = files
+              .map(file => file.filename)
+              .filter(path => !isPureDocumentation(path));
+            if (materialChanges.length > 0 && !changedChangelog) {
+              core.setFailed(
+                '本 PR 修改了实际功能/配置/部署文件，但未更新 personal-maintenance/更新日志.md。'
+                + ' 请补充具体修改、PR/commit、测试、部署状态和遗留问题。'
+              );
+            } else {
+              core.info(materialChanges.length > 0
+                ? '✅ 已同步更新日志。'
+                : '✅ 本 PR 仅调整文档/日志，不需要额外记录。');
+            }
