@@ -292,6 +292,22 @@ export const syncCloudAwayTask = async (deps: CloudAwaySyncDeps, options: { seed
   }
 };
 
+/**
+ * 场景真正结束后再重新核对：读取已经落库的最近一次角色发言，
+ * 由 syncCloudAwayTask 合并较新的见面/挂断时刻。
+ * 不用 DateApp/CallApp 用户本轮文字的 timestamp 冒充 Char 锚点。
+ * 只修正「离开后自动提醒」链，不改预约任务，也不产生模型调用。
+ */
+export const rearmCloudAwayAfterSceneExit = async (
+  deps: Omit<CloudAwaySyncDeps, 'lastCharAt'>,
+): Promise<boolean> => {
+  if (!deps.char.awayMessage?.enabled) return false;
+  const recent = await DB.getRecentMessagesByCharId(deps.char.id, 50, true);
+  const lastCharAt = getLastRealCharMessageAt(recent);
+  if (lastCharAt == null) return false;
+  return syncCloudAwayTask({ ...deps, lastCharAt });
+};
+
 /** 关掉离开后消息或改了等待时长时调用：取消云端那条，下一轮对方开口时按新设置重建。 */
 export const cancelCloudAwayTasks = async (char: CharacterProfile, updateCharacter: UpdateCharacter): Promise<void> => {
   // 关闭/改间隔时不能再执行按旧配置排队的用户互动改期。
