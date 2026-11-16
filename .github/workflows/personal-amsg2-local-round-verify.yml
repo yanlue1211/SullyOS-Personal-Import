@@ -1,0 +1,43 @@
+name: Verify AMSG2 local single-round scheduling
+on:
+  push:
+    branches: [personal/amsg2-local-single-round-20261116]
+  pull_request:
+    branches: [personal/audio-listening]
+    paths:
+      - 'hooks/useChatAI.ts'
+      - 'utils/amsg2ToolLoop*'
+      - 'docs/amsg2-pacing-limits.md'
+      - '.github/workflows/personal-amsg2-local-round-verify.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify-local-schedule:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Test schedule outcomes and local conversation compatibility
+        run: >-
+          pnpm vitest run utils/amsg2ToolLoop.test.ts
+          utils/amsg2ToolBridge.test.ts
+          utils/amsgLimits.test.ts
+          utils/amsgInstantChat.test.ts
+          utils/anthropicApi.test.ts
+          utils/geminiApi.test.ts
+          utils/personalInnerVoice.test.ts
+          utils/chatRequestPayload.test.ts
+      - name: Build personal web UI
+        run: pnpm run build
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+      - name: Worker must stay unchanged
+        run: git diff --exit-code -- worker/amsg/worker.bundle.js
