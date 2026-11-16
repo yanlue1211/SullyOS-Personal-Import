@@ -541,7 +541,7 @@ const DateApp: React.FC = () => {
         const rawContent = await callLLM(messages, resolveDialogueApi(apiConfig, char).temperature ?? 0.85);
         const cleanDateContent = await applyInPersonSchedules(rawContent, scheduling, {
             userProfile, groups, realtimeConfig, apiConfig, updateCharacter,
-        }, ok => addToast(ok ? '已预约未来主动消息' : '线下主动消息预约失败，可在主动消息 2.0 面板检查', ok ? 'success' : 'error'));
+        }, (ok, reason) => addToast(ok ? '已预约未来主动消息' : `线下主动消息预约失败：${reason || '请检查主动消息 2.0 的频率与连接状态'}`, ok ? 'success' : 'error'));
         const parsed = parseSARModuleReply(cleanDateContent, sarModulePlan);
         const sarModuleEvents = createSARModuleEventMeta(sarModulePlan);
         const userSurface = sarModulePlan.user?.phase === 'active' && parsed.userSurface

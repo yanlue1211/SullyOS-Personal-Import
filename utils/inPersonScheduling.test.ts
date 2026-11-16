@@ -4,7 +4,7 @@ vi.mock('./activeMsgClient', () => ({ ActiveMsgClient: {scheduleCharacterTask:vi
 vi.mock('./activeMsgStore', () => ({ ActiveMsgStore: {getGlobalConfig:vi.fn()} }));
 import { ActiveMsgClient } from './activeMsgClient';
 import { ActiveMsgStore } from './activeMsgStore';
-import { prepareInPersonScheduling, applyInPersonSchedules } from './inPersonScheduling';
+import { prepareInPersonScheduling, applyInPersonSchedules, explainInPersonScheduleFailure } from './inPersonScheduling';
 import { setAmsgActiveDate, isAmsgActiveDate } from './amsgInteractionGuard';
 const actor = (id:string, enabled=true):any => ({id,name:id,activeMsg2Config:{enabled,tasks:[],minIntervalMinutes:1}});
 const a=actor('a'), b=actor('b');
@@ -72,7 +72,7 @@ it('云端失败不报预约成功，仍保留正常正文',async()=>{
     const context=await prepareInPersonScheduling([a],true);
     vi.mocked(ActiveMsgClient.scheduleCharacterTask).mockRejectedValue(new Error('offline'));
     expect(await applyInPersonSchedules(`正文\n${call()}`,context,base,report)).toBe('正文');
-    expect(report).toHaveBeenCalledWith(false);
+    expect(report).toHaveBeenCalledWith(false,expect.stringContaining('云端创建任务失败'));
     expect(updates).not.toHaveBeenCalled();
 });
 
@@ -93,4 +93,32 @@ it('等待全局配置期间开始新场次，仍保留旧身份并拒绝迟到�
     const context=await pending;
     await applyInPersonSchedules(call(),context,base,report);
     expect(ActiveMsgClient.scheduleCharacterTask).not.toHaveBeenCalled();
+});
+
+it('线下排程失败告知真实限制来源，不把所有失败都提示为三次连发', async()=>{
+    const ctx=await prepareInPersonScheduling([a],true);
+    vi.mocked(ActiveMsgClient.scheduleCharacterTask).mockRejectedValueOnce(new Error('该角色已经排好了 10 次主动消息，到上限了'));
+    await applyInPersonSchedules(call(),ctx,base,report);
+    expect(report).toHaveBeenCalledWith(false,expect.stringContaining('同时挂着'));
+    expect(ActiveMsgClient.scheduleCharacterTask).toHaveBeenCalledTimes(1);
+    expect(explainInPersonScheduleFailure({tool:'schedule_active_message',status:'rejected',reason:'unanswered_limit'})).toContain('连发额度');
+    expect(explainInPersonScheduleFailure({tool:'schedule_active_message',status:'rejected',reason:'min_gap'})).toContain('太接近');
+    expect(explainInPersonScheduleFailure({tool:'schedule_active_message',status:'error',message:'Failed to fetch sk-not-for-display'})).not.toContain('sk-not-for-display');
+});
+it('连发不限时三条旧预约不会被误判为三次上限',async()=>{
+    const ch=actor('a');
+    ch.activeMsg2Config={...ch.activeMsg2Config,maxUnansweredSends:0,maxActiveTasks:10,minSendGapMinutes:0,tasks:[1,2,3].map((n)=>({
+        taskUuid:`old-${n}`,clientTaskId:`old-client-${n}`,firstSendTime:new Date(Date.now()+(n+3)*3600000).toISOString(),
+        mode:'auto',recurrenceType:'none',expirePolicy:'expire',source:'character',status:'scheduled',createdAt:Date.now(),
+    }))};
+    const ctx=await prepareInPersonScheduling([ch],true);
+    await applyInPersonSchedules(call(),ctx,base,report);
+    expect(ActiveMsgClient.scheduleCharacterTask).toHaveBeenCalledTimes(1);
+    expect(report).toHaveBeenCalledWith(true);
+});
+it('同轮超过两次预约明确反馈，而不是静默忽略第三次',async()=>{
+    const ctx=await prepareInPersonScheduling([a],true);
+    await applyInPersonSchedules([call('a',1),call('a',2),call('a',3)].join('\n'),ctx,base,report);
+    expect(ActiveMsgClient.scheduleCharacterTask).toHaveBeenCalledTimes(2);
+    expect(report).toHaveBeenCalledWith(false,expect.stringContaining('最多创建 2 个预约'));
 });

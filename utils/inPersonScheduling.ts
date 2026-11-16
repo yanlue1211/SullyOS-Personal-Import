@@ -6,6 +6,40 @@ import { getAmsgActiveDateEncounterId } from './amsgInteractionGuard';
 import { resolveCharTimeZone } from './timezone';
 
 type ToolBase = Parameters<typeof createAmsg2ToolSession>[0];
+type InPersonScheduleOutcome = Awaited<ReturnType<typeof executeAmsg2ToolWithOutcome>>['outcome'];
+
+/**
+ * 只向用户展示固定中文原因，不透传 Worker / 供应商的原始错误信息：
+ * 它们可能夹带后台地址、令牌、模型上下文等敏感字段。
+ */
+export function explainInPersonScheduleFailure(outcome: InPersonScheduleOutcome): string {
+    if (outcome.status === 'duplicate') return '同一轮已经约过这条时间，重复预约未创建';
+    if (outcome.status === 'rejected') {
+        switch (outcome.reason) {
+            case 'unanswered_limit':
+                return '未回复期间的连发额度已满；请确认「主动频率」里的「不限」已经保存';
+            case 'min_gap':
+                return '预约时间与现有任务太接近，请检查「两次之间至少隔多久」';
+            case 'recurring_not_allowed':
+                return '角色没有获得安排每天/每周重复消息的权限';
+            default:
+                return '当前预约未能通过规则校验，请检查主动频率与待执行任务';
+        }
+    }
+    // 用户界面要告诉用户是哪道限额拦的，但绝不暴露原始错误正文。
+    const error = outcome.message ?? '';
+    if (/已经排好了\s*\d+\s*次主动消息|任务名额已满|排程任务.*上限/.test(error)) {
+        return '同时挂着的预约任务达到名额上限；「不限连发」并不会取消这项限制';
+    }
+    if (/Failed to fetch|network|fetch failed|timeout|超时|503|502|CORS/i.test(error)) {
+        return '连接云端 Worker 失败，请检查网络和主动消息 2.0 的连接状态';
+    }
+    if (/时间|send_at|future|past|太近|at least|invalid/i.test(error)) {
+        return '预约时间无效或离现在太近，请调整到将来的有效时间';
+    }
+    return '云端创建任务失败；不是已经确认的三次连发拦截，请检查连接与待执行任务';
+}
+
 export interface InPersonScheduleContext {
     prompt: string;
     actors: CharacterProfile[];
@@ -55,7 +89,7 @@ export async function prepareInPersonScheduling(
 export async function applyInPersonSchedules(
     raw: string, context: InPersonScheduleContext,
     base: Omit<ToolBase, 'char'>,
-    report: (ok: boolean) => void,
+    report: (ok: boolean, reason?: string) => void,
 ): Promise<string> {
     const calls = extractFireScheduleTextCalls(raw);
     let content = raw;
@@ -65,9 +99,9 @@ export async function applyInPersonSchedules(
         const id = typeof call.args.character_id === 'string' ? call.args.character_id : '';
         const actor = id ? context.actors.find(actor => actor.id === id)
             : !context.requireActorId && context.actors.length === 1 ? context.actors[0] : undefined;
-        if (!actor || !base.userProfile) { if (context.actors.length) report(false); continue; }
+        if (!actor || !base.userProfile) { if (context.actors.length) report(false, '当前角色没有这一轮的预约权限'); continue; }
         const encounter = context.encounters.get(actor.id);
-        if (!encounter || getAmsgActiveDateEncounterId(actor.id) !== encounter) { report(false); continue; }
+        if (!encounter || getAmsgActiveDateEncounterId(actor.id) !== encounter) { report(false, '见面场次已改变，旧回复不能继续排程'); continue; }
         let session = sessions.get(actor.id);
         if (!session) { session = createAmsg2ToolSession({...base, char: actor}); sessions.set(actor.id, session); }
         // 不接收模型自造的内部参数，也不允许角色在这里建循环任务。
@@ -76,8 +110,12 @@ export async function applyInPersonSchedules(
                 send_at: call.args.send_at, mode: call.args.mode, prompt_hint: call.args.prompt_hint,
                 expire_policy: call.args.expire_policy, recurrence: 'none', __dateExitEncounterId: encounter,
             }, session);
-            report(outcome.status === 'done');
-        } catch { report(false); }
+            if (outcome.status === 'done') report(true);
+            else report(false, explainInPersonScheduleFailure(outcome));
+        } catch { report(false, '预约执行中断，请检查云端连接'); }
     }
+    // 旧版把第 3 条及以后静默抛掉：用户只见到“没预约上”，完全看不到是
+    // 单轮最多两次的限制，容易误以为是三次连发限制。仍保留两条安全护栏，明确告知。
+    if (calls.length > 2) report(false, '同一轮线下回复最多创建 2 个预约，其余没有执行');
     return content;
 }
