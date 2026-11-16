@@ -8,7 +8,8 @@ import { expect, it } from 'vitest';
 const legacyTextCalls: Record<string, number> = {
     'apps/GroupChat.tsx': 1,
     'apps/GameApp.tsx': 1,
-    'components/date/story/StoryTheaterSession.tsx': 2,
+    // 剧情上下文已集中到共享适配层；保持既有文本入口数量，不恢复旧调用点。
+    'utils/storyTheaterContextParts.ts': 1,
     'utils/socialGeneration.ts': 1,
     // 记忆诊断、迁移、后台门牌任务目前的契约是序列化文本，不是角色对话。
     'apps/MemoryPalaceApp.tsx': 1,
