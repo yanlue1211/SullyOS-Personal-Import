@@ -1,5 +1,8 @@
 import type { CharacterProfile } from '../types';
-import { isAmsg2EnabledForChar } from './amsg2Tasks';
+import {
+    currentOccurrenceMs, describeRecurrence, formatTaskTime, getPendingTasks, isAmsg2EnabledForChar,
+} from './amsg2Tasks';
+import { resolveAmsgLimits, SELF_SCHEDULE_HARD_GAP_MS } from './amsgLimits';
 import { isAmsg2GlobalReady, createAmsg2ToolSession, executeAmsg2ToolWithOutcome } from './amsg2ToolBridge';
 import { buildSendAtExample, extractFireScheduleTextCalls } from './amsgFireSchedule';
 import { getAmsgActiveDateEncounterId } from './amsgInteractionGuard';
@@ -65,10 +68,36 @@ export async function prepareInPersonScheduling(
         encounters: new Map(enabled.map(actor => [actor.id, capturedEncounters.get(actor.id)!])),
     };
     if (!enabled.length) return context;
+    // 线下模式此前只告知角色「能预约」，却没有像普通聊天那样给它看
+    // 已排好的任务列表。相同时间自然反复撞上 min_gap，角色无从知道缘由。
+    // 直接使用本地任务清单的当前待触发时刻；循环任务用下一次触发时间，
+    // 不能复述第一次建立任务的旧日期。这里只读，不向 Worker 再发请求。
+    const nowMs = Date.now();
     const actorInfo = enabled.map(actor => {
         const tzId = resolveCharTimeZone(actor) || Intl.DateTimeFormat().resolvedOptions().timeZone;
-        return `角色 ${JSON.stringify(actor.name)}，character_id=${JSON.stringify(actor.id)}，时区 ${tzId}，明天此刻示例 ${buildSendAtExample(Date.now(), {tzId})}`;
-    }).join('\n');
+        const limits = resolveAmsgLimits(actor.activeMsg2Config);
+        const gapMinutes = Math.ceil(Math.max(limits.minSendGapMs, SELF_SCHEDULE_HARD_GAP_MS) / 60_000);
+        const booked = getPendingTasks(actor.activeMsg2Config, nowMs)
+            .filter(task => !task.away && !task.dateLeave && !task.clientTaskId?.startsWith('away-'))
+            .map(task => ({ task, at: currentOccurrenceMs(task, nowMs) }))
+            .filter((entry): entry is { task: typeof entry.task; at: number } => entry.at !== null && Number.isFinite(entry.at))
+            .sort((a, b) => a.at - b.at);
+        const bookedLines = booked.length
+            ? [
+                `已预约的未来线上联系（${booked.length} 次；用户手动排和你自己排的都占时间）：`,
+                ...booked.map(({ task, at }) => {
+                    const hint = task.promptHint?.replace(/\s+/g, ' ').trim().slice(0, 72);
+                    return `- ${formatTaskTime(at, tzId)} · ${describeRecurrence(task.recurrenceType)} · ${task.source === 'character' ? '你自己排的' : '用户排的'}`
+                        + (hint ? ` · 方向 ${JSON.stringify(hint)}` : '');
+                }),
+            ]
+            : ['本机目前没有已知的待触发线上预约；刚由云端离线新增、尚未同步回手机的任务可能还不在这份清单里。'];
+        return [
+            `角色 ${JSON.stringify(actor.name)}，character_id=${JSON.stringify(actor.id)}，时区 ${tzId}，明天此刻示例 ${buildSendAtExample(nowMs, {tzId})}`,
+            ...bookedLines,
+            `排新时间前核对上述已排任务：同一个时间、相同事件已经约好就不要再排；新时间必须和已预约时刻至少隔 ${gapMinutes} 分钟。没有合适的新时间就不预约，直接正常聊天即可。`,
+        ].join('\n');
+    }).join('\n\n');
     context.prompt = [
         '【线下会话的未来主动联系工具】',
         '你此刻仍然和对方在同一线下场景。主动消息 2.0 排下的所有任务，都是未来要真正通过线上聊天发给对方的消息，不是线下提醒、当面台词或待办事项。',
@@ -80,6 +109,7 @@ export async function prepareInPersonScheduling(
         actorInfo,
         'send_at 用对应角色所在时区的墙钟时间，不带时区后缀，必须晚于当前时间至少一分钟。剧情里的虚构日期不能代替现实的发送时间。',
         '遵守用户已有的频率、重复、到点必发权限，不可自行越过。',
+        '上面的已预约时间是给你核对冲突用的，不是让你现在就提前发送，也不要在回复正文泄露这张排程表。',
         '整轮最多预约两条。没有自然理由就不要预约；工具调用不属于剧情台词、旁白，不写进任何正文或小剧场模块。',
     ].join('\n');
     return context;

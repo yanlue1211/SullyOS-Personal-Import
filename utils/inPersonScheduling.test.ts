@@ -122,3 +122,59 @@ it('同轮超过两次预约明确反馈，而不是静默忽略第三次',async
     expect(ActiveMsgClient.scheduleCharacterTask).toHaveBeenCalledTimes(2);
     expect(report).toHaveBeenCalledWith(false,expect.stringContaining('最多创建 2 个预约'));
 });
+
+
+it('线下首轮主动看到已有预约：按角色时区和触发时间排序，不再撞同一个时间',async()=>{
+    const ch=actor('a');
+    ch.customTimezoneEnabled=true;
+    ch.customTimezone='Asia/Shanghai';
+    ch.activeMsg2Config={...ch.activeMsg2Config,minSendGapMinutes:10,tasks:[
+        {taskUuid:'later',clientTaskId:'later-id',mode:'prompted',promptHint:'傍晚出门后报平安',
+         firstSendTime:'2026-11-11T07:00:00Z',recurrenceType:'none',source:'character',status:'scheduled',createdAt:Date.now()},
+        {taskUuid:'earlier',clientTaskId:'earlier-id',mode:'auto',
+         firstSendTime:'2026-11-11T05:00:00Z',recurrenceType:'none',source:'user',status:'scheduled',createdAt:Date.now()},
+        {taskUuid:'away-msg',clientTaskId:'away-1',mode:'auto',away:true,
+         firstSendTime:'2026-11-11T04:40:00Z',recurrenceType:'none',source:'character',status:'scheduled',createdAt:Date.now()},
+        {taskUuid:'already-fired',clientTaskId:'old',mode:'auto',
+         firstSendTime:'2026-11-05T05:00:00Z',recurrenceType:'none',source:'character',status:'scheduled',createdAt:Date.now()},
+    ]};
+    const ctx=await prepareInPersonScheduling([ch],true);
+    expect(ctx.prompt).toContain('已预约的未来线上联系（2 次');
+    expect(ctx.prompt).toContain('2026/11/11');
+    expect(ctx.prompt).toContain('13:00');
+    expect(ctx.prompt).toContain('15:00');
+    expect(ctx.prompt.indexOf('13:00')).toBeLessThan(ctx.prompt.indexOf('15:00'));
+    expect(ctx.prompt).toContain('傍晚出门后报平安');
+    expect(ctx.prompt).toContain('至少隔 10 分钟');
+    expect(ctx.prompt).toContain('同一个时间、相同事件已经约好就不要再排');
+    expect(ctx.prompt).not.toContain('away-msg');
+    expect(ctx.prompt).not.toContain('2026/11/5');
+    expect(ActiveMsgClient.scheduleCharacterTask).not.toHaveBeenCalled();
+});
+it('多角色只看到各自预约；没有任务不伪造已有排程，低间隔仍遵循硬性防撞底线',async()=>{
+    const chA=actor('a'),chB=actor('b');
+    chA.activeMsg2Config={...chA.activeMsg2Config,minSendGapMinutes:0,tasks:[
+        {taskUuid:'a-task',clientTaskId:'a-task',mode:'auto',
+         firstSendTime:'2026-11-11T06:00:00Z',recurrenceType:'none',source:'character',status:'scheduled',createdAt:Date.now()},
+    ]};
+    const ctx=await prepareInPersonScheduling([chA,chB],true);
+    const first=ctx.prompt.indexOf('角色 "a"'),second=ctx.prompt.indexOf('角色 "b"');
+    expect(first).toBeGreaterThanOrEqual(0);
+    expect(second).toBeGreaterThan(first);
+    expect(ctx.prompt.slice(first,second)).toContain('已预约的未来线上联系（1 次');
+    expect(ctx.prompt.slice(second)).toContain('本机目前没有已知的待触发线上预约');
+    expect(ctx.prompt.slice(first,second)).toContain('至少隔 3 分钟');
+    expect(ctx.prompt.slice(second)).not.toContain('2026/11/11 06:00');
+});
+it('重复任务显示未来下一次，且刚过点的下次远端时间优先',async()=>{
+    const ch=actor('a');
+    ch.activeMsg2Config={...ch.activeMsg2Config,tasks:[
+        {taskUuid:'daily',clientTaskId:'daily',mode:'auto',promptHint:'起床说早安',
+         firstSendTime:'2026-11-07T06:00:00Z',nextSendAt:'2026-11-12T06:00:00Z',
+         recurrenceType:'daily',source:'character',status:'scheduled',createdAt:Date.now()},
+    ]};
+    const ctx=await prepareInPersonScheduling([ch],true);
+    expect(ctx.prompt).toContain('每天');
+    expect(ctx.prompt).toContain('2026/11/12');
+    expect(ctx.prompt).not.toContain('2026/11/7');
+});
