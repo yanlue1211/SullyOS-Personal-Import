@@ -278,7 +278,7 @@ describe('theme contrast & style inheritance boundaries', () => {
     const chatOuterIdx = chatSource.indexOf("<div className={`h-full w-full relative overflow-hidden ${homePhone ? '' : 'text-slate-900'}`}>");
     const chatStyleIdx = chatSource.indexOf('<ChatRuntimeStyle', chatOuterIdx);
     const chatRootIdx = chatSource.indexOf('className={`sully-chat-root', chatOuterIdx);
-    const chatBoundaryIdx = chatSource.indexOf('.sully-chat-root 仅包裹聊天舞台');
+    const chatBoundaryIdx = chatSource.indexOf('聊天舞台在上方结束，以下系统弹窗不继承角色白框 CSS / 私聊文字颜色');
     const chatRootCloseBeforeBoundary = chatSource.lastIndexOf('</div>', chatBoundaryIdx);
     const chatInputIdx = chatSource.lastIndexOf('<ChatInputArea', chatBoundaryIdx);
     const chatModalsIdx = chatSource.indexOf('<ChatModals');
