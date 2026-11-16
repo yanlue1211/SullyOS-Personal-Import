@@ -21,6 +21,7 @@
 | **3D 小屋 · 布局与功能分区** | [`docs/room3d-layout.md`](./docs/room3d-layout.md) | 设计或重排任何房间/样板房、自动摆家具前必读；先划功能区，再按家具组合摆放，保留连续动线，不能逐件随机找空位；本轮统一黑 × 绿 × 白 |
 | **美化分享码与人工审核** | [`docs/beauty-share.md`](./docs/beauty-share.md) | 改美化投稿、作者身份、分享码领取或 `worker/beauty-share` 前必读；未审文件保持私有，更新通过后才替换已发布指针，仅作者明确授权且已审作品进入公开静态装扮库，未授权旧作不公开 |
 | **ChatApp 白框与主题对比度边界** | [`docs/chat-decoration.md`](./docs/chat-decoration.md) | 改 `.sully-chat-root`、全屏消息卡/弹层 Portal、白框选择器及深浅色表单时必读；维护家园小手机隔离、自定义 CSS 和内置白框兼容。 |
+| **API 调用记录的用途与 Token** | [`docs/api-call-log.md`](./docs/api-call-log.md) | 改模型请求元数据、用途归属、缓存计数或云端账单时必读；明确区分已上线本地计数与尚未同步的云端 Worker。 |
 | **角色默认对话 API** | [`docs/character-api.md`](./docs/character-api.md) | 改角色独立 API、API 预设分组或对话模型路由前必读；App 优先，单角色回复才使用角色默认，凭据整套选择 |
 | **Anthropic 原生接口 / Prompt Caching** | [`docs/anthropic-messages.md`](./docs/anthropic-messages.md) | 改 Messages 转换、SSE、缓存或 amsg 原生模型调用前必读；原生端点随整套凭据保存，不新增代理，旧 Worker 先更新并验证能力 |
 | **Gemini 原生接口 / 自动缓存** | [`docs/gemini-native.md`](./docs/gemini-native.md) | 改 Gemini 转换、SSE、工具签名或缓存计数前必读；动态提示保留位置，原生能力按当前 Worker 地址确认 |
