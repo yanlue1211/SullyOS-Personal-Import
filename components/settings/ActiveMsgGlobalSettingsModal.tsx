@@ -265,6 +265,7 @@ const ActiveMsgGlobalSettingsModal: React.FC<ActiveMsgGlobalSettingsModalProps> 
   // 「生成 Master Key」只在本次打开期间展示，前端不落盘——它是 worker 侧密钥，粘进 CF env 即可。
   const [generatedMasterKey, setGeneratedMasterKey] = useState('');
   const [generatedServerToken, setGeneratedServerToken] = useState('');
+  const [serverTokenOpen, setServerTokenOpen] = useState(false);
 
   // 一键部署：填一枚 CF Token，剩下的（建库、传 worker、写密钥、加定时）都自动做完。
   // Token 只在这次部署期间留在内存里，成功与否都不落盘——它是能改整个账号 Workers 的
@@ -1463,7 +1464,7 @@ const ActiveMsgGlobalSettingsModal: React.FC<ActiveMsgGlobalSettingsModalProps> 
                 <div className="space-y-1">
                   <code className="font-mono text-[11px] text-slate-600">AMSG_SERVER_TOKEN（可选）</code>
                   <p className="text-[11px] text-slate-400">
-                    防止别人滥用你的 Worker。值 = 下面「共享密钥」填的那串，两边一致即可；不配则端点全开。
+                    防止别人滥用你的 Worker。值 = 下面「共享密钥」（点「展开」才出现）填的那串，两边一致即可；不配则端点全开。
                   </p>
                 </div>
               </div>
@@ -1613,28 +1614,45 @@ const ActiveMsgGlobalSettingsModal: React.FC<ActiveMsgGlobalSettingsModalProps> 
             </div>
           </div>
 
-          <div>
-            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block pl-1">
-              共享密钥（可选）
-            </label>
-            <div className="flex gap-2">
-              <input
-                type="password"
-                value={config.serverToken || ''}
-                onChange={(event) => patchConfig({ serverToken: event.target.value })}
-                placeholder="worker 配了 AMSG_SERVER_TOKEN 才需要填"
-                className="flex-1 bg-white/70 border border-slate-200 rounded-2xl px-4 py-3 text-sm"
-              />
-              <button
-                type="button"
-                onClick={() => void handleGenerateServerToken()}
-                className="shrink-0 px-3 py-3 text-xs rounded-2xl font-bold bg-white border border-slate-200 text-slate-600 active:scale-95 transition-transform"
-              >
-                随机
-              </button>
-            </div>
-            {generatedServerToken ? (
-              <SecretReveal value={generatedServerToken} className="mt-1.5" />
+          {/*
+            共享密钥默认折叠：自动部署已填好。防止误点「随机」导致浏览器与云端 Worker 401。
+            本地仍存原配置；展开只是展示入口，不触碰密钥或云端绑定。
+          */}
+          <div className="space-y-2">
+            <button
+              type="button"
+              aria-expanded={serverTokenOpen}
+              onClick={() => setServerTokenOpen((prev) => !prev)}
+              className="w-full flex items-center justify-between text-left text-[11px] font-bold text-slate-400 pl-1"
+            >
+              <span>共享密钥 · {config.serverToken ? '已填好' : '未填'}</span>
+              <span>{serverTokenOpen ? '收起' : '展开'}</span>
+            </button>
+            {serverTokenOpen ? (
+              <>
+                <p className="text-[11px] leading-relaxed text-slate-400 pl-1">
+                  一键部署已经自动填好，不用动。改了的话要和 Worker 上的 AMSG_SERVER_TOKEN 保持一致，否则会连不上。
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    type="password"
+                    value={config.serverToken || ''}
+                    onChange={(event) => patchConfig({ serverToken: event.target.value })}
+                    placeholder="worker 配了 AMSG_SERVER_TOKEN 才需要填"
+                    className="flex-1 bg-white/70 border border-slate-200 rounded-2xl px-4 py-3 text-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void handleGenerateServerToken()}
+                    className="shrink-0 px-3 py-3 text-xs rounded-2xl font-bold bg-white border border-slate-200 text-slate-600 active:scale-95 transition-transform"
+                  >
+                    随机
+                  </button>
+                </div>
+                {generatedServerToken ? (
+                  <SecretReveal value={generatedServerToken} className="mt-1.5" />
+                ) : null}
+              </>
             ) : null}
           </div>
 
