@@ -41,6 +41,20 @@ describe('打脏入口接线（保存后调 markAmsgStateDirty）', () => {
     }
   });
 
+  it('Chat：用户发送后等卡片替换落库再打脏，沿用合批而不强制重复 PUT', () => {
+    const src = read('../apps/Chat.tsx');
+    const fn = sliceBetween(src, 'const sendText = async', 'const handleSendText = async');
+    const saved = fn.indexOf('const savedUserMsgId = await DB.saveMessage(msgPayload);');
+    const cardReplacement = fn.indexOf('await DB.deleteMessage(savedUserMsgId);');
+    const historyReady = fn.indexOf('await reloadMessages(visibleCountRef.current);');
+    const sync = fn.indexOf('markAmsgStateDirty({ char, userProfile, groups, realtimeConfig });', historyReady);
+    expect(saved).toBeGreaterThan(-1);
+    expect(cardReplacement).toBeGreaterThan(saved);
+    expect(historyReady).toBeGreaterThan(cardReplacement);
+    expect(sync).toBeGreaterThan(historyReady);
+    expect(fn).not.toContain("flushAmsgState('user-message-saved')");
+  });
+
   it('OSContext 启动路径接了底账补传 resumePendingAmsgStateSync', () => {
     expect(read('../context/OSContext.tsx')).toContain('resumePendingAmsgStateSync({');
   });
