@@ -8,7 +8,7 @@ export default function VoiceCleanupPanel(){
  const clear=async()=>{if(!plan||busy)return;setBusy(true);setProgress('正在准备清理…');try{const r=await clearAllVoices(plan,setProgress);setPlan(null);setResult(`已清理 ${r.files} 项语音，释放约 ${formatBytes(r.freedBytes)}。${r.retainedFiles?`${r.retainedFiles} 个文件仍被其他内容引用，已保留。`:''}即将刷新页面。`);setTimeout(()=>window.location.reload(),2500);}catch(e){setResult(`清理未完成：${String(e)}。已清理部分不会自动恢复，请重新扫描。`);setPlan(null);}finally{setBusy(false);setProgress('');}};
  return <div className="mt-4 p-4 rounded-2xl bg-emerald-50 border border-emerald-100">
   <div className="text-xs font-bold text-slate-700">语音一键清理（保留收藏）</div>
-  <p className="text-xs text-slate-500 leading-relaxed mt-2">清理角色语音、用户录音、陪伴语音和月栖语音；手动收藏的语音原文件和收藏记录保留。文字、转写、语气、聊天、记忆、音乐与 BGM 也保留。</p>
+  <p className="text-xs text-slate-500 leading-relaxed mt-2">清理角色语音、用户录音、陪伴语音和月栖语音；手动收藏的语音原文件和收藏记录保留。文字、转写、语气、聊天和记忆保留；音乐与 BGM 保留。</p>
   <button disabled={busy} onClick={()=>void inspect()} className="mt-3 px-4 py-2 rounded-xl bg-white text-emerald-700 border border-emerald-200 text-xs font-bold disabled:opacity-50">{busy?'处理中…':'扫描并清理全部语音'}</button>
   {result&&<p role="status" className="mt-2 text-xs text-slate-600">{result}</p>}
   <Modal isOpen={!!plan} title="清理全部语音" onClose={()=>{if(!busy)setPlan(null);}} footer={<>
