@@ -35,6 +35,7 @@ export interface SongwritingCard {
   audio?: string;
   /** ID of the saved score revision for local navigation; never a public URL. */
   melodyVersionId?: string;
+  melodyScope?: string;
   /** Internal idempotency key, never printed to character context. */
   performanceKey?: string;
 }
@@ -148,7 +149,7 @@ export function cardText(card: SongwritingCard) {
     return `🎤 演唱完成卡 · ${card.title}\n${card.author}已完成这首歌的演唱。\n${card.after ? `歌词：\n${card.after}\n` : ""}歌曲引用：${card.songId}`;
   }
   if (card.kind === "melody") {
-    return `🎼 旋律${card.label}卡 · ${card.title}\n${card.author}${card.label === "谱曲完成" ? "完成了" : "调整了"}《${card.title}》的旋律。\n第${card.version}版 · ${card.after || "乐谱已保存"}\n打开写歌 App 可查看乐谱与试听。\n歌曲引用：${card.songId}`;
+    return `🎼 旋律${card.label}卡 · ${card.title}\n${card.author}${card.label === "谱曲完成" ? "完成了" : "调整了"}《${card.title}》的${card.melodyScope || "旋律"}。\n第${card.version}版 · ${card.after || "乐谱已保存"}\n打开写歌 App 可查看乐谱与试听。\n歌曲引用：${card.songId}`;
   }
   return `🎵 歌曲完成卡 · ${card.title}\n${card.author}完成了这首歌。\n${card.after || ""}\n歌曲引用：${card.songId}`;
 }

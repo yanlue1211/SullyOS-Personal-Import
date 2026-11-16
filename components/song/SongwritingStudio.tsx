@@ -1,4 +1,6 @@
-import HaimianProduction from "./HaimianProduction";
+import {vocalTarget,inferVocalTarget,phraseForLine,type VocalTarget} from '../../features/songwriting/vocalMelody';
+import {listenVocalRange} from '../../features/songwriting/melodyListening';
+import {useVocalPlayback} from './useVocalPlayback';
 import MelodyPanel from "./MelodyPanel";
 import { askCharForMelody, getMelody } from "../../features/songwriting/melody";
 import { commitMelodyTurn } from "../../features/songwriting/melodyChat";
@@ -45,6 +47,7 @@ interface Props {
   onTheme: (t: StudioTheme) => void;
   onBack: () => void;
   onPreview: (song: SongSheet) => void;
+  onProduction?: (song: SongSheet) => void;
   initialTab?: "lyrics" | "production";
 }
 export default function SongwritingStudio({
@@ -53,6 +56,7 @@ export default function SongwritingStudio({
   onTheme,
   onBack,
   onPreview,
+  onProduction,
   initialTab = "lyrics",
 }: Props) {
   const {
@@ -65,12 +69,12 @@ export default function SongwritingStudio({
     lastMsgTimestamp,
   } = useOS();
   const [song, setSong] = useState(initial),
-    [tab, setTab] = useState<"lyrics" | "chat" | "history" | "voice" | "production" | "melody">(initialTab),
+    [tab, setTab] = useState<"lyrics" | "chat" | "history" | "voice" | "production" | "melody">(initialTab === "production" ? "lyrics" : initialTab),
     [rows, setRows] = useState<Message[]>([]),
     [all, setAll] = useState(false);
   const [visibleCount, setVisibleCount] = useState(200);
   const [chatFocus, setChatFocus] = useState<"lyrics" | "melody">("lyrics");
-  const [melodyRetry, setMelodyRetry] = useState<{ text: string; id: string } | null>(null);
+  const [melodyRetry, setMelodyRetry] = useState<{ text: string; id: string; target?: VocalTarget; listen?: boolean } | null>(null);
   const [text, setText] = useState(""),
     [busy, setBusy] = useState(""),
     [error, setError] = useState(""),
@@ -80,7 +84,8 @@ export default function SongwritingStudio({
     [instruction, setInstruction] = useState("");
   const [editorTitle, setEditorTitle] = useState("");
   const [editorBaseTitle, setEditorBaseTitle] = useState("");
-  const [productionSection, setProductionSection] = useState<"haimian" | "voice">("haimian");
+  const vocalPlayback = useVocalPlayback(song);
+  useEffect(()=>{if(initialTab === "production") (onProduction || onPreview)(initial);},[initial.id]);
   const [editorBase, setEditorBase] = useState(""),
     [lastRequest, setLastRequest] = useState<{
       text: string;
@@ -228,20 +233,29 @@ export default function SongwritingStudio({
       await refresh();
     });
   const generateMelody = async (
-    request: { text: string; id: string },
+    request: { text: string; id: string; target?: VocalTarget; listen?: boolean },
     isRetry = false,
   ) =>
     run("正在谱曲和交流", async () => {
       setRetry(null);
       controller.current = new AbortController();
-      const current = await getSong(initial.id);
+      let current = await getSong(initial.id);
       // Share the exact same song-scoped private chat and ordinary memory context.
       // Retrying uses the same delivery key, so a failed request never duplicates the user turn.
       if (!isRetry)
         await writeTurn(current, "user", request.text, request.id + ":user");
       setMelodyRetry(request);
-      const currentProject = getMelody(current);
-      const source = currentProject?.versions.find(v => v.id === currentProject.activeId);
+      const target = request.target || inferVocalTarget(current, request.text, vocalTarget(current, "song"));
+      let currentProject = getMelody(current);
+      let source = currentProject?.versions.find(v => v.id === currentProject?.activeId);
+      if (source && (request.listen || /你.*(?:听听|试听|听一下)|自己听/.test(request.text))) {
+        const heardVersionId=source.id;
+        current = await listenVocalRange(current, source, target);
+        controller.current.signal.throwIfAborted();
+        if(getMelody(current)?.activeId!==heardVersionId) throw Error("试听期间当前旋律已切换，请重新确认范围");
+        currentProject = getMelody(current);
+        source = currentProject?.versions.find(v => v.id === currentProject?.activeId);
+      }
       const reply = await askCharForMelody(
         current,
         {
@@ -252,6 +266,7 @@ export default function SongwritingStudio({
         controller.current.signal,
         source,
         request.text,
+        target,
       );
       // Assistant text, the new score (if any), and its completion card commit atomically.
       await commitMelodyTurn(
@@ -267,7 +282,7 @@ export default function SongwritingStudio({
     const value = text.trim();
     setText("");
     const request = { text: value, id: crypto.randomUUID() };
-    if (tab === "melody" || (tab === "chat" && chatFocus === "melody")) {
+    if (chatFocus === "melody" || /谱曲|曲调|旋律|小节|音符|转音/.test(value)) {
       void generateMelody(request);
       return;
     }
@@ -403,8 +418,8 @@ export default function SongwritingStudio({
             ["lyrics", "歌词本"],
             ["chat", "创作对话"],
             ["history", "修改历史"],
-            ["production", "出歌与成品"],
-            ["melody", "自主谱曲"],
+            ["voice", "专属歌声"],
+            ["melody", "人声曲谱"],
           ] as const
         ).map(([id, title]) => (
           <button key={id} onClick={() => { setTab(id); if (id === "melody") setChatFocus("melody"); }} aria-pressed={tab === id}>
@@ -475,6 +490,7 @@ export default function SongwritingStudio({
                       <span>{String(index + 1).padStart(2, "0")}</span>
                       <p>{line.content}</p>
                     </button>
+                    {phraseForLine(song,getMelody(song)?.versions.find(v=>v.id===getMelody(song)?.activeId),line.id)&&<button className="sw-line-listen" aria-label={`试听第${index+1}句人声曲调`} disabled={!!busy} onClick={()=>void vocalPlayback.play(vocalTarget(song,"line",index))}>🔊</button>}
                   </div>
                 ))
               ) : (
@@ -612,24 +628,15 @@ export default function SongwritingStudio({
               <button
                 className="sw-primary"
                 disabled={!!busy || !lines.length}
-                onClick={() => { setProductionSection("haimian"); setTab("production"); }}
+                onClick={() => (onProduction || onPreview)(song)}
               >
                 出歌 / 成品 / 下载 →
               </button>
             </div>
           </>
         )}
-        {(tab === "chat" || tab === "melody") && (
+        {tab === "chat" && (
           <>
-            {tab === "melody" && (
-              <MelodyPanel
-                key={song.id}
-                song={song}
-                onUpdate={setSong}
-                composing={!!busy}
-                onCompose={(instruction) => void generateMelody({ text: instruction, id: crypto.randomUUID() })}
-              />
-            )}
             {tab === "chat" && (
               <div className="sw-chat-mode" role="group" aria-label="创作对话模式">
                 <button aria-pressed={chatFocus === "lyrics"} onClick={() => setChatFocus("lyrics")}>✍️ 歌词交流</button>
@@ -711,14 +718,7 @@ export default function SongwritingStudio({
           </>
         )}
         {tab === "voice" && <SingingLab key={char?.id} char={char} />}
-        {tab === "production" && <>
-          <div className="sw-chat-mode" role="group" aria-label="出歌设置">
-            <button aria-pressed={productionSection === "haimian"} onClick={() => setProductionSection("haimian")}>海绵出歌 · 成品</button>
-            <button aria-pressed={productionSection === "voice"} onClick={() => setProductionSection("voice")}>专属歌声</button>
-            <button onClick={() => onPreview(song)}>其他出歌方式 / 试听</button>
-          </div>
-          {productionSection === "voice" ? <SingingLab key={char?.id} char={char} /> : <HaimianProduction key={song.id} song={song} onUpdate={setSong} />}
-        </>}
+        {tab === "melody" && <MelodyPanel key={song.id} song={song} onUpdate={setSong} composing={!!busy} onCompose={(instruction,target,listen) => {setChatFocus("melody");setTab("chat");if(instruction==='我想和你聊聊这首歌的人声曲调。')return;void generateMelody({text:instruction,target,listen,id:crypto.randomUUID()});}} />}
         {tab === "history" && (
           <>
             {!(song.lyricRevisions || []).length && (
@@ -748,6 +748,8 @@ export default function SongwritingStudio({
           </>
         )}
       </main>
+      {vocalPlayback.error && <p role="alert" className="sw-error">{vocalPlayback.error}</p>}
+      {vocalPlayback.playing && <button className="sw-text-button" onClick={vocalPlayback.stop}>停止旋律试听</button>}
       {busy && (
         <div className="sw-status" role="status">
           <span className="sw-loading">✧</span> {busy}…{" "}
@@ -758,13 +760,13 @@ export default function SongwritingStudio({
           )}
         </div>
       )}
-      {(tab === "chat" || tab === "melody") && (
+      {tab === "chat" && (
         <footer className="sw-composer">
           <textarea
             aria-label="创作聊天"
             value={text}
             onChange={(e) => setText(e.target.value)}
-            placeholder={tab === "melody" || chatFocus === "melody" ? "和他聊聊旋律、试听感受，或者说想改哪里…" : "聊聊主题，或说说想改哪一句…"}
+            placeholder={chatFocus === "melody" ? "和他聊聊旋律、试听感受，或者说想改哪里…" : "聊聊主题，或说说想改哪一句…"}
             rows={2}
           />
           <button

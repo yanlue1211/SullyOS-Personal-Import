@@ -4,7 +4,10 @@ on:
     branches: [personal/songwriting-melody-abcjs-prototype-20261116]
   pull_request:
     paths:
-      - 'features/songwriting/melody.ts'
+      - 'features/songwriting/**'
+      - 'apps/SongwritingApp.tsx'
+      - 'scripts/song-production-browser-check.mjs'
+      - 'test/fixtures/song-production-browser*'
       - 'components/song/MelodyPanel.tsx'
       - 'components/song/MelodyPanel.css'
       - 'utils/audioApi.ts'
@@ -28,5 +31,19 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm vitest run utils/songwritingMelody.test.ts --maxWorkers=2 --minWorkers=1
+      - run: pnpm vitest run utils/songwritingMelody.test.ts utils/vocalMelody.test.ts utils/melodyListening.test.ts utils/songwriting.test.ts --maxWorkers=2 --minWorkers=1
       - run: pnpm build
+
+      - name: Verify unified production dialog and vocal score UI
+        run: |
+          mkdir -p "$RUNNER_TEMP/song-browser"
+          pnpm --dir "$RUNNER_TEMP/song-browser" add playwright@1.56.1
+          pnpm --dir "$RUNNER_TEMP/song-browser" exec playwright install --with-deps chromium
+          pnpm exec vite --host 127.0.0.1 --port 5183 > /tmp/song-vite.log 2>&1 &
+          for i in $(seq 1 30); do curl --fail --silent http://127.0.0.1:5183/test/fixtures/song-production-browser.html > /dev/null && break; sleep 1; done
+          SONGWRITING_PLAYWRIGHT_MODULE="$RUNNER_TEMP/song-browser/node_modules/playwright/index.mjs" node scripts/song-production-browser-check.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: unified-song-production-mobile
+          path: test-results/song-production

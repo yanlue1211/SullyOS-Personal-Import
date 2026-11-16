@@ -1,3 +1,4 @@
+import {getMelody} from './melody';
 import type { APIConfig, UserProfile, SongSheet, SongLine } from "../../types";
 import { DB } from "../../utils/db";
 import { loadCharacterContextRange } from "../../utils/chatContextRange";
@@ -131,6 +132,8 @@ export async function generateStudioReply(
     genre: song.genre === "free" ? "不限曲风，根据用户的讨论与创作设想自由发挥" : song.genre,
     mood: song.mood === "free" ? "不预设情绪，根据用户的讨论与歌词自然决定，可随段落变化" : song.mood,
     creativeVision: song.production?.vision || "",
+    vocalMelody: getMelody(song)?.versions.find(v=>v.id===getMelody(song)?.activeId) || null,
+    lyricMelodyAlignment: "已有曲调时按人声乐句、节奏和停顿填词；一个字可唱多个音或拖腔，不要求一字一音。未填词的多个乐句按顺序分别写成歌词行，保留未选中歌词。",
     structure: song.lyricTemplate,
     customStructure: song.customLyricTemplate,
     lines: finalLines(song).map((l, index) => ({

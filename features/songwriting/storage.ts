@@ -1,3 +1,4 @@
+import {alignVocalLyrics} from './vocalMelody';
 import { DB, openDB } from "../../utils/db";
 import type { SongSheet, Message } from "../../types";
 import {
@@ -181,7 +182,7 @@ export function acceptProposal(
       lastActiveAt: at,
     };
     return {
-      song: next,
+      song: alignVocalLyrics(next, song.lines),
       revision: {
         id: p.id,
         label: p.label,

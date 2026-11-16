@@ -68,8 +68,9 @@ export async function commitMelodyTurn(
               kind: "melody", songId, title: original.title,
               label: version.sourceId ? "旋律调整" : "谱曲完成",
               author, at: now + 1, version: nextIndex,
-              after: `8小节 · C大调 · 4/4拍 · ${version.bpm} BPM${changed ? ` · 调整第${changed}小节` : ""}`,
+              after: `${version.bars.length}小节${version.phrases?.length ? ` · ${version.phrases.length}个人声乐句` : ""} · C大调 · 4/4拍 · ${version.bpm} BPM${changed ? ` · 调整第${changed}小节` : ""}`,
               melodyVersionId: version.id,
+              melodyScope: version.phrases ? "人声乐句" : undefined,
             };
             const cardRow = messages.add({
               charId: original.collaboratorId,
