@@ -1,12 +1,12 @@
 # 心象与聊天正文的分离
 
-`utils/assistantThinking.ts` 是个人版前台 API、聊天后处理、通知清洗共用的纯解析器。本轮先安全同步前台路径；主动消息 Worker 暂时保留个人版现有逻辑与已部署的 CORS 补丁，云端结构化 thinking 对齐需要单独源码/bundle/生产验收。判断依据是接口字段或明确的内联标签，不根据模型别名、语言或分析语气猜测。
+`utils/assistantThinking.ts` 是个人版前台 API、聊天后处理与流式预览共用的纯解析器。本轮先安全同步前台路径；主动消息 Worker 暂时保留个人版现有逻辑与已部署的 CORS 补丁，云端结构化 thinking 对齐需要单独源码/bundle/生产验收。判断依据是接口字段或明确的内联标签，不根据模型别名、语言或分析语气猜测。
 
 ## 支持的响应
 
 - OpenAI 兼容的 `choices[].message` / SSE `choices[].delta`：`reasoning_content`、`reasoning`、`thinking`。空占位字段不能遮住后面的有效字段；同时出现的别名视为镜像，避免重复。
 - `reasoning_details` 中的 `reasoning.text.text` 和 `reasoning.summary.summary`。可见别名优先，别名为空时才读 details；不显示加密数据、签名或 redacted thinking。
-- `content` 数组中 `thought: true`，以及 `thinking` / `thought` / `reasoning` 类型块。只有正文进入气泡、通知和正文预览。这里仅兼容被渠道放进 Chat Completions 的内容块，未新增 Gemini 原生 generateContent / Interactions 传输接口。
+- `content` 数组中 `thought: true`，以及 `thinking` / `thought` / `reasoning` 类型块。只有正文进入前台聊天气泡和流式正文预览。Worker 共用的旧通知清洗尚未改动。这里仅兼容被渠道放进 Chat Completions 的内容块，未新增 Gemini 原生 generateContent / Interactions 传输接口。
 - 正文内明确的 `<think>` / `<thinking>` / `<thought>` 块，允许标签属性和闭合空格。全部完整块及末尾未闭合块均提取；未闭合部分不进入正文。
 
 非流式响应统一成字符串正文及 `reasoning_content`，保留独立的 `anthropic_content`、`anthropic_thinking` 和 `reasoning_details` 字段；Anthropic 原生工具续答仍使用原转换器保存的签名块。SSE 可见摘要按增量拼接，不把加密签名解释为文字。
@@ -27,4 +27,4 @@
 - [Gemini thinking](https://aistudio.google.com/docs/thinking)：可见摘要与不可读签名的区别。
 - [OpenRouter reasoning](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens)：结构化摘要与流式增量。
 
-回归覆盖普通 JSON、带回调和不带回调的 SSE、镜像去重、空白增量、结构化 thought 块、闭合后仍有未闭合块、关闭显示、普通英文保留、云端推送及空正文。均为协议样本和模拟请求，未使用用户渠道 Key 实测。
+前台专项回归覆盖普通 JSON、带回调和不带回调的 SSE、镜像去重、空白增量、结构化 thought 块、闭合后仍有未闭合块、关闭显示、普通英文保留、角色 `<心声>` 隔离和空正文。既有 Worker 回归只用于确认未破坏原云端行为，**不代表新版结构化 thinking 已在云端生效**。均为协议样本和模拟请求，未使用用户渠道 Key 实测。
