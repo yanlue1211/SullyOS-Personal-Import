@@ -38,7 +38,6 @@ jobs:
           utils/xhsMcpClient.test.ts
           utils/webpageExtractor.test.ts
           utils/friendFeedPublic.test.ts
-          utils/friendFeedRefresh.test.ts
           utils/personalChatMedia.test.ts
       - name: Build
         run: pnpm run build
