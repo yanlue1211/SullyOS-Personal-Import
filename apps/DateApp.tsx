@@ -1154,7 +1154,7 @@ const DateApp: React.FC = () => {
                     <button onClick={() => startPeek(char, 'invite')} className="text-left rounded-2xl border border-neutral-700 px-6 py-5 hover:bg-neutral-900">
                         <span className="block text-lg">让他靠近</span><span className="block text-xs text-neutral-400 mt-2">由他自然地来到你面前</span>
                     </button>
-                    <button onClick={() => { if (char) { setAmsgActiveDate(char.id, true, encounterIdRef.current); void (isAmsg2EnabledForChar(char) ? ActiveMsgClient.putCharLimits(char) : Promise.resolve()).catch(error => console.warn('[DateApp] 见面锁同步失败', error)); markDateTurnDirty(char); } setPeekStatus(''); setMode('session'); }} className="text-left rounded-2xl border border-neutral-700 px-6 py-5 hover:bg-neutral-900">
+                    <button onClick={() => { if (char) { setAmsgActiveDate(char.id, true, encounterIdRef.current); void ((isAmsg2EnabledForChar(char) || char.awayMessage?.enabled) ? ActiveMsgClient.putCharLimits(char) : Promise.resolve()).catch(error => console.warn('[DateApp] 见面锁同步失败', error)); markDateTurnDirty(char); } setPeekStatus(''); setMode('session'); }} className="text-left rounded-2xl border border-neutral-700 px-6 py-5 hover:bg-neutral-900">
                         <span className="block text-lg">直接见面</span><span className="block text-xs text-neutral-400 mt-2">不生成开场白，直接开始互动</span>
                     </button>
                 </div>
