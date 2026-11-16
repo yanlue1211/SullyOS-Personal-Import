@@ -1019,6 +1019,9 @@ export const normalizeNote = (n: any): {
     commentCount: number;
     shareCount: number;
     xsecToken?: string;
+    xsecSource?: string;
+    url?: string;
+    platform?: 'xhs' | 'rednote';
     coverUrl?: string;
     images?: string[];
     type?: string;
@@ -1065,7 +1068,7 @@ export const normalizeNote = (n: any): {
         collects: parseXhsCount(collectsRaw),
         commentCount: parseXhsCount(commentCountRaw),
         shareCount: parseXhsCount(shareCountRaw),
-        xsecToken: n.xsecToken || n.xsec_token || card?.xsec_token || card?.xsecToken || undefined,
+        xsecToken, xsecSource, url, platform,
         coverUrl,
         images,
         type: n.type || card?.type || undefined,
