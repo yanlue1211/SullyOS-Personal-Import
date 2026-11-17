@@ -1,6 +1,6 @@
 import {expect,it} from 'vitest';
 import {makeVersion,mergeVocalReply,melodyToAbc} from '../features/songwriting/melody';
-import {alignVocalLyrics,phraseForLine,selectVocalRange,vocalTarget} from '../features/songwriting/vocalMelody';
+import {lyricSectionGroups,inferVocalTarget,alignVocalLyrics,phraseForLine,selectVocalRange,vocalTarget} from '../features/songwriting/vocalMelody';
 const lines=[{id:'a',section:'verse',content:'想你',authorId:'user'},{id:'b',section:'verse',content:'晚风来',authorId:'user'},{id:'c',section:'chorus',content:'奔向你',authorId:'user'}] as any;
 const song={id:'s',lines} as any;
 // One syllable extends over several pitches; the rest is a phrase pause, not another word.
@@ -36,4 +36,13 @@ it('old eight-bar versions remain playable but are never guessed onto individual
  const old=makeVersion(Array.from({length:8},bar),84,'旧版');
  expect(selectVocalRange(song,old,vocalTarget(song,'song')).version.bars).toHaveLength(8);
  expect(()=>selectVocalRange(song,old,vocalTarget(song,'line',0))).toThrow('还没有对应曲调');
+});
+
+it('selects whole numbered section occurrences without changing another verse or chorus',()=>{
+ const sections=['verse','verse','chorus','chorus','verse','verse','chorus','bridge'];
+ const song:any={id:'sections',lines:sections.map((section,i)=>({id:String(i),section,content:'歌词'+i}))};
+ expect(lyricSectionGroups(song).map(g=>g.label)).toEqual(['主歌 1 · Verse 1','副歌 1 · Chorus 1','主歌 2 · Verse 2','副歌 2 · Chorus 2','桥段 1 · Bridge 1']);
+ expect(vocalTarget(song,'section',5).lineIds).toEqual(['4','5']);
+ expect(inferVocalTarget(song,'请写 verse 2 的调',vocalTarget(song,'song'))).toEqual(vocalTarget(song,'section',4));
+ expect(inferVocalTarget(song,'把副歌2重新写一下',vocalTarget(song,'song'))).toEqual(vocalTarget(song,'section',6));
 });
