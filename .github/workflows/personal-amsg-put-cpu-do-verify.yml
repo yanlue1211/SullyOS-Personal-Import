@@ -1,0 +1,50 @@
+name: Personal AMSG PUT CPU Durable Object verify and bundle
+
+on:
+  push:
+    branches:
+      - personal/amsg-put-cpu-do-20261117
+  pull_request:
+    branches:
+      - personal/audio-listening
+    paths:
+      - 'worker/amsg/src/index.ts'
+      - 'worker/amsg/src/index.test.ts'
+      - 'utils/amsgBundleVersion.ts'
+      - 'worker/amsg/worker.bundle.js'
+      - '.github/workflows/personal-amsg-put-cpu-do-verify.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  verify-and-bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Test Worker PUT route and existing AMSG logic
+        run: pnpm exec vitest run worker/amsg/src/index.test.ts utils/activeMsgClient.test.ts utils/amsgClientStateSelectiveRead.test.ts
+      - name: Build official Worker bundle
+        run: pnpm run build:workers
+      - name: Commit the generated Worker bundle on this isolated development branch only
+        if: github.event_name == 'push' && github.ref == 'refs/heads/personal/amsg-put-cpu-do-20261117'
+        run: |
+          git add -- worker/amsg/worker.bundle.js
+          if ! git diff --cached --quiet; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -m "build(amsg): regenerate verified 2026-11-17.1 Worker bundle"
+            git push origin HEAD:personal/amsg-put-cpu-do-20261117
+          fi
+      - name: Verify checked-in bundle identical to freshly built Worker
+        run: git diff --exit-code -- worker/amsg/worker.bundle.js
