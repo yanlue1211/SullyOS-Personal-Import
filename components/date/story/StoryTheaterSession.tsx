@@ -1,4 +1,5 @@
 import {buildStoryCharacterContextParts} from '../../../utils/storyTheaterContextParts';
+import { usesHumanStyle, SCENE_NATURAL_EXPRESSION_PROMPT } from '../../../utils/chatPromptPreferences';
 import { prepareInPersonScheduling, applyInPersonSchedules } from '../../../utils/inPersonScheduling';
 import { beginStoryMeeting, endStoryMeeting } from '../../../utils/storyMeetingLock';
 import { ActiveMsgClient } from '../../../utils/activeMsgClient';
@@ -779,6 +780,8 @@ const StoryTheaterSession: React.FC<Props> = ({ entry, preset, masks, onBack, on
                     ...(affinityAwarenessReminder ? [{ role: 'system' as const, content: affinityAwarenessReminder }] : []),
                     ...(oracleBlock?[{role:'system' as const,content:oracleBlock}]:[]),
                     ...(scheduling.prompt ? [{role:'system' as const, content:scheduling.prompt}] : []),
+                    ...(actors.length > 0 && actors.every(usesHumanStyle)
+                        ? [{ role: 'system' as const, content: SCENE_NATURAL_EXPRESSION_PROMPT }] : []),
                     { role: 'system' as const, content: identityGuard },
                     ...(isReroll ? [{ role: 'system' as const, content: STORY_REROLL_INSTRUCTION }] : []),
                 ];
