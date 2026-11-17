@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { DatePrompts, DATE_STYLE_PRESETS, extractObservation, stripObservation, hasObservation, resolveObserveFields, OBSERVE_OPEN, OBSERVE_CLOSE } from './datePrompts';
+import { DatePrompts, buildDateInteractionPrinciples, DATE_STYLE_PRESETS, extractObservation, stripObservation, hasObservation, resolveObserveFields, OBSERVE_OPEN, OBSERVE_CLOSE } from './datePrompts';
 import type { CharacterProfile, UserProfile, Message, MountedWorldbook } from '../types';
 import { buildCharacterResponsePrinciples } from './characterResponsePrinciples';
 import { buildChatRequestPayload } from './chatRequestPayload';
@@ -670,5 +670,38 @@ describe('DatePrompts.buildPeekPayload', async () => {
         expect(sysOf(session.messages)).toContain('借走了一本诗集');
         expect(lastUserOf(peek.messages).content).not.toContain('如果刚聊完');
         expect(lastUserOf(peek.messages).content).toContain('根据最近记录中的剧情进展');
+    });
+});
+
+
+describe('线下自然表达规范的注入范围', () => {
+    it('send / reroll / 感知开场均注入场景表达规范，不混入线上气泡格式', async () => {
+        const char = makeChar({ humanStyleEnabled: true });
+        for (const variant of ['send', 'reroll'] as const) {
+            const built = await DatePrompts.buildSessionPayload({
+                char, userProfile: user, emojis: [],
+                allMsgs: [makeMsg({ role: 'assistant', content: '[normal] 开场白' }), makeMsg({ content: '我来了' })],
+                userText: '我来了', variant,
+            });
+            const tail = built.messages.filter(message => message.role === 'system').at(-1)?.content || '';
+            expect(tail).toContain('面对面与剧情共用 · 自然表达校准');
+            expect(tail).toContain('不要对比式升华');
+            expect(tail).not.toContain('IM 碎片化聊天');
+            expect(sysOf(built.messages)).toContain('Visual Novel Mode');
+        }
+        const peek = await DatePrompts.buildPeekPayload({ char, userProfile: user, emojis: [], allMsgs: [] });
+        expect(peek.messages.filter(message => message.role === 'system').at(-1)?.content)
+            .toContain('面对面与剧情共用 · 自然表达校准');
+    });
+    it('关闭角色的人味表达开关时不注入共用风格，不影响角色已有回应原则', () => {
+        const output = buildDateInteractionPrinciples('小白', '阿明', false, false);
+        expect(output).not.toContain('面对面与剧情共用 · 自然表达校准');
+        expect(output).toContain('最后，回到你自己');
+    });
+    it('电影感仍保留风格与VN示例，但不要求每一行铺感官与肢体反应', () => {
+        const block = DATE_STYLE_PRESETS.find(item => item.id === 'cinematic')!.block;
+        expect(block).toContain('按需选择感官');
+        expect(block).toContain('重点行有画面即可');
+        expect(block).not.toContain('每一行都有**画面**');
     });
 });

@@ -745,3 +745,13 @@ describe('剧情携带共享媒体和完整原文',()=>{
   expect(formatActorRecentMessages({...actor,timeAwarenessEnabled:false},rows,undefined,undefined,{includeTimestamps:true})).not.toContain('2026');
  });
 });
+
+
+describe('剧情表达兼容：保留预设风格但不强制肢体八股', () => {
+    it('内置默认文风允许用对话和选择表达情绪，不要求先写微表情', () => {
+        const style = BUILTIN_NIGHT_SCREENING_PRESET.document.prompts.find(item => item.id === 'nmj-v3-style-default');
+        expect(style?.enabled).toBe(true);
+        expect(style?.content).toContain('情绪可以落在行动、台词、选择或身体反应里');
+        expect(style?.content).not.toContain('情绪先走身体，再走语言');
+    });
+});

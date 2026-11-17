@@ -6,7 +6,7 @@ import { buildChatOutputStylePrompt } from './chatOutputStylePrompt';
 import { ChatPrompts } from './chatPrompts';
 import { extractInnerVoice } from '../features/personal/innerVoice/protocol';
 import { DB } from './db';
-import { usesHumanStyle, usesInnerVoice, MINIMAL_THINKING_PROMPT } from './chatPromptPreferences';
+import { usesHumanStyle, usesInnerVoice, MINIMAL_THINKING_PROMPT, SCENE_NATURAL_EXPRESSION_PROMPT } from './chatPromptPreferences';
 
 it('imports the exact delivered four-entry slang worldbook', () => {
  const books=parseStandardWorldbook(JSON.stringify(slangWorldbook),'玩梗与造梗');
@@ -36,7 +36,7 @@ describe('independent per-character chat prompt preferences', () => {
  });
  it.each([true,false])('builds cloud template parts with heart independently %s', async innerVoiceEnabled => {
   const parts=await ChatPrompts.buildSystemPromptParts({id:'prefs-cloud',name:'a',humanStyleEnabled:false,innerVoiceEnabled} as any,{name:'u'} as any,[],[],[],[],undefined,undefined,undefined,undefined,undefined,undefined,{forFirePack:true});
-  expect(parts.recencyTail).toBe('');expect(parts.stable.includes('角色心声固定协议')).toBe(innerVoiceEnabled);
+  expect(parts.recencyTail).toContain('回复前核对时间');expect(parts.stable.includes('角色心声固定协议')).toBe(innerVoiceEnabled);
  });
  it('retains Chinese first-person thinking rules without roleplay, custom roleplay or third-person analysis', () => {
   const output=buildChatOutputStylePrompt({charName:'a',humanStyleEnabled:false,thinkingChain:{enabled:true,customPrompt:'CUSTOM_ROLE_SENTINEL'}});
@@ -100,4 +100,15 @@ it.each([true,false])('history and per-turn recall changes preserve the fixed pr
  expect(first.stable).toBe(second.stable);expect(first.recencyTail).toBe(second.recencyTail);expect(first.recencyTail.includes('最后，回到你自己')).toBe(humanStyleEnabled);expect(first.recencyTail).not.toContain('【反煽情');
  expect(first.stable).not.toContain('RECALL_A');expect(first.stable).not.toContain('USER_A');
  expect(first.volatileState).toContain('RECALL_A');expect(second.volatileState).toContain('RECALL_B');
+});
+
+
+it('shared scene expression avoids IM format and model-specific constraints', () => {
+    expect(SCENE_NATURAL_EXPRESSION_PROMPT).toContain('不要对比式升华');
+    expect(SCENE_NATURAL_EXPRESSION_PROMPT).toContain('日常无需感恩');
+    expect(SCENE_NATURAL_EXPRESSION_PROMPT).toContain('不要求缩短剧情正文');
+    expect(SCENE_NATURAL_EXPRESSION_PROMPT).toContain('VN 行首情绪标签');
+    expect(SCENE_NATURAL_EXPRESSION_PROMPT).not.toContain('1—8 条独立短消息');
+    expect(SCENE_NATURAL_EXPRESSION_PROMPT).not.toContain('Gemini');
+    expect(SCENE_NATURAL_EXPRESSION_PROMPT).not.toContain('Claude');
 });

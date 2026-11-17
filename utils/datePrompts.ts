@@ -32,7 +32,7 @@ import { getElevenLabsVoiceActingGuide } from './elevenLabsTts';
 import { isElevenLabsV4Model } from './elevenLabsModels';
 import { selectCharacterContextMessages } from './chatContextRange';
 import { buildCharacterResponsePrinciples } from './characterResponsePrinciples';
-import { usesHumanStyle, ANTI_CLICHE_INTERACTION_PROMPT } from './chatPromptPreferences';
+import { usesHumanStyle, ANTI_CLICHE_INTERACTION_PROMPT, SCENE_NATURAL_EXPRESSION_PROMPT } from './chatPromptPreferences';
 import { voiceLanguagePromptLabel } from './voiceLanguage';
 
 const buildDateVoiceTranslationGuide = (char: CharacterProfile): string => {
@@ -57,7 +57,7 @@ export function buildDateInteractionPrinciples(charName: string, userName: strin
 一轮只需走到此刻自然成熟的一步。允许一句台词、一个普通动作、共享沉默或继续日常；无需凑满戏剧拍数。张力可以起伏、回落，不必连续升高。已有亲密和热烈也可以自然延续，程度仍来自这两个人的关系和当前互动。
 ${peek === 'invite' ? '此刻由角色主动靠近用户：用第三人称开场散文写自己的行动和开口，不使用 VN 情绪标签；给用户留下回应空间，不代写用户反应。' : peek ? '此刻是用户尚未走近的第三人称镜头：描写角色自己的生活与当下状态，不新增用户的到场动作、台词或双方互动。' : '保持本场景的 VN 输出格式；角色与回应原则用于形成正文，不在正文解释规则。'}
 ` + buildCharacterResponsePrinciples(charName, userName)
-      + (includeAntiCliche ? '\n\n' + ANTI_CLICHE_INTERACTION_PROMPT : '');
+      + (includeAntiCliche ? '\n\n' + ANTI_CLICHE_INTERACTION_PROMPT + '\n\n' + SCENE_NATURAL_EXPRESSION_PROMPT : '');
 }
 
 export type ApiMessage = { role: string; content: any; name?: string };
@@ -141,13 +141,13 @@ export const DATE_STYLE_PRESETS: DateStylePreset[] = [
         hint: '默认风格。沉浸式镜头感，感官细节丰富，有呼吸和停顿。',
         peekHint: '电影感，沉浸式，细节丰富',
         block: `### ⭐ 动作与叙述行的写法（风格：电影感）
-你不是在列清单，你是在写一个正在发生的场景。每一行动作/叙述都应该让人感受到**此时此刻的空气**。
+你不是在列清单，你是在写一个正在发生的场景。重要时刻可以留出空气，普通交流与动作也允许直接写，不必每一行都铺出电影镜头。
 
 **具体要求**：
-- 写出**感官**：光线怎么落的、空气什么味道、皮肤什么触感、周围什么声音
-- 写出**节奏**：动作之间有停顿、有犹豫、有呼吸，不要一口气做完三个动作
-- 写出**情绪的痕迹**：不要说"他很紧张"，而是写他的手指在桌面上画了一道看不见的线
-- 让每一行都有**画面**，像电影里的一个镜头
+- **按需选择感官**：只写此刻人物确实会注意、能影响动作或对话的光线、声音、触感；不必逐轮凑齐感官项目
+- **节奏跟着现场走**：有时停顿、犹豫，有时行动利落、直接回应；不为了表现节奏而强行加呼吸或停顿
+- **情绪落在真实选择里**：可以通过台词、行动、沉默或少量身体反应体现，不默认先写手指、喉咙、心跳再解释情绪
+- 重点行有画面即可；普通对白、短动作和必要交代无需为“镜头感”增添无关描写
 
 ❌ **不要这样写**（后续行缺少标签，动作只剩罗列）：
 [normal] 把手放下，看向你。
