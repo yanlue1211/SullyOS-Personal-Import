@@ -82,6 +82,7 @@ import {
   pickSidechannelShellKeys,
   supportsClientStateDelete,
 } from './amsgClientStateDelete';
+import { readSelectedClientStateEntries } from './amsgClientStateSelectiveRead';
 import { observeRemoteStateUpdatedAt, stampStateUpdatedAt } from './amsgStateClock';
 import { flattenContentPartsToText } from './promptMessageCleanup';
 import { resolveBlobRefsDeep } from './blobRef';
@@ -1564,6 +1565,12 @@ export const clearNamespaceValuesOrThrow = async (
  * 挂在 syncCharFirePacks 的末尾：那条路每次聊完都会为每个角色跑到，正好顺路。放在
  * 正常同步之后，这里的成败不影响同步本身。
  */
+// 历史空壳扫描只是一项清理工作，不是发送消息的前置条件。某台免费 Worker
+// 读整个 namespace 超 CPU 时，不能在每轮聊天后反复用相同的大 GET 撞配额。
+// 失败后本次页面会话最多每 6 小时再试一次；从未标记「已扫」，不丢数据。
+const SIDECHANNEL_SWEEP_FAILURE_COOLDOWN_MS = 6 * 60 * 60 * 1000;
+const lastFailedSidechannelSweepAt = new Map<string, number>();
+
 const sweepSidechannelShells = async (client: ReiClient, charIds: string[]): Promise<void> => {
   let config: ActiveMsg2GlobalConfig;
   try {
@@ -1573,7 +1580,12 @@ const sweepSidechannelShells = async (client: ReiClient, charIds: string[]): Pro
   }
   if (config.clientStateDeleteSupported !== true) return;
   const swept = new Set(config.sidechannelShellsSweptCharIds ?? []);
-  const pending = [...new Set(charIds)].filter((charId) => !swept.has(charId));
+  const now = Date.now();
+  const pending = [...new Set(charIds)].filter((charId) => {
+    if (swept.has(charId)) return false;
+    const failedAt = lastFailedSidechannelSweepAt.get(charId);
+    return failedAt === undefined || now - failedAt >= SIDECHANNEL_SWEEP_FAILURE_COOLDOWN_MS;
+  });
   if (pending.length === 0) return;
 
   const newlySwept: string[] = [];
@@ -1600,7 +1612,9 @@ const sweepSidechannelShells = async (client: ReiClient, charIds: string[]): Pro
         }
       }
       newlySwept.push(charId);
+      lastFailedSidechannelSweepAt.delete(charId);
     } catch (error) {
+      lastFailedSidechannelSweepAt.set(charId, Date.now());
       console.warn(`${ACTIVE_MSG_RUNTIME_HEADER} 角色 ${charId} 的旁路存储空壳没清完（下次同步再试）`, error);
     }
   }
@@ -4270,7 +4284,7 @@ export const ActiveMsgClient = {
   async readClientStateValue(namespace: string, key: string): Promise<string | null> {
     const config = await ensureWorkerReady();
     const client = await initializeClient(config);
-    const response = await client.getClientState(namespace);
+    const response = await client.getClientState(namespace, { key });
     if (!response?.success) {
       throw new Error(formatAmsgServerError(response, '读取云端状态失败。'));
     }
@@ -4291,10 +4305,10 @@ export const ActiveMsgClient = {
   },
 
   /**
-   * 面板上那两句「近况」一次读齐：最近一次为什么没响（last_skip）、今天主动找了几次
-   * （daily_sends）。两份住在同一个角色命名空间里，读一次整个命名空间就都有了——分两次
-   * 读的话每次都要把几十 KB 的 fire_pack 一起拉下来解密。读失败两样都按「没有」处理：
-   * 这是锦上添花的说明，不该让面板打不开。
+   * 面板「近况」只需五条小状态（最近跳过原因、离开后机会和每日发送次数）。
+   * 以前整个 namespace 拉取/解密，角色的巨大 fire_pack 也跟着进了 Worker CPU。
+   * 现在用 SDK 原生 key 过滤分别取五条；任一读取失败就标 statusReadOk=false，
+   * 不能把「云端没读到」伪装成「云端真的没有」。
    */
   async readPanelStatus(charId: string): Promise<{
     lastSkip: AmsgLastSkip | null;
@@ -4308,9 +4322,10 @@ export const ActiveMsgClient = {
     try {
       const config = await ensureWorkerReady();
       const client = await initializeClient(config);
-      const response = await client.getClientState(amsgStateNamespace(charId));
-      if (!response?.success) return { lastSkip: null, awayLastSkip: null, awayTrace: [], statusReadOk: false, dailySends: null, awayDailySends: null };
-      const entries = (response.data?.entries ?? []) as Array<{ key: string; value: string }>;
+      const entries = await readSelectedClientStateEntries(client, amsgStateNamespace(charId), [
+        AMSG_LAST_SKIP_KEY, AMSG_AWAY_LAST_SKIP_KEY, AMSG_AWAY_TRACE_KEY,
+        AMSG_DAILY_SENDS_KEY, AMSG_AWAY_DAILY_SENDS_KEY,
+      ]);
       const valueOf = (key: string) => entries.find((e) => e?.key === key)?.value || null;
       const skipValue = valueOf(AMSG_LAST_SKIP_KEY);
       return {
