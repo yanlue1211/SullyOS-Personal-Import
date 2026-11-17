@@ -14798,7 +14798,7 @@ function buildScheduledPush(message, build, extraMeta, bannerBody) {
 }
 
 // utils/amsgBundleVersion.ts
-var AMSG_BUNDLE_VERSION = "2026-11-16.1";
+var AMSG_BUNDLE_VERSION = "2026-11-17.1";
 
 // worker/amsg/src/reproduction.ts
 async function writeDiagnosticStage(writeState, runId, event, fields = {}) {
@@ -21851,6 +21851,7 @@ var judgeTick = (storage) => {
   return "stalled";
 };
 var INSTANT_TICK_UUID_KEY = "taskUuid";
+var CLIENT_STATE_PUT_DO_NAME = "amsg:client-state:put";
 var upstream = createSingleUserCloudflareWorker(buildWorkerConfig, {
   /**
    * cron 那条路上没有调用方能看到错误响应——上游把异常 catch 掉之后，整轮就这么无声
@@ -21874,6 +21875,24 @@ var inspectSchema = async (env) => {
   }
 };
 var InstantTickDO = class extends DurableObject {
+  /**
+   * Cloudflare Free 普通 Worker 每次 HTTP 只有 10ms CPU，
+   * 大 fire_pack 的加密/切块/D1 写入偶发需要 ~21ms，导致 exceededCpu。
+   *
+   * 同一账号已有的 SQLite DO 在 Free 方案有独立的 30s CPU 上限；
+   * 把原始 PUT 请求原封不动转进去，由同一个 amsg-server handler 完成鉴权、
+   * AES-GCM、updatedAt / version 条件写与 D1 存储。不复制实现，不拆数据。
+   * DO 实例只有内部 binding 能访问；其它路由/方法都不开放。
+   */
+  async fetch(request) {
+    if (request.method !== "PUT" || new URL(request.url).pathname !== "/client-state") {
+      return jsonWithCors(404, {
+        success: false,
+        error: { code: "NOT_FOUND", message: "Durable Object \u53EA\u5904\u7406 client-state PUT" }
+      });
+    }
+    return upstream.fetch(request, this.env);
+  }
   async petAdmit(args) {
     return this.ctx.blockConcurrencyWhile(() => admitPetCloud(args, this.env, upstream));
   }
@@ -22181,7 +22200,14 @@ var src_default = {
       });
     }
     try {
-      const response = await upstream.fetch(request, env);
+      let response;
+      if (pathname === "/client-state" && method === "PUT" && env.INSTANT_TICK) {
+        const ns = env.INSTANT_TICK;
+        const stub = ns.get(ns.idFromName(CLIENT_STATE_PUT_DO_NAME));
+        response = typeof stub.fetch === "function" ? await stub.fetch(request) : await upstream.fetch(request, env);
+      } else {
+        response = await upstream.fetch(request, env);
+      }
       const headers2 = new Headers(response.headers);
       for (const [key, value] of Object.entries(CORS_HEADERS)) headers2.set(key, value);
       return new Response(response.body, {
