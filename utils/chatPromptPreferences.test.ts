@@ -36,7 +36,7 @@ describe('independent per-character chat prompt preferences', () => {
  });
  it.each([true,false])('builds cloud template parts with heart independently %s', async innerVoiceEnabled => {
   const parts=await ChatPrompts.buildSystemPromptParts({id:'prefs-cloud',name:'a',humanStyleEnabled:false,innerVoiceEnabled} as any,{name:'u'} as any,[],[],[],[],undefined,undefined,undefined,undefined,undefined,undefined,{forFirePack:true});
-  expect(parts.recencyTail).toBe('');expect(parts.stable.includes('角色心声固定协议')).toBe(innerVoiceEnabled);
+  expect(parts.recencyTail).toContain('回复前核对时间');expect(parts.stable.includes('角色心声固定协议')).toBe(innerVoiceEnabled);
  });
  it('retains Chinese first-person thinking rules without roleplay, custom roleplay or third-person analysis', () => {
   const output=buildChatOutputStylePrompt({charName:'a',humanStyleEnabled:false,thinkingChain:{enabled:true,customPrompt:'CUSTOM_ROLE_SENTINEL'}});
