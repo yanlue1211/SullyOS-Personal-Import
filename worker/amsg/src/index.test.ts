@@ -4044,6 +4044,98 @@ describe('inspectWorkerEnv — 配置自检', () => {
   });
 });
 
+describe('AMSG client-state PUT 独立 CPU 预算（已有 SQLite Durable Object）', () => {
+  const envBase = {
+    AMSG_MASTER_KEY: 'a'.repeat(64),
+    VAPID_EMAIL: 'mailto:a@b.c',
+    VAPID_PUBLIC_KEY: 'pub',
+    VAPID_PRIVATE_KEY: 'priv',
+    DB: { prepare: () => {} },
+  } as any;
+  const url = 'https://w.example/client-state';
+  const requestHeaders = {
+    'Content-Type': 'application/json',
+    'X-User-Id': '00000000-0000-4000-8000-000000000001',
+    'X-Client-Token': 'opaque-token',
+    'X-Payload-Encrypted': 'true',
+    'X-Encryption-Version': '1',
+    Origin: 'https://yanlue1211.github.io',
+  };
+
+  it('519KB 加密体按原样送进已有 DO，入口不解密、不拆包、不另存状态', async () => {
+    const body = JSON.stringify({ iv: 'a', authTag: 'b', encryptedData: 'c'.repeat(519_000) });
+    const fetchInDo = vi.fn(async (forwarded: Request) => {
+      expect(forwarded.method).toBe('PUT');
+      expect(new URL(forwarded.url).pathname).toBe('/client-state');
+      expect(forwarded.headers.get('X-Client-Token')).toBe('opaque-token');
+      expect(forwarded.headers.get('X-User-Id')).toBe(requestHeaders['X-User-Id']);
+      expect(forwarded.headers.get('X-Payload-Encrypted')).toBe('true');
+      expect(await forwarded.text()).toBe(body);
+      return new Response(JSON.stringify({ success: true, data: { upserted: 3, skipped: 0 } }), {
+        status: 200, headers: { 'Content-Type': 'application/json' },
+      });
+    });
+    const idFromName = vi.fn((name: string) => name);
+    const get = vi.fn(() => ({ fetch: fetchInDo }));
+    const env = { ...envBase, INSTANT_TICK: { idFromName, get } };
+    const response = await (worker as any).fetch(new Request(url, { method: 'PUT', headers: requestHeaders, body }), env);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Access-Control-Allow-Origin')).toBe('*');
+    expect(await response.json()).toEqual({ success: true, data: { upserted: 3, skipped: 0 } });
+    expect(fetchInDo).toHaveBeenCalledTimes(1);
+    expect(idFromName).toHaveBeenCalledWith('amsg:client-state:put');
+    expect(get).toHaveBeenCalledTimes(1);
+  });
+
+  it('DO 的业务拒绝按原码、原正文+CORS 返回，不会重传导致重复或乱序写入', async () => {
+    const original = { success: false, error: { code: 'INVALID_STATE_ENTRIES', message: 'bad entries' } };
+    const fetchInDo = vi.fn(async () => new Response(JSON.stringify(original), {
+      status: 400, headers: { 'Content-Type': 'application/json' },
+    }));
+    const env = { ...envBase, INSTANT_TICK: { idFromName: () => 'one', get: () => ({ fetch: fetchInDo }) } };
+    const response = await (worker as any).fetch(new Request(url, {
+      method: 'PUT', headers: requestHeaders, body: '{"encryptedData":"bad"}',
+    }), env);
+    expect(response.status).toBe(400);
+    expect(response.headers.get('Access-Control-Allow-Origin')).toBe('*');
+    expect(await response.json()).toEqual(original);
+    expect(fetchInDo).toHaveBeenCalledTimes(1);
+  });
+
+  it('普通 GET / OPTIONS 与其它上游路由不转 DO；缺少 binding 也保留旧接口行为', async () => {
+    const fetchInDo = vi.fn(() => Promise.reject(new Error('should not be called')));
+    const env = { ...envBase, INSTANT_TICK: { idFromName: () => 'one', get: () => ({ fetch: fetchInDo }) } };
+    const preflight = await (worker as any).fetch(new Request(url, { method: 'OPTIONS' }), env);
+    expect(preflight.status).toBe(204);
+    expect(preflight.headers.get('Access-Control-Allow-Headers')).toContain('Content-Encoding');
+    const regular = await (worker as any).fetch(new Request('https://w.example/vapid-public-key'), env);
+    expect(regular.status).toBe(200);
+    expect(fetchInDo).not.toHaveBeenCalled();
+
+    // binding 没装时不改为新的强制 503，而是走旧上游逻辑。
+    const oldEnv = { ...envBase, INSTANT_TICK: undefined };
+    const old = await (worker as any).fetch(new Request(url, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: '{}' },
+    ), oldEnv);
+    expect(old.headers.get('Access-Control-Allow-Origin')).toBe('*');
+    expect(old.status).not.toBe(404);
+  });
+
+  it('DO 内部入口只允许确切 PUT /client-state，不让其它路由绕过原 Worker 的配置门', async () => {
+    const prototype = (workerEntry.InstantTickDO as any).prototype;
+    const ctx = { env: envBase };
+    for (const request of [
+      new Request('https://w.example/client-state', { method: 'GET' }),
+      new Request('https://w.example/messages', { method: 'PUT', body: '{}' }),
+      new Request('https://w.example/client-state/subroute', { method: 'PUT', body: '{}' }),
+    ]) {
+      const response = await prototype.fetch.call(ctx, request);
+      expect(response.status).toBe(404);
+      expect(response.headers.get('Access-Control-Allow-Origin')).toBe('*');
+    }
+  });
+});
+
 describe('worker 入口 — 配置不全时的响应', () => {
   const brokenEnv = { AMSG_MASTER_KEY: '', DB: undefined } as any;
   const fullEnv = {
