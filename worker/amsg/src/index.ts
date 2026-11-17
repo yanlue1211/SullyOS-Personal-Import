@@ -3900,6 +3900,10 @@ const judgeTick = (storage: Awaited<ReturnType<typeof inspectStorage>>) => {
 /** DO 存「这个实例负责哪条任务」用的 storage 键。 */
 const INSTANT_TICK_UUID_KEY = 'taskUuid';
 
+// 固定命名、仅负责 client-state PUT 的 DO 实例。绝不复用即时对话的 task UUID，
+// 不设 alarm / 不写 DO storage；实际仍通过现有 SDK 写原来的 D1 client_state 表。
+const CLIENT_STATE_PUT_DO_NAME = 'amsg:client-state:put';
+
 const upstream = createSingleUserCloudflareWorker(buildWorkerConfig, {
   /**
    * cron 那条路上没有调用方能看到错误响应——上游把异常 catch 掉之后，整轮就这么无声
@@ -3952,6 +3956,24 @@ const inspectSchema = async (env: Env): Promise<{ schema: SchemaProbe; error: Am
  * cron 仍然留着：它是所有定时任务的正常投递通道，同时也是这一跳万一没跑成时的兜底。
  */
 export class InstantTickDO extends DurableObject<Env> {
+  /**
+   * Cloudflare Free 普通 Worker 每次 HTTP 只有 10ms CPU，
+   * 大 fire_pack 的加密/切块/D1 写入偶发需要 ~21ms，导致 exceededCpu。
+   *
+   * 同一账号已有的 SQLite DO 在 Free 方案有独立的 30s CPU 上限；
+   * 把原始 PUT 请求原封不动转进去，由同一个 amsg-server handler 完成鉴权、
+   * AES-GCM、updatedAt / version 条件写与 D1 存储。不复制实现，不拆数据。
+   * DO 实例只有内部 binding 能访问；其它路由/方法都不开放。
+   */
+  async fetch(request: Request): Promise<Response> {
+    if (request.method !== 'PUT' || new URL(request.url).pathname !== '/client-state') {
+      return jsonWithCors(404, {
+        success: false, error: { code: 'NOT_FOUND', message: 'Durable Object 只处理 client-state PUT' },
+      });
+    }
+    return upstream.fetch(request, this.env);
+  }
+
   async petAdmit(args:PetRouteArgs):Promise<unknown> {
     return this.ctx.blockConcurrencyWhile(() => admitPetCloud(args,this.env,upstream));
   }
@@ -4345,7 +4367,22 @@ export default {
     // 遮成 TypeError: Failed to fetch。透传原状态码/正文，只补统一的 CORS 头；
     // 不改鉴权、加密、client_state 写入及业务回执。
     try {
-      const response = await upstream.fetch(request, env);
+      let response: Response;
+      // 把 CPU-heavy 的 PUT 交给已有 SQLite Durable Object（Free: 30s CPU/次）。
+      // 外层只转发 Request stream，不碰正文、密文、headers，不改原来的回执。
+      // 没有 DO 绑定时保留老 Worker 的原行为，避免旧安装丧失全部状态同步能力。
+      // 注意：DO *执行失败* 时绝不重试到 upstream；可能已经写入数据库。
+      if (pathname === '/client-state' && method === 'PUT' && env.INSTANT_TICK) {
+        const ns = env.INSTANT_TICK;
+        const stub = ns.get(ns.idFromName(CLIENT_STATE_PUT_DO_NAME)) as unknown as {
+          fetch?: (req: Request) => Promise<Response>;
+        };
+        response = typeof stub.fetch === 'function'
+          ? await stub.fetch(request)
+          : await upstream.fetch(request, env);
+      } else {
+        response = await upstream.fetch(request, env);
+      }
       const headers = new Headers(response.headers);
       for (const [key, value] of Object.entries(CORS_HEADERS)) headers.set(key, value);
       return new Response(response.body, {
