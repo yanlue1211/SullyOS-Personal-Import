@@ -1,4 +1,5 @@
-import {vocalTarget,inferVocalTarget,phraseForLine,type VocalTarget} from '../../features/songwriting/vocalMelody';
+import PlaybackIcon from './PlaybackIcon';
+import {vocalTarget,inferVocalTarget,phraseForLine,lyricSectionGroups,type VocalTarget} from '../../features/songwriting/vocalMelody';
 import {listenVocalRange} from '../../features/songwriting/melodyListening';
 import {useVocalPlayback} from './useVocalPlayback';
 import MelodyPanel from "./MelodyPanel";
@@ -108,6 +109,7 @@ export default function SongwritingStudio({
     bottom = useRef<HTMLDivElement>(null);
   const char = characters.find((c) => c.id === song.collaboratorId),
     lines = finalLines(song),
+    sectionGroups = lyricSectionGroups(song),
     p = song.lyricProposal;
   const refresh = async () => {
     const current = await getSong(initial.id);
@@ -300,7 +302,7 @@ export default function SongwritingStudio({
       addToast("先接受或取消当前候选，再生成新的版本", "info");
       return;
     }
-    const start = Math.min(position, lines.length);
+    let start = Math.min(position, lines.length);
     let count =
       scope === "song"
         ? lines.length
@@ -308,20 +310,17 @@ export default function SongwritingStudio({
           ? Number(start < lines.length)
           : 0;
     const targetSection = lines[start]?.section || section;
-    if (scope === "section")
-      for (
-        let i = start;
-        i < lines.length && lines[i].section === targetSection;
-        i++
-      )
-        count++;
+    if (scope === "section") {
+      const group=sectionGroups.find(g=>start>=g.start&&start<g.end);
+      if(group){start=group.start;count=group.end-group.start;}
+    }
     const target: GenerationTarget = {
       scope,
       start: scope === "song" ? 0 : start,
       deleteCount: count,
       section: targetSection,
     };
-    const request = `请${count ? "修改" : "创作"}${scope === "line" ? "一句歌词" : scope === "section" ? `${sectionNames[targetSection]}段落` : "整首歌词"}${scope === "song" ? "" : `，从第${start + 1}句开始`}。${instruction.trim() || "按我们的讨论和当前歌曲自然创作，句数不固定。"}`;
+    const request = `请${count ? "修改" : "创作"}${scope === "line" ? "一句歌词" : scope === "section" ? `${sectionGroups.find(g=>g.start===start)?.label || sectionNames[targetSection]}段落` : "整首歌词"}${scope === "song" ? "" : `，从第${start + 1}句开始`}。${instruction.trim() || "按我们的讨论和当前歌曲自然创作，句数不固定。"}`;
     void generate({ text: request, target, id: crypto.randomUUID() });
   };
   const apply = () => {
@@ -423,8 +422,8 @@ export default function SongwritingStudio({
             ["lyrics", "歌词本"],
             ["chat", "创作对话"],
             ["history", "修改历史"],
-            ["voice", "专属歌声"],
             ["melody", "人声曲谱"],
+            ["voice", "专属歌声"],
           ] as const
         ).map(([id, title]) => (
           <button key={id} onClick={() => { setTab(id); if (id === "melody") setChatFocus("melody"); }} aria-pressed={tab === id}>
@@ -495,7 +494,7 @@ export default function SongwritingStudio({
                       <span>{String(index + 1).padStart(2, "0")}</span>
                       <p>{line.content}</p>
                     </button>
-                    {phraseForLine(song,getMelody(song)?.versions.find(v=>v.id===getMelody(song)?.activeId),line.id)&&<button className="sw-line-listen" aria-label={`试听第${index+1}句人声曲调`} disabled={!!busy} onClick={()=>void vocalPlayback.play(vocalTarget(song,"line",index))}>🔊</button>}
+                    {phraseForLine(song,getMelody(song)?.versions.find(v=>v.id===getMelody(song)?.activeId),line.id)&&<button className="sw-line-listen" aria-label={`${vocalPlayback.statusFor(vocalTarget(song,"line",index))==='playing'?'暂停':vocalPlayback.statusFor(vocalTarget(song,"line",index))==='paused'?'继续':'试听'}第${index+1}句人声曲调`} disabled={!!busy||vocalPlayback.statusFor(vocalTarget(song,"line",index))==='loading'} onClick={()=>void vocalPlayback.play(vocalTarget(song,"line",index))}><PlaybackIcon paused={vocalPlayback.statusFor(vocalTarget(song,"line",index))==='playing'} loading={vocalPlayback.statusFor(vocalTarget(song,"line",index))==='loading'}/></button>}
                   </div>
                 ))
               ) : (
@@ -563,13 +562,13 @@ export default function SongwritingStudio({
               {scope !== "song" && (
                 <div className="sw-form-row">
                   <label>
-                    开始位置
+                    {scope==='section'?'选择段落':'开始位置'}
                     <select
-                      aria-label="开始位置"
-                      value={Math.min(position, lines.length)}
+                      aria-label={scope==='section'?'歌词段落':'开始位置'}
+                      value={scope==='section'&&position<lines.length?(sectionGroups.find(g=>position>=g.start&&position<g.end)?.start??0):Math.min(position,lines.length)}
                       onChange={(e) => setPosition(Number(e.target.value))}
                     >
-                      {lines.map((l, i) => (
+                      {scope==='section'?sectionGroups.map(g=><option key={g.start} value={g.start}>{g.label}（{g.end-g.start}句）</option>):lines.map((l, i) => (
                         <option key={l.id} value={i}>
                           第 {i + 1} 句 · {sectionNames[l.section]}
                         </option>
@@ -723,7 +722,7 @@ export default function SongwritingStudio({
           </>
         )}
         {tab === "voice" && <SingingLab key={char?.id} char={char} />}
-        {tab === "melody" && <MelodyPanel key={song.id} song={song} onUpdate={setSong} composing={!!busy} onCompose={(instruction,target,listen) => {setChatFocus("melody");setTab("chat");if(instruction==='我想和你聊聊这首歌的人声曲调。')return;void generateMelody({text:instruction,target,listen,id:crypto.randomUUID()});}} />}
+        {tab === "melody" && <MelodyPanel charName={char?.name || "创作伙伴"} key={song.id} song={song} onUpdate={setSong} composing={!!busy} onCompose={(instruction,target,listen) => {setChatFocus("melody");setTab("chat");if(instruction==='我想和你聊聊这首歌的人声曲调。')return;void generateMelody({text:instruction,target,listen,id:crypto.randomUUID()});}} />}
         {tab === "history" && (
           <>
             {!(song.lyricRevisions || []).length && (

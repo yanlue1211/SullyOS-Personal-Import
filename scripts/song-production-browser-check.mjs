@@ -1,7 +1,7 @@
 import {pathToFileURL} from 'node:url';
 import {mkdir} from 'node:fs/promises';
 const {chromium}=await import(pathToFileURL(process.env.SONGWRITING_PLAYWRIGHT_MODULE).href);
-const browser=await chromium.launch({headless:true,args:['--no-sandbox']});
+const browser=await chromium.launch({headless:true,executablePath:process.env.SONGWRITING_CHROMIUM_EXECUTABLE||undefined,args:['--no-sandbox']});
 await mkdir('test-results/song-production',{recursive:true});
 try{
  for(const width of [320,390]){
@@ -9,6 +9,9 @@ try{
   page.on('pageerror',e=>errors.push(e.message));await page.route('https://qa-vocal.invalid/**',r=>r.abort());
   await page.goto('http://127.0.0.1:5183/test/fixtures/song-production-browser.html');
   await page.getByText('晚风试唱',{exact:true}).click();
+  const tabs=await page.locator('.sw-tabs button').evaluateAll(ns=>ns.map(n=>({text:n.textContent,x:n.getBoundingClientRect().x+n.getBoundingClientRect().width/2})));
+  if(tabs.map(t=>t.text).join('|')!=='歌词本|创作对话|修改历史|人声曲谱|专属歌声')throw Error('wrong tab order');
+  if(tabs.slice(2).some((t,i)=>Math.abs((t.x-tabs[i+1].x)-(tabs[1].x-tabs[0].x))>1))throw Error('unequal tab spacing');
   await page.getByRole('button',{name:'出歌 / 成品 / 下载 →',exact:true}).click();
   const dialog=page.getByRole('dialog');await dialog.waitFor();
   if(await dialog.count()!==1)throw Error('duplicate production dialogs');
@@ -20,9 +23,15 @@ try{
   if(await page.getByRole('button',{name:/试听第\d+句人声曲调/}).count()!==2)throw Error('missing per-line vocal playback');
   await page.getByRole('button',{name:'人声曲谱',exact:true}).click();
   if(await page.getByLabel('创作聊天').count())throw Error('score page duplicates chat');
+  await page.getByLabel('旋律范围').selectOption('section');
+  const options=await page.getByLabel('旋律段落').locator('option').allTextContents();
+  if(!options.some(t=>t.includes('Verse 2'))||!options.some(t=>t.includes('Chorus 1'))||!options.some(t=>t.includes('Bridge 1')))throw Error('missing whole section options');
+  await page.getByLabel('旋律段落').selectOption('4');
+  if(await page.getByLabel('旋律段落').inputValue()!=='4')throw Error('wrong repeated verse');
   await page.getByLabel('旋律范围').selectOption('line');await page.getByLabel('旋律歌词句子').selectOption('1');
   await page.locator('.sw-scroll').evaluate(n=>n.scrollTop=0);
   await page.screenshot({path:`test-results/song-production/vocal-score-${width}.png`});
+  if(await page.getByRole('button',{name:/让 阿源 听/}).count()!==1)throw Error('missing collaborator name');
   await page.getByRole('button',{name:'去创作对话',exact:true}).click();
   if(await page.getByLabel('创作聊天').count()!==1)throw Error('expected exactly one creative composer');
   if(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1))throw Error('mobile horizontal overflow');

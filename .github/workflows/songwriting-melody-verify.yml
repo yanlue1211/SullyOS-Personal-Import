@@ -31,7 +31,7 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm vitest run utils/songwritingMelody.test.ts utils/vocalMelody.test.ts utils/melodyListening.test.ts utils/songwriting.test.ts --maxWorkers=2 --minWorkers=1
+      - run: pnpm vitest run utils/songwritingMelody.test.ts utils/vocalMelody.test.ts utils/vocalPlayback.test.tsx utils/melodyListening.test.ts utils/songwriting.test.ts --maxWorkers=2 --minWorkers=1
       - run: pnpm build
 
       - name: Verify unified production dialog and vocal score UI
