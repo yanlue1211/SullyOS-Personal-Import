@@ -1,0 +1,31 @@
+name: Personal AMSG client-state CPU selective verify
+
+on:
+  pull_request:
+    branches:
+      - personal/audio-listening
+    paths:
+      - 'utils/amsgClientStateSelectiveRead.ts'
+      - 'utils/amsgClientStateSelectiveRead.test.ts'
+      - 'utils/activeMsgClient.ts'
+      - 'utils/activeMsgClient.test.ts'
+      - '.github/workflows/personal-amsg-client-state-cpu-verify.yml'
+  push:
+    branches:
+      - personal/amsg-client-state-cpu-selective-20261117
+
+jobs:
+  verify-selective-client-state:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Test selected-key GET, errors, and existing AMSG client semantics
+        run: pnpm exec vitest run utils/amsgClientStateSelectiveRead.test.ts utils/activeMsgClient.test.ts
