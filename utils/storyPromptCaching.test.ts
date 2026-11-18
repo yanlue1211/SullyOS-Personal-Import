@@ -75,3 +75,64 @@ it('preserves the previous cached history prefix when the scene gains another di
     const strip = ({cache_control: _cache, ...block}: any) => block;
     expect(flatten(b).slice(0, end + 1).map(strip)).toEqual(oldBlocks.slice(0, end + 1).map(strip));
 });
+
+it('places the built-in V6.27 stable rules before history while keeping final format rules after it', () => {
+    const builtin = structuredClone(BUILTIN_NIGHT_SCREENING_PRESET);
+    const compiled = compile(1, builtin);
+    const indexOf = (needle: string) => compiled.messages.findIndex(message => message.content.includes(needle));
+    const style = indexOf('旁白不是中立摄像头');
+    const firstHistory = indexOf('past 0');
+    const lastFormat = indexOf('格式是输出协议');
+    expect(style).toBeGreaterThanOrEqual(0);
+    expect(firstHistory).toBeGreaterThan(style);
+    expect(lastFormat).toBeGreaterThan(firstHistory);
+    expect(compiled.messages[style].name).toBe('sully_history_context');
+    expect(JSON.stringify(prefix(compiled))).toContain('旁白不是中立摄像头');
+    expect(JSON.stringify(prefix(compiled))).not.toContain('本轮召回 1');
+    expect(JSON.stringify(prefix(compiled))).not.toContain('格式是输出协议');
+    // Request optimization must not change the user-facing prompt editor order.
+    const sourceOrder = builtin.document.prompts.map(prompt => prompt.id);
+    expect(sourceOrder.indexOf('chatHistory')).toBeLessThan(sourceOrder.indexOf('nmj-v3-style-default'));
+});
+
+it('keeps custom/duplicated preset ordering and disabled history behavior untouched', () => {
+    const imported: any = {...structuredClone(BUILTIN_NIGHT_SCREENING_PRESET), id: 'custom-scene', builtIn: false};
+    const customMessages = compile(1, imported).messages;
+    const customHistory = customMessages.findIndex(message => message.content === 'past 0');
+    const customStyle = customMessages.findIndex(message => message.content.includes('旁白不是中立摄像头'));
+    expect(customHistory).toBeGreaterThanOrEqual(0);
+    expect(customStyle).toBeGreaterThan(customHistory);
+    const builtinNoHistory: any = structuredClone(BUILTIN_NIGHT_SCREENING_PRESET);
+    builtinNoHistory.document.prompts.find((prompt: any) => prompt.marker === 'history').enabled = false;
+    const disabled = compile(1, builtinNoHistory);
+    expect(disabled.messages.some(message => message.content === 'past 0')).toBe(false);
+    expect(JSON.stringify(disabled.messages)).toContain('本轮召回 1');
+});
+
+it('preserves cached V6.27 history prefix across 12 growing rounds and changing live recalls', () => {
+    const builtin = structuredClone(BUILTIN_NIGHT_SCREENING_PRESET);
+    const blocks = (round: number) => {
+        const rows = Array.from({length: 24 + round}, (_, i) => ({
+            role: i % 2 ? 'assistant' : 'user',
+            content: 'scene history ' + i,
+        })) as any;
+        const payload = compile(round, builtin, rows);
+        const request = native(payload);
+        return {request, blocks: request.messages.flatMap((message: any) => message.content.map((block: any) => ({role: message.role, ...block})))};
+    };
+    const stripCache = ({cache_control: _cache, ...block}: any) => block;
+    let previous: ReturnType<typeof blocks> | null = null;
+    for (let round = 0; round < 12; round++) {
+        const current = blocks(round);
+        expect(current.blocks.filter((block: any) => block.cache_control).length).toBeLessThanOrEqual(3);
+        if (previous) {
+            const end = previous.blocks.findLastIndex((block: any) => block.cache_control);
+            expect(end).toBeGreaterThanOrEqual(0);
+            expect(current.blocks.slice(0, end + 1).map(stripCache)).toEqual(
+                previous.blocks.slice(0, end + 1).map(stripCache)
+            );
+            expect(current.request.system).toEqual(previous.request.system);
+        }
+        previous = current;
+    }
+});
