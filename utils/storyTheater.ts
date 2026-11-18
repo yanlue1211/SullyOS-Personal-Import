@@ -1027,28 +1027,44 @@ export const compileStoryPreset = (input: {
 }): { messages: StoryApiMessage[]; settings: StoryGenerationSettings; assistantPrefill?: StoryApiMessage } => {
     const { preset, slots, userName, characterNames } = input;
     const document = (preset || BUILTIN_NIGHT_SCREENING_PRESET).document;
+    // The built-in theater keeps its editor/group order. Only the request layout
+    // moves the history slot behind stable story/style rules, so a growing
+    // transcript does not invalidate those rules' Claude cache prefix.
+    // Keep the output/exit section after history for final formatting priority.
+    // User-imported and duplicated presets preserve their authored order.
+    const historyIndex = document.prompts.findIndex(prompt => prompt.enabled && !prompt.section && prompt.marker === 'history');
+    const outputIndex = document.prompts.findIndex(prompt => prompt.id === 'nmj-v64-section-output-start');
+    const isBuiltIn = !preset || (preset.builtIn === true && preset.id === BUILTIN_NIGHT_SCREENING_PRESET.id);
+    const requestPrompts = isBuiltIn && historyIndex >= 0 && outputIndex > historyIndex
+        ? [
+            ...document.prompts.slice(0, historyIndex),
+            ...document.prompts.slice(historyIndex + 1, outputIndex),
+            document.prompts[historyIndex],
+            ...document.prompts.slice(outputIndex),
+        ]
+        : document.prompts;
     const messages: StoryApiMessage[] = [];
     const liveMessages: StoryApiMessage[] = [];
     const liveSlots: StoryPromptSlots = {actors: '', persona: '', scenario: '', worldBefore: '', worldAfter: '', ...input.liveSlots};
     const deferLive = input.historyMessages?.some(message => message.role === 'user' || message.role === 'assistant')
-        && document.prompts.some(prompt => prompt.enabled && !prompt.section && prompt.marker === 'history');
+        && requestPrompts.some(prompt => prompt.enabled && !prompt.section && prompt.marker === 'history');
 
-    const worldBeforePrompts = document.prompts.filter(prompt => prompt.marker === 'world_before');
+    const worldBeforePrompts = requestPrompts.filter(prompt => prompt.marker === 'world_before');
     const enabledWorldBeforePrompt = worldBeforePrompts.find(prompt => prompt.enabled);
-    const firstEnabledCharacterIndex = document.prompts.findIndex(prompt => prompt.enabled && prompt.marker === 'characters');
+    const firstEnabledCharacterIndex = requestPrompts.findIndex(prompt => prompt.enabled && prompt.marker === 'characters');
     const shouldBackfillWorldBefore = worldBeforePrompts.length === 0 && Boolean(slots.worldBefore.trim());
     const shouldMoveWorldBeforeAheadOfCharacters = Boolean(
         enabledWorldBeforePrompt
         && firstEnabledCharacterIndex >= 0
-        && document.prompts.indexOf(enabledWorldBeforePrompt) > firstEnabledCharacterIndex
+        && requestPrompts.indexOf(enabledWorldBeforePrompt) > firstEnabledCharacterIndex
         && slots.worldBefore.trim(),
     );
 
     // 糯米机原生 Prompt Manager 按数组顺序送出；同一个 marker 只注入一次，
     // 角色资料始终使用一份完整的沙盒上下文。
     const injectedMarkers = new Set<string>();
-    for (let index = 0; index < document.prompts.length; index += 1) {
-        const prompt = document.prompts[index];
+    for (let index = 0; index < requestPrompts.length; index += 1) {
+        const prompt = requestPrompts[index];
         if (
             index === firstEnabledCharacterIndex
             && (shouldBackfillWorldBefore || shouldMoveWorldBeforeAheadOfCharacters)

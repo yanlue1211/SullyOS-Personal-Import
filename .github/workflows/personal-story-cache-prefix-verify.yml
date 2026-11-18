@@ -1,0 +1,34 @@
+name: Personal theater Claude cache prefix verification
+
+on:
+  push:
+    branches: [personal/story-claude-cache-prefix-20261118]
+  pull_request:
+    branches: [personal/audio-listening]
+    paths:
+      - 'utils/storyTheater.ts'
+      - 'utils/storyPromptCaching.test.ts'
+      - '.github/workflows/personal-story-cache-prefix-verify.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify-theater-cache-prefix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Exercise actual V6.27 order, 12-round cache replay and compatibility
+        run: pnpm exec vitest run utils/storyPromptCaching.test.ts utils/storyTheater.test.ts utils/storyPresetGroups.test.ts utils/anthropicApi.test.ts
+      - name: Production bundle
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: pnpm run build
