@@ -1,0 +1,16 @@
+name: PR91 public Pages and Worker deployment audit
+on:
+  pull_request:
+    paths:
+      - 'scripts/release91-live-status.mjs'
+      - '.github/workflows/personal-release91-live-audit.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Public Pages, Worker .11, D1 and Push read-only checks
+        run: node scripts/release91-live-status.mjs
