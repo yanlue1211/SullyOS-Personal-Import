@@ -1,0 +1,27 @@
+name: Personal chat overnight relative time
+on:
+  pull_request:
+    branches: [personal/audio-listening]
+    paths:
+      - 'utils/chatPrompts.ts'
+      - 'utils/chatTimestampReminder.test.ts'
+      - '.github/workflows/personal-chat-overnight-time-verify.yml'
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      NODE_OPTIONS: '--max-old-space-size=4096'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm vitest run utils/chatTimestampReminder.test.ts utils/contextTimeAwareness.test.ts utils/chatPrompts.test.ts utils/chatPrompts.firePack.test.ts utils/timeAwarenessRequests.test.ts
+      - run: pnpm build
