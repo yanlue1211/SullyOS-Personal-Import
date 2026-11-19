@@ -113,6 +113,28 @@ describe('no-read preference: turn-scoped prefix cache busting', () => {
         expect(next.messages[2].content[0].cache_control).toEqual({type: 'ephemeral'});
     });
 
+    it('ignores late system reminders when carrying a signed tool response forward', () => {
+        const first = {
+            tools: [{name: 'schedule_active_message', description: '排程', input_schema: {type: 'object', properties: {}}}],
+            system: [{type: 'text', text: '人设'}],
+            messages: [{role: 'user', content: [
+                {type: 'text', text: '记得提醒我'},
+                {type: 'text', text: '<system-reminder>上轮动态时间</system-reminder>'},
+            ]}],
+        };
+        const following = {...first, messages: [
+            {role: 'user', content: [{type: 'text', text: '记得提醒我'}]},
+            {role: 'assistant', content: [signed, {type: 'tool_use', id: 't', name: 'schedule_active_message', input: {}}]},
+            {role: 'user', content: [{type: 'tool_result', tool_use_id: 't', content: [{type: 'text', text: 'success'}]}]},
+        ]};
+        const native = (b: any) => JSON.parse(String(withFullWriteNativeCache('https://relay.test/v1/messages',
+            {method: 'POST', body: JSON.stringify(b)})?.body));
+        const a = native(first), b = native(following);
+        expect(a.tools[0].description).toBe(b.tools[0].description);
+        expect(a.messages[0].content[0].text).toBe('记得提醒我');
+        expect(b.messages[1].content[0]).toEqual(signed);
+    });
+
     it('does not modify the signed prefix of an older thinking block from before a new user turn', () => {
         const original = {
             system: [{type: 'text', text: '原有系统'}],
