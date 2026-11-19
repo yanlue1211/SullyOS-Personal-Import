@@ -53,10 +53,14 @@ export const ContextBuilder = {
         if (options?.skipTimeAwareness || !isScheduleFeatureOn(char)) return '';
         const schedule = await (snapshot ?? getDailyScheduleForChar(char));
         if (!schedule) return '';
-        return buildScheduleInjectionText(schedule, undefined, nowInTimeZone(resolveCharTimeZone(char)), {
+        const scheduleText = buildScheduleInjectionText(schedule, undefined, nowInTimeZone(resolveCharTimeZone(char)), {
             includeFullDay: true, includeClock: char.timeAwarenessEnabled !== false,
             includeChangeInstruction: allowScheduleChange,
         });
+        // 浏览器聊天层单独教本轮调整动作；scheduleInjection 是 Worker 共用纯叶子，
+        // 不能为了这一条聊天提示词改变 Worker bundle 与线上后台行为。
+        if (!allowScheduleChange || char.timeAwarenessEnabled === false || !scheduleText) return scheduleText;
+        return scheduleText + '\n【调整今天自己的日程】如你在本轮聊天中确实决定更换原有计划，或与对方明确约好新的活动，可在正常回复末尾另起一行写 [[ACTION:CHANGE_SCHEDULE | 14:00 | 和对方逛街]]。其中 14:00 只是格式示例：必须照抄上方真实存在的当前或未来时段开始时间，替换为新活动。当天已过去的安排不能改，通常只动真正受影响的1—2项。对方只提议但尚未说定时先不要改；已确定的工作行程不能凭空抹掉，遇到冲突先协商。无需解释动作标签，没发生变动就不要输出。';
     },
     buildEmotionContext: (char: CharacterProfile, options?: EmotionContextOptions): string => {
         if ((options?.surface !== 'chat' && options?.surface !== 'home') || !isEmotionFeatureOn(char)) return '';

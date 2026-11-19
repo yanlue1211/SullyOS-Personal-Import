@@ -36,6 +36,16 @@ it('home and date peek both include the same schedule without emotion opt-in',as
  expect(peek.messages[0].content).not.toContain('日程标记画画');
 });
 
+it('live chat can persist an agreed schedule change in the same reply; no-clock cannot',async()=>{
+ const live=await ContextBuilder.buildVolatileCoreState(char,{emotion:{surface:'chat'}});
+ expect(live).toContain('09:00 日程标记画画');
+ expect(live).toContain('ACTION:CHANGE_SCHEDULE');
+ expect(live).toContain('必须照抄上方真实存在');
+ expect(m.load).toHaveBeenCalledTimes(1);
+ const noClock=await ContextBuilder.buildVolatileCoreState({...char,timeAwarenessEnabled:false},{emotion:{surface:'chat'}});
+ expect(noClock).toContain('日程标记画画');
+ expect(noClock).not.toContain('ACTION:CHANGE_SCHEDULE');
+});
 it('the lightweight role-settings entry also sees an enabled schedule',async()=>{
  expect(await ContextBuilder.buildRoleSettingsContext(char,{skipMemories:true})).toContain('日程标记画画');
 });
