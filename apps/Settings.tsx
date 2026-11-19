@@ -4308,7 +4308,7 @@ const Settings: React.FC = () => {
                    {editPresetApiType === 'anthropic' && <label className="block text-xs text-slate-500">缓存写入方式
                        <select aria-label="预设 Anthropic 缓存写入方式" value={editPresetCacheMode} onChange={e => setEditPresetCacheMode(e.target.value as 'optimized' | 'full-write')} className="w-full mt-1 bg-white rounded-xl border border-slate-200 px-3 py-2">
                            <option value="optimized">默认 · 稳定前缀优化</option>
-                           <option value="full-write">全量写入 · 最后消息断点（5 分钟）</option>
+                           <option value="full-write">全量写入 · 尽量不读（5 分钟，实验）</option>
                        </select>
                    </label>}
               </div>
