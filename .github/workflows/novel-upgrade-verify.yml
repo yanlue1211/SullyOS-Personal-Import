@@ -1,0 +1,40 @@
+name: Pen pal studio verification
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - 'apps/NovelApp.tsx'
+      - 'components/novel/**'
+      - 'utils/novel*.ts'
+      - 'utils/messageFormat*'
+      - 'scripts/novel-upgrade-browser-check.mjs'
+      - 'test/fixtures/novel-upgrade.*'
+      - '.github/workflows/novel-upgrade-verify.yml'
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      NODE_OPTIONS: '--max-old-space-size=4096'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm vitest run utils/novelNarration.test.ts utils/novelStream.test.ts utils/novelPersona.test.ts utils/messageFormat.novelCard.test.ts utils/safeApi.stream.test.ts utils/chatMessageVisibility.test.ts utils/chatContextRange.test.ts --maxWorkers=2 --minWorkers=1
+      - run: pnpm build
+      - name: Run mobile flows against mock APIs
+        run: |
+          mkdir -p "$RUNNER_TEMP/novel-browser"
+          pnpm --dir "$RUNNER_TEMP/novel-browser" add playwright@1.56.1
+          pnpm --dir "$RUNNER_TEMP/novel-browser" exec playwright install --with-deps chromium
+          pnpm exec vite --host 127.0.0.1 --port 5183 > "$RUNNER_TEMP/novel-vite.log" 2>&1 &
+          for i in $(seq 1 30); do curl --fail --silent http://127.0.0.1:5183/test/fixtures/novel-upgrade.html > /dev/null && break; sleep 1; done
+          NOVEL_PLAYWRIGHT_MODULE="$RUNNER_TEMP/novel-browser/node_modules/playwright/index.mjs" node scripts/novel-upgrade-browser-check.mjs

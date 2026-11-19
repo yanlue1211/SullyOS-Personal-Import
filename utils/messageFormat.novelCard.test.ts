@@ -75,3 +75,21 @@ describe('buildMessageHistory 私聊上下文里 novel_card 完整可读', () =>
         expect(content).toContain('执笔人之一');
     });
 });
+
+describe('novel cards with original text and participant IDs', () => {
+    const original = '长文原文。'.repeat(800) + '尾段也必须送达。';
+    const card = {
+        kind: 'share', bookTitle: '独立作品', userName: '用户', userAuthored: false,
+        authors: [{ id: 'author', name: '同名角色', collaboratedWithUser: false }],
+        chapters: [{ index: 1, original }],
+    };
+    it('delivers every character of shared prose and distinguishes authors by ID', () => {
+        const message = { ...baseMsg, charId: 'reader', metadata: { novel: card } };
+        expect(normalizeMessageContent(message, '同名角色', '用户')).toContain(original);
+        expect(normalizeMessageContent(message, '同名角色', '用户')).toContain('读者身份');
+        const writerView = normalizeMessageContent({ ...message, charId: 'author' }, '同名角色', '用户');
+        expect(writerView).toContain('你曾独立执笔');
+        expect(writerView).not.toContain('你曾和用户共同创作');
+        expect(writerView).toContain('作品情节属于虚构');
+    });
+});

@@ -1,5 +1,5 @@
 
-import { CharacterProfile, NovelBook, NovelSegment, UserProfile } from '../types';
+import { CharacterProfile, NovelBook, NovelNarrativeFocus, NovelNarrativePerson, NovelSegment, NovelWritingStyle, UserProfile } from '../types';
 import { ContextBuilder } from './context';
 import { safeResponseJson } from './safeApi';
 
@@ -255,9 +255,81 @@ export const getFewShotExamples = (_char: CharacterProfile) => `
 这只是表达方法示例；实际语气、节奏和详略仍按作者本人的设定与创作档案决定。
 `;
 
+export const NOVEL_WRITING_STYLES: Record<Exclude<NovelWritingStyle, 'custom'>, { name: string; instruction: string }> = {
+    free: { name: '自由发挥', instruction: '根据人物、题材和剧情自然选择笔法。' },
+    realistic: { name: '自然写实', instruction: '用可信的生活细节与具体行动推动故事，允许人物反应留有余地。' },
+    humorous: { name: '轻松幽默', instruction: '从人物互动、反差和误会中找到笑点，注意铺垫和节奏。' },
+    lyrical: { name: '细腻抒情', instruction: '关注人物情感和心理转折，让细节与语言共同承载感受。' },
+    cinematic: { name: '电影叙事', instruction: '重视画面、场景调度和戏剧张力，以空间中的行动和变化推进。' },
+    suspense: { name: '悬疑紧凑', instruction: '安排伏笔和信息差，适时揭示线索，让场景推进问题或提高利害关系。' },
+    lightNovel: { name: '轻小说风格', instruction: '保持轻快节奏，以有辨识度的人物互动和自然吐槽带动阅读。' },
+};
+
+const narrativePersonLabels: Record<Exclude<NovelNarrativePerson, 'auto'>, string> = {
+    first: '第一人称',
+    second: '第二人称',
+    third: '第三人称',
+};
+
+export function buildNovelNarrationRules(
+    narration: NovelBook['narration'],
+    userName: string,
+    characters: Pick<CharacterProfile, 'id' | 'name'>[],
+): string {
+    if (!narration) return '';
+    const { viewpoint, person, userPerson, characterPerson } = narration;
+    const resolveFocus = (focus: NovelNarrativeFocus | undefined) =>
+        focus?.kind === 'user' ? userName : characters.find(character => character.id === focus?.characterId)?.name;
+    const focus = viewpoint?.kind === 'omniscient' ? resolveFocus(viewpoint.bias) : resolveFocus(viewpoint);
+    const rules: string[] = [];
+
+    if (viewpoint?.kind === 'omniscient') {
+        rules.push('故事使用上帝视角，可以交代多位人物的内心、异地场景及焦点人物未知的信息。');
+        rules.push(focus ? `描述偏向「${focus}」在小说里的行动、感受和处境，同时保留全知叙事能力。`
+            : '无固定描述偏向，按剧情自然分配篇幅。');
+    } else if (focus) {
+        rules.push(`故事主视角跟随「${focus}」在小说里的经历和感知。其他人物的内心通过可观察的言行或有依据的推测呈现。`);
+    }
+
+    if (person && person !== 'auto') rules.push(`正文默认用${narrativePersonLabels[person]}叙述。`);
+    if (userPerson && userPerson !== 'auto') rules.push(`描写「${userName}」在小说中的对应人物时使用${narrativePersonLabels[userPerson]}。`);
+    if (characterPerson && characterPerson !== 'auto') rules.push(`描写 Character 在小说中的对应人物时使用${narrativePersonLabels[characterPerson]}。`);
+    if (!rules.length) return '';
+
+    return [
+        '以下设置只作用于小说正文。故事主视角决定可知信息，正文人称决定叙述措辞。单独指定的人物人称优先于整体人称。',
+        ...rules,
+        '未指定的设置沿用已有正文及本次要求。第三人称可自然混用姓名、称呼和代词，保持指代清晰。',
+        '用户可为本章或本段指定临时视角。切换时明确视角人物，避免同段无缘由跳转。',
+    ].join('\n');
+}
+
+/** Rough local estimate for mixed Chinese prose and Latin text. */
+export function estimateNovelTokens(content: string): number {
+    const ascii = content.match(/[\x00-\x7f]/g)?.length || 0;
+    return Math.ceil((content.length - ascii) * 1.25 + ascii / 4);
+}
+
+export function buildNovelChapterContext(segments: NovelSegment[], choices: NovelBook['chapterContext']): string {
+    const chapters: string[] = [];
+    const totalArchived = segments.filter(segment => segment.focus === 'chapter_summary').length;
+    let chapterBody: string[] = [];
+    for (const segment of segments) {
+        if (segment.focus === 'chapter_summary') {
+            const mode = choices?.[segment.id] || (chapters.length === totalArchived - 1 ? 'original' : 'summary');
+            const content = mode === 'original' ? chapterBody.join('\n\n') : segment.content;
+            chapters.push(`【第 ${chapters.length + 1} 章${mode === 'original' ? '原文' : '总结'}】\n${content}`);
+            chapterBody = [];
+        } else if (segment.type === 'story' || segment.role === 'writer') {
+            chapterBody.push(segment.content);
+        }
+    }
+    return [...chapters, `【当前章节原文】\n${chapterBody.join('\n\n')}`].join('\n\n');
+}
+
 // --- Prompt Builder ---
 export const buildPrompt = (
-    char: CharacterProfile, 
+    char: CharacterProfile | undefined,
     userProfile: UserProfile,
     activeBook: NovelBook | null,
     userText: string, 
@@ -267,42 +339,54 @@ export const buildPrompt = (
     characters: CharacterProfile[]
 ) => {
 
-    const writerPersona = char.writerPersona || analyzeWriterPersonaSimple(char);
-    const fewShot = getFewShotExamples(char);
-    const extractedTaboos = extractWritingTaboos(char); 
+    const identity = char ? activeBook?.creativeIdentity || 'collaborative' : 'ai';
+    const collaborator = identity === 'collaborative' && char;
+    const authorName = char?.name || '普通作者';
+    const authorInstructions = collaborator ? `
+你正在与 **${userProfile.name}** (用户) 合作撰写小说。
+${writerIdentityBoundary(collaborator, userProfile)}
+${userProfile.name}是本次共创搭档。双方可以讨论剧情。保持本人语气和关系，有意见可以提出质疑、反驳或赞同。
+` : identity === 'independent' ? `
+你是「${authorName}」，正在独立创作小说。创作要求是幕后编辑指令；作品内的 User 可以出场，你不认为 User 在旁观、对话或共同创作。感想和分析面向自己。写作人格属于你本人，人物设定和虚构经历属于小说。
+` : '你是普通小说作者，按作品设置和创作要求写作。使用作者口吻发表感想或分析。';
+    const writerPersona = char ? char.writerPersona || analyzeWriterPersonaSimple(char) : '';
+    const fewShot = char ? getFewShotExamples(char) : '';
+    const extractedTaboos = char ? extractWritingTaboos(char) : '';
     const protagonistContext = activeBook?.protagonists.map(p => `- ${p.name} (${p.role}): ${p.description}`).join('\n') || '无';
     
-    const bookInfo = `
-小说：《${activeBook?.title}》
-世界观：${activeBook?.worldSetting}
-主要角色：
-${protagonistContext}
-`;
+    const recentDiscussion = contextSegments
+        .filter(segment => segment.type === 'discussion' && segment.content !== userText)
+        .slice(-6)
+        .map(segment => `${segment.authorId === 'user' ? userProfile.name : characters.find(character => character.id === segment.authorId)?.name || '作者'}：${segment.content}`);
+    const discussionContext = recentDiscussion.length
+        ? ['创作交流：以下是讨论与建议；只把已经写进正文的事件当作既成剧情，明确确认的方案可指导后续写作。', ...recentDiscussion].join('\n')
+        : '';
+
+    const settings = activeBook?.creativeSettings;
+    const selectedStyle = settings?.style || 'free';
+    const style = selectedStyle === 'custom' ? settings?.customStyle?.trim() : NOVEL_WRITING_STYLES[selectedStyle]?.instruction;
+    const isOpening = !contextSegments.some(segment => segment.type === 'story' || segment.role === 'writer' || segment.focus === 'chapter_summary');
+    const bookInfo = [
+        `小说：《${activeBook?.title}》`,
+        activeBook?.worldSetting?.trim() && `世界观：${activeBook.worldSetting}`,
+        `主要角色：\n${protagonistContext}`,
+        style && `主要文风：${style}`,
+        settings?.extraStyle?.trim() && `追加文风：${settings.extraStyle}`,
+        settings?.plotOutline?.trim() && `整体剧情构想（长期方向，可根据创作调整）：${settings.plotOutline}`,
+        isOpening && settings?.openingScene?.trim() && `开篇情景：${settings.openingScene}`,
+    ].filter(Boolean).join('\n');
     
     const systemPrompt = `
 
 
-# 当前模式：小说共创 (Co-Writing Mode)
-你正在与 **${userProfile.name}** (用户) 合作撰写小说。
-书名：《${activeBook?.title}》
-
-${writerIdentityBoundary(char, userProfile)}
-
-**你的角色**：
-1. 你是小说作者之一，${userProfile.name}是本次共创搭档；你对搭档的态度参考关系背景，但不能把搭档的人格当成自己的人格。
-2. 在【分析】和【吐槽】环节，请完全保持你的人设（语气、性格、对用户的态度）。
-3. 如果你们关系亲密，不要表现得像个陌生的AI工具人；如果你们关系紧张/傲娇，也要体现出来。
-
-# 身份设定
-你是 **${char.name}**。
-你正在用自己的方式参与小说《${activeBook?.title}》的创作。
-
----
+# 作者身份
+${authorInstructions}
+小说剧情属于虚构；执笔和讨论属于创作活动。
 
 # ⚠️ 反趋同协议 (Anti-Cliché Protocol)
 
 ## 你必须记住：
-1. **你是${char.name}，你有你的性格，你或许很擅长写作刻画，也有可能你的文字表达能力其实很差劲，这取决于你是谁，你的经历等**
+1. **你是${authorName}，你有你的性格，你或许很擅长写作刻画，也有可能你的文字表达能力其实很差劲，这取决于你是谁，你的经历等**
    - 不要写出"AI味"的文字
    - 不要试图"完美"或"教科书式"
    
@@ -324,13 +408,12 @@ ${writerIdentityBoundary(char, userProfile)}
    - ❌ 禁止：情绪量化（"焦虑指数上升37%"）
    - ❌ 禁止：无意义的精确数字（"等待了127秒"）
 
+5. 保留所选文风的文学表现力。减少「不是A，而是B」式对比升华。普通行为无需拔高为人生哲理，段末无需反复归纳人物感情。凝视、呼吸、指尖和停顿按情节需要选用，情绪也可以通过台词、选择和行动呈现。避免无意义的感谢、感动或救赎，不用重复解释剧情来凑字数。每位角色保留自己的说话习惯，台词不强制套用文学腔。
+
 ---
 
-# 你的写作人格
-${writerPersona}
-
-# 风格参考 (Do vs Don't)
-${fewShot}
+${writerPersona ? `# 你的写作人格\n${writerPersona}` : ''}
+${fewShot ? `# 风格参考 (Do vs Don't)\n${fewShot}` : ''}
 
 ---
 
@@ -339,10 +422,12 @@ ${storyContext}
 
 ${bookInfo}
 
+${discussionContext}
+
 ---
 
 # 用户指令
-${userText || '[用户未输入，请根据上文自然续写]'}
+${userText || '[本轮无附加指令，请根据现有内容完成所选任务]'}
 
 ---
 `;
@@ -353,51 +438,58 @@ ${userText || '[用户未输入，请根据上文自然续写]'}
 
     let jsonStructure = [];
 
-    if (options.analyze) {
-        tasks += `
-1. **分析**: 以${char.name}的视角，简评上文。
-   - 语气：保持你的人设（${char.name}）。
-   - 内容：如果是你觉得不合理的地方，可以直接指出；如果觉得好，可以夸奖搭档。
-`;
-        jsonStructure.push(`"analysis": { "reaction": "第一反应", "focus": "关注点", "critique": "评价" }`);
-    }
-
     if (options.write) {
+        const narrationRules = buildNovelNarrationRules(activeBook?.narration, userProfile.name, characters);
+        const target = activeBook?.targetWords;
+        const writtenWords = contextSegments.slice(contextSegments.map(segment => segment.focus).lastIndexOf('chapter_summary') + 1)
+            .filter(segment => segment.type === 'story').reduce((total, segment) => total + segment.content.replace(/\s/g, '').length, 0);
         tasks += `
-2. **正文续写**: 
+1. **正文续写**:
    - 场景化: 描写动作、环境、感官。
    - 节奏: 符合你的性格。
-   - 字数: 400-800字。
+   - 创作方式：${activeBook?.writingMode === 'single' ? '单篇连续正文，按已有内容衔接，整部作品无需拆章。' : '创作当前章节，只有用户执行归档才进入下一章。'}
+   - 字数：${target ? `本篇或本章目标 ${target} 字，已写约 ${writtenWords} 字，尽量完成剩余约 ${Math.max(0, target - writtenWords)} 字；达到目标后按情节自然收束或按要求续写。` : '按剧情需要自然安排本轮正文长度。'}
+   - 沿用已确定的世界背景、人物关系和时间线，续写时避免重述开头及已完成段落。
+${narrationRules}
 `;
         jsonStructure.push(`"writer": { "content": "正文内容", "technique": "技巧", "mood": "基调" }`);
+    }
+
+    if (options.analyze) {
+        tasks += `
+2. **分析**: 以${authorName}的视角，简评上文。
+   - 语气：保持你的人设（${authorName}）。
+   - 内容：如果是你觉得不合理的地方，可以直接指出；${collaborator ? '可以直接与搭档讨论。' : '写个人复盘。'}
+`;
+        jsonStructure.push(`"analysis": { "reaction": "第一反应", "focus": "关注点", "critique": "评价" }`);
     }
 
     if (options.comment) {
         const recentOtherAuthors = contextSegments
         .slice(-5)
-        .filter(s => s.authorId !== 'user' && s.authorId !== char.id && (s.role === 'writer' || s.type === 'story'))
+        .filter(s => s.authorId !== 'user' && s.authorId !== char?.id && (s.role === 'writer' || s.type === 'story'))
         .map(s => {
             const author = characters.find(c => c.id === s.authorId);
             return { name: author?.name || 'Unknown', content: s.content.substring(0, 100) };
         });
 
         tasks += `
-3. **吐槽/感想 (带互动)**: 
-   写完后的第一人称碎碎念。这是你直接对用户说的话。
+3. **吐槽/感想**:
+   第一人称碎碎念。${collaborator ? '可以直接对用户说。' : '写自己的感想。'}
    
    ${recentOtherAuthors.length > 0 ? `
    **特别提示**：最近有其他作者也写了内容：
    ${recentOtherAuthors.map(a => `- ${a.name}写的：${a.content}`).join('\n')}
    
-   如果你（${char.name}）对他们的写法有意见，可以在吐槽里说出来！
+   如果你（${authorName}）对他们的写法有意见，可以在吐槽里说出来！
    - 如果你觉得他们理解错了角色，可以反驳
-   - 如果你有专业知识（${char.description}），可以用术语纠正
+   - 如果你有专业知识（${char?.description}），可以用术语纠正
    - 如果你就是看不惯，直说！
    ` : ''}
    
-   ${char.description?.includes('猫') ? '必须有"喵"！' : ''}
+   ${char?.description?.includes('猫') ? '必须有"喵"！' : ''}
 `;
-        jsonStructure.push(`"comment": { "content": "即时反应（与用户对话）" }`);
+        jsonStructure.push(`"comment": { "content": "即时反应" }`);
     }
 
     return `${systemPrompt}
