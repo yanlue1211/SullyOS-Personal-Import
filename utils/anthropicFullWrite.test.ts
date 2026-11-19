@@ -24,6 +24,8 @@ describe('Anthropic full-write mode', () => {
     it('matches exactly one channel, and an active normal config wins over a saved experimental preset', () => {
         expect(shouldUseAnthropicFullWrite({url, init: init(), candidates: [full]})).toBe(true);
         expect(shouldUseAnthropicFullWrite({url, init: init(), candidates: [{...full, anthropicCacheMode: 'optimized'}, full]})).toBe(false);
+        // The active character policy is supplied first when a request has a charId.
+        expect(shouldUseAnthropicFullWrite({url, init: init(), candidates: [full, {...full, anthropicCacheMode: 'optimized'}]})).toBe(true);
         expect(shouldUseAnthropicFullWrite({url, init: init(), candidates: [{...full, apiKey: 'not-secret'}]})).toBe(false);
         expect(shouldUseAnthropicFullWrite({url, init: init({...body(), model: 'other'}), candidates: [full]})).toBe(false);
         expect(shouldUseAnthropicFullWrite({url: 'https://open.test/v1/chat/completions', init: init(), candidates: [full]})).toBe(false);
