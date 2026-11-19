@@ -128,7 +128,7 @@ describe('novel character card and AU context', () => {
         const prompt = buildPrompt(writer, user, work, '开始', '', { write: true, comment: false, analyze: false }, [], members);
         expect(prompt).toContain('这是所有人都是人鱼的世界');
         expect(prompt).toContain('小人鱼：是一只人鱼');
-        expect(prompt).toContain('本作品的身份、经历与世界背景以本作品设定及剧情为准');
+        expect(buildNovelCharacterCardContext(work, members)).toContain('本作品的身份、经历与世界背景以本作品设定及剧情为准');
         expect(prompt).not.toContain('PRIVATE_ACTOR_REMARK');
     });
 });

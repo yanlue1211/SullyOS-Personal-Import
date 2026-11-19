@@ -59,6 +59,7 @@ try {
     assert.match(characterRequest, /GUEST_CARD_CORE/);
     assert.match(characterRequest, /作者核心人物卡/);
     assert.match(characterRequest, /本作品中对应的剧中人：客串人物别名/);
+    assert.match(characterRequest, /本作品的身份、经历与世界背景以本作品设定及剧情为准/);
     assert.doesNotMatch(characterRequest, /ONLY_USER_REMARK/);
     assert.doesNotMatch(characterRequest, /WORLD_DISABLED/);
     assert.match(characterRequest, /幕后编辑指令/);

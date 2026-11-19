@@ -308,15 +308,19 @@ export function buildNovelCharacterCardContext(
     book: Pick<NovelBook, 'collaboratorIds' | 'protagonists' | 'narration'>,
     characters: CharacterProfile[],
 ): string {
-    return getNovelWorldbookMembers(book, characters).map(character => {
-        const castNames = [...new Set(book.protagonists
+    const cards = getNovelWorldbookMembers(book, characters).map(character => {
+        const castNames = [...new Set((book.protagonists || [])
             .filter(person => resolveNovelProtagonistSource(person, characters)?.id === character.id)
             .map(person => person.name.trim()).filter(Boolean))];
         return [
             buildBareTheaterActorContext(character),
             castNames.length ? `- 本作品中对应的剧中人：${castNames.join('、')}` : '',
         ].filter(Boolean).join('\n');
-    }).join('\n\n');
+    });
+    return cards.length ? [
+        '人物性格参考关联角色的人设卡；本作品的身份、经历与世界背景以本作品设定及剧情为准，未写明的按世界观和故事发展自然安排。',
+        ...cards,
+    ].join('\n\n') : '';
 }
 
 export function buildNovelNarrationRules(
@@ -424,7 +428,6 @@ ${userProfile.name}是本次共创搭档。双方可以讨论剧情。保持本�
         `小说：《${activeBook?.title}》`,
         activeBook?.worldSetting?.trim() && `世界观：${activeBook.worldSetting}`,
         `主要角色：\n${protagonistContext}`,
-        '人物性格参考关联角色的人设卡；本作品的身份、经历与世界背景以本作品设定及剧情为准，未写明的按世界观和故事发展自然安排。',
         style && `主要文风：${style}`,
         settings?.extraStyle?.trim() && `追加文风：${settings.extraStyle}`,
         settings?.plotOutline?.trim() && `整体剧情构想（长期方向，可根据创作调整）：${settings.plotOutline}`,
