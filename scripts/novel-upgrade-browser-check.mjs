@@ -62,7 +62,9 @@ try {
     await send.click();
     await page.getByText('模拟正文。', { exact: true }).waitFor();
     const characterRequest = JSON.stringify(requests[2].messages);
-    assert.doesNotMatch(characterRequest, /bookMeta/);
+    const characterPrompt = requests[2].messages.map(message => message.content).join('\n');
+    assert.match(characterPrompt, /"bookMeta": \{ "summary"/);
+    assert.doesNotMatch(characterPrompt, /"bookMeta": \{ "title"/);
     assert.match(characterRequest, /WORLD_ENABLED/);
     assert.match(characterRequest, /WORLD_CAST_ONLY/);
     assert.match(characterRequest, /GUEST_CARD_CORE/);
