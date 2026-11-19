@@ -10,6 +10,7 @@ const origin = process.env.NOVEL_TEST_ORIGIN || 'http://127.0.0.1:5183';
 
 try {
     const page = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    page.setDefaultTimeout(20_000);
     const requests = [];
     const pageErrors = [];
     page.on('pageerror', error => pageErrors.push(error.message));
@@ -28,7 +29,11 @@ try {
     const send = page.getByRole('button', { name: '发送创作任务' });
     await send.click();
     await page.getByText('模拟正文。', { exact: true }).waitFor();
-    await page.getByText('海底来信', { exact: true }).waitFor();
+    await page.getByText('海底来信', { exact: true }).waitFor().catch(async error => {
+        console.log('DEBUG: first novel state:', (await page.locator('body').innerText()).slice(0, 1600));
+        console.log('DEBUG: model request count:', requests.length, 'page errors:', pageErrors);
+        throw error;
+    });
     assert.equal(await page.getByTestId('novel-book-summary').textContent(), '一场人鱼的冒险');
     assert.deepEqual(requests.map(request => request.model), ['mock-main']);
     assert.match(JSON.stringify(requests[0].messages), /bookMeta/);
