@@ -26,10 +26,10 @@ export default function DialogueApiFields({ value, onChange, fetchModels, isLoad
                             onChange={e => onChange({anthropicCacheMode: e.target.value as 'optimized' | 'full-write'})}
                             className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700">
                             <option value="optimized">默认 · 稳定前缀优化</option>
-                            <option value="full-write">全量写入 · 最后断点</option>
+                            <option value="full-write">全量写入 · 尽量不读（实验）</option>
                         </select>
                     </label>
-                    {value.anthropicCacheMode === 'full-write' && <p className="text-[10px] text-slate-400 leading-relaxed">实验模式：不优化缓存前缀，每轮仅在最后一条消息末尾放一个 5 分钟断点，尽量写入整轮上下文。该设置随渠道预设保存；实际写入费用和命中仍取决于中转站。</p>}
+                    {value.anthropicCacheMode === 'full-write' && <p className="text-[10px] text-slate-400 leading-relaxed">特殊计费渠道实验：在最早的工具/系统技术文本加入随新对话轮次变化的标记，尽量让旧缓存失效；最后仍只放一个 5 分钟写入断点。工具续答保留同一标记以保护思考签名；如果存在较早的签名思考，则为避免 400 不强制改前缀。仅影响浏览器本地调用；中转站实际是否读取及如何计费不能保证。</p>}
                 </div>}
                 {llmApiType(value) === 'anthropic' && value.anthropicCacheMode !== 'full-write' && <div className="rounded-xl border border-slate-200/60 bg-white/40 px-3 py-3 space-y-2">
                     <label className="flex items-center justify-between gap-3 text-xs text-slate-500">
