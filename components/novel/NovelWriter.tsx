@@ -10,7 +10,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { NovelBook, NovelSegment, CharacterProfile, UserProfile } from '../../types';
 import {
     NOVEL_THEMES, GenerationOptions, extractWritingTags,
-    analyzeWriterPersonaSimple, generateWriterPersonaDeep, buildNovelChapterContext, estimateNovelTokens,
+    analyzeWriterPersonaSimple, generateWriterPersonaDeep, buildNovelChapterContext, estimateNovelTokens, getNovelWorldbookMembers,
     buildPrompt, parsePersonaMarkdown
 } from '../../utils/novelUtils';
 import Modal from '../os/Modal';
@@ -300,9 +300,7 @@ const NovelWriter: React.FC<NovelWriterProps> = ({
                     [userPrompt, storyContext.slice(-1200)].filter(Boolean).join('\n'), userProfile.name, remoteVectorConfig, char.name)
                 : '';
             const chosenIds = new Set(sourceSettings?.worldbookIds || []);
-            const viewpoint = activeBook.narration?.viewpoint;
-            const focus = viewpoint?.kind === 'omniscient' ? viewpoint.bias : viewpoint;
-            const members = characters.filter(character => activeBook.collaboratorIds.includes(character.id) || (focus?.kind === 'character' && focus.characterId === character.id))
+            const members = getNovelWorldbookMembers(activeBook, characters)
                 .map(character => ({ ...character, mountedWorldbooks: character.mountedWorldbooks?.filter(book => chosenIds.has(book.id)) }));
             const history: Array<{ role: 'user' | 'assistant' | 'system'; content: string }> = [{ role: 'user', content: prompt }];
             const core = char && sourceSettings?.corePersona !== false ? buildBareTheaterActorContext(char) : '';

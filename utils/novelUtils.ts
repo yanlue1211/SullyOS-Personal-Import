@@ -271,13 +271,33 @@ const narrativePersonLabels: Record<Exclude<NovelNarrativePerson, 'auto'>, strin
     third: '第三人称',
 };
 
+/** Use the same roster for the worldbook picker and the request. */
+export function getNovelWorldbookMembers(
+    book: Pick<NovelBook, 'collaboratorIds' | 'protagonists' | 'narration'>,
+    characters: CharacterProfile[],
+): CharacterProfile[] {
+    const ids = new Set(book.collaboratorIds);
+    const viewpoint = book.narration?.viewpoint;
+    const focus = viewpoint?.kind === 'omniscient' ? viewpoint.bias : viewpoint;
+    if (focus?.kind === 'character') ids.add(focus.characterId);
+    for (const person of book.protagonists || []) {
+        if (person.sourceCharacterId) {
+            ids.add(person.sourceCharacterId);
+        } else if (person.sourceCharacterId === undefined) {
+            const matches = characters.filter(character => character.name.trim() === person.name.trim());
+            if (matches.length === 1) ids.add(matches[0].id);
+        }
+    }
+    return characters.filter(character => ids.has(character.id));
+}
+
 export function buildNovelNarrationRules(
     narration: NovelBook['narration'],
     userName: string,
     characters: Pick<CharacterProfile, 'id' | 'name'>[],
+    protagonists: NovelBook['protagonists'] = [],
 ): string {
-    if (!narration) return '';
-    const { viewpoint, person, userPerson, characterPerson } = narration;
+    const { viewpoint, userPerson } = narration || {};
     const resolveFocus = (focus: NovelNarrativeFocus | undefined) =>
         focus?.kind === 'user' ? userName : characters.find(character => character.id === focus?.characterId)?.name;
     const focus = viewpoint?.kind === 'omniscient' ? resolveFocus(viewpoint.bias) : resolveFocus(viewpoint);
@@ -291,13 +311,19 @@ export function buildNovelNarrationRules(
         rules.push(`故事主视角跟随「${focus}」在小说里的经历和感知。其他人物的内心通过可观察的言行或有依据的推测呈现。`);
     }
 
-    if (person && person !== 'auto') rules.push(`正文默认用${narrativePersonLabels[person]}叙述。`);
-    if (userPerson && userPerson !== 'auto') rules.push(`描写「${userName}」在小说中的对应人物时使用${narrativePersonLabels[userPerson]}。`);
-    if (characterPerson && characterPerson !== 'auto') rules.push(`描写 Character 在小说中的对应人物时使用${narrativePersonLabels[characterPerson]}。`);
+    const addPerson = (name: string, person?: NovelNarrativePerson) => {
+        if (!person || person === 'auto') return;
+        const usage = person === 'first' ? '由此人叙述的段落中，此人自称「我」'
+            : person === 'second' ? '叙述者直接对这位人物叙述时，用「你」指代此人'
+            : '可用姓名、称呼或代词指代此人';
+        rules.push(`「${name}」的人称偏好为${narrativePersonLabels[person]}：${usage}。`);
+    };
+    addPerson(userName, userPerson);
+    for (const protagonist of protagonists) addPerson(protagonist.name, protagonist.narrativePerson);
     if (!rules.length) return '';
 
     return [
-        '以下设置只作用于小说正文。故事主视角决定可知信息，正文人称决定叙述措辞。单独指定的人物人称优先于整体人称。',
+        '以下设置只作用于小说正文。故事主视角决定可知信息，人物人称只约束对应对象及适用段落。对话照人物口吻写，避免连续重复代词，保持当前段落的称谓与视角清楚。',
         ...rules,
         '未指定的设置沿用已有正文及本次要求。第三人称可自然混用姓名、称呼和代词，保持指代清晰。',
         '用户可为本章或本段指定临时视角。切换时明确视角人物，避免同段无缘由跳转。',
@@ -439,7 +465,7 @@ ${userText || '[本轮无附加指令，请根据现有内容完成所选任务]
     let jsonStructure = [];
 
     if (options.write) {
-        const narrationRules = buildNovelNarrationRules(activeBook?.narration, userProfile.name, characters);
+        const narrationRules = buildNovelNarrationRules(activeBook?.narration, userProfile.name, characters, activeBook?.protagonists);
         const target = activeBook?.targetWords;
         const writtenWords = contextSegments.slice(contextSegments.map(segment => segment.focus).lastIndexOf('chapter_summary') + 1)
             .filter(segment => segment.type === 'story').reduce((total, segment) => total + segment.content.replace(/\s/g, '').length, 0);

@@ -5,8 +5,8 @@ import { NovelBook, NovelCreativeIdentity, NovelCreativeSettings, NovelNarration
 import Modal from '../components/os/Modal';
 import ConfirmDialog from '../components/os/ConfirmDialog';
 import { processImage } from '../utils/file';
-import { NOVEL_THEMES, NOVEL_WRITING_STYLES, analyzeWriterPersonaSimple, buildNovelChapterContext, estimateNovelTokens } from '../utils/novelUtils';
-import NovelNarrationSettings from '../components/novel/NovelNarrationSettings';
+import { NOVEL_THEMES, NOVEL_WRITING_STYLES, analyzeWriterPersonaSimple, buildNovelChapterContext, estimateNovelTokens, getNovelWorldbookMembers } from '../utils/novelUtils';
+import NovelNarrationSettings, { NarrativePersonSelect } from '../components/novel/NovelNarrationSettings';
 import NovelWriter from '../components/novel/NovelWriter';
 import { CharacterGroupFilterBar, filterCharactersByGroup, GROUP_FILTER_ALL } from '../components/character/CharacterGroupFilter';
 import { Robot, MaskHappy, PenNib, Books, FolderOpen } from '@phosphor-icons/react';
@@ -23,6 +23,8 @@ const NovelApp: React.FC = () => {
     const [activeTheme, setActiveTheme] = useState(NOVEL_THEMES[0]);
 
     // Create / Settings Form
+    const [settingsTab, setSettingsTab] = useState<'书稿' | '人物' | '叙述' | '资料'>('书稿');
+    const [worldbookQuery, setWorldbookQuery] = useState('');
     const [tempTitle, setTempTitle] = useState('');
     const [tempSubtitle, setTempSubtitle] = useState('');
     const [tempSummary, setTempSummary] = useState('');
@@ -134,11 +136,11 @@ const NovelApp: React.FC = () => {
 
     // --- CRUD ---
 
-    const relevantSourceIds = new Set(selectedCollaborators);
-    const focus = narration.viewpoint?.kind === 'omniscient' ? narration.viewpoint.bias : narration.viewpoint;
-    if (focus?.kind === 'character') relevantSourceIds.add(focus.characterId);
     const availableBooks = new Map<string, { title: string; owners: string[] }>();
-    for (const character of characters.filter(character => relevantSourceIds.has(character.id))) {
+    const sourceMembers = getNovelWorldbookMembers({
+        collaboratorIds: [...selectedCollaborators], protagonists: tempProtagonists, narration,
+    }, characters);
+    for (const character of sourceMembers) {
         for (const book of character.mountedWorldbooks || []) {
             const available = availableBooks.get(book.id);
             if (available) available.owners.push(character.name);
@@ -163,6 +165,8 @@ const NovelApp: React.FC = () => {
     };
 
     const handleEditBookSettings = () => {
+        setSettingsTab('书稿');
+        setWorldbookQuery('');
         if (!activeBook) return;
         setTempTitle(activeBook.title);
         setTempSubtitle(activeBook.subtitle || '');
@@ -199,6 +203,8 @@ const NovelApp: React.FC = () => {
     };
 
     const resetTempState = () => {
+        setSettingsTab('书稿');
+        setWorldbookQuery('');
         setNarration({});
         setChapterContext({});
         setSourceSettings({});
@@ -248,8 +254,8 @@ const NovelApp: React.FC = () => {
         trackEvent('保存一个剧中人');
     };
 
-    const handleImportProtagonist = (p: {name: string, role?: string, description: string}) => {
-        const newP: NovelProtagonist = { id: `proto-${Date.now()}-${Math.random()}`, name: p.name, role: p.role || '主角', description: p.description || '' };
+    const handleImportProtagonist = (p: Omit<NovelProtagonist, 'id' | 'role'> & { role?: string }) => {
+        const newP: NovelProtagonist = { id: `proto-${Date.now()}-${Math.random()}`, sourceCharacterId: p.sourceCharacterId, narrativePerson: p.narrativePerson, name: p.name, role: p.role || '主角', description: p.description || '' };
         setTempProtagonists(prev => [...prev, newP]);
         setIsProtoImportOpen(false);
         addToast(`已导入角色: ${p.name}`, 'success');
@@ -388,7 +394,17 @@ const NovelApp: React.FC = () => {
                     <button onClick={view === 'create' ? handleCreateBook : handleSaveSettings} className="bg-slate-800 text-white px-4 py-1.5 rounded-full text-xs font-bold shadow-md active:scale-95 transition-transform">保存</button>
                     </div>
                 </div>
-                <div className="flex-1 overflow-y-auto p-6 space-y-8 pb-20">
+                <nav aria-label="书稿设置分区" className="shrink-0 border-b border-slate-200 bg-white px-6 pb-3 pt-1">
+                    <div className="mx-auto grid max-w-xl grid-cols-4 gap-1 rounded-2xl bg-slate-100 p-1">
+                    {(['书稿', '人物', '叙述', '资料'] as const).map(tab => (
+                        <button key={tab} type="button" aria-pressed={tab === settingsTab}
+                            className={`rounded-full py-2 text-sm font-bold ${tab === settingsTab ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                            onClick={() => setSettingsTab(tab)}>{tab}</button>
+                    ))}
+                    </div>
+                </nav>
+                <div key={settingsTab} className="flex-1 overflow-y-auto px-6 py-6 pb-20"><div className="mx-auto max-w-xl space-y-7">
+                    {settingsTab === '书稿' && <>
                     <section className="space-y-4">
                         <input value={tempTitle} onChange={e => setTempTitle(e.target.value)} placeholder="书名" className="w-full text-2xl font-bold bg-transparent border-b border-slate-200 py-2 outline-none focus:border-slate-800 font-serif" />
                         <input value={tempSubtitle} onChange={e => setTempSubtitle(e.target.value)} placeholder="卷名/副标题" className="w-full text-sm font-bold bg-transparent border-b border-slate-200 py-2 outline-none focus:border-slate-800 text-slate-600" />
@@ -405,12 +421,26 @@ const NovelApp: React.FC = () => {
                             </div>
                         </div>
                     </section>
+                    </>}
+                    {settingsTab === '人物' && <>
                     <section className="space-y-4">
-                        <div className="flex justify-between items-center"><label className="text-xs font-bold text-slate-400 uppercase block">世界观设定</label><button onClick={() => { setIsWorldbookModalOpen(true); trackEvent('打开导入世界书弹窗'); }} className="text-[10px] bg-indigo-50 text-indigo-600 px-2 py-1 rounded font-bold hover:bg-indigo-100 flex items-center gap-1"><Books size={12} /> 导入世界书</button></div>
-                        <textarea value={tempWorld} onChange={e => setTempWorld(e.target.value)} placeholder="世界观设定..." className="w-full h-32 bg-white border border-slate-200 rounded-xl p-3 text-sm resize-none outline-none focus:border-slate-400" />
+                        <label className="text-xs font-bold text-slate-400 uppercase block">共创者</label>
+                        {/* 分组筛选（没建分组时不渲染）：只影响可选项的显示，不影响已勾选共创者 */}
+                        <CharacterGroupFilterBar characters={characters} groups={characterGroups} value={collabGroupId} onChange={setCollabGroupId} />
+                        <div className="flex gap-3 overflow-x-auto pb-2 no-scrollbar">{filterCharactersByGroup(characters, characterGroups, collabGroupId).map(c => (<button type="button" aria-pressed={selectedCollaborators.has(c.id)} key={c.id} onClick={() => { const s = new Set(selectedCollaborators); if(s.has(c.id)) s.delete(c.id); else s.add(c.id); setSelectedCollaborators(s); }} className={`flex w-16 shrink-0 flex-col items-center gap-2 cursor-pointer transition-opacity ${selectedCollaborators.has(c.id) ? 'opacity-100' : 'opacity-50 grayscale'}`}><TokenImg value={c.avatar} className="w-12 h-12 rounded-full object-cover shadow-sm" /><span className="text-[10px] font-bold text-slate-600 truncate w-full">{c.name}</span></button>))}</div>
                     </section>
-                    <details className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                        <summary className="cursor-pointer text-sm font-bold text-slate-700">文风与剧情构想</summary>
+                    <section className="space-y-4">
+                        <div className="flex justify-between items-center"><label className="text-xs font-bold text-slate-400 uppercase">剧中人</label><div className="flex gap-2"><button onClick={() => { setIsProtoImportOpen(true); trackEvent('打开导入剧中人弹窗'); }} className="text-[10px] bg-indigo-50 text-indigo-600 px-2 py-1 rounded font-bold hover:bg-indigo-100 border border-indigo-100 flex items-center gap-1"><FolderOpen size={12} /> 导入</button><button onClick={() => openProtagonistEdit()} className="text-[10px] bg-slate-100 px-2 py-1 rounded text-slate-600 hover:bg-slate-200 transition-colors">+ 添加</button></div></div>
+                        <div className="grid grid-cols-2 gap-3">{tempProtagonists.map((p, idx) => (<ProtagonistCard key={p.id} p={p} onClick={() => openProtagonistEdit(p)} onDelete={() => setTempProtagonists(tempProtagonists.filter((_, i) => i !== idx))} />))}</div>
+                    </section>
+                    </>}
+                    {settingsTab === '叙述' && <>
+                        <section className="space-y-3 border-b border-slate-200 pb-5">
+                            <h2 className="text-xs font-bold text-slate-500">视角与人称</h2>
+                            <NovelNarrationSettings value={narration} onChange={setNarration} characters={characters} />
+                        </section>
+                    <section className="space-y-3 border-b border-slate-200 pb-5">
+                        <h2 className="text-xs font-bold text-slate-500">文风与剧情构想</h2>
                         <div className="mt-3 space-y-3 text-xs text-slate-600">
                             <label className="block">
                                 创作身份
@@ -445,9 +475,9 @@ const NovelApp: React.FC = () => {
                                 </label>
                             ))}
                         </div>
-                    </details>
-                    <details className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                        <summary className="cursor-pointer text-sm font-bold text-slate-700">正文生成</summary>
+                    </section>
+                    <section className="space-y-3 border-b border-slate-200 pb-5">
+                        <h2 className="text-xs font-bold text-slate-500">正文生成</h2>
                         <label className="mt-3 block text-sm">
                             创作模式
                             <select value={writingMode} onChange={e => setWritingMode(e.target.value === 'single' ? 'single' : 'chapters')}
@@ -476,34 +506,7 @@ const NovelApp: React.FC = () => {
                                 ))}
                             </div>
                         </details>
-                    </details>
-                    <details className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                        <summary className="cursor-pointer text-sm font-bold text-slate-700">世界书与记忆</summary>
-                        <div className="mt-3 space-y-2 text-sm text-slate-700">
-                            {([['corePersona', '核心人设'], ['recallMemory', '长期记忆（使用已配置的向量召回）'], ['recentChat', '最近聊天上下文']] as const).map(([key, label]) => (
-                                <label key={key} className="flex items-center gap-2">
-                                    <input type="checkbox" checked={sourceSettings[key] ?? key === 'corePersona'}
-                                        onChange={event => setSourceSettings({ ...sourceSettings, [key]: event.target.checked })} />
-                                    {label}
-                                </label>
-                            ))}
-                            <div className="pt-1 font-bold">本作品的世界书</div>
-                            {!availableBooks.size && <p className="text-xs text-slate-500">选择共创者或视角角色后可勾选已挂载的世界书。</p>}
-                            {[...availableBooks].map(([id, book]) => (
-                                <label key={id} className="flex items-start gap-2">
-                                    <input className="mt-1" type="checkbox" checked={sourceSettings.worldbookIds?.includes(id) ?? false}
-                                        onChange={event => {
-                                            const ids = new Set(sourceSettings.worldbookIds || []);
-                                            if (event.target.checked) ids.add(id);
-                                            else ids.delete(id);
-                                            setSourceSettings({ ...sourceSettings, worldbookIds: [...ids] });
-                                        }} />
-                                    <span>{book.title}<small className="block text-slate-500">{book.owners.join('、')}</small></span>
-                                </label>
-                            ))}
-                        </div>
-                    </details>
-                    <NovelNarrationSettings value={narration} onChange={setNarration} characters={characters} />
+                    </section>
                     {view === 'settings' && writingMode !== 'single' && activeBook?.segments.some(segment => segment.focus === 'chapter_summary') && (
                         <details className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                             <summary className="cursor-pointer text-sm font-bold text-slate-700">章节上下文</summary>
@@ -524,19 +527,59 @@ const NovelApp: React.FC = () => {
                             ))}
                         </details>
                     )}
+                    </>}
+                    {settingsTab === '资料' && <>
                     <section className="space-y-4">
-                        <label className="text-xs font-bold text-slate-400 uppercase block">共创者</label>
-                        {/* 分组筛选（没建分组时不渲染）：只影响可选项的显示，不影响已勾选共创者 */}
-                        <CharacterGroupFilterBar characters={characters} groups={characterGroups} value={collabGroupId} onChange={setCollabGroupId} />
-                        <div className="flex gap-3 overflow-x-auto pb-2 no-scrollbar">{filterCharactersByGroup(characters, characterGroups, collabGroupId).map(c => (<div key={c.id} onClick={() => { const s = new Set(selectedCollaborators); if(s.has(c.id)) s.delete(c.id); else s.add(c.id); setSelectedCollaborators(s); }} className={`flex flex-col items-center gap-2 cursor-pointer transition-opacity ${selectedCollaborators.has(c.id) ? 'opacity-100' : 'opacity-50 grayscale'}`}><TokenImg value={c.avatar} className="w-12 h-12 rounded-full object-cover shadow-sm" /><span className="text-[10px] font-bold text-slate-600">{c.name}</span></div>))}</div>
+                        <div className="flex justify-between items-center"><label className="text-xs font-bold text-slate-400 uppercase block">世界观设定</label><button onClick={() => { setIsWorldbookModalOpen(true); trackEvent('打开导入世界书弹窗'); }} className="text-[10px] bg-indigo-50 text-indigo-600 px-2 py-1 rounded font-bold hover:bg-indigo-100 flex items-center gap-1"><Books size={12} /> 导入世界书</button></div>
+                        <textarea value={tempWorld} onChange={e => setTempWorld(e.target.value)} placeholder="世界观设定..." className="w-full h-32 bg-white border border-slate-200 rounded-xl p-3 text-sm resize-none outline-none focus:border-slate-400" />
                     </section>
-                    <section className="space-y-4">
-                        <div className="flex justify-between items-center"><label className="text-xs font-bold text-slate-400 uppercase">剧中人</label><div className="flex gap-2"><button onClick={() => { setIsProtoImportOpen(true); trackEvent('打开导入剧中人弹窗'); }} className="text-[10px] bg-indigo-50 text-indigo-600 px-2 py-1 rounded font-bold hover:bg-indigo-100 border border-indigo-100 flex items-center gap-1"><FolderOpen size={12} /> 导入</button><button onClick={() => openProtagonistEdit()} className="text-[10px] bg-slate-100 px-2 py-1 rounded text-slate-600 hover:bg-slate-200 transition-colors">+ 添加</button></div></div>
-                        <div className="grid grid-cols-2 gap-3">{tempProtagonists.map((p, idx) => (<ProtagonistCard key={p.id} p={p} onClick={() => openProtagonistEdit(p)} onDelete={() => setTempProtagonists(tempProtagonists.filter((_, i) => i !== idx))} />))}</div>
+                    <section className="space-y-3">
+                        <h2 className="text-xs font-bold text-slate-500">世界书与记忆</h2>
+                        <div className="mt-3 space-y-2 text-sm text-slate-700">
+                            {([['corePersona', '核心人设'], ['recallMemory', '长期记忆（使用已配置的向量召回）'], ['recentChat', '最近聊天上下文']] as const).map(([key, label]) => (
+                                <label key={key} className="flex items-center gap-2">
+                                    <input type="checkbox" checked={sourceSettings[key] ?? key === 'corePersona'}
+                                        onChange={event => setSourceSettings({ ...sourceSettings, [key]: event.target.checked })} />
+                                    {label}
+                                </label>
+                            ))}
+                            <div className="pt-1 font-bold">本作品的世界书</div>
+                            {!availableBooks.size && <p className="text-xs text-slate-500">可勾选共创者、剧中人和视角角色已挂载的世界书。</p>}
+                            {availableBooks.size > 0 && <input type="search" aria-label="搜索世界书" placeholder="搜索书名或人物"
+                                value={worldbookQuery} onChange={event => setWorldbookQuery(event.target.value)}
+                                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" />}
+                            <div className="max-h-80 divide-y divide-slate-100 overflow-y-auto rounded-xl border border-slate-200 bg-white">
+                            {[...availableBooks].filter(([, book]) => [book.title, ...book.owners].some(value => value.toLowerCase().includes(worldbookQuery.trim().toLowerCase()))).map(([id, book]) => (
+                                <label key={id} className="flex min-h-12 items-center gap-3 px-3 py-2">
+                                    <input className="mt-1" type="checkbox" checked={sourceSettings.worldbookIds?.includes(id) ?? false}
+                                        onChange={event => {
+                                            const ids = new Set(sourceSettings.worldbookIds || []);
+                                            if (event.target.checked) ids.add(id);
+                                            else ids.delete(id);
+                                            setSourceSettings({ ...sourceSettings, worldbookIds: [...ids] });
+                                        }} />
+                                    <span>{book.title}<small className="block text-slate-500">{book.owners.join('、')}</small></span>
+                                </label>
+                            ))}
+                            </div>
+                        </div>
                     </section>
+                    </>}
                 </div>
-                <Modal isOpen={isProtagonistModalOpen} title="编辑角色" onClose={() => setIsProtagonistModalOpen(false)} footer={<button onClick={saveProtagonist} className="w-full py-3 bg-slate-800 text-white font-bold rounded-2xl">保存</button>}>{editingProtagonist && (<div className="space-y-4"><div><label className="text-xs font-bold text-slate-400 uppercase block mb-1">姓名</label><input value={editingProtagonist.name} onChange={e => setEditingProtagonist({...editingProtagonist, name: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold" /></div><div><label className="text-xs font-bold text-slate-400 uppercase block mb-1">定位</label><input value={editingProtagonist.role} onChange={e => setEditingProtagonist({...editingProtagonist, role: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm" placeholder="主角 / 反派" /></div><div><label className="text-xs font-bold text-slate-400 uppercase block mb-1">设定</label><textarea value={editingProtagonist.description} onChange={e => setEditingProtagonist({...editingProtagonist, description: e.target.value})} className="w-full h-32 bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm resize-none leading-relaxed" /></div></div>)}</Modal>
-                <Modal isOpen={isProtoImportOpen} title="导入角色" onClose={() => setIsProtoImportOpen(false)}><div className="flex p-1 bg-slate-100 rounded-xl mb-3"><button onClick={() => setImportTab('system')} className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all ${importTab === 'system' ? 'bg-white shadow text-indigo-600' : 'text-slate-400'}`}>系统角色 (AI)</button><button onClick={() => setImportTab('history')} className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all ${importTab === 'history' ? 'bg-white shadow text-indigo-600' : 'text-slate-400'}`}>历史角色</button></div><div className="max-h-[50vh] overflow-y-auto no-scrollbar space-y-3 p-1">{importTab === 'system' && characters.map(c => (<button key={c.id} onClick={() => handleImportProtagonist({name: c.name, role: '客串', description: c.description})} className="w-full flex items-center gap-3 p-3 bg-white border border-slate-100 rounded-xl hover:border-indigo-200 shadow-sm active:scale-95 transition-all text-left"><TokenImg value={c.avatar} className="w-8 h-8 rounded-full object-cover" /><div className="flex-1 min-w-0"><div className="font-bold text-sm text-slate-700">{c.name}</div><div className="text-[10px] text-slate-400 truncate">{c.description}</div></div></button>))}{importTab === 'history' && historyProtagonists.map((p, idx) => (<button key={`hist-${idx}`} onClick={() => handleImportProtagonist(p)} className="w-full flex items-center gap-3 p-3 bg-white border border-slate-100 rounded-xl hover:border-indigo-200 shadow-sm active:scale-95 transition-all text-left"><div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-xs font-bold text-slate-500 border border-slate-200">{p.name[0]}</div><div className="flex-1 min-w-0"><div className="font-bold text-sm text-slate-700">{p.name}</div><div className="text-[10px] text-slate-400 truncate">{p.role} - {p.description || "无描述"}</div></div></button>))}</div></Modal>
+                </div>
+                <Modal isOpen={isProtagonistModalOpen} title="编辑角色" onClose={() => setIsProtagonistModalOpen(false)} footer={<button onClick={saveProtagonist} className="w-full py-3 bg-slate-800 text-white font-bold rounded-2xl">保存</button>}>{editingProtagonist && (<div className="space-y-4"><div><label className="text-xs font-bold text-slate-400 uppercase block mb-1">姓名</label><input value={editingProtagonist.name} onChange={e => setEditingProtagonist({...editingProtagonist, name: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold" /></div><div><label className="text-xs font-bold text-slate-400 uppercase block mb-1">定位</label><input value={editingProtagonist.role} onChange={e => setEditingProtagonist({...editingProtagonist, role: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm" placeholder="主角 / 反派" /></div><div><label className="text-xs font-bold text-slate-400 uppercase block mb-1">设定</label><textarea value={editingProtagonist.description} onChange={e => setEditingProtagonist({...editingProtagonist, description: e.target.value})} className="w-full h-32 bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm resize-none leading-relaxed" /></div><label className="block text-xs text-slate-600">正文人称
+                        <NarrativePersonSelect value={editingProtagonist.narrativePerson}
+                            onChange={narrativePerson => setEditingProtagonist({ ...editingProtagonist, narrativePerson })} />
+                    </label><label className="block text-xs text-slate-600">关联角色的世界书
+                        <select className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                            value={editingProtagonist.sourceCharacterId ?? '__match__'}
+                            onChange={event => setEditingProtagonist({ ...editingProtagonist, sourceCharacterId: event.target.value === '__match__' ? undefined : event.target.value })}>
+                            <option value="__match__">按同名匹配</option>
+                            <option value="">不关联</option>
+                            {characters.map(character => <option key={character.id} value={character.id}>{character.name}</option>)}
+                        </select>
+                    </label></div>)}</Modal>
+                <Modal isOpen={isProtoImportOpen} title="导入角色" onClose={() => setIsProtoImportOpen(false)}><div className="flex p-1 bg-slate-100 rounded-xl mb-3"><button onClick={() => setImportTab('system')} className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all ${importTab === 'system' ? 'bg-white shadow text-indigo-600' : 'text-slate-400'}`}>系统角色 (AI)</button><button onClick={() => setImportTab('history')} className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all ${importTab === 'history' ? 'bg-white shadow text-indigo-600' : 'text-slate-400'}`}>历史角色</button></div><div className="max-h-[50vh] overflow-y-auto no-scrollbar space-y-3 p-1">{importTab === 'system' && characters.map(c => (<button key={c.id} onClick={() => handleImportProtagonist({sourceCharacterId: c.id, name: c.name, role: '客串', description: c.description})} className="w-full flex items-center gap-3 p-3 bg-white border border-slate-100 rounded-xl hover:border-indigo-200 shadow-sm active:scale-95 transition-all text-left"><TokenImg value={c.avatar} className="w-8 h-8 rounded-full object-cover" /><div className="flex-1 min-w-0"><div className="font-bold text-sm text-slate-700">{c.name}</div><div className="text-[10px] text-slate-400 truncate">{c.description}</div></div></button>))}{importTab === 'history' && historyProtagonists.map((p, idx) => (<button key={`hist-${idx}`} onClick={() => handleImportProtagonist(p)} className="w-full flex items-center gap-3 p-3 bg-white border border-slate-100 rounded-xl hover:border-indigo-200 shadow-sm active:scale-95 transition-all text-left"><div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-xs font-bold text-slate-500 border border-slate-200">{p.name[0]}</div><div className="flex-1 min-w-0"><div className="font-bold text-sm text-slate-700">{p.name}</div><div className="text-[10px] text-slate-400 truncate">{p.role} - {p.description || "无描述"}</div></div></button>))}</div></Modal>
                 <Modal isOpen={isWorldbookModalOpen} title="导入世界书设定" onClose={() => setIsWorldbookModalOpen(false)}><div className="max-h-[50vh] overflow-y-auto no-scrollbar space-y-2 p-1">{worldbooks.map(wb => (<button key={wb.id} onClick={() => importWorldbook(wb)} className="w-full text-left p-3 rounded-xl border border-slate-100 hover:border-indigo-300 bg-white shadow-sm active:scale-95 transition-all"><div className="font-bold text-slate-700 text-sm">{wb.title}</div><div className="text-[10px] text-slate-400 mt-1">{wb.category || '未分类'}</div></button>))}</div></Modal>
             </div>
         );
