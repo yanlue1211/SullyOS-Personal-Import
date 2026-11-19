@@ -289,7 +289,7 @@ export interface VisionApiConfig {
 }
 
 /** A complete dialogue endpoint, separate from TTS/vision configuration. */
-export type DialogueApiConfig = Pick<APIConfig, 'baseUrl' | 'apiKey' | 'model' | 'stream' | 'temperature' | 'maxTokens' | 'apiType'>;
+export type DialogueApiConfig = Pick<APIConfig, 'baseUrl' | 'apiKey' | 'model' | 'stream' | 'temperature' | 'maxTokens' | 'apiType' | 'anthropicCacheMode'>;
 
 export type AudioApiSongQuality = 'standard' | 'exhigh' | 'lossless';
 export interface AudioApiConfig {
@@ -302,6 +302,8 @@ export interface AudioApiConfig {
 
 export interface APIConfig {
   apiType?: 'openai' | 'anthropic' | 'gemini';
+  /** Per-channel Anthropic cache policy; old configurations use the optimized default. */
+  anthropicCacheMode?: 'optimized' | 'full-write';
   /** 私聊单次生成上限；未设置沿用 8000，不改变历史范围。 */
   maxTokens?: number;
   baseUrl: string;

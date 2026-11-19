@@ -1,0 +1,41 @@
+name: Personal Anthropic full-write cache regression
+
+on:
+  pull_request:
+    branches: [personal/audio-listening]
+    paths:
+      - 'apps/Settings.tsx'
+      - 'components/settings/DialogueApiFields.tsx'
+      - 'context/OSContext.tsx'
+      - 'types.ts'
+      - 'utils/anthropicFullWrite*'
+      - 'utils/apiPresetSwitch*'
+      - '.github/workflows/personal-anthropic-full-write-verify.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Verify isolated full-write mode and original native protocol
+        run: >-
+          pnpm vitest run
+          utils/anthropicFullWrite.test.ts
+          utils/apiPresetSwitch.test.ts
+          utils/anthropicApi.test.ts
+          utils/characterApi.test.ts
+      - name: Build production frontend and verify Worker bundle remains unchanged
+        run: pnpm run build

@@ -21,6 +21,18 @@ export default function DialogueApiFields({ value, onChange, fetchModels, isLoad
                 </label>
                 {llmApiType(value) === 'anthropic' && <div className="rounded-xl border border-slate-200/60 bg-white/40 px-3 py-3 space-y-2">
                     <label className="flex items-center justify-between gap-3 text-xs text-slate-500">
+                        <span>缓存写入方式</span>
+                        <select aria-label="Anthropic 缓存写入方式" value={value.anthropicCacheMode === 'full-write' ? 'full-write' : 'optimized'}
+                            onChange={e => onChange({anthropicCacheMode: e.target.value as 'optimized' | 'full-write'})}
+                            className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700">
+                            <option value="optimized">默认 · 稳定前缀优化</option>
+                            <option value="full-write">全量写入 · 最后断点</option>
+                        </select>
+                    </label>
+                    {value.anthropicCacheMode === 'full-write' && <p className="text-[10px] text-slate-400 leading-relaxed">实验模式：不优化缓存前缀，每轮仅在最后一条消息末尾放一个 5 分钟断点，尽量写入整轮上下文。该设置随渠道预设保存；实际写入费用和命中仍取决于中转站。</p>}
+                </div>}
+                {llmApiType(value) === 'anthropic' && value.anthropicCacheMode !== 'full-write' && <div className="rounded-xl border border-slate-200/60 bg-white/40 px-3 py-3 space-y-2">
+                    <label className="flex items-center justify-between gap-3 text-xs text-slate-500">
                         <span>Prompt 缓存时效</span>
                         <select aria-label="Anthropic 缓存时效" value={cacheTtl}
                             onChange={e => { const ttl = e.target.value as AnthropicCacheTtl; setCacheTtl(ttl); setAnthropicCacheTtl(ttl); }}
