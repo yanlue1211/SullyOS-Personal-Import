@@ -25,6 +25,7 @@ describe('configFromPreset', () => {
       baseUrl: 'https://api.example.com/v1',
       apiKey: 'sk-abc',
       model: 'gpt-x',
+      anthropicCacheMode: 'optimized',
     });
   });
 
@@ -105,5 +106,17 @@ describe('presetDiffersFromConfig', () => {
 
   it('只是末尾斜杠、空格不同不算差异', () => {
     expect(presetDiffersFromConfig(preset('a', base), { ...base, baseUrl: 'https://x/', model: ' m ' })).toBe(false);
+  });
+});
+
+describe('Anthropic full-write stays attached to its API preset', () => {
+  it('switches full-write on and clears it when returning to an older preset', () => {
+    const full = preset('full', { baseUrl: 'https://relay.test/v1/messages', apiType: 'anthropic', apiKey: 'key', model: 'claude', anthropicCacheMode: 'full-write' });
+    const normal = preset('normal', { baseUrl: 'https://relay.test/v1/messages', apiType: 'anthropic', apiKey: 'key', model: 'claude' });
+    expect(configFromPreset(full).anthropicCacheMode).toBe('full-write');
+    expect(configFromPreset(normal).anthropicCacheMode).toBe('optimized');
+    expect(findActivePresetId([normal, full], { ...full.config, anthropicCacheMode: 'full-write' })).toBe('full');
+    expect(findActivePresetId([normal, full], { ...normal.config, anthropicCacheMode: 'optimized' })).toBe('normal');
+    expect(presetDiffersFromConfig(normal, { ...normal.config, anthropicCacheMode: 'full-write' })).toBe(true);
   });
 });
