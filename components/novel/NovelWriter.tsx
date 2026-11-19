@@ -10,7 +10,7 @@ import { NovelBook, NovelSegment, CharacterProfile, UserProfile } from '../../ty
 import {
     NOVEL_THEMES, GenerationOptions, extractWritingTags,
     analyzeWriterPersonaSimple, generateWriterPersonaDeep, buildNovelChapterContext, estimateNovelTokens, getNovelWorldbookMembers,
-    buildPrompt, parsePersonaMarkdown, buildNovelCharacterCardContext
+    buildPrompt, parsePersonaMarkdown, buildNovelCharacterCardContext, getNovelAutoBookMetaPatch
 } from '../../utils/novelUtils';
 import Modal from '../os/Modal';
 import ConfirmDialog from '../os/ConfirmDialog';
@@ -273,9 +273,11 @@ const NovelWriter: React.FC<NovelWriterProps> = ({
         setIsTyping(true);
         setLastTokenUsage(null);
         let received = '';
-        const appendResults = async (results: NovelSegment[]) => {
+        const appendResults = async (results: NovelSegment[], metadata: unknown = undefined) => {
             const next = [...contextSegments, ...results];
-            await updateNovel(activeBook.id, { segments: next, ...(activeBook.completion ? { completion: { ...activeBook.completion, stale: true } } : {}) });
+            const metaPatch = results.some(segment => segment.type === 'story' && segment.authorId !== 'user')
+                ? getNovelAutoBookMetaPatch(activeBook, genOptions, contextSegments, metadata) : {};
+            await updateNovel(activeBook.id, { segments: next, ...metaPatch, ...(activeBook.completion ? { completion: { ...activeBook.completion, stale: true } } : {}) });
             setSegments(next);
         };
 
@@ -381,14 +383,15 @@ const NovelWriter: React.FC<NovelWriterProps> = ({
             }
 
             if (!newAiSegments.length) throw new Error('未收到所选任务的有效内容');
-            await appendResults(newAiSegments);
+            await appendResults(newAiSegments, res.bookMeta);
         } catch (e: any) {
-            const partial = genOptions.write ? readNovelStreamPreview(received).body : '';
+            const preview = genOptions.write ? readNovelStreamPreview(received) : null;
+            const partial = preview?.body || '';
             if (partial.trim()) {
                 await appendResults([{
                     id: `seg-${Date.now()}-partial`, role: 'writer', type: 'story',
                     authorId: char?.id || 'ai', creativeIdentity, content: partial, timestamp: Date.now(),
-                }]);
+                }], preview?.bookMeta);
                 addToast('已保留收到的正文，可以手动继续写。', 'info');
             } else {
                 addToast('请求失败: ' + e.message, 'error');
@@ -670,7 +673,7 @@ ${kind === 'work' ? '同时涵盖主线与支线、主要人物最终结局、�
                     </button>
                     {/* Title is clickable to open settings */}
                     <button type="button" className="flex flex-col items-center cursor-pointer active:opacity-70 transition-opacity" onClick={onOpenSettings} disabled={isTyping || isGeneratingSummary}>
-                        <span className={`font-bold text-base ${activeTheme.text} truncate max-w-[150px]`}>{activeBook.title}</span>
+                        <span className={`font-bold text-base ${activeTheme.text} truncate max-w-[150px]`}>{activeBook.title?.trim() || '待命名书稿'}</span>
                         <span className="flex items-center gap-2">
                             <span className={`text-[10px] opacity-60 ${activeTheme.text}`}>{isCompleted ? '已完结' : isSingle ? '单篇正文' : `第 ${chapterCount} 章`}</span>
                             {lastTokenUsage && <span className={`text-[9px] px-1.5 py-0.5 rounded opacity-50 font-mono border border-current ${activeTheme.text}`}>{lastTokenUsage}</span>}

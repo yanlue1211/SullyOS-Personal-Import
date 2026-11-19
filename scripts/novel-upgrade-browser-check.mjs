@@ -19,7 +19,7 @@ try {
         if (body.model === 'mock-summary') {
             return route.fulfill({ status: 503, json: { error: { message: '预期的副 API 故障' } } });
         }
-        const chunk = JSON.stringify({ choices: [{ delta: { content: '{"writer":{"content":"模拟正文\u3002' } }] });
+        const chunk = JSON.stringify({ choices: [{ delta: { content: '{"bookMeta":{"title":"海底来信","summary":"一场人鱼的冒险"},"writer":{"content":"模拟正文\u3002' } }] });
         return route.fulfill({ contentType: 'text/event-stream', body: `data: ${chunk}\n\n` });
     });
 
@@ -28,7 +28,10 @@ try {
     const send = page.getByRole('button', { name: '发送创作任务' });
     await send.click();
     await page.getByText('模拟正文。', { exact: true }).waitFor();
+    await page.getByText('海底来信', { exact: true }).waitFor();
+    assert.equal(await page.getByTestId('novel-book-summary').textContent(), '一场人鱼的冒险');
     assert.deepEqual(requests.map(request => request.model), ['mock-main']);
+    assert.match(JSON.stringify(requests[0].messages), /bookMeta/);
     assert.equal(requests[0].stream, true);
     assert.match(JSON.stringify(requests[0].messages), /描述偏向.*视角人物/);
     assert.match(JSON.stringify(requests[0].messages), /测试用户.*人称偏好为第三人称/);
@@ -54,6 +57,7 @@ try {
     await send.click();
     await page.getByText('模拟正文。', { exact: true }).waitFor();
     const characterRequest = JSON.stringify(requests[2].messages);
+    assert.doesNotMatch(characterRequest, /bookMeta/);
     assert.match(characterRequest, /WORLD_ENABLED/);
     assert.match(characterRequest, /WORLD_CAST_ONLY/);
     assert.match(characterRequest, /GUEST_CARD_CORE/);

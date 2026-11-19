@@ -12,6 +12,13 @@ describe('novel streaming fields', () => {
             .toEqual({ body: '正文', comment: '感想', analysis: '复盘' });
     });
 
+    it('recovers completed book title and summary even when the first paragraph is truncated', () => {
+        expect(readNovelStreamPreview('{"bookMeta":{"title":"海底来信","summary":"一条人鱼的远行"},"writer":{"content":"潮汐涌来'))
+            .toEqual({ body: '潮汐涌来', comment: '', analysis: '', bookMeta: { title: '海底来信', summary: '一条人鱼的远行' } });
+        expect(readNovelStreamPreview('{"bookMeta":{"title":"尚未结束'))
+            .toEqual({ body: '', comment: '', analysis: '' });
+    });
+
     it('does not promote metadata fragments or fenced wrappers to prose', () => {
         expect(readNovelStreamPreview('```json\n{"meta":{"content":"假正文"},"writer":{"content":"第一段')).toEqual({
             body: '第一段', comment: '', analysis: '',

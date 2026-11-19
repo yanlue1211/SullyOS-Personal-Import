@@ -2,6 +2,7 @@ export interface NovelStreamPreview {
     body: string;
     comment: string;
     analysis: string;
+    bookMeta?: { title?: string; summary?: string };
 }
 
 interface JsonString {
@@ -54,6 +55,9 @@ export function readNovelStreamPreview(raw: string): NovelStreamPreview {
                 if (object === 'comment' && key === 'content') preview.comment = token.value;
                 if (object === 'analysis' && key === 'reaction') reaction = token.value;
                 if (object === 'analysis' && key === 'critique') preview.analysis = token.value;
+                if (object === 'bookMeta' && token.complete && (key === 'title' || key === 'summary')) {
+                    (preview.bookMeta ??= {})[key] = token.value;
+                }
             }
             if (!token.complete) break;
             index = token.end - 1;

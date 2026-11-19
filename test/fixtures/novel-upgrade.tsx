@@ -19,7 +19,7 @@ const guest = { ...reader, id: 'guest', name: '客串', description: 'ONLY_USER_
 const characters = [author, reader, guest];
 const characterMode = new URLSearchParams(location.search).has('chapters');
 const initial: NovelBook = {
-    id: 'novel-test', title: '测试手稿', summary: '', coverStyle: 'parchment', worldSetting: '',
+    id: 'novel-test', title: characterMode ? '测试手稿' : '', summary: '', coverStyle: 'parchment', worldSetting: '',
     protagonists: [{ id: 'guest-cast', name: '客串人物别名', role: '配角', description: '', sourceCharacterId: guest.id }], collaboratorIds: characterMode ? [author.id, reader.id] : [], segments: [],
     writingMode: characterMode ? 'chapters' : 'single', creativeIdentity: characterMode ? 'independent' : 'ai',
     narration: { viewpoint: { kind: 'omniscient', bias: { kind: 'character', characterId: reader.id } }, userPerson: 'third' },
@@ -37,6 +37,7 @@ function App() {
     } as unknown as React.ComponentProps<typeof OSPreviewProvider>['value'];
 
     return <OSPreviewProvider value={value}>
+        <output data-testid="novel-book-summary" className="sr-only">{book.summary}</output>
         <NovelWriter activeBook={book} characters={characters} userProfile={user} apiConfig={apiConfig}
             onBack={() => {}} updateCharacter={() => {}} collaborators={characterMode ? [author, reader] : []}
             targetCharId={target} setTargetCharId={setTarget} onOpenSettings={() => {}}

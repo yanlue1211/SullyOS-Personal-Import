@@ -385,6 +385,36 @@ export function buildNovelChapterContext(segments: NovelSegment[], choices: Nove
     return [...chapters, `【当前章节原文】\n${chapterBody.join('\n\n')}`].join('\n\n');
 }
 
+/** Generate only missing book details together with the first AI-written prose. */
+export function getNovelAutoBookMetaFields(
+    book: Pick<NovelBook, 'title' | 'summary'> | null,
+    options: Pick<GenerationOptions, 'write'>,
+    segments: NovelSegment[],
+): { title: boolean; summary: boolean } {
+    const eligible = !!options.write && !!book && !segments.some(segment =>
+        segment.type === 'story' && segment.authorId !== 'user'
+    );
+    return { title: eligible && !book?.title?.trim(), summary: eligible && !book?.summary?.trim() };
+}
+
+/** Never overwrite user-authored titles, or persist incomplete / invalid model fields. */
+export function getNovelAutoBookMetaPatch(
+    book: Pick<NovelBook, 'title' | 'summary'>,
+    options: Pick<GenerationOptions, 'write'>,
+    segments: NovelSegment[],
+    bookMeta: unknown,
+): Partial<Pick<NovelBook, 'title' | 'summary'>> {
+    const fields = getNovelAutoBookMetaFields(book, options, segments);
+    if (!bookMeta || typeof bookMeta !== 'object') return {};
+    const meta = bookMeta as Record<string, unknown>;
+    const patch: Partial<Pick<NovelBook, 'title' | 'summary'>> = {};
+    const clean = (value: unknown, length: number) =>
+        typeof value === 'string' ? value.replace(/\s+/g, ' ').trim().slice(0, length).trim() : '';
+    if (fields.title) { const title = clean(meta.title, 80); if (title) patch.title = title; }
+    if (fields.summary) { const summary = clean(meta.summary, 180); if (summary) patch.summary = summary; }
+    return patch;
+}
+
 // --- Prompt Builder ---
 export const buildPrompt = (
     char: CharacterProfile | undefined,
@@ -425,7 +455,7 @@ ${userProfile.name}是本次共创搭档。双方可以讨论剧情。保持本�
     const style = selectedStyle === 'custom' ? settings?.customStyle?.trim() : NOVEL_WRITING_STYLES[selectedStyle]?.instruction;
     const isOpening = !contextSegments.some(segment => segment.type === 'story' || segment.role === 'writer' || segment.focus === 'chapter_summary');
     const bookInfo = [
-        `小说：《${activeBook?.title}》`,
+        `小说：${activeBook?.title?.trim() ? `《${activeBook.title.trim()}》` : '标题待定'}`,
         activeBook?.worldSetting?.trim() && `世界观：${activeBook.worldSetting}`,
         `主要角色：\n${protagonistContext}`,
         style && `主要文风：${style}`,
@@ -494,7 +524,16 @@ ${userText || '[本轮无附加指令，请根据现有内容完成所选任务]
 请按以下结构输出JSON。
 `;
 
-    let jsonStructure = [];
+    let jsonStructure: string[] = [];
+    const autoMeta = getNovelAutoBookMetaFields(activeBook, options, contextSegments);
+    if (autoMeta.title || autoMeta.summary) {
+        const fields = [
+            autoMeta.title ? '"title": "根据故事拟定的书名"' : '',
+            autoMeta.summary ? '"summary": "一句话作品简介"' : '',
+        ].filter(Boolean).join(', ');
+        tasks += '\n首次写作正文时，结合世界观、剧情构想和开篇内容，同步填写尚未设置的书稿资料；不改已填写的字段。\n';
+        jsonStructure.push(`"bookMeta": { ${fields} }`);
+    }
 
     if (options.write) {
         const narrationRules = buildNovelNarrationRules(activeBook?.narration, userProfile.name, characters, activeBook?.protagonists);
