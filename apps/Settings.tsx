@@ -534,6 +534,7 @@ const Settings: React.FC = () => {
   const [localKey, setLocalKey] = useState(apiConfig.apiKey);
   const [localUrl, setLocalUrl] = useState(apiConfig.baseUrl);
   const [localApiType, setLocalApiType] = useState<LlmApiType>(llmApiType(apiConfig));
+  const [localAnthropicCacheMode, setLocalAnthropicCacheMode] = useState<'optimized' | 'full-write'>(apiConfig.anthropicCacheMode === 'full-write' ? 'full-write' : 'optimized');
   const [localModel, setLocalModel] = useState(String(apiConfig.model || ''));
   const [localStream, setLocalStream] = useState<boolean>(apiConfig.stream === true);
   const [localMaxTokens, setLocalMaxTokens] = useState(apiConfig.maxTokens ?? 8000);
@@ -590,6 +591,7 @@ const Settings: React.FC = () => {
   const [editPresetName, setEditPresetName] = useState('');
   const [editPresetUrl, setEditPresetUrl] = useState('');
   const [editPresetApiType, setEditPresetApiType] = useState<LlmApiType>('openai');
+  const [editPresetCacheMode, setEditPresetCacheMode] = useState<'optimized' | 'full-write'>('optimized');
   const [editPresetKey, setEditPresetKey] = useState('');
   const [editPresetModel, setEditPresetModel] = useState('');
   const [editPresetStream, setEditPresetStream] = useState(false);
@@ -1068,12 +1070,13 @@ const Settings: React.FC = () => {
   useEffect(() => {
       setLocalUrl(apiConfig.baseUrl);
       setLocalApiType(llmApiType(apiConfig));
+      setLocalAnthropicCacheMode(apiConfig.anthropicCacheMode === 'full-write' ? 'full-write' : 'optimized');
       setLocalKey(apiConfig.apiKey);
       setLocalModel(String(apiConfig.model || ''));
       setLocalStream(apiConfig.stream === true);
       setLocalMaxTokens(apiConfig.maxTokens ?? 8000);
       setLocalTemperature(typeof apiConfig.temperature === 'number' ? apiConfig.temperature : 0.85);
-  }, [apiConfig.baseUrl, apiConfig.apiKey, apiConfig.model, apiConfig.stream, apiConfig.temperature, apiConfig.maxTokens, apiConfig.apiType]);
+  }, [apiConfig.baseUrl, apiConfig.apiKey, apiConfig.model, apiConfig.stream, apiConfig.temperature, apiConfig.maxTokens, apiConfig.apiType, apiConfig.anthropicCacheMode]);
 
   useEffect(() => {
       setLocalVisionEnabled(apiConfig.visionApi?.enabled === true);
@@ -1120,7 +1123,7 @@ const Settings: React.FC = () => {
   // 这样刷新、手改 URL、导入备份之后，界面上的「使用中」永远等于请求真的会发去哪。
   const activePresetId = useMemo(
       () => findActivePresetId(apiPresets, apiConfig),
-      [apiPresets, apiConfig.baseUrl, apiConfig.apiKey, apiConfig.model],
+      [apiPresets, apiConfig.baseUrl, apiConfig.apiKey, apiConfig.model, apiConfig.apiType, apiConfig.anthropicCacheMode],
   );
 
   /**
@@ -1153,6 +1156,7 @@ const Settings: React.FC = () => {
       setEditPresetGroup(preset.group || '');
       setEditPresetUrl(preset.config.baseUrl || '');
       setEditPresetApiType(llmApiType(preset.config));
+      setEditPresetCacheMode(isActive ? localAnthropicCacheMode : (preset.config.anthropicCacheMode === 'full-write' ? 'full-write' : 'optimized'));
       setEditPresetKey(preset.config.apiKey || '');
       setEditPresetModel(preset.config.model || '');
       setEditPresetMaxTokens(isActive ? localMaxTokens : (preset.config.maxTokens ?? localMaxTokens));
@@ -1180,6 +1184,7 @@ const Settings: React.FC = () => {
           ...preset.config,
           baseUrl: normalizeLlmBaseUrl(normalizeApiBaseUrl(editPresetUrl), editPresetApiType),
           apiType: editPresetApiType,
+          anthropicCacheMode: editPresetCacheMode,
           apiKey: normalizeApiCredential(editPresetKey),
           model: normalizeApiModel(editPresetModel),
           stream: editPresetStream,
@@ -1247,6 +1252,7 @@ const Settings: React.FC = () => {
       addApiPreset(newPresetName, {
         baseUrl: normalizeLlmBaseUrl(normalizeApiBaseUrl(localUrl), localApiType),
         apiType: localApiType,
+        anthropicCacheMode: localAnthropicCacheMode,
         apiKey: normalizeApiCredential(localKey),
         model: normalizeApiModel(localModel),
         stream: localStream,
@@ -1271,6 +1277,7 @@ const Settings: React.FC = () => {
       apiKey: normalizeApiCredential(localKey),
       baseUrl: normalizeLlmBaseUrl(normalizeApiBaseUrl(localUrl), localApiType),
       apiType: localApiType,
+      anthropicCacheMode: localAnthropicCacheMode,
       model: normalizeApiModel(modelOverride ?? localModel),
       stream: localStream,
       temperature: localTemperature,
@@ -2721,9 +2728,10 @@ const Settings: React.FC = () => {
 
             <div className="space-y-4">
                 <DialogueApiFields
-                    value={{ baseUrl: localUrl, apiKey: localKey, model: localModel, stream: localStream, temperature: localTemperature, maxTokens: localMaxTokens, apiType: localApiType }}
+                    value={{ baseUrl: localUrl, apiKey: localKey, model: localModel, stream: localStream, temperature: localTemperature, maxTokens: localMaxTokens, apiType: localApiType, anthropicCacheMode: localAnthropicCacheMode }}
                     onChange={patch => {
                         if (patch.apiType !== undefined) setLocalApiType(patch.apiType);
+                         if (patch.anthropicCacheMode !== undefined) setLocalAnthropicCacheMode(patch.anthropicCacheMode);
                         if (patch.baseUrl !== undefined) setLocalUrl(patch.baseUrl);
                         if (patch.apiKey !== undefined) setLocalKey(patch.apiKey);
                         if (patch.stream !== undefined) setLocalStream(patch.stream);
@@ -4297,6 +4305,12 @@ const Settings: React.FC = () => {
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">URL</label>
                   <select aria-label="预设接口类型" value={editPresetApiType} onChange={e => setEditPresetApiType(e.target.value as LlmApiType)} className="w-full bg-slate-100 rounded-xl px-4 py-2.5 text-sm"><option value="openai">OpenAI 兼容</option><option value="anthropic">Anthropic 原生 Messages</option><option value="gemini">Gemini 原生（自动缓存）</option></select>
                   <input value={editPresetUrl} onChange={e => setEditPresetUrl(e.target.value)} placeholder="https://..." className="w-full bg-slate-100 rounded-xl px-4 py-2.5 text-sm font-mono focus:outline-primary" />
+                   {editPresetApiType === 'anthropic' && <label className="block text-xs text-slate-500">缓存写入方式
+                       <select aria-label="预设 Anthropic 缓存写入方式" value={editPresetCacheMode} onChange={e => setEditPresetCacheMode(e.target.value as 'optimized' | 'full-write')} className="w-full mt-1 bg-white rounded-xl border border-slate-200 px-3 py-2">
+                           <option value="optimized">默认 · 稳定前缀优化</option>
+                           <option value="full-write">全量写入 · 最后消息断点（5 分钟）</option>
+                       </select>
+                   </label>}
               </div>
               <div className="space-y-1.5">
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Key</label>
@@ -4349,6 +4363,7 @@ const Settings: React.FC = () => {
                   onClick={() => {
                       setEditPresetUrl(localUrl);
                       setEditPresetApiType(localApiType);
+                       setEditPresetCacheMode(localAnthropicCacheMode);
                       setEditPresetKey(localKey);
                       setEditPresetModel(localModel);
                       setEditPresetStream(localStream);
