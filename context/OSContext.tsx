@@ -1321,9 +1321,18 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
           try {
               const currentCacheConfigs = anthropicCacheConfigsRef.current;
+              const currentRequestMeta = (sendArgs[1] as any)?.__sullyMeta || ambientMetaAtStart;
+              // Same URL/key/model may be deliberately configured differently
+              // for a character. Prefer the actual caller's setting over global
+              // and other characters; the previous global-first ordering silently
+              // disabled a character's explicitly selected full-write mode.
+              const currentCharacterApi = currentRequestMeta?.charId
+                  ? currentCacheConfigs.characters.find(character => character.id === currentRequestMeta.charId)?.dialogueApi
+                  : undefined;
               const fullWrite = shouldUseAnthropicFullWrite({
                   url: urlStr, init: sendArgs[1],
                   candidates: [
+                      currentCharacterApi,
                       currentCacheConfigs.apiConfig,
                       ...currentCacheConfigs.characters.map(character => character.dialogueApi),
                       currentCacheConfigs.apiConfig.momentsApi,
