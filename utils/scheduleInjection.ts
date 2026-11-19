@@ -84,6 +84,11 @@ export const buildScheduleInjection = (
     options: ScheduleInjectionOptions = {},
 ): string => {
     if (!schedule || !schedule.slots || schedule.slots.length === 0) return '';
+    // 复用现有回复标签解析与落库：角色在原本这一轮回复里就能改当前/未来时段，无额外模型请求。
+    // 时钟关闭时既不给精确开始时间，也不能要求模型输出以时间定位的修改标签。
+    const changeInstruction = options.includeChangeInstruction && options.includeClock !== false
+        ? '\n【可以修改自己的今日日程】今天的安排允许随着实际聊天、临时邀约和你的决定变化。只有本轮已经明确约好或确实决定更换当前/未来某个安排时，才在正常聊天回复末尾单独一行写 [[ACTION:CHANGE_SCHEDULE | 14:00 | 和对方逛街]]（例子中的14:00必须换成上面原表里真实存在的开始时间）。按已有时段修改，不新增时间，不改已过去的安排；通常只改真正受影响的1—2项，其他保留。对方只是提议、尚未约好时不要提前改；已经确定的工作不能随意抹掉，遇到冲突先商量。没有变化就不要写标签，标签不会展示给对方。'
+        : '';
     return '[今日日程 · 初步安排]\n' + schedule.slots.map(slot => `${options.includeClock === false ? '' : slot.startTime + ' '}${slot.activity}${slot.description ? '：' + slot.description : ''}`).join('\n')
-        + '\n这是今天最初的大致安排，不是已发生事实或必须照表执行的指令。根据实际对话、临时事件和角色意愿灵活调整；不要为了符合日程打断话题或反复催促用户。这是你自己的生活安排，不是给对方列的待办；涉及对方的事顺口带过即可，不用追着问进展。';
+        + '\n这是今天最初的大致安排，不是已发生事实或必须照表执行的指令。根据实际对话、临时事件和角色意愿灵活调整；不要为了符合日程打断话题或反复催促用户。这是你自己的生活安排，不是给对方列的待办；涉及对方的事顺口带过即可，不用追着问进展。' + changeInstruction;
 };
