@@ -2753,6 +2753,40 @@ const MessageItem = React.memo(({
 
     if (m.type === 'novel_card') {
         const n: any = m.metadata?.novel || {};
+        if (n.kind) {
+            const authorNames = [
+                ...(n.userAuthored ? [n.userName] : []),
+                ...(n.authors || []).map((author: { name: string }) => author.name),
+            ];
+            const label = n.kind === 'share' ? '原文分享' : n.kind === 'start' ? '开始创作'
+                : n.kind === 'chapter' ? '章节完成' : '作品完结';
+            return commonLayout(
+                <article className="w-[min(72vw,19rem)] overflow-hidden rounded-2xl border border-amber-800/25 bg-[#fdf6e8] font-serif text-amber-950 shadow-md">
+                    <header className="flex gap-3 border-b border-amber-900/15 p-4">
+                        {n.coverImage && <TokenImg value={n.coverImage} className="h-[4.5rem] w-12 shrink-0 rounded object-cover shadow" />}
+                        <div className="min-w-0">
+                            <p className="text-[10px] text-amber-800">笔友会 · {label}</p>
+                            <h3 className="mt-1 break-words text-base font-bold">《{n.bookTitle || '无题'}》</h3>
+                            {n.subtitle && <p className="break-words text-xs text-amber-900/80">{n.subtitle}</p>}
+                            <p className="mt-1 break-words text-xs text-amber-900/80">{authorNames.join('、') || '普通 AI 作者'}</p>
+                        </div>
+                    </header>
+                    <div className="space-y-2 px-4 py-3 text-xs">
+                        {n.bookSummary && <p className="whitespace-pre-wrap break-words leading-relaxed">{n.bookSummary}</p>}
+                        {n.kind !== 'start' && <p className="text-[10px] text-amber-800">{n.completed ? '已完结' : '创作中'}</p>}
+                        {n.summary && <details><summary className="cursor-pointer font-bold">全文剧情总结</summary><p className="mt-2 whitespace-pre-wrap break-words">{n.summary}</p></details>}
+                        {(n.chapters || []).map((chapter: { index: number; original?: string; summary?: string }) => (
+                            <details key={chapter.index} className="rounded-lg border border-amber-800/15 bg-white/40 px-3 py-2">
+                                <summary className="cursor-pointer font-bold">
+                                    {n.scope === 'work' && n.chapters.length === 1 ? '阅读全文' : `第 ${chapter.index} 章 · ${chapter.original !== undefined ? '阅读原文' : '剧情总结'}`}
+                                </summary>
+                                <p className="mt-2 max-h-80 overflow-y-auto whitespace-pre-wrap break-words leading-loose">{chapter.original ?? chapter.summary}</p>
+                            </details>
+                        ))}
+                    </div>
+                </article>
+            );
+        }
         const bookTitle: string = n.bookTitle || '无题';
         const isCoauthor = Array.isArray(n.collaboratorNames) && n.collaboratorNames.includes(charName);
         const coauthors: string[] = Array.isArray(n.collaboratorNames) ? n.collaboratorNames.filter((name: string) => name && name !== charName) : [];

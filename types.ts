@@ -1225,6 +1225,7 @@ export interface NovelSegment {
     timestamp: number;
     focus?: string; 
     targetSegId?: string;
+    creativeIdentity?: NovelCreativeIdentity;
     meta?: {
         tone?: string;
         suggestion?: string;
@@ -1232,6 +1233,31 @@ export interface NovelSegment {
         technique?: string;
         mood?: string;
     };
+}
+
+export type NovelNarrativePerson = 'auto' | 'first' | 'second' | 'third';
+
+export type NovelNarrativeFocus =
+    | { kind: 'user' }
+    | { kind: 'character'; characterId: string };
+
+export interface NovelNarration {
+    viewpoint?: NovelNarrativeFocus | { kind: 'omniscient'; bias?: NovelNarrativeFocus };
+    person?: NovelNarrativePerson;
+    userPerson?: NovelNarrativePerson;
+    characterPerson?: NovelNarrativePerson;
+}
+
+export type NovelCreativeIdentity = 'ai' | 'independent' | 'collaborative';
+
+export type NovelWritingStyle = 'free' | 'realistic' | 'humorous' | 'lyrical' | 'cinematic' | 'suspense' | 'lightNovel' | 'custom';
+
+export interface NovelCreativeSettings {
+    style?: NovelWritingStyle;
+    customStyle?: string;
+    extraStyle?: string;
+    plotOutline?: string;
+    openingScene?: string;
 }
 
 export interface NovelBook {
@@ -1245,6 +1271,20 @@ export interface NovelBook {
     collaboratorIds: string[]; 
     protagonists: NovelProtagonist[];
     segments: NovelSegment[];
+    narration?: NovelNarration;
+    creativeIdentity?: NovelCreativeIdentity;
+    writingMode?: 'single' | 'chapters';
+    sourceSettings?: {
+        worldbookIds?: string[];
+        corePersona?: boolean;
+        recallMemory?: boolean;
+        recentChat?: boolean;
+    };
+    completion?: { summary: string; completedAt?: number; stale?: boolean };
+    targetWords?: number;
+    tokenLimits?: { context?: number; output?: number; summaryInput?: number };
+    chapterContext?: Record<string, 'original' | 'summary'>;
+    creativeSettings?: NovelCreativeSettings;
     createdAt: number;
     lastActiveAt: number;
 }

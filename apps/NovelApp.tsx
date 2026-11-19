@@ -1,11 +1,12 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useOS } from '../context/OSContext';
-import { NovelBook, NovelProtagonist, CharacterProfile } from '../types';
+import { NovelBook, NovelCreativeIdentity, NovelCreativeSettings, NovelNarration, NovelProtagonist, CharacterProfile } from '../types';
 import Modal from '../components/os/Modal';
 import ConfirmDialog from '../components/os/ConfirmDialog';
 import { processImage } from '../utils/file';
-import { NOVEL_THEMES, analyzeWriterPersonaSimple } from '../utils/novelUtils';
+import { NOVEL_THEMES, NOVEL_WRITING_STYLES, analyzeWriterPersonaSimple, buildNovelChapterContext, estimateNovelTokens } from '../utils/novelUtils';
+import NovelNarrationSettings from '../components/novel/NovelNarrationSettings';
 import NovelWriter from '../components/novel/NovelWriter';
 import { CharacterGroupFilterBar, filterCharactersByGroup, GROUP_FILTER_ALL } from '../components/character/CharacterGroupFilter';
 import { Robot, MaskHappy, PenNib, Books, FolderOpen } from '@phosphor-icons/react';
@@ -17,13 +18,22 @@ const NovelApp: React.FC = () => {
     
     // Navigation State
     const [view, setView] = useState<'shelf' | 'create' | 'write' | 'settings' | 'library'>('shelf');
-    const [activeBook, setActiveBook] = useState<NovelBook | null>(null);
+    const [selectedBook, setActiveBook] = useState<NovelBook | null>(null);
+    const activeBook = novels.find(book => book.id === selectedBook?.id) || selectedBook;
     const [activeTheme, setActiveTheme] = useState(NOVEL_THEMES[0]);
 
     // Create / Settings Form
     const [tempTitle, setTempTitle] = useState('');
     const [tempSubtitle, setTempSubtitle] = useState('');
     const [tempSummary, setTempSummary] = useState('');
+    const [creativeSettings, setCreativeSettings] = useState<NovelCreativeSettings>({});
+    const [creativeIdentity, setCreativeIdentity] = useState<NovelCreativeIdentity>('collaborative');
+    const [writingMode, setWritingMode] = useState<NovelBook['writingMode']>('chapters');
+    const [tokenLimits, setTokenLimits] = useState<NonNullable<NovelBook['tokenLimits']>>({});
+    const [targetWords, setTargetWords] = useState('');
+    const [sourceSettings, setSourceSettings] = useState<NonNullable<NovelBook['sourceSettings']>>({});
+    const [chapterContext, setChapterContext] = useState<NonNullable<NovelBook['chapterContext']>>({});
+    const [narration, setNarration] = useState<NovelNarration>({});
     const [tempWorld, setTempWorld] = useState('');
     const [selectedCollaborators, setSelectedCollaborators] = useState<Set<string>>(new Set());
     const [collabGroupId, setCollabGroupId] = useState(GROUP_FILTER_ALL); // 共创者选择的分组筛选
@@ -124,13 +134,25 @@ const NovelApp: React.FC = () => {
 
     // --- CRUD ---
 
+    const relevantSourceIds = new Set(selectedCollaborators);
+    const focus = narration.viewpoint?.kind === 'omniscient' ? narration.viewpoint.bias : narration.viewpoint;
+    if (focus?.kind === 'character') relevantSourceIds.add(focus.characterId);
+    const availableBooks = new Map<string, { title: string; owners: string[] }>();
+    for (const character of characters.filter(character => relevantSourceIds.has(character.id))) {
+        for (const book of character.mountedWorldbooks || []) {
+            const available = availableBooks.get(book.id);
+            if (available) available.owners.push(character.name);
+            else availableBooks.set(book.id, { title: book.title, owners: [character.name] });
+        }
+    }
+
     const handleCreateBook = () => {
         if (!tempTitle.trim()) { addToast('请输入标题', 'error'); return; }
         const newBook: NovelBook = {
             id: `novel-${Date.now()}`,
             title: tempTitle, subtitle: tempSubtitle, summary: tempSummary,
             coverStyle: activeTheme.id, coverImage: tempCoverImage, worldSetting: tempWorld,
-            collaboratorIds: Array.from(selectedCollaborators), protagonists: tempProtagonists,
+            collaboratorIds: Array.from(selectedCollaborators), protagonists: tempProtagonists, narration, creativeSettings, creativeIdentity, writingMode, sourceSettings, tokenLimits, targetWords: Number(targetWords) || undefined,
             segments: [], createdAt: Date.now(), lastActiveAt: Date.now()
         };
         addNovel(newBook);
@@ -146,6 +168,14 @@ const NovelApp: React.FC = () => {
         setTempSubtitle(activeBook.subtitle || '');
         setTempSummary(activeBook.summary);
         setTempWorld(activeBook.worldSetting);
+        setNarration(activeBook.narration || {});
+        setChapterContext(activeBook.chapterContext || {});
+        setSourceSettings(activeBook.sourceSettings || {});
+        setCreativeIdentity(activeBook.creativeIdentity || 'collaborative');
+        setWritingMode(activeBook.writingMode || 'chapters');
+        setTargetWords(String(activeBook.targetWords || ''));
+        setTokenLimits(activeBook.tokenLimits || {});
+        setCreativeSettings(activeBook.creativeSettings || {});
         setActiveTheme(getTheme(activeBook.coverStyle));
         setTempCoverImage(activeBook.coverImage || '');
         setSelectedCollaborators(new Set(activeBook.collaboratorIds));
@@ -157,19 +187,26 @@ const NovelApp: React.FC = () => {
     const handleSaveSettings = async () => {
         if (!activeBook) return;
         const updated = {
-            ...activeBook,
             title: tempTitle, subtitle: tempSubtitle, summary: tempSummary,
             worldSetting: tempWorld, coverStyle: activeTheme.id, coverImage: tempCoverImage,
-            collaboratorIds: Array.from(selectedCollaborators), protagonists: tempProtagonists,
-            segments: activeBook.segments, lastActiveAt: Date.now()
+            collaboratorIds: Array.from(selectedCollaborators), protagonists: tempProtagonists, narration, creativeSettings, creativeIdentity, writingMode, sourceSettings, tokenLimits, targetWords: Number(targetWords) || undefined,
+            chapterContext, lastActiveAt: Date.now()
         };
         await updateNovel(activeBook.id, updated);
-        setActiveBook(updated);
+        setActiveBook({ ...activeBook, ...updated });
         setView('write');
         addToast('设定已更新，内容完好', 'success');
     };
 
     const resetTempState = () => {
+        setNarration({});
+        setChapterContext({});
+        setSourceSettings({});
+        setCreativeIdentity('collaborative');
+        setWritingMode('chapters');
+        setTargetWords('');
+        setTokenLimits({});
+        setCreativeSettings({});
         setTempTitle(''); setTempSubtitle(''); setTempSummary(''); setTempWorld(''); setSelectedCollaborators(new Set()); setTempProtagonists([]); setTempCoverImage(''); setCoverInputUrl('');
     };
 
@@ -372,6 +409,121 @@ const NovelApp: React.FC = () => {
                         <div className="flex justify-between items-center"><label className="text-xs font-bold text-slate-400 uppercase block">世界观设定</label><button onClick={() => { setIsWorldbookModalOpen(true); trackEvent('打开导入世界书弹窗'); }} className="text-[10px] bg-indigo-50 text-indigo-600 px-2 py-1 rounded font-bold hover:bg-indigo-100 flex items-center gap-1"><Books size={12} /> 导入世界书</button></div>
                         <textarea value={tempWorld} onChange={e => setTempWorld(e.target.value)} placeholder="世界观设定..." className="w-full h-32 bg-white border border-slate-200 rounded-xl p-3 text-sm resize-none outline-none focus:border-slate-400" />
                     </section>
+                    <details className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                        <summary className="cursor-pointer text-sm font-bold text-slate-700">文风与剧情构想</summary>
+                        <div className="mt-3 space-y-3 text-xs text-slate-600">
+                            <label className="block">
+                                创作身份
+                                <select value={creativeIdentity}
+                                    onChange={e => setCreativeIdentity(e.target.value as NovelCreativeIdentity)}
+                                    className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+                                    <option value="ai">普通 AI 写作</option>
+                                    <option value="independent">角色独立执笔</option>
+                                    <option value="collaborative">我与角色共创</option>
+                                </select>
+                            </label>
+                            <label className="block">
+                                主要文风
+                                <select value={creativeSettings.style || 'free'}
+                                    onChange={e => setCreativeSettings({ ...creativeSettings, style: e.target.value as NovelCreativeSettings['style'] })}
+                                    className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+                                    {Object.entries(NOVEL_WRITING_STYLES).map(([id, style]) => <option key={id} value={id}>{style.name}</option>)}
+                                    <option value="custom">自定义文风</option>
+                                </select>
+                            </label>
+                            {([
+                                ['customStyle', '自定义文风'],
+                                ['extraStyle', '追加文风'],
+                                ['plotOutline', '整体剧情构想'],
+                                ['openingScene', '开篇情景'],
+                            ] as const).filter(([field]) => field !== 'customStyle' || creativeSettings.style === 'custom').map(([field, label]) => (
+                                <label key={field} className="block">
+                                    {label}
+                                    <textarea rows={3} value={creativeSettings[field] || ''}
+                                        onChange={e => setCreativeSettings({ ...creativeSettings, [field]: e.target.value })}
+                                        className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
+                                </label>
+                            ))}
+                        </div>
+                    </details>
+                    <details className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                        <summary className="cursor-pointer text-sm font-bold text-slate-700">正文生成</summary>
+                        <label className="mt-3 block text-sm">
+                            创作模式
+                            <select value={writingMode} onChange={e => setWritingMode(e.target.value === 'single' ? 'single' : 'chapters')}
+                                disabled={view === 'settings' && !!activeBook?.segments.some(segment => segment.focus === 'chapter_summary')}
+                                className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-2">
+                                <option value="chapters">分章节创作</option>
+                                <option value="single">生成全文</option>
+                            </select>
+                        </label>
+                        <label className="mt-3 block text-sm">
+                            {writingMode === 'single' ? '全文目标字数' : '当前章节目标字数'}
+                            <input type="number" min={1} step={1} value={targetWords} placeholder="自动"
+                                onChange={e => setTargetWords(e.target.value)}
+                                className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-2" />
+                        </label>
+                        <details className="mt-3">
+                            <summary className="cursor-pointer text-xs text-slate-600">模型 Token 上限</summary>
+                            <div className="mt-2 space-y-2 text-xs text-slate-700">
+                                {([['context', '主模型上下文上限'], ['output', '主模型输出上限'], ['summaryInput', '副 API 输入上限']] as const).map(([key, label]) => (
+                                    <label key={key} className="block">
+                                        {label}
+                                        <input type="number" min={1} step={1} value={tokenLimits[key] || ''} placeholder="留空使用渠道默认"
+                                            onChange={event => setTokenLimits({ ...tokenLimits, [key]: Number(event.target.value) > 0 ? Number(event.target.value) : undefined })}
+                                            className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-2" />
+                                    </label>
+                                ))}
+                            </div>
+                        </details>
+                    </details>
+                    <details className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                        <summary className="cursor-pointer text-sm font-bold text-slate-700">世界书与记忆</summary>
+                        <div className="mt-3 space-y-2 text-sm text-slate-700">
+                            {([['corePersona', '核心人设'], ['recallMemory', '长期记忆（使用已配置的向量召回）'], ['recentChat', '最近聊天上下文']] as const).map(([key, label]) => (
+                                <label key={key} className="flex items-center gap-2">
+                                    <input type="checkbox" checked={sourceSettings[key] ?? key === 'corePersona'}
+                                        onChange={event => setSourceSettings({ ...sourceSettings, [key]: event.target.checked })} />
+                                    {label}
+                                </label>
+                            ))}
+                            <div className="pt-1 font-bold">本作品的世界书</div>
+                            {!availableBooks.size && <p className="text-xs text-slate-500">选择共创者或视角角色后可勾选已挂载的世界书。</p>}
+                            {[...availableBooks].map(([id, book]) => (
+                                <label key={id} className="flex items-start gap-2">
+                                    <input className="mt-1" type="checkbox" checked={sourceSettings.worldbookIds?.includes(id) ?? false}
+                                        onChange={event => {
+                                            const ids = new Set(sourceSettings.worldbookIds || []);
+                                            if (event.target.checked) ids.add(id);
+                                            else ids.delete(id);
+                                            setSourceSettings({ ...sourceSettings, worldbookIds: [...ids] });
+                                        }} />
+                                    <span>{book.title}<small className="block text-slate-500">{book.owners.join('、')}</small></span>
+                                </label>
+                            ))}
+                        </div>
+                    </details>
+                    <NovelNarrationSettings value={narration} onChange={setNarration} characters={characters} />
+                    {view === 'settings' && writingMode !== 'single' && activeBook?.segments.some(segment => segment.focus === 'chapter_summary') && (
+                        <details className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                            <summary className="cursor-pointer text-sm font-bold text-slate-700">章节上下文</summary>
+                            <p className="mt-2 text-xs text-slate-600">所选章节与当前正文粗估约 {estimateNovelTokens(buildNovelChapterContext(activeBook.segments, chapterContext)).toLocaleString()} Tokens。实际用量依模型而异。</p>
+                            {!!tokenLimits.context && estimateNovelTokens(buildNovelChapterContext(activeBook.segments, chapterContext)) > tokenLimits.context && (
+                                <p role="alert" className="mt-2 text-xs text-rose-700">所选内容超过配置的上下文预算，请调整章节读取方式或核对模型上限。</p>
+                            )}
+                            {activeBook.segments.filter(segment => segment.focus === 'chapter_summary').map((segment, index, summaries) => (
+                                <label key={segment.id} className="mt-2 flex items-center justify-between gap-2 text-sm text-slate-700">
+                                    第 {index + 1} 章
+                                    <select value={chapterContext[segment.id] || (index === summaries.length - 1 ? 'original' : 'summary')}
+                                        onChange={e => setChapterContext({ ...chapterContext, [segment.id]: e.target.value === 'original' ? 'original' : 'summary' })}
+                                        className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                                        <option value="original">章节原文</option>
+                                        <option value="summary">剧情总结</option>
+                                    </select>
+                                </label>
+                            ))}
+                        </details>
+                    )}
                     <section className="space-y-4">
                         <label className="text-xs font-bold text-slate-400 uppercase block">共创者</label>
                         {/* 分组筛选（没建分组时不渲染）：只影响可选项的显示，不影响已勾选共创者 */}

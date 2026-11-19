@@ -1,3 +1,4 @@
+import { formatNovelCardForPrompt, type NovelCardData } from './novelCards';
 import {readRealMedia,mediaText} from '../features/experience/format';
 import { innerVoiceMemoryContext } from '../features/personal/innerVoice/protocol';
 import { workroomMessageText } from './workroomEvent';
@@ -261,6 +262,8 @@ export function normalizeMessageContent(
     // 让上下文 / 归档 / palace 都能读到"这本书写了什么"。共创者视角是"我们一起写的书"，
     // 非共创者视角是"用户分享给我看的书"，措辞要区分开。
     if (type === 'novel_card') {
+        const current = msg.metadata?.novel as NovelCardData | undefined;
+        if (current?.kind) return formatNovelCardForPrompt(current, msg.charId);
         const n = msg.metadata?.novel as {
             bookTitle?: string;
             subtitle?: string;
