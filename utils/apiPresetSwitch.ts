@@ -23,12 +23,13 @@ import { normalizeLlmBaseUrl, llmApiType } from './llmEndpoint';
  * 把用户手调过的温度、流式开关顺手重置掉。
  */
 export type PresetSwitchPatch =
-  Pick<APIConfig, 'baseUrl' | 'apiKey' | 'model'> & Partial<Pick<APIConfig, 'stream' | 'temperature' | 'maxTokens' | 'apiType'>>;
+  Pick<APIConfig, 'baseUrl' | 'apiKey' | 'model'> & Partial<Pick<APIConfig, 'stream' | 'temperature' | 'maxTokens' | 'apiType' | 'anthropicCacheMode'>>;
 
 export function configFromPreset(preset: ApiPreset): PresetSwitchPatch {
   const patch: PresetSwitchPatch = {
     baseUrl: normalizeLlmBaseUrl(normalizeApiBaseUrl(preset.config.baseUrl), preset.config.apiType),
     apiType: preset.config.apiType,
+    anthropicCacheMode: preset.config.anthropicCacheMode === 'full-write' ? 'full-write' : 'optimized',
     apiKey: normalizeApiCredential(preset.config.apiKey),
     model: normalizeApiModel(preset.config.model),
   };
@@ -41,12 +42,13 @@ export function configFromPreset(preset: ApiPreset): PresetSwitchPatch {
 /** 接口类型及三件套一致才算同一预设；归一化后比较，避免末尾斜杠或空格造成假不一致。 */
 export function presetMatchesConfig(
   preset: ApiPreset,
-  config: Pick<APIConfig, 'baseUrl' | 'apiKey' | 'model' | 'apiType'>,
+  config: Pick<APIConfig, 'baseUrl' | 'apiKey' | 'model' | 'apiType' | 'anthropicCacheMode'>,
 ): boolean {
   return llmApiType(preset.config) === llmApiType(config)
     && normalizeLlmBaseUrl(normalizeApiBaseUrl(preset.config.baseUrl), preset.config.apiType) === normalizeLlmBaseUrl(normalizeApiBaseUrl(config.baseUrl), config.apiType)
     && normalizeApiCredential(preset.config.apiKey) === normalizeApiCredential(config.apiKey)
-    && normalizeApiModel(preset.config.model) === normalizeApiModel(config.model);
+    && normalizeApiModel(preset.config.model) === normalizeApiModel(config.model)
+    && (preset.config.anthropicCacheMode === 'full-write') === (config.anthropicCacheMode === 'full-write');
 }
 
 /**
@@ -57,7 +59,7 @@ export function presetMatchesConfig(
  */
 export function presetDiffersFromConfig(
   preset: ApiPreset,
-  config: Pick<APIConfig, 'baseUrl' | 'apiKey' | 'model'> & Partial<Pick<APIConfig, 'stream' | 'temperature' | 'maxTokens'>>,
+  config: Pick<APIConfig, 'baseUrl' | 'apiKey' | 'model'> & Partial<Pick<APIConfig, 'stream' | 'temperature' | 'maxTokens' | 'anthropicCacheMode'>>,
 ): boolean {
   if (!presetMatchesConfig(preset, config)) return true;
   if ((preset.config.maxTokens ?? 8000) !== (config.maxTokens ?? 8000)) return true;
@@ -75,7 +77,7 @@ export function presetDiffersFromConfig(
  */
 export function findActivePresetId(
   presets: ApiPreset[],
-  config: Pick<APIConfig, 'baseUrl' | 'apiKey' | 'model'>,
+  config: Pick<APIConfig, 'baseUrl' | 'apiKey' | 'model' | 'anthropicCacheMode'>,
 ): string | null {
   if (!normalizeApiBaseUrl(config.baseUrl) && !normalizeApiModel(config.model)) return null;
   return presets.find(preset => presetMatchesConfig(preset, config))?.id ?? null;
