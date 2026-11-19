@@ -13,14 +13,17 @@ const author = {
     ],
 } as CharacterProfile;
 const reader = { id: 'reader', name: '视角人物', avatar: '', description: '' } as CharacterProfile;
-const characters = [author, reader];
+const guest = { ...reader, id: 'guest', name: '客串', mountedWorldbooks: [
+    { id: 'guest-book', title: '客串资料', constant: true, position: 1, content: 'WORLD_CAST_ONLY' },
+] } as CharacterProfile;
+const characters = [author, reader, guest];
 const characterMode = new URLSearchParams(location.search).has('chapters');
 const initial: NovelBook = {
     id: 'novel-test', title: '测试手稿', summary: '', coverStyle: 'parchment', worldSetting: '',
-    protagonists: [], collaboratorIds: characterMode ? [author.id, reader.id] : [], segments: [],
+    protagonists: [{ id: 'guest-cast', name: '客串人物别名', role: '配角', description: '', sourceCharacterId: guest.id }], collaboratorIds: characterMode ? [author.id, reader.id] : [], segments: [],
     writingMode: characterMode ? 'chapters' : 'single', creativeIdentity: characterMode ? 'independent' : 'ai',
-    narration: { viewpoint: { kind: 'omniscient', bias: { kind: 'character', characterId: reader.id } }, person: 'third' },
-    sourceSettings: { worldbookIds: ['enabled'] }, targetWords: 20000,
+    narration: { viewpoint: { kind: 'omniscient', bias: { kind: 'character', characterId: reader.id } }, userPerson: 'third' },
+    sourceSettings: { worldbookIds: ['enabled', 'guest-book'] }, targetWords: 20000,
     createdAt: 1, lastActiveAt: 1,
 };
 
@@ -35,7 +38,7 @@ function App() {
 
     return <OSPreviewProvider value={value}>
         <NovelWriter activeBook={book} characters={characters} userProfile={user} apiConfig={apiConfig}
-            onBack={() => {}} updateCharacter={() => {}} collaborators={characterMode ? characters : []}
+            onBack={() => {}} updateCharacter={() => {}} collaborators={characterMode ? [author, reader] : []}
             targetCharId={target} setTargetCharId={setTarget} onOpenSettings={() => {}}
             updateNovel={async (_, patch) => setBook(current => ({ ...current, ...patch }))} />
     </OSPreviewProvider>;

@@ -1210,6 +1210,8 @@ export interface Worldbook extends WorldbookEntryConfig {
 
 // --- NOVEL / CO-WRITING TYPES ---
 export interface NovelProtagonist {
+    sourceCharacterId?: string;
+    narrativePerson?: NovelNarrativePerson;
     id: string;
     name: string;
     role: string; // e.g. "Protagonist", "Villain"

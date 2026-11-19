@@ -7,12 +7,6 @@ interface Props {
     characters: CharacterProfile[];
 }
 
-const personFields = [
-    ['person', '正文整体人称'],
-    ['userPerson', 'User 在正文中的人称'],
-    ['characterPerson', '角色在正文中的人称'],
-] as const;
-
 const selectClass = 'block mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700';
 
 export default function NovelNarrationSettings({ value, onChange, characters }: Props) {
@@ -22,8 +16,7 @@ export default function NovelNarrationSettings({ value, onChange, characters }: 
         : bias?.kind === 'character' ? bias.characterId : undefined;
 
     return (
-        <details className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-            <summary className="cursor-pointer text-sm font-bold text-slate-700">叙述设置</summary>
+        <div>
             <div className="mt-3 space-y-3 text-xs text-slate-600">
                 <label className="block">
                     故事主视角
@@ -71,19 +64,26 @@ export default function NovelNarrationSettings({ value, onChange, characters }: 
                         </select>
                     </label>
                 )}
-                {personFields.map(([field, label]) => (
-                    <label key={field} className="block">
-                        {label}
-                        <select className={selectClass} value={value[field] || 'auto'}
-                            onChange={({ target }) => onChange({ ...value, [field]: target.value as NovelNarrativePerson })}>
-                            <option value="auto">自动</option>
-                            <option value="first">第一人称</option>
-                            <option value="second">第二人称</option>
-                            <option value="third">第三人称</option>
-                        </select>
-                    </label>
-                ))}
+                <label className="block">
+                    User 在正文中的人称
+                    <NarrativePersonSelect value={value.userPerson} onChange={userPerson => onChange({ ...value, userPerson })} />
+                </label>
+                <p className="text-xs text-slate-500">其他人物的人称可在各自的剧中人卡片里设置。</p>
             </div>
-        </details>
+        </div>
     );
+}
+
+
+export function NarrativePersonSelect({ value, onChange }: {
+    value?: NovelNarrativePerson;
+    onChange: (value: NovelNarrativePerson) => void;
+}) {
+    return <select className={selectClass} value={value || 'auto'}
+        onChange={event => onChange(event.target.value as NovelNarrativePerson)}>
+        <option value="auto">自动</option>
+        <option value="first">第一人称 · 我</option>
+        <option value="second">第二人称 · 你</option>
+        <option value="third">第三人称 · 姓名／他／她</option>
+    </select>;
 }

@@ -31,7 +31,7 @@ try {
     assert.deepEqual(requests.map(request => request.model), ['mock-main']);
     assert.equal(requests[0].stream, true);
     assert.match(JSON.stringify(requests[0].messages), /描述偏向.*视角人物/);
-    assert.match(JSON.stringify(requests[0].messages), /正文默认用第三人称/);
+    assert.match(JSON.stringify(requests[0].messages), /测试用户.*人称偏好为第三人称/);
     assert.match(JSON.stringify(requests[0].messages), /20000 字/);
 
     await page.getByRole('button', { name: '续写正文' }).click();
@@ -55,6 +55,7 @@ try {
     await page.getByText('模拟正文。', { exact: true }).waitFor();
     const characterRequest = JSON.stringify(requests[2].messages);
     assert.match(characterRequest, /WORLD_ENABLED/);
+    assert.match(characterRequest, /WORLD_CAST_ONLY/);
     assert.doesNotMatch(characterRequest, /WORLD_DISABLED/);
     assert.match(characterRequest, /幕后编辑指令/);
     assert.doesNotMatch(characterRequest, /合作撰写小说/);

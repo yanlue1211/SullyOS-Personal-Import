@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CharacterProfile, NovelBook, UserProfile } from '../types';
-import { buildNovelChapterContext, buildNovelNarrationRules, buildPrompt, NOVEL_WRITING_STYLES } from './novelUtils';
+import { getNovelWorldbookMembers, buildNovelChapterContext, buildNovelNarrationRules, buildPrompt, NOVEL_WRITING_STYLES } from './novelUtils';
 
 const author = { id: 'author', name: '执笔者', description: '' } as CharacterProfile;
 const observer = { id: 'observer', name: '视角角色', description: '' } as CharacterProfile;
@@ -14,11 +14,11 @@ describe('novel narration', () => {
             person: 'third',
             userPerson: 'second',
             characterPerson: 'first',
-        }, user.name, characters);
+        }, user.name, characters, [{ id: 'cast', name: '剧中人', role: '', description: '', narrativePerson: 'first' }]);
         expect(rules).toContain('主视角跟随「视角角色」');
-        expect(rules).toContain('正文默认用第三人称');
-        expect(rules).toContain('对应人物时使用第二人称');
-        expect(rules).toContain('对应人物时使用第一人称');
+        expect(rules).not.toContain('正文默认用第三人称');
+        expect(rules).toContain('「读者」的人称偏好为第二人称');
+        expect(rules).toContain('「剧中人」的人称偏好为第一人称');
         expect(rules).not.toContain(author.name);
     });
 
@@ -83,4 +83,12 @@ describe('novel creator modes', () => {
         expect(ai).toContain('普通小说作者');
         expect(ai).not.toContain('你的写作人格');
     });
+});
+
+it('includes cast worldbooks by explicit source or unique legacy name', () => {
+    const cast = { id: 'cast', name: '剧中别名', role: '', description: '', sourceCharacterId: observer.id };
+    const book = { collaboratorIds: [author.id], protagonists: [cast] };
+    expect(getNovelWorldbookMembers(book, characters)).toEqual(characters);
+    expect(getNovelWorldbookMembers({ ...book, protagonists: [{ ...cast, name: observer.name, sourceCharacterId: undefined }] }, characters)).toEqual(characters);
+    expect(getNovelWorldbookMembers({ ...book, protagonists: [{ ...cast, name: observer.name, sourceCharacterId: '' }] }, characters)).toEqual([author]);
 });
