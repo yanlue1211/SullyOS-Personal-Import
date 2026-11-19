@@ -1,6 +1,7 @@
 
-import { CharacterProfile, NovelBook, NovelNarrativeFocus, NovelNarrativePerson, NovelSegment, NovelWritingStyle, UserProfile } from '../types';
+import { CharacterProfile, NovelBook, NovelNarrativeFocus, NovelNarrativePerson, NovelProtagonist, NovelSegment, NovelWritingStyle, UserProfile } from '../types';
 import { ContextBuilder } from './context';
+import { buildBareTheaterActorContext } from './storyTheater';
 import { safeResponseJson } from './safeApi';
 
 // --- Visual Themes ---
@@ -271,6 +272,21 @@ const narrativePersonLabels: Record<Exclude<NovelNarrativePerson, 'auto'>, strin
     third: '第三人称',
 };
 
+/** Explicit source IDs win; old unlinked characters use a unique name match. */
+export function resolveNovelProtagonistSource(
+    person: Pick<NovelProtagonist, 'name' | 'sourceCharacterId'>,
+    characters: CharacterProfile[],
+): CharacterProfile | undefined {
+    if (person.sourceCharacterId !== undefined) return characters.find(character => character.id === person.sourceCharacterId);
+    const matches = characters.filter(character => character.name.trim() === person.name.trim());
+    return matches.length === 1 ? matches[0] : undefined;
+}
+
+/** A user's Character remark is not a novel character setting. */
+export function importedNovelProtagonist(character: Pick<CharacterProfile, 'id' | 'name'>) {
+    return { sourceCharacterId: character.id, name: character.name, role: '客串', description: '' };
+}
+
 /** Use the same roster for the worldbook picker and the request. */
 export function getNovelWorldbookMembers(
     book: Pick<NovelBook, 'collaboratorIds' | 'protagonists' | 'narration'>,
@@ -281,14 +297,30 @@ export function getNovelWorldbookMembers(
     const focus = viewpoint?.kind === 'omniscient' ? viewpoint.bias : viewpoint;
     if (focus?.kind === 'character') ids.add(focus.characterId);
     for (const person of book.protagonists || []) {
-        if (person.sourceCharacterId) {
-            ids.add(person.sourceCharacterId);
-        } else if (person.sourceCharacterId === undefined) {
-            const matches = characters.filter(character => character.name.trim() === person.name.trim());
-            if (matches.length === 1) ids.add(matches[0].id);
-        }
+        const source = resolveNovelProtagonistSource(person, characters);
+        if (source) ids.add(source.id);
     }
     return characters.filter(character => ids.has(character.id));
+}
+
+/** Reference the linked author's and cast's real character cards once per source ID. */
+export function buildNovelCharacterCardContext(
+    book: Pick<NovelBook, 'collaboratorIds' | 'protagonists' | 'narration'>,
+    characters: CharacterProfile[],
+): string {
+    const cards = getNovelWorldbookMembers(book, characters).map(character => {
+        const castNames = [...new Set((book.protagonists || [])
+            .filter(person => resolveNovelProtagonistSource(person, characters)?.id === character.id)
+            .map(person => person.name.trim()).filter(Boolean))];
+        return [
+            buildBareTheaterActorContext(character),
+            castNames.length ? `- 本作品中对应的剧中人：${castNames.join('、')}` : '',
+        ].filter(Boolean).join('\n');
+    });
+    return cards.length ? [
+        '人物性格参考关联角色的人设卡；本作品的身份、经历与世界背景以本作品设定及剧情为准，未写明的按世界观和故事发展自然安排。',
+        ...cards,
+    ].join('\n\n') : '';
 }
 
 export function buildNovelNarrationRules(
@@ -378,7 +410,7 @@ ${userProfile.name}是本次共创搭档。双方可以讨论剧情。保持本�
     const writerPersona = char ? char.writerPersona || analyzeWriterPersonaSimple(char) : '';
     const fewShot = char ? getFewShotExamples(char) : '';
     const extractedTaboos = char ? extractWritingTaboos(char) : '';
-    const protagonistContext = activeBook?.protagonists.map(p => `- ${p.name} (${p.role}): ${p.description}`).join('\n') || '无';
+    const protagonistContext = activeBook?.protagonists.map(p => `- ${p.name}${p.role?.trim() ? `（${p.role}）` : ''}${p.description?.trim() ? `：${p.description}` : ''}`).join('\n') || '无';
     
     const recentDiscussion = contextSegments
         .filter(segment => segment.type === 'discussion' && segment.content !== userText)
@@ -509,11 +541,9 @@ ${narrationRules}
    
    如果你（${authorName}）对他们的写法有意见，可以在吐槽里说出来！
    - 如果你觉得他们理解错了角色，可以反驳
-   - 如果你有专业知识（${char?.description}），可以用术语纠正
    - 如果你就是看不惯，直说！
    ` : ''}
    
-   ${char?.description?.includes('猫') ? '必须有"喵"！' : ''}
 `;
         jsonStructure.push(`"comment": { "content": "即时反应" }`);
     }
