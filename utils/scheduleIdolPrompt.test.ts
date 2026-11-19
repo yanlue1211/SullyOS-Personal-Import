@@ -11,6 +11,8 @@ describe('idol daily schedule prompt', () => {
         expect(text).toContain('临时邀约');
         expect(text).toContain('1—2个时段');
         expect(text).toContain('下午逛街');
+        expect(text).toContain('音乐剧演员');
+        expect(text).toContain('播音主持');
     });
     it('does not inject idol duties into an unrelated card', () => {
         expect(buildIdolScheduleVariationPrompt({ systemPrompt: '一个异世界炼金术师' } as any)).toBe('');
