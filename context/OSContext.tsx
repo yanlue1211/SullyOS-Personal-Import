@@ -88,6 +88,7 @@ import { loadChatInputPreferences, saveChatInputPreferences } from '../utils/cha
 import { collectAppearance, collectCharSettings, collectDataScale, collectFeatureFlagsAsync, collectSARFeatureFlags } from '../utils/analyticsSnapshot';
 import { normalizeApiConfig, normalizeApiPreset } from '../utils/apiConfigNormalize';
 import { fetchLlm } from '../utils/anthropicApi';
+import { shouldUseAnthropicFullWrite, withFullWriteNativeCache } from '../utils/anthropicFullWrite';
 import { getCheckPhoneApi, setCheckPhoneApi } from '../utils/checkPhoneApi';
 import { markBackupDone } from '../utils/backupReminder';
 import { collectSARLocalBackup, restoreSARLocalBackup } from '../utils/vrWorld/sarBackup';
@@ -1226,6 +1227,10 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       trackCurrentSARFeaturesOnce(collectSARFeatureFlags());
   }, [isDataLoaded]);
 
+  // The fetch interceptor is installed once, but credentials can change after mounting.
+  const anthropicCacheConfigsRef = useRef({ apiConfig, apiPresets, characters });
+  anthropicCacheConfigsRef.current = { apiConfig, apiPresets, characters };
+
   // --- Global Error Interception ---
   useEffect(() => {
       if (interceptorsInitialized.current) return;
@@ -1315,7 +1320,21 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           }
 
           try {
-              let response = await fetchLlm(sendArgs[0], sendArgs[1], originalFetch, true);
+              const currentCacheConfigs = anthropicCacheConfigsRef.current;
+              const fullWrite = shouldUseAnthropicFullWrite({
+                  url: urlStr, init: sendArgs[1],
+                  candidates: [
+                      currentCacheConfigs.apiConfig,
+                      ...currentCacheConfigs.characters.map(character => character.dialogueApi),
+                      currentCacheConfigs.apiConfig.momentsApi,
+                      currentCacheConfigs.apiConfig.proactiveApi,
+                      ...currentCacheConfigs.apiPresets.map(preset => preset.config),
+                  ],
+              });
+              const nativeTransport: typeof fetch = fullWrite
+                  ? ((nativeResource, nativeInit) => originalFetch(nativeResource, withFullWriteNativeCache(nativeResource, nativeInit)))
+                  : originalFetch;
+              let response = await fetchLlm(sendArgs[0], sendArgs[1], nativeTransport, true);
 
               // /chat/completions 是可能已经开始计费的请求。拿到任何 HTTP 响应后都不在
               // 兼容层静默重发：中转站可能在返回错误前已经把任务交给上游，重发会让用户
