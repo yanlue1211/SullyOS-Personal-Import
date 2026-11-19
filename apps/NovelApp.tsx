@@ -149,10 +149,9 @@ const NovelApp: React.FC = () => {
     }
 
     const handleCreateBook = () => {
-        if (!tempTitle.trim()) { addToast('请输入标题', 'error'); return; }
         const newBook: NovelBook = {
             id: `novel-${Date.now()}`,
-            title: tempTitle, subtitle: tempSubtitle, summary: tempSummary,
+            title: tempTitle.trim(), subtitle: tempSubtitle, summary: tempSummary.trim(),
             coverStyle: activeTheme.id, coverImage: tempCoverImage, worldSetting: tempWorld,
             collaboratorIds: Array.from(selectedCollaborators), protagonists: tempProtagonists, narration, creativeSettings, creativeIdentity, writingMode, sourceSettings, tokenLimits, targetWords: Number(targetWords) || undefined,
             segments: [], createdAt: Date.now(), lastActiveAt: Date.now()
@@ -191,7 +190,7 @@ const NovelApp: React.FC = () => {
     const handleSaveSettings = async () => {
         if (!activeBook) return;
         const updated = {
-            title: tempTitle, subtitle: tempSubtitle, summary: tempSummary,
+            title: tempTitle.trim(), subtitle: tempSubtitle, summary: tempSummary.trim(),
             worldSetting: tempWorld, coverStyle: activeTheme.id, coverImage: tempCoverImage,
             collaboratorIds: Array.from(selectedCollaborators), protagonists: tempProtagonists, narration, creativeSettings, creativeIdentity, writingMode, sourceSettings, tokenLimits, targetWords: Number(targetWords) || undefined,
             chapterContext, lastActiveAt: Date.now()
@@ -366,7 +365,7 @@ const NovelApp: React.FC = () => {
                             <div key={book.id} onClick={() => { setActiveBook(book); setView('write'); trackEvent('打开书稿写作页'); }} className="group relative aspect-auto min-h-[14rem] bg-white rounded-2xl shadow-sm hover:shadow-xl transition-all duration-300 overflow-hidden border border-slate-100 cursor-pointer flex flex-col">
                                 <div className={`h-28 shrink-0 ${style.bg} relative p-4 flex flex-col justify-end`} style={bgStyle}>
                                     <div className={`absolute inset-0 ${book.coverImage ? 'bg-black/30' : ''}`}></div>
-                                    <div className="relative z-10"><h3 className={`font-bold text-lg leading-tight line-clamp-2 ${book.coverImage ? 'text-white drop-shadow-md' : style.text}`}>{book.title}</h3>{book.subtitle && <p className={`text-[10px] font-bold opacity-80 uppercase tracking-wide truncate ${book.coverImage ? 'text-white' : style.text}`}>{book.subtitle}</p>}</div>
+                                    <div className="relative z-10"><h3 className={`font-bold text-lg leading-tight line-clamp-2 ${book.coverImage ? 'text-white drop-shadow-md' : style.text}`}>{book.title?.trim() || '待命名书稿'}</h3>{book.subtitle && <p className={`text-[10px] font-bold opacity-80 uppercase tracking-wide truncate ${book.coverImage ? 'text-white' : style.text}`}>{book.subtitle}</p>}</div>
                                 </div>
                                 <div className="p-4 flex-1 flex flex-col justify-between">
                                     <p className="text-xs text-slate-500 line-clamp-3 leading-relaxed mb-3">{book.summary || '暂无简介...'}</p>
@@ -406,9 +405,10 @@ const NovelApp: React.FC = () => {
                 <div key={settingsTab} className="flex-1 overflow-y-auto px-6 py-6 pb-20"><div className="mx-auto max-w-xl space-y-7">
                     {settingsTab === '书稿' && <>
                     <section className="space-y-4">
-                        <input value={tempTitle} onChange={e => setTempTitle(e.target.value)} placeholder="书名" className="w-full text-2xl font-bold bg-transparent border-b border-slate-200 py-2 outline-none focus:border-slate-800 font-serif" />
+                        <input value={tempTitle} onChange={e => setTempTitle(e.target.value)} placeholder="书名（可留空，首段正文时自拟）" className="w-full text-2xl font-bold bg-transparent border-b border-slate-200 py-2 outline-none focus:border-slate-800 font-serif" />
                         <input value={tempSubtitle} onChange={e => setTempSubtitle(e.target.value)} placeholder="卷名/副标题" className="w-full text-sm font-bold bg-transparent border-b border-slate-200 py-2 outline-none focus:border-slate-800 text-slate-600" />
-                        <textarea value={tempSummary} onChange={e => setTempSummary(e.target.value)} placeholder="一句话简介..." className="w-full h-20 bg-slate-100 rounded-xl p-3 text-sm resize-none outline-none" />
+                        <textarea value={tempSummary} onChange={e => setTempSummary(e.target.value)} placeholder="一句话简介（可留空，首段正文时生成）..." className="w-full h-20 bg-slate-100 rounded-xl p-3 text-sm resize-none outline-none" />
+                        <p className="text-xs text-slate-400">书名和简介留空，会在首次生成正文时一起拟定；已填写的内容不会被覆盖。副标题可不填。</p>
                         <div>
                             <label className="text-xs font-bold text-slate-400 uppercase mb-2 block">内页风格</label>
                             <div className="flex gap-3 overflow-x-auto pb-2 no-scrollbar">{NOVEL_THEMES.map(t => (<button key={t.id} onClick={() => setActiveTheme(t)} className={`w-12 h-16 rounded-md shadow-sm border-2 shrink-0 ${t.bg} ${activeTheme.id === t.id ? 'border-slate-800 scale-105' : 'border-transparent'}`}></button>))}</div>

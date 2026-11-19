@@ -10,6 +10,7 @@ const origin = process.env.NOVEL_TEST_ORIGIN || 'http://127.0.0.1:5183';
 
 try {
     const page = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    page.setDefaultTimeout(20_000);
     const requests = [];
     const pageErrors = [];
     page.on('pageerror', error => pageErrors.push(error.message));
@@ -19,7 +20,7 @@ try {
         if (body.model === 'mock-summary') {
             return route.fulfill({ status: 503, json: { error: { message: '预期的副 API 故障' } } });
         }
-        const chunk = JSON.stringify({ choices: [{ delta: { content: '{"writer":{"content":"模拟正文\u3002' } }] });
+        const chunk = JSON.stringify({ choices: [{ delta: { content: '{"bookMeta":{"title":"海底来信","summary":"一场人鱼的冒险"},"writer":{"content":"模拟正文\u3002' } }] });
         return route.fulfill({ contentType: 'text/event-stream', body: `data: ${chunk}\n\n` });
     });
 
@@ -28,7 +29,14 @@ try {
     const send = page.getByRole('button', { name: '发送创作任务' });
     await send.click();
     await page.getByText('模拟正文。', { exact: true }).waitFor();
+    await page.getByText('海底来信', { exact: true }).waitFor().catch(async error => {
+        console.log('DEBUG: first novel state:', (await page.locator('body').innerText()).slice(0, 1600));
+        console.log('DEBUG: model request count:', requests.length, 'page errors:', pageErrors);
+        throw error;
+    });
+    assert.equal(await page.getByTestId('novel-book-summary').textContent(), '一场人鱼的冒险');
     assert.deepEqual(requests.map(request => request.model), ['mock-main']);
+    assert.match(JSON.stringify(requests[0].messages), /bookMeta/);
     assert.equal(requests[0].stream, true);
     assert.match(JSON.stringify(requests[0].messages), /描述偏向.*视角人物/);
     assert.match(JSON.stringify(requests[0].messages), /测试用户.*人称偏好为第三人称/);
@@ -54,6 +62,9 @@ try {
     await send.click();
     await page.getByText('模拟正文。', { exact: true }).waitFor();
     const characterRequest = JSON.stringify(requests[2].messages);
+    const characterPrompt = requests[2].messages.map(message => message.content).join('\n');
+    assert.match(characterPrompt, /"bookMeta": \{ "summary"/);
+    assert.doesNotMatch(characterPrompt, /"bookMeta": \{ "title"/);
     assert.match(characterRequest, /WORLD_ENABLED/);
     assert.match(characterRequest, /WORLD_CAST_ONLY/);
     assert.match(characterRequest, /GUEST_CARD_CORE/);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CharacterProfile, NovelBook, UserProfile } from '../types';
-import { getNovelWorldbookMembers, resolveNovelProtagonistSource, buildNovelCharacterCardContext, importedNovelProtagonist, buildNovelChapterContext, buildNovelNarrationRules, buildPrompt, NOVEL_WRITING_STYLES } from './novelUtils';
+import { getNovelAutoBookMetaFields, getNovelAutoBookMetaPatch, getNovelWorldbookMembers, resolveNovelProtagonistSource, buildNovelCharacterCardContext, importedNovelProtagonist, buildNovelChapterContext, buildNovelNarrationRules, buildPrompt, NOVEL_WRITING_STYLES } from './novelUtils';
 
 const author = { id: 'author', name: '执笔者', description: '' } as CharacterProfile;
 const observer = { id: 'observer', name: '视角角色', description: '' } as CharacterProfile;
@@ -130,5 +130,38 @@ describe('novel character card and AU context', () => {
         expect(prompt).toContain('小人鱼：是一只人鱼');
         expect(buildNovelCharacterCardContext(work, members)).toContain('本作品的身份、经历与世界背景以本作品设定及剧情为准');
         expect(prompt).not.toContain('PRIVATE_ACTOR_REMARK');
+    });
+});
+
+describe('auto book title and synopsis during first prose generation', () => {
+    const empty = { title: '', summary: '' } as NovelBook;
+    const first = { write: true }, noWriting = { write: false };
+    const aiScene = { id: 'first', type: 'story', role: 'writer', authorId: 'ai', content: '第一段', timestamp: 1 } as NovelSegment;
+    it('adds only missing book metadata to the first prose request', () => {
+        expect(getNovelAutoBookMetaFields(empty, first, [])).toEqual({ title: true, summary: true });
+        const prompt = buildPrompt(undefined, user, { ...empty, protagonists: [], creativeSettings: {
+            plotOutline: '人鱼寻找海面上的少年', openingScene: '海底的钟响了',
+        } } as NovelBook, '', '', { write: true, comment: false, analyze: false }, [], []);
+        expect(prompt).toContain('"bookMeta": { "title"');
+        expect(prompt).toContain('"summary": "一句话作品简介"');
+        expect(prompt).toContain('人鱼寻找海面上的少年');
+        expect(prompt).toContain('海底的钟响了');
+        expect(prompt).toContain('标题待定');
+        expect(getNovelAutoBookMetaFields(empty, noWriting, [])).toEqual({ title: false, summary: false });
+        expect(getNovelAutoBookMetaFields(empty, first, [aiScene])).toEqual({ title: false, summary: false });
+    });
+    it('does not overwrite a custom title or accept invalid metadata', () => {
+        const partiallyFilled = { title: '我写的标题', summary: '' };
+        expect(getNovelAutoBookMetaFields(partiallyFilled, first, [])).toEqual({ title: false, summary: true });
+        expect(getNovelAutoBookMetaPatch(partiallyFilled, first, [],
+            { title: '不可覆盖', summary: ' 新简介 ' })).toEqual({ summary: '新简介' });
+        expect(getNovelAutoBookMetaPatch(empty, first, [],
+            { title: ' 海底来信 ', summary: ' 人鱼的冒险 ' })).toEqual({ title: '海底来信', summary: '人鱼的冒险' });
+        expect(getNovelAutoBookMetaPatch(empty, first, [], { title: 23, summary: null })).toEqual({});
+        expect(getNovelAutoBookMetaPatch(empty, first, [aiScene], { title: '不应保存' })).toEqual({});
+    });
+    it('allows user-written prose before first model-generated prose', () => {
+        expect(getNovelAutoBookMetaFields(empty, first, [{ ...aiScene, authorId: 'user' }]))
+            .toEqual({ title: true, summary: true });
     });
 });
