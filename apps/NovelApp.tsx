@@ -405,7 +405,7 @@ const NovelApp: React.FC = () => {
                 <div key={settingsTab} className="flex-1 overflow-y-auto px-6 py-6 pb-20"><div className="mx-auto max-w-xl space-y-7">
                     {settingsTab === '书稿' && <>
                     <section className="space-y-4">
-                        <input value={tempTitle} onChange={e => setTempTitle(e.target.value)} placeholder="书名（可留空，首段正文时自拟）" className="w-full text-2xl" font-bold bg-transparent border-b border-slate-200 py-2 outline-none focus:border-slate-800 font-serif" />
+                        <input value={tempTitle} onChange={e => setTempTitle(e.target.value)} placeholder="书名（可留空，首段正文时自拟）" className="w-full text-2xl font-bold bg-transparent border-b border-slate-200 py-2 outline-none focus:border-slate-800 font-serif" />
                         <input value={tempSubtitle} onChange={e => setTempSubtitle(e.target.value)} placeholder="卷名/副标题" className="w-full text-sm font-bold bg-transparent border-b border-slate-200 py-2 outline-none focus:border-slate-800 text-slate-600" />
                         <textarea value={tempSummary} onChange={e => setTempSummary(e.target.value)} placeholder="一句话简介（可留空，首段正文时生成）..." className="w-full h-20 bg-slate-100 rounded-xl p-3 text-sm resize-none outline-none" />
                         <p className="text-xs text-slate-400">书名和简介留空，会在首次生成正文时一起拟定；已填写的内容不会被覆盖。副标题可不填。</p>
