@@ -6,14 +6,14 @@ import type { CharacterProfile, NovelBook, UserProfile } from '../../types';
 
 const user = { name: '测试用户' } as UserProfile;
 const author = {
-    id: 'author', name: '测试作者', avatar: '', description: '', systemPrompt: '作者核心',
+    id: 'author', name: '测试作者', avatar: '', description: '', systemPrompt: '作者核心人物卡',
     mountedWorldbooks: [
         { id: 'enabled', title: '已选', constant: true, position: 1, content: 'WORLD_ENABLED' },
         { id: 'disabled', title: '未选', constant: true, position: 1, content: 'WORLD_DISABLED' },
     ],
 } as CharacterProfile;
 const reader = { id: 'reader', name: '视角人物', avatar: '', description: '' } as CharacterProfile;
-const guest = { ...reader, id: 'guest', name: '客串', mountedWorldbooks: [
+const guest = { ...reader, id: 'guest', name: '客串', description: 'ONLY_USER_REMARK', systemPrompt: 'GUEST_CARD_CORE', worldview: 'GUEST_ORIGINAL_WORLD', mountedWorldbooks: [
     { id: 'guest-book', title: '客串资料', constant: true, position: 1, content: 'WORLD_CAST_ONLY' },
 ] } as CharacterProfile;
 const characters = [author, reader, guest];
@@ -23,7 +23,7 @@ const initial: NovelBook = {
     protagonists: [{ id: 'guest-cast', name: '客串人物别名', role: '配角', description: '', sourceCharacterId: guest.id }], collaboratorIds: characterMode ? [author.id, reader.id] : [], segments: [],
     writingMode: characterMode ? 'chapters' : 'single', creativeIdentity: characterMode ? 'independent' : 'ai',
     narration: { viewpoint: { kind: 'omniscient', bias: { kind: 'character', characterId: reader.id } }, userPerson: 'third' },
-    sourceSettings: { worldbookIds: ['enabled', 'guest-book'] }, targetWords: 20000,
+    sourceSettings: { corePersona: false, worldbookIds: ['enabled', 'guest-book'] }, targetWords: 20000,
     createdAt: 1, lastActiveAt: 1,
 };
 

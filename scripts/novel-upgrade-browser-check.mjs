@@ -56,6 +56,10 @@ try {
     const characterRequest = JSON.stringify(requests[2].messages);
     assert.match(characterRequest, /WORLD_ENABLED/);
     assert.match(characterRequest, /WORLD_CAST_ONLY/);
+    assert.match(characterRequest, /GUEST_CARD_CORE/);
+    assert.match(characterRequest, /作者核心人物卡/);
+    assert.match(characterRequest, /本作品中对应的剧中人：客串人物别名/);
+    assert.doesNotMatch(characterRequest, /ONLY_USER_REMARK/);
     assert.doesNotMatch(characterRequest, /WORLD_DISABLED/);
     assert.match(characterRequest, /幕后编辑指令/);
     assert.doesNotMatch(characterRequest, /合作撰写小说/);

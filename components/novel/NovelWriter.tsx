@@ -1,5 +1,4 @@
 import { ContextBuilder } from '../../utils/context';
-import { buildBareTheaterActorContext } from '../../utils/storyTheater';
 import { selectCharacterContextMessages } from '../../utils/chatContextRange';
 import { getReliableMemoryPalaceHighWaterMark } from '../../utils/memoryPalace/highWaterMark';
 import { isVisibleChatMessage } from '../../utils/chatMessageVisibility';
@@ -11,7 +10,7 @@ import { NovelBook, NovelSegment, CharacterProfile, UserProfile } from '../../ty
 import {
     NOVEL_THEMES, GenerationOptions, extractWritingTags,
     analyzeWriterPersonaSimple, generateWriterPersonaDeep, buildNovelChapterContext, estimateNovelTokens, getNovelWorldbookMembers,
-    buildPrompt, parsePersonaMarkdown
+    buildPrompt, parsePersonaMarkdown, buildNovelCharacterCardContext
 } from '../../utils/novelUtils';
 import Modal from '../os/Modal';
 import ConfirmDialog from '../os/ConfirmDialog';
@@ -303,8 +302,8 @@ const NovelWriter: React.FC<NovelWriterProps> = ({
             const members = getNovelWorldbookMembers(activeBook, characters)
                 .map(character => ({ ...character, mountedWorldbooks: character.mountedWorldbooks?.filter(book => chosenIds.has(book.id)) }));
             const history: Array<{ role: 'user' | 'assistant' | 'system'; content: string }> = [{ role: 'user', content: prompt }];
-            const core = char && sourceSettings?.corePersona !== false ? buildBareTheaterActorContext(char) : '';
-            const relationship = char && creativeIdentity === 'collaborative' && sourceSettings?.corePersona !== false && userProfile.bio
+            const core = buildNovelCharacterCardContext(activeBook, characters);
+            const relationship = char && creativeIdentity === 'collaborative' && userProfile.bio
                 ? `共创搭档「${userProfile.name}」的资料（仅用于交流，不属于作者本人）：${userProfile.bio}`
                 : '';
             const messages = ContextBuilder.buildGroupWorldbookRequest({
