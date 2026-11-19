@@ -66,7 +66,9 @@ describe('Anthropic full-write mode', () => {
         const withoutMarker = structuredClone(out);
         withoutMarker.system = undefined;
         expect(stripCache({...withoutMarker, system: undefined})).toEqual({...native, system: undefined});
-        expect(out.system[0].text).toMatch(/request-cache-write-scope/);
+        // With no genuine user turn before the signed tool result, changing
+        // the system would invalidate a signature; the helper safely skips it.
+        expect(out).not.toHaveProperty('system');
     });
 });
 
