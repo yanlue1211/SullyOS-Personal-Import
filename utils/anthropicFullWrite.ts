@@ -68,7 +68,22 @@ function hasEarlierSignedThinking(messages: any[], lastUser: number): boolean {
 }
 
 function cacheTurnMarker(messages: any[], lastUser: number): string {
-    const prefix = JSON.stringify(messages.slice(0, lastUser + 1), (key, value) =>
+    // Only actual user turns identify this generation. Late system reminders,
+    // tool-result blocks and transient dynamic context can differ between a
+    // first request and its signed tool continuation; they must not rotate the
+    // marker and invalidate the continuation signature.
+    const userTurns = messages.slice(0, lastUser + 1).flatMap((message, index) => {
+        if (message?.role !== 'user' || !Array.isArray(message.content)) return [];
+        const content = message.content.filter((block: any) =>
+            block && (
+                block.type === 'image'
+                || block.type === 'document'
+                || (block.type === 'text' && typeof block.text === 'string'
+                    && !block.text.startsWith('<system-reminder>'))
+            ));
+        return content.length ? [{ index, content }] : [];
+    });
+    const prefix = JSON.stringify(userTurns, (key, value) =>
         key === 'cache_control' ? undefined : value);
     // Two 32-bit folds make accidental collisions over long conversations unlikely.
     // This is a cache discriminator, NOT a credential, hash of a user identity or
