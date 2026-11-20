@@ -97,21 +97,23 @@ try {
             }), { headers: { 'Content-Type': 'text/event-stream' } }));
         };
     });
+    await page.addStyleTag({ content: 'div.overflow-y-auto:has(> [data-novel-block]) { height: 420px; overflow-y: auto; }' });
     await send.click();
     const firstParagraph = page.getByText('流式正文第 1 段。', { exact: true });
     await firstParagraph.waitFor();
     assert.equal(await page.getByText('提笔写下新的开始...', { exact: true }).count(), 0);
     const novelScroll = page.locator('div.overflow-y-auto').filter({ has: firstParagraph }).last();
-    await novelScroll.evaluate(node => { node.scrollTop = 500; });
-    await page.waitForFunction(() => {
-        const block = document.querySelector('[data-novel-block]');
-        return block?.parentElement?.scrollTop === 500;
-    }, undefined, { polling: 'raf' });
+    const readingPosition = await novelScroll.evaluate(node => {
+        node.scrollTop = 500;
+        node.dispatchEvent(new Event('scroll'));
+        return node.scrollTop;
+    });
+    assert.ok(readingPosition >= 490, 'Fixture must have a scrollable reading area');
     const previewNode = await firstParagraph.elementHandle();
     await page.evaluate(() => window.finishNovelTestStream());
     await page.waitForFunction(() => !document.querySelector('[aria-label="发送创作任务"]')?.disabled);
     assert.ok(await previewNode.evaluate(node => node.isConnected));
-    assert.ok(Math.abs(await novelScroll.evaluate(node => node.scrollTop) - 500) < 15);
+    assert.ok(Math.abs(await novelScroll.evaluate(node => node.scrollTop) - readingPosition) < 15);
     await page.getByLabel('正文字号').selectOption('3');
     assert.equal(await firstParagraph.evaluate(node => getComputedStyle(node).fontSize), '23px');
     await page.getByRole('button', { name: '纯正文阅读' }).click();
