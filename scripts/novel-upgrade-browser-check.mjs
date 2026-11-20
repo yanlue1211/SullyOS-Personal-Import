@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 
 const { chromium } = await import(pathToFileURL(process.env.NOVEL_PLAYWRIGHT_MODULE).href);
@@ -75,6 +76,51 @@ try {
     assert.doesNotMatch(characterRequest, /WORLD_DISABLED/);
     assert.match(characterRequest, /幕后编辑指令/);
     assert.doesNotMatch(characterRequest, /合作撰写小说/);
+    await page.goto(`${origin}/test/fixtures/novel-upgrade.html`);
+    await page.evaluate(() => {
+        const originalFetch = window.fetch;
+        window.fetch = (url, init) => {
+            if (!String(url).includes('/novel-test-main/v1/chat/completions')) return originalFetch(url, init);
+            const encoder = new TextEncoder();
+            const event = content => encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`);
+            const body = Array.from({ length: 80 }, (_, index) => `流式正文第 ${index + 1} 段。`).join('\n\n');
+            const json = JSON.stringify({ writer: { content: body } });
+            return Promise.resolve(new Response(new ReadableStream({
+                start(controller) {
+                    controller.enqueue(event(json.slice(0, -3)));
+                    window.finishNovelTestStream = () => {
+                        controller.enqueue(event(json.slice(-3)));
+                        controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+                        controller.close();
+                    };
+                },
+            }), { headers: { 'Content-Type': 'text/event-stream' } }));
+        };
+    });
+    await send.click();
+    const firstParagraph = page.getByText('流式正文第 1 段。', { exact: true });
+    await firstParagraph.waitFor();
+    assert.equal(await page.getByText('提笔写下新的开始...', { exact: true }).count(), 0);
+    const novelScroll = page.locator('div.overflow-y-auto').filter({ has: firstParagraph }).last();
+    await novelScroll.evaluate(node => { node.scrollTop = 500; });
+    await page.waitForFunction(() => {
+        const block = document.querySelector('[data-novel-block]');
+        return block?.parentElement?.scrollTop === 500;
+    }, undefined, { polling: 'raf' });
+    const previewNode = await firstParagraph.elementHandle();
+    await page.evaluate(() => window.finishNovelTestStream());
+    await page.waitForFunction(() => !document.querySelector('[aria-label="发送创作任务"]')?.disabled);
+    assert.ok(await previewNode.evaluate(node => node.isConnected));
+    assert.ok(Math.abs(await novelScroll.evaluate(node => node.scrollTop) - 500) < 15);
+    await page.getByLabel('正文字号').selectOption('3');
+    assert.equal(await firstParagraph.evaluate(node => getComputedStyle(node).fontSize), '23px');
+    await page.getByRole('button', { name: '纯正文阅读' }).click();
+    assert.equal(await firstParagraph.evaluate(node => getComputedStyle(node).fontSize), '23px');
+    const downloadPromise = page.waitForEvent('download');
+    await page.getByRole('button', { name: '导出 TXT' }).click();
+    const download = await downloadPromise;
+    assert.match(download.suggestedFilename(), /\.txt$/);
+    assert.match(await readFile(await download.path(), 'utf8'), /流式正文第 1 段。[\s\S]*流式正文第 80 段。/);
     assert.deepEqual(pageErrors, []);
     console.log('PASS: mobile writer, one main call, truncated stream recovery, local input, single-work completion, summary failure without fallback, and worldbook selection');
 } finally {
