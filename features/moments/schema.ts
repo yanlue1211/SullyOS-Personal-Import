@@ -172,6 +172,8 @@ export interface Activity {
   lateChatNight?: string;
   lateChatAllowed?: boolean;
   exceptionNight?: string;
+  /** Daily suppression of repeated soft-budget notices (no effect on scheduling). */
+  lastTargetNoticeDay?: string;
 }
 export interface Call {
   id: string;

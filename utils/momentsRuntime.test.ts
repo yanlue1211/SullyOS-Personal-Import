@@ -1,5 +1,6 @@
 import { beforeEach, it, expect, vi } from "vitest";
 import { DB, openDB } from "./db";
+import { getLocalDateKey } from "./localDate";
 import { momentsEngagement } from "../features/moments/engagement";
 import { safeFetchJson } from "./safeApi";
 import {
@@ -597,4 +598,74 @@ it('a mixed round delivers only the new comment, without an unrelated read recei
  expect(cards).toHaveLength(1);expect(cards[0].content).toContain('本轮真实发出的评论');
  expect(cards[0].content).not.toContain('只浏览的旧动态');expect(cards[0].content).not.toContain('仅阅读的来信');
  expect((await getRow<any>('snapshot:a')).text).toContain('仅阅读的来信');
+});
+
+const prepareAutomaticBudget = async (target=1, limit=3) => {
+  await saveConfig(c => {
+    c.target=target;
+    c.limit=limit;
+    c.friends=[["a","b"]];
+    c.participants.a.habits.hours=Array.from({length:24},(_,i)=>i);
+  });
+  await transaction(async s => {
+    s.put({
+      id:"activity:a",kind:"activity",owner:"a",at:Date.now(),
+      nextAt:0,postDue:Date.now()+86400000,lastPost:0,
+    });
+  },true);
+};
+const seedAutomaticCall = async (id:string, phase:Call["phase"]) =>
+  transaction(async s => {
+    s.put({id,kind:"call",owner:"b",at:Date.now()-1000,
+      day:getLocalDateKey(new Date()),automatic:true,
+      phase,revision:1,until:0} satisfies Call);
+  },true);
+
+it("failed API attempts still use hard safety budget, but do not exhaust the soft success target", async () => {
+  await prepareAutomaticBudget();
+  await seedAutomaticCall("failed-auto","failed");
+  await transaction(async s=>markSeen(s,await getConfig(s),"a",post),true);
+  const ordinary=await publish("b","乙",{text:"又是一个普通日常",theme:"普通日常",
+    media:[],visibility:{mode:"all",ids:[]}});
+  const task=await reserveActivity("a",true);
+  expect(task).toBeDefined();
+  expect(task?.posts.map(x=>x.id)).toContain(ordinary.id);
+  expect((await rows<Call>("call")).filter(x=>x.automatic && x.phase !== "reserved")).toHaveLength(1);
+});
+
+it("after 21-like soft target, a new user post takes precedence over a backlog of ordinary friend posts", async () => {
+  await prepareAutomaticBudget();
+  await seedAutomaticCall("success-auto","success");
+  await transaction(async s=>markSeen(s,await getConfig(s),"a",post),true);
+  for(let i=0;i<6;i++)
+    await publish("b","乙",{text:"普通帖子"+i,theme:"普通帖子"+i,
+      media:[],visibility:{mode:"all",ids:[]}});
+  const userNew=await publish("user","小雨",{text:"我刚发的最新动态",theme:"今天",
+    media:[],visibility:{mode:"all",ids:[]}});
+  const task=await reserveActivity("a",true);
+  expect(task).toBeDefined();
+  expect(task?.posts.some(p=>p.id===userNew.id)).toBe(true);
+  expect(task?.posts[0]?.id).toBe(userNew.id);
+  expect(task?.posts.length).toBeLessThanOrEqual(5);
+});
+
+it("a direct new user comment also remains eligible above soft target, with no immediate forced response",async()=>{
+  await prepareAutomaticBudget();
+  await seedAutomaticCall("success-auto","success");
+  await transaction(async s=>markSeen(s,await getConfig(s),"a",post),true);
+  const own=await publish("a","阿青",{text:"我发的一条动态",theme:"私人的工作",
+    media:[],visibility:{mode:"all",ids:[]}});
+  await interact("user","小雨",own.id,{kind:"comment",text:"我想问问你今天怎么样"});
+  const task=await reserveActivity("a",true);
+  expect(task?.posts.some(p=>p.id===own.id)).toBe(true);
+  expect(task?.review?.[own.id].directCommentIds).toHaveLength(1);
+  // Reservation alone must never trigger an extra provider request.
+  expect(safeFetchJson).not.toHaveBeenCalled();
+});
+
+it("reaching the hard limit stops even priority user events and failed attempts count for safety",async()=>{
+  await prepareAutomaticBudget(1,3);
+  for(let i=0;i<3;i++)await seedAutomaticCall("failed-"+i,"failed");
+  expect(await reserveActivity("a",true)).toBeUndefined();
+  expect((await rows<Call>("call")).filter(x=>x.automatic && x.phase === "failed")).toHaveLength(3);
 });
