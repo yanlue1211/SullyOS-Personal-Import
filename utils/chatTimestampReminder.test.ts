@@ -6,14 +6,16 @@ it('puts raw-history time calibration in the uncached final reminder rather than
  const p=await build(true);
  expect(p.recencyTail).toContain('未归档的原始聊天');
  expect(p.recencyTail).toContain('不能把发言日期当成事件日期');
- expect(p.recencyTail).toContain('12日凌晨1点还没睡');
- expect(p.recencyTail).toContain('10日凌晨4点是前天');
- expect(p.recencyTail).toContain('11日凌晨3点是昨天');
- expect(p.recencyTail).toContain('9日晚上9点可和10日凌晨4点一起称为前天那晚');
- expect(p.recencyTail).toContain('10日晚上9点按日期也是前天晚上');
- expect(p.recencyTail).toContain('12日下午2点再提12日凌晨1点');
- expect(p.recencyTail).toContain('昨晚/昨天晚上');
- expect(p.recencyTail).toContain('睡醒情况顺延');
+ expect(p.recencyTail).toContain('区分两种表达');
+ expect(p.recencyTail).toContain('零点不强行切断');
+ expect(p.recencyTail).toContain('10日凌晨4点是前天凌晨');
+ expect(p.recencyTail).toContain('11日凌晨3点是昨天凌晨');
+ expect(p.recencyTail).toContain('9日晚上9点可与10日凌晨4点视作前天那晚');
+ expect(p.recencyTail).toContain('10日晚上9点按日期是前天晚上');
+ expect(p.recencyTail).toContain('12日下午2点，再提12日凌晨1点的事可称昨晚');
+ expect(p.recencyTail).toContain('不需要额外判断对方几点睡、几点醒');
+ expect(p.recencyTail).not.toContain('睡醒状态');
+ expect(p.recencyTail).not.toContain('尚未睡觉');
  expect(p.stable).not.toContain('【回复前核对时间】');
 });
 it('respects disabled real-time awareness and separate application rules',async()=>{
