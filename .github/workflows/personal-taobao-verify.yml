@@ -1,0 +1,35 @@
+name: Personal Taobao mobile storefront and cart verification
+
+on:
+  pull_request:
+    branches:
+      - personal/audio-listening
+    paths:
+      - 'apps/TaobaoStorefront.tsx'
+      - 'apps/taobao.css'
+      - 'apps/CommerceApp.tsx'
+      - 'utils/personalCommerce.ts'
+      - 'utils/personalCommerce.test.ts'
+      - '.github/workflows/personal-taobao-verify.yml'
+      - 'personal-maintenance/更新日志.md'
+  workflow_dispatch:
+
+jobs:
+  taobao:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Commerce cart and card regression
+        run: pnpm exec vitest run utils/personalCommerce.test.ts
+      - name: Production build
+        run: NODE_OPTIONS=--max-old-space-size=4096 pnpm run build

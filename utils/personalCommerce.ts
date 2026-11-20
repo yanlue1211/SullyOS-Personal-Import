@@ -1,13 +1,15 @@
 import { DB, openDB } from './db';
 export type CommerceKind = 'taobao' | 'meituan';
 export interface CommerceProduct { id: string; kind: CommerceKind; title: string; shop: string; detail: string; price: number; deliveryMinutes?: number; shopId?: string; category?: string; }
-export interface CommerceOrder { id: string; charId: string; charName: string; userName: string; product: CommerceProduct; buyer: 'user'|'char'; recipient: 'user'|'char'; createdAt: number; eta: number; autonomous: boolean; requestId?: string; createdNotified?: boolean; deliveredNotified?: boolean; }
+export interface CommerceOrder { id: string; charId: string; charName: string; userName: string; product: CommerceProduct; buyer: 'user'|'char'; recipient: 'user'|'char'; createdAt: number; eta: number; autonomous: boolean; quantity?: number; requestId?: string; createdNotified?: boolean; deliveredNotified?: boolean; }
 export interface CommerceShop { id:string; kind:CommerceKind; name:string; category:string; description:string; }
-interface State { products: CommerceProduct[]; orders: CommerceOrder[]; shops:CommerceShop[]; members:Record<CommerceKind,string[]>; preferences:Record<CommerceKind,string>; }
+export interface TaobaoCartLine { productId:string; quantity:number; }
+interface State { products: CommerceProduct[]; orders: CommerceOrder[]; shops:CommerceShop[]; members:Record<CommerceKind,string[]>; preferences:Record<CommerceKind,string>; cart:TaobaoCartLine[]; }
 const KEY = 'personal_commerce_v1';
-const empty = (): State => ({products: [], orders: [], shops:[], members:{taobao:[],meituan:[]},preferences:{taobao:'',meituan:''}});
+const empty = (): State => ({products: [], orders: [], shops:[], members:{taobao:[],meituan:[]},preferences:{taobao:'',meituan:''},cart:[]});
 function decode(raw: unknown): State { if (!raw) return empty(); const s = typeof raw === 'string' ? JSON.parse(raw) : raw; if (!Array.isArray(s.products)||!Array.isArray(s.orders)) throw new Error('订单数据无法读取，请保留备份'); s.members={taobao:Array.isArray(s.members?.taobao)?s.members.taobao:[],meituan:Array.isArray(s.members?.meituan)?s.members.meituan:[]};
  s.preferences={taobao:typeof s.preferences?.taobao==='string'?s.preferences.taobao:'',meituan:typeof s.preferences?.meituan==='string'?s.preferences.meituan:''};
+ s.cart=Array.isArray(s.cart)?s.cart.filter((v:any)=>v&&typeof v.productId==='string'&&Number.isInteger(v.quantity)&&v.quantity>0&&v.quantity<=99).slice(0,150):[];
  if(!Array.isArray(s.shops)){const byName=new Map<string,CommerceShop>();for(const product of s.products){const key=`${product.kind}:${product.shop}`;if(!byName.has(key))byName.set(key,{id:`legacy:${product.kind}:${product.shop}`,kind:product.kind,name:product.shop,category:product.category||'精选店铺',description:''});product.shopId=byName.get(key)!.id;}s.shops=[...byName.values()];}
  return s; }
 export const readCommerce = async (): Promise<State> => decode(await DB.getAsset(KEY));
@@ -68,6 +70,68 @@ export async function createCommerceOrder(input:{charId:string;charName:string;u
  try { await publishOrderCard(order,false); await markNotified(order.id, false); notify(); } catch { /* Persisted outbox is retried by reconcileCommerce. */ }
  return order;
 }
+/** Cart lines live in the existing commerce asset, so old backups/shops/orders remain intact. */
+export async function addTaobaoCartItem(productId:string,quantity=1){
+ if(!Number.isInteger(quantity)||quantity<1||quantity>99)throw new Error('购物数量需要在1到99之间');
+ await mutate(s=>{
+  if(!s.products.some(p=>p.kind==='taobao'&&p.id===productId))throw new Error('商品已下架，请刷新店铺');
+  const line=s.cart.find(v=>v.productId===productId);
+  if(line)line.quantity=Math.min(99,line.quantity+quantity);
+  else s.cart.push({productId,quantity});
+ });notify();
+}
+export async function setTaobaoCartQuantity(productId:string,quantity:number){
+ if(!Number.isInteger(quantity)||quantity<0||quantity>99)throw new Error('商品数量无效');
+ await mutate(s=>{
+  const idx=s.cart.findIndex(v=>v.productId===productId);
+  if(idx<0)return;
+  if(quantity===0)s.cart.splice(idx,1);
+  else s.cart[idx].quantity=quantity;
+ });notify();
+}
+/** A selected cart checkout is one atomic asset transaction; outbox retries failed cards. */
+export async function checkoutTaobaoProducts(input:{
+ charId:string;charName:string;userName:string;buyer:'user'|'char';recipient:'user'|'char';
+ lines:TaobaoCartLine[];removeFromCart:boolean;
+},now=Date.now()):Promise<CommerceOrder[]>{
+ if(!input.lines.length||input.lines.length>40)throw new Error('请选择要结算的商品');
+ const ids=new Set<string>();
+ const orders=await mutate(s=>{
+  if(!s.members.taobao.includes(input.charId))throw new Error('该角色尚未接入淘宝');
+  const created:CommerceOrder[]=[];
+  for(const line of input.lines){
+   if(!line||typeof line.productId!=='string'||!Number.isInteger(line.quantity)||line.quantity<1||line.quantity>99||ids.has(line.productId))
+    throw new Error('购物车商品或数量不正确');
+   ids.add(line.productId);
+   const product=s.products.find(p=>p.id===line.productId&&p.kind==='taobao');
+   if(!product)throw new Error('商品已下架，请先从购物车移除失效商品');
+   if(input.removeFromCart){
+    const saved=s.cart.find(v=>v.productId===line.productId);
+    if(!saved||saved.quantity<line.quantity)throw new Error('购物车数量已变化，请重新结算');
+   }
+   created.push({
+    id:crypto.randomUUID(),charId:input.charId,charName:input.charName,userName:input.userName,
+    product:{...product},buyer:input.buyer,recipient:input.recipient,quantity:line.quantity,
+    createdAt:now,eta:now+(product.deliveryMinutes??4320)*60000,autonomous:false,
+   });
+  }
+  s.orders.push(...created);
+  if(input.removeFromCart){
+   for(const line of input.lines){
+    const saved=s.cart.find(v=>v.productId===line.productId)!;
+    saved.quantity-=line.quantity;
+   }
+   s.cart=s.cart.filter(v=>v.quantity>0);
+  }
+  return created;
+ });
+ for(const order of orders){
+  try{await publishOrderCard(order,false);await markNotified(order.id,false);}
+  catch{/* Keep the new order in durable outbox for reconcileCommerce. */}
+ }
+ notify();
+ return orders;
+}
 function card(order:CommerceOrder,delivered:boolean){return {type:'commerce_order',order,delivered};}
 async function publishOrderCard(order:CommerceOrder,delivered:boolean){const payload=card(order,delivered);await DB.saveMessageOnce(`commerce:${order.id}:${delivered?'delivered':'created'}`,{charId:order.charId,role:'system',type:'score_card',content:JSON.stringify(payload),timestamp:delivered?order.eta:order.createdAt,metadata:{scoreCard:payload,source:'personal-commerce'}});}
 const notify=()=>{if(typeof window!=='undefined')window.dispatchEvent(new Event('commerce-updated'));};
@@ -78,7 +142,7 @@ export async function reconcileCommerce(now=Date.now()){
  if(scanning)return;scanning=true;
  try{const {orders}=await readCommerce();let changed=false;for(const order of orders){if(!order.createdNotified){await publishOrderCard(order,false);await markNotified(order.id,false);changed=true;}if(now>=order.eta&&!order.deliveredNotified){await publishOrderCard(order,true);await markNotified(order.id,true);changed=true;}}if(changed)notify();}finally{scanning=false;}
 }
-export function orderText(o:CommerceOrder,delivered=false){const who=(v:'user'|'char')=>v==='char'?o.charName:o.userName;return `[${o.product.kind==='meituan'?'外卖':'购物'}订单] ${who(o.buyer)}给${who(o.recipient)}买了${o.product.title}，¥${o.product.price.toFixed(2)}。${delivered?`${who(o.recipient)}已收到`:`状态：${orderStatus(o)}；预计送达：${new Date(o.eta).toLocaleString()}`}。`;}
+export function orderText(o:CommerceOrder,delivered=false){const who=(v:'user'|'char')=>v==='char'?o.charName:o.userName;const quantity=o.quantity||1;return `[${o.product.kind==='meituan'?'外卖':'购物'}订单] ${who(o.buyer)}给${who(o.recipient)}买了${o.product.title}${quantity>1?` ×${quantity}`:''}，¥${(o.product.price*quantity).toFixed(2)}。${delivered?`${who(o.recipient)}已收到`:`状态：${orderStatus(o)}；预计送达：${new Date(o.eta).toLocaleString()}`}。`;}
 export async function commerceContext(charId:string){const {orders,products,members}=await readCommerce();const pending=orders.filter(o=>o.charId===charId&&o.eta>Date.now());const blocked=purchaseBlock(orders,charId,Date.now());const available=products.filter(p=>members[p.kind].includes(charId));return {
  pending:pending.length?`\n【生活背景·待收货，仅知晓即可】\n${pending.map(o=>orderText(o)).join('\n')}\n无需每轮提及、查询或关心，只有话题相关或到达时自然回应。\n`:'',
  guide:available.length?`\n【生活购物权限】你可在${[...new Set(available.map(p=>p.kind==='meituan'?'美团':'淘宝'))].join('、')}给用户或自己买东西。没有具体契机不必买，也不能捏造已下单。${blocked?`给用户的主动礼物暂停：${blocked}；给自己买不受此限制。`:''}决定逛商城时先单独一行输出 <逛商城>{"query":"想找的商品关键词","kind":"taobao"}</逛商城>（kind 可为 taobao 或 meituan，也可省略；可附 shopId、offset 翻页）。先不附购物正文或心声。系统随后提供相关商品，再用 <购物>{"productId":"查询到的有效ID","recipient":"user"}</购物> 下单；recipient 可为 user 或 char。一轮最多一单，系统创建成功才算购买。\n`:'',
