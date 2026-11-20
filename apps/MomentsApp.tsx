@@ -1116,16 +1116,19 @@ export default function MomentsApp() {
               <h2>巡检状态</h2>
               <p>
                 {config.enabled
-                  ? "已开启 · 页面可见运行时每五分钟本地检查"
+                  ? "已开启 · 网页仍在运行时约每五分钟检查一次"
                   : "已关闭"}
               </p>
               <p>
                 今日自动尝试{" "}
-                {
-                  calls.filter((c) => c.automatic && c.phase !== "reserved")
-                    .length
-                }{" "}
-                / 上限 {config.limit} · 参考目标 {config.target}
+                {calls.filter(c => c.automatic && c.phase !== "reserved").length}{" "}
+                / 硬上限 {config.limit}
+              </p>
+              <p>
+                今日成功活动{" "}
+                {calls.filter(c => c.automatic && c.phase === "success").length}{" "}
+                / 参考目标 {config.target}
+                {" "}· 失败或未提交 {calls.filter(c => c.automatic && c.phase === "failed").length} 次
               </p>
               <p>
                 今日手动社交请求{" "}
@@ -1136,7 +1139,7 @@ export default function MomentsApp() {
                 次
               </p>
               <p className="mm-hint">
-                失败请求也可能产生提供方用量；媒体识别、习惯评估另见系统API日志。恢复页面不补发离线活动。
+                失败或未收到响应的请求也可能已到达提供方，仍计入每日30次硬上限；参考目标只按成功活动计算。达到参考目标后，你的新动态和直接发给角色的新评论仍可使用剩余额度。媒体识别、习惯评估另见系统API日志；浏览器后台被冻结时无法保证准时运行，不补发离线活动。
               </p>
             </section>
             <section>
