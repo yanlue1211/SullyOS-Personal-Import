@@ -7,6 +7,7 @@ import {
   type CommerceKind, type CommerceProduct, type CommerceOrder, type CommerceShop,
 } from '../utils/personalCommerce';
 import OrderCard from '../components/commerce/OrderCard';
+import TaobaoStorefront from './TaobaoStorefront';
 
 function Commerce({ kind }: { kind: CommerceKind }) {
   const { characters, userProfile, apiConfig, closeApp, addToast } = useOS();
@@ -147,5 +148,5 @@ function Commerce({ kind }: { kind: CommerceKind }) {
     </section></div>}
   </div>;
 }
-export default function TaobaoApp() { return <Commerce kind="taobao" />; }
+export default function TaobaoApp() { return <TaobaoStorefront />; }
 export function MeituanApp() { return <Commerce kind="meituan" />; }
