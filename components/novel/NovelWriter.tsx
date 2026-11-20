@@ -180,6 +180,7 @@ const NovelWriter: React.FC<NovelWriterProps> = ({
         } catch { return 1; }
     });
     const layout = layouts[layoutIndex];
+    const streamSavePosition = useRef<{ id: string; scrollTop: number; blockTop?: number } | null>(null);
     const layoutAnchor = useRef<{ id: string; offset: number; height: number } | null>(null);
     const [lastTokenUsage, setLastTokenUsage] = useState<number | null>(null);
     const [isStyleExpanded, setIsStyleExpanded] = useState(false);
@@ -222,9 +223,20 @@ const NovelWriter: React.FC<NovelWriterProps> = ({
     }, [activeBook.segments]);
 
     useLayoutEffect(() => {
-        if (scrollRef.current && followTail.current && !isEditModalOpen) {
-            scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+        const node = scrollRef.current;
+        if (!node || isEditModalOpen) return;
+        const saved = streamSavePosition.current;
+        if (saved && segments.some(segment => segment.id === saved.id)) {
+            streamSavePosition.current = null;
+            if (!followTail.current) {
+                const block = node.querySelector<HTMLElement>(`[data-novel-block="${saved.id}"]`);
+                node.scrollTop = block && saved.blockTop !== undefined
+                    ? block.offsetTop - saved.blockTop + saved.scrollTop
+                    : saved.scrollTop;
+                return;
+            }
         }
+        if (followTail.current) node.scrollTop = node.scrollHeight;
     }, [segments, isTyping, isEditModalOpen, streamPreview]);
 
     useLayoutEffect(() => {
@@ -332,6 +344,7 @@ const NovelWriter: React.FC<NovelWriterProps> = ({
 
         const storyId = `seg-${Date.now()}-w`;
         streamStoryId.current = storyId;
+        streamSavePosition.current = null;
         setIsTyping(true);
         setLastTokenUsage(null);
         let received = '';
@@ -339,6 +352,11 @@ const NovelWriter: React.FC<NovelWriterProps> = ({
             const next = [...contextSegments, ...results];
             const metaPatch = results.some(segment => segment.type === 'story' && segment.authorId !== 'user')
                 ? getNovelAutoBookMetaPatch(activeBook, genOptions, contextSegments, metadata) : {};
+            const node = scrollRef.current;
+            const previewBlock = node?.querySelector<HTMLElement>(`[data-novel-block="${storyId}"]`);
+            if (node && previewBlock && !followTail.current && results.some(segment => segment.id === storyId)) {
+                streamSavePosition.current = { id: storyId, scrollTop: node.scrollTop, blockTop: previewBlock.offsetTop };
+            }
             await updateNovel(activeBook.id, { segments: next, ...metaPatch, ...(activeBook.completion ? { completion: { ...activeBook.completion, stale: true } } : {}) });
             setSegments(next);
         };

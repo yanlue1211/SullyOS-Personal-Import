@@ -97,7 +97,7 @@ try {
             }), { headers: { 'Content-Type': 'text/event-stream' } }));
         };
     });
-    await page.addStyleTag({ content: 'div.overflow-y-auto:has(> [data-novel-block]) { height: 420px; overflow-y: auto; }' });
+    await page.addStyleTag({ content: 'div.overflow-y-auto:has(> [data-novel-block]) { height: 420px; overflow-y: auto; } [data-novel-block] { position: relative; } [data-novel-block] > .absolute { position: absolute; }' });
     await send.click();
     const firstParagraph = page.getByText('流式正文第 1 段。', { exact: true });
     await firstParagraph.waitFor();
@@ -113,7 +113,8 @@ try {
     await page.evaluate(() => window.finishNovelTestStream());
     await page.waitForFunction(() => !document.querySelector('[aria-label="发送创作任务"]')?.disabled);
     assert.ok(await previewNode.evaluate(node => node.isConnected));
-    assert.ok(Math.abs(await novelScroll.evaluate(node => node.scrollTop) - readingPosition) < 15);
+    const finalPosition = await novelScroll.evaluate(node => node.scrollTop);
+    assert.ok(Math.abs(finalPosition - readingPosition) < 15, `Reading position moved from ${readingPosition} to ${finalPosition}`);
     await page.getByLabel('正文字号').selectOption('3');
     assert.equal(await firstParagraph.evaluate(node => getComputedStyle(node).fontSize), '23px');
     await page.getByRole('button', { name: '纯正文阅读' }).click();
