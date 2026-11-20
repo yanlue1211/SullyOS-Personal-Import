@@ -5,7 +5,7 @@ import { isVisibleChatMessage } from '../../utils/chatMessageVisibility';
 import { formatMessageForPrompt } from '../../utils/messageFormat';
 import { retrieveMemories } from '../../utils/memoryPalace/pipeline';
 
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useMemo } from 'react';
 import { NovelBook, NovelSegment, CharacterProfile, UserProfile } from '../../types';
 import {
     NOVEL_THEMES, GenerationOptions, extractWritingTags,
@@ -48,6 +48,22 @@ interface PersonaPanelProps {
     addToast: (msg: string, type: 'success' | 'error' | 'info') => void;
     apiConfig: any;
     updateCharacter: (id: string, updates: Partial<CharacterProfile>) => void;
+}
+
+const layouts = [
+    { label: '小', fontSize: 15, lineHeight: 1.65, gap: 12 },
+    { label: '默认', fontSize: 17, lineHeight: 1.85, gap: 16 },
+    { label: '大', fontSize: 20, lineHeight: 1.95, gap: 20 },
+    { label: '特大', fontSize: 23, lineHeight: 2, gap: 24 },
+];
+const layoutKey = 'sullyos.novel.layout';
+
+function NovelBody({ text, layout }: { text: string; layout: typeof layouts[number] }) {
+    return <div className="whitespace-pre-wrap break-words" style={{ fontSize: layout.fontSize, lineHeight: layout.lineHeight }}>
+        {text.split(/\r?\n(?:[^\S\r\n]*\r?\n)+/).map((paragraph, index) => (
+            <p key={index} style={{ marginTop: index ? layout.gap : 0 }}>{paragraph}</p>
+        ))}
+    </div>;
 }
 
 const PersonaPanel: React.FC<PersonaPanelProps> = ({
@@ -156,6 +172,15 @@ const NovelWriter: React.FC<NovelWriterProps> = ({
     const [segments, setSegments] = useState<NovelSegment[]>(activeBook.segments);
     const [streamPreview, setStreamPreview] = useState<NovelStreamPreview | null>(null);
     const followTail = useRef(true);
+    const streamStoryId = useRef('');
+    const [layoutIndex, setLayoutIndex] = useState(() => {
+        try {
+            const saved = Number(localStorage.getItem(layoutKey) ?? 1);
+            return layouts[saved] ? saved : 1;
+        } catch { return 1; }
+    });
+    const layout = layouts[layoutIndex];
+    const layoutAnchor = useRef<{ id: string; offset: number; height: number } | null>(null);
     const [lastTokenUsage, setLastTokenUsage] = useState<number | null>(null);
     const [isStyleExpanded, setIsStyleExpanded] = useState(false);
 
@@ -196,11 +221,39 @@ const NovelWriter: React.FC<NovelWriterProps> = ({
         setSegments(activeBook.segments);
     }, [activeBook.segments]);
 
-    useEffect(() => {
+    useLayoutEffect(() => {
         if (scrollRef.current && followTail.current && !isEditModalOpen) {
             scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
         }
     }, [segments, isTyping, isEditModalOpen, streamPreview]);
+
+    useLayoutEffect(() => {
+        const node = scrollRef.current;
+        const anchor = layoutAnchor.current;
+        layoutAnchor.current = null;
+        if (!node || !anchor) return;
+        const block = Array.from(node.querySelectorAll<HTMLElement>('[data-novel-block]'))
+            .find(element => element.dataset.novelBlock === anchor.id);
+        if (!block) return;
+        const bounds = block.getBoundingClientRect();
+        const offset = anchor.offset < 0 ? anchor.offset : anchor.offset * bounds.height / anchor.height;
+        node.scrollTop += bounds.top - node.getBoundingClientRect().top + offset;
+    }, [layoutIndex]);
+
+    const changeLayout = (index: number) => {
+        if (index === layoutIndex) return;
+        const node = scrollRef.current;
+        if (node) {
+            const top = node.getBoundingClientRect().top;
+            const block = Array.from(node.querySelectorAll<HTMLElement>('[data-novel-block]'))
+                .find(element => element.getBoundingClientRect().bottom > top);
+            if (block?.dataset.novelBlock && block.offsetHeight > 0) {
+                layoutAnchor.current = { id: block.dataset.novelBlock, offset: top - block.getBoundingClientRect().top, height: block.offsetHeight };
+            }
+        }
+        setLayoutIndex(index);
+        try { localStorage.setItem(layoutKey, String(index)); } catch { /* Applies for this session. */ }
+    };
 
     const chapterCount = useMemo(() => segments.filter(s => s.focus === 'chapter_summary').length + 1, [segments]);
     const targetChar = isAi ? undefined : collaborators.find(c => c.id === targetCharId) || collaborators[0];
@@ -214,6 +267,13 @@ const NovelWriter: React.FC<NovelWriterProps> = ({
         }
         return segments.slice(lastSummaryIdx + 1);
     }, [segments]);
+
+    const hasStoryPreview = Boolean(genOptions.write && streamPreview?.body && !segments.some(segment => segment.id === streamStoryId.current));
+    const renderedSegments = hasStoryPreview && streamPreview ? [...segments, {
+        id: streamStoryId.current, type: 'story' as const, authorId: targetChar?.id || 'ai',
+        content: streamPreview.body, timestamp: 0,
+    }] : segments;
+    const renderedCurrentSegments = hasStoryPreview ? [...displaySegments, renderedSegments[renderedSegments.length - 1]] : displaySegments;
 
     const historicalSummaries = useMemo(() => {
         return segments.filter(s => s.focus === 'chapter_summary');
@@ -270,6 +330,8 @@ const NovelWriter: React.FC<NovelWriterProps> = ({
 
     const runGeneration = async (char: CharacterProfile | undefined, userPrompt: string, contextSegments: NovelSegment[]) => {
 
+        const storyId = `seg-${Date.now()}-w`;
+        streamStoryId.current = storyId;
         setIsTyping(true);
         setLastTokenUsage(null);
         let received = '';
@@ -376,7 +438,7 @@ const NovelWriter: React.FC<NovelWriterProps> = ({
                 newAiSegments.push({ id: `seg-${baseTime}-a`, role: 'analyst', type: 'analysis', authorId: char?.id || 'ai', creativeIdentity, content: res.analysis.critique || JSON.stringify(res.analysis), focus: res.analysis.focus, meta: { reaction: res.analysis.reaction }, timestamp: baseTime + 1 });
             }
             if (genOptions.write && typeof res.writer?.content === 'string' && res.writer.content.trim()) {
-                newAiSegments.push({ id: `seg-${baseTime}-w`, role: 'writer', type: 'story', authorId: char?.id || 'ai', creativeIdentity, content: res.writer.content, meta: { ...(res.meta || {}), technique: res.writer.technique, mood: res.writer.mood }, timestamp: baseTime + 2 });
+                newAiSegments.push({ id: storyId, role: 'writer', type: 'story', authorId: char?.id || 'ai', creativeIdentity, content: res.writer.content, meta: { ...(res.meta || {}), technique: res.writer.technique, mood: res.writer.mood }, timestamp: baseTime + 2 });
             }
             if (genOptions.comment && typeof res.comment?.content === 'string' && res.comment.content.trim()) {
                 newAiSegments.push({ id: `seg-${baseTime}-c`, role: 'commenter', type: 'discussion', authorId: char?.id || 'ai', creativeIdentity, content: res.comment.content, timestamp: baseTime + 3 });
@@ -389,7 +451,7 @@ const NovelWriter: React.FC<NovelWriterProps> = ({
             const partial = preview?.body || '';
             if (partial.trim()) {
                 await appendResults([{
-                    id: `seg-${Date.now()}-partial`, role: 'writer', type: 'story',
+                    id: storyId, role: 'writer', type: 'story',
                     authorId: char?.id || 'ai', creativeIdentity, content: partial, timestamp: Date.now(),
                 }], preview?.bookMeta);
                 addToast('已保留收到的正文，可以手动继续写。', 'info');
@@ -597,6 +659,27 @@ ${kind === 'work' ? '同时涵盖主线与支线、主要人物最终结局、�
         setSelectedChapterIds(allChaptersSelected ? new Set() : new Set(historicalSummaries.map(s => s.id)));
     };
 
+    const downloadTxt = () => {
+        const chapters = [...chapterContentList, { title: `第 ${chapterCount} 章`, segments: displaySegments }];
+        const text = chapters.flatMap(chapter => {
+            const body = chapter.segments.filter(segment => segment.type === 'story').map(segment => segment.content).join('\n\n');
+            return body.trim() ? [isSingle ? body : `${chapter.title}\n\n${body}`] : [];
+        }).join('\n\n');
+        if (!text) {
+            addToast('当前作品还没有正文', 'info');
+            return;
+        }
+        const title = activeBook.title?.trim() || '待命名书稿';
+        const link = document.createElement('a');
+        const url = URL.createObjectURL(new Blob(['\uFEFF', title, '\n\n', text], { type: 'text/plain;charset=utf-8' }));
+        link.href = url;
+        link.download = title.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_') + '.txt';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    };
+
     const openForwardModal = (scope: typeof shareScope, paragraph?: NovelSegment) => {
         if (scope === 'chapters' && !selectedChapterIds.size) return;
         setShareScope(scope);
@@ -736,6 +819,12 @@ ${kind === 'work' ? '同时涵盖主线与支线、主要人物最终结局、�
                     ? <button onClick={() => updateNovel(activeBook.id, { completion: { ...activeBook.completion!, completedAt: undefined } })}>重新开启作品</button>
                     : <button disabled={isTyping || isGeneratingSummary} onClick={() => handleGenerateSummary('work')}>完结作品</button>}
                 <button onClick={() => openForwardModal('work')}>分享全文</button>
+                <button onClick={downloadTxt}>导出 TXT</button>
+                <label className="inline-flex items-center gap-1">排版
+                    <select aria-label="正文字号" value={layoutIndex} onChange={event => changeLayout(Number(event.target.value))} className="bg-transparent">
+                        {layouts.map((preset, index) => <option key={preset.label} value={index}>{preset.label}</option>)}
+                    </select>
+                </label>
                 {!isSingle && <button onClick={() => openForwardModal('current')}>分享当前章</button>}
                 {activeBook.completion?.stale && <span>全文总结可能已过期</span>}
             </div>
@@ -743,7 +832,7 @@ ${kind === 'work' ? '同时涵盖主线与支线、主要人物最终结局、�
             {/* Content Stream */}
             <div className="flex-1 overflow-y-auto p-4 space-y-6 no-scrollbar pb-40" ref={scrollRef} onScroll={event => {
                 const node = event.currentTarget;
-                followTail.current = node.scrollHeight - node.scrollTop - node.clientHeight < 90;
+                followTail.current = node.scrollHeight - node.scrollTop - node.clientHeight <= 6;
             }}>
                 {isReading && !isSingle && <nav className="flex flex-wrap gap-2 text-xs">
                     {chapterContentList.map((chapter, index) => <button key={chapter.id} onClick={() => setReadingChapterIndex(index)}>{chapter.title}</button>)}
@@ -752,18 +841,19 @@ ${kind === 'work' ? '同时涵盖主线与支线、主要人物最终结局、�
                 {isReading && <article className={`p-5 whitespace-pre-wrap leading-loose ${activeTheme.paper} ${activeTheme.text}`}>
                     <h2 className="mb-4 text-xl font-bold">{activeBook.title}</h2>
                     <p className="mb-3 text-xs opacity-60">{segments.filter(segment => segment.type === 'story').reduce((count, segment) => count + segment.content.replace(/\s/g, '').length, 0).toLocaleString()} 字</p>
-                    {segments.filter(segment => segment.type === 'story' || segment.focus === 'chapter_summary').map(segment => (
+                    {renderedSegments.filter(segment => segment.type === 'story' || segment.focus === 'chapter_summary').map(segment => (
                         segment.focus === 'chapter_summary'
                             ? <hr key={segment.id} id={segment.id === historicalSummaries.at(-1)?.id ? 'novel-current-chapter' : undefined} className="my-5" />
-                            : <p key={segment.id} className="mb-4">{segment.content}</p>
+                            : <div key={segment.id} data-novel-block={segment.id} style={{ marginBottom: layout.gap }}><NovelBody text={segment.content} layout={layout} /></div>
                     ))}
                 </article>}
-                {!isReading && displaySegments.length === 0 && <div className="text-center py-20 opacity-40"><p className="text-sm italic font-serif">{!isSingle && <>第 {chapterCount} 章<br/></>}提笔写下新的开始...</p></div>}
-                {!isReading && displaySegments.map(seg => {
+                {!isReading && displaySegments.length === 0 && !streamPreview?.body && !streamPreview?.comment && !streamPreview?.analysis && <div className="text-center py-20 opacity-40"><p className="text-sm italic font-serif">{!isSingle && <>第 {chapterCount} 章<br/></>}提笔写下新的开始...</p></div>}
+                {!isReading && renderedCurrentSegments.map((seg: NovelSegment) => {
+                    const isPreview = seg.timestamp === 0 && seg.id === streamStoryId.current;
                     const isUser = seg.authorId === 'user';
                     const char = !isUser ? characters.find(c => c.id === seg.authorId) : null;
                     const role = seg.role || (seg.type === 'story' ? 'writer' : (seg.type === 'analysis' ? 'analyst' : 'commenter'));
-                    const hoverMenu = !isTyping && !isGeneratingSummary && (
+                    const hoverMenu = !isPreview && !isTyping && !isGeneratingSummary && (
                         <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 z-10 bg-white/80 backdrop-blur rounded-lg p-1 shadow-sm border border-slate-100">
                             {role === 'writer' && <button onClick={() => openForwardModal('paragraph', seg)} className="px-1 text-xs text-slate-600">分享此段</button>}
                             <button onClick={() => handleEditSegment(seg)} className="p-1 hover:bg-slate-100 rounded text-slate-400 hover:text-indigo-500"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3"><path d="m5.433 13.917 1.262-3.155A4 4 0 0 1 7.58 9.42l6.92-6.918a2.121 2.121 0 0 1 3 3l-6.92 6.918c-.383.383-.84.685-1.343.886l-3.154 1.262a.5.5 0 0 1-.65-.65Z" /></svg></button>
@@ -772,12 +862,12 @@ ${kind === 'work' ? '同时涵盖主线与支线、主要人物最终结局、�
                     );
 
                     if (role === 'writer') return (
-                        <div key={seg.id} className={`p-6 rounded-sm shadow-sm leading-loose text-justify text-[17px] relative group transition-all ${activeTheme.paper} ${activeTheme.text} ${isUser ? 'border-l-4 border-slate-300' : ''}`}>
+                        <div key={seg.id} data-novel-block={seg.id} className={`p-6 rounded-sm shadow-sm text-justify relative group ${activeTheme.paper} ${activeTheme.text} ${isUser ? 'border-l-4 border-slate-300' : ''}`}>
                             {hoverMenu}
-                            <div className="absolute -top-3 left-4 bg-white/90 border border-black/5 px-2 py-0.5 rounded text-[9px] font-sans font-bold uppercase tracking-wider text-slate-500 shadow-sm flex items-center gap-1.5">
+                            {!isPreview && <div className="absolute -top-3 left-4 bg-white/90 border border-black/5 px-2 py-0.5 rounded text-[9px] font-sans font-bold uppercase tracking-wider text-slate-500 shadow-sm flex items-center gap-1.5">
                                 {isUser ? null : <TokenImg value={char?.avatar} className="w-3 h-3 rounded-full object-cover" />}<span>{isUser ? '我 (User)' : char?.name || 'AI'} 执笔</span>{!isUser && seg.meta?.mood && <span className="bg-slate-100 px-1.5 rounded text-[9px] text-slate-600 normal-case">{seg.meta.mood}</span>}
-                            </div>
-                            <div className="whitespace-pre-wrap">{seg.content}</div>
+                            </div>}
+                            <NovelBody text={seg.content} layout={layout} />
                         </div>
                     );
                     if (role === 'commenter') return (
@@ -794,7 +884,6 @@ ${kind === 'work' ? '同时涵盖主线与支线、主要人物最终结局、�
                     );
                     return null;
                 })}
-                {genOptions.write && streamPreview?.body && <div className={`p-5 whitespace-pre-wrap leading-loose ${activeTheme.paper} ${activeTheme.text}`}>{streamPreview.body}</div>}
                 {!isReading && genOptions.comment && streamPreview?.comment && <div className="rounded-xl bg-amber-50 p-3 text-sm text-slate-700">{streamPreview.comment}</div>}
                 {!isReading && genOptions.analyze && streamPreview?.analysis && <div className="rounded-xl bg-slate-50 p-3 text-sm text-slate-700">{streamPreview.analysis}</div>}
                 {isTyping && !streamPreview && <div className="flex justify-center py-4"><div className="flex gap-2"><div className={`w-2 h-2 rounded-full ${activeTheme.button} animate-bounce`}></div><div className={`w-2 h-2 rounded-full ${activeTheme.button} animate-bounce delay-75`}></div><div className={`w-2 h-2 rounded-full ${activeTheme.button} animate-bounce delay-150`}></div></div></div>}
@@ -896,7 +985,7 @@ ${kind === 'work' ? '同时涵盖主线与支线、主要人物最终结局、�
                                             {!isUser && char && <TokenImg value={char.avatar} className="w-3 h-3 rounded-full object-cover" />}
                                             <span>{isUser ? '我' : char?.name} 执笔</span>
                                         </div>
-                                        <div className="whitespace-pre-wrap font-serif">{seg.content}</div>
+                                        <NovelBody text={seg.content} layout={layout} />
                                     </div>
                                 );
                             })}
