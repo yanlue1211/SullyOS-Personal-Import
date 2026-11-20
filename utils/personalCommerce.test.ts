@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import {beforeEach,it,expect} from 'vitest';
 import {DB} from './db';
-import {normalizeProducts,saveProducts,createCommerceOrder,readCommerce,reconcileCommerce,orderStatus,commerceContext,consumeCommerceAction,saveCommerceMembers,saveCommercePreferences,commerceContext as getContext,orderText,normalizeShops,saveShops,saveShopProducts,addTaobaoCartItem,setTaobaoCartQuantity,checkoutTaobaoProducts,normalizeTaobaoCatalog,saveTaobaoCatalog,appendTaobaoProducts,saveTaobaoAddress,deleteTaobaoAddress,setDefaultTaobaoAddress} from './personalCommerce';
+import {normalizeProducts,saveProducts,createCommerceOrder,readCommerce,reconcileCommerce,orderStatus,commerceContext,consumeCommerceAction,saveCommerceMembers,saveCommercePreferences,commerceContext as getContext,orderText,normalizeShops,saveShops,saveShopProducts,addTaobaoCartItem,setTaobaoCartQuantity,checkoutTaobaoProducts,normalizeTaobaoCatalog,saveTaobaoCatalog,appendTaobaoProducts,saveTaobaoAddress,deleteTaobaoAddress,setDefaultTaobaoAddress,resolveCommerceSelection,taobaoCartLineKey} from './personalCommerce';
 let productId:string;
 beforeEach(async()=>{await DB.deleteDB();const p=normalizeProducts([{title:'热汤面',shop:'小面馆',price:22,detail:'清汤'}],'meituan');await saveProducts(p,'meituan');productId=p[0].id;await saveCommerceMembers('meituan',['a','b']);});
 const input=()=>({charId:'a',charName:'甲',userName:'我',productId,buyer:'char' as const,recipient:'user' as const});
@@ -165,4 +165,34 @@ it('stores separate delivery addresses and snapshots the selected recipient addr
 it('loads old backup state without user profiles',async()=>{
  await DB.saveAsset('personal_commerce_v1',JSON.stringify({shops:[],products:[{id:'x',kind:'taobao',title:'笔',shop:'文具',price:10,detail:''}],orders:[]}));
  const state=await readCommerce();expect(state.cart).toEqual([]);expect(state.taobaoProfiles).toEqual({});
+});
+
+it('normalizes color, weight and print options without affecting old products',()=>{
+ const [dog,shirt]=normalizeProducts([
+  {title:'狗粮',price:59,variants:[{name:'克重',options:[{label:'1kg',price:59},{label:'5kg',price:239}]}]},
+  {title:'印花上衣',price:39,variants:[{name:'印花',options:['小熊','樱桃']},{name:'尺码',options:['S','M']}]}
+ ],'taobao');
+ expect(resolveCommerceSelection(dog,{克重:'5kg'}).price).toBe(239);
+ expect(resolveCommerceSelection(shirt,{印花:'樱桃',尺码:'M'}).summary).toContain('樱桃');
+ expect(()=>resolveCommerceSelection(shirt,{印花:'不存在'})).toThrow('规格已下架');
+ expect(normalizeProducts([{title:'旧商品',price:12}],'taobao')[0].variants).toEqual([]);
+});
+it('keeps two variants of one product as distinct cart lines, prices and order snapshots',async()=>{
+ const shop=normalizeShops([{name:'萌宠生活',category:'宠物',description:'店'}],'taobao')[0];
+ await saveShops([shop],'taobao');await saveCommerceMembers('taobao',['a']);
+ const [dog]=normalizeProducts([{title:'小狗粮',price:65,variants:[{name:'克重',options:[{label:'1kg',price:65},{label:'5kg',price:249}]},{name:'口味',options:['鸡肉','牛肉']}]}],'taobao');
+ await saveShopProducts([dog],shop);
+ const small={克重:'1kg',口味:'鸡肉'},large={克重:'5kg',口味:'牛肉'};
+ await addTaobaoCartItem(dog.id,2,small);await addTaobaoCartItem(dog.id,1,large);
+ let cart=(await readCommerce()).cart;
+ expect(cart).toHaveLength(2);
+ expect(new Set(cart.map(taobaoCartLineKey)).size).toBe(2);
+ await setTaobaoCartQuantity(dog.id,3,large);
+ cart=(await readCommerce()).cart;expect(cart[0].quantity).toBe(2);expect(cart[1].quantity).toBe(3);
+ const orders=await checkoutTaobaoProducts({charId:'a',charName:'甲',userName:'我',buyer:'user',recipient:'char',removeFromCart:true,lines:cart});
+ expect(orders.map(o=>o.unitPrice)).toEqual([65,249]);
+ expect(orders[1].selectedOptions).toEqual(large);
+ expect(orderText(orders[1])).toContain('5kg');
+ expect((await readCommerce()).cart).toHaveLength(0);
+ expect((await readCommerce()).orders).toHaveLength(2);
 });

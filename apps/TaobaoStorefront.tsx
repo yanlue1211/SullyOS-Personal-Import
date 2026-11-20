@@ -12,12 +12,13 @@ import {
   readCommerce, saveCommerceMembers, saveCommercePreferences,
   setTaobaoCartQuantity, type CommerceOrder, type CommerceProduct, type CommerceShop,
   type TaobaoCartLine, type TaobaoAddress, type TaobaoProfile, orderStatus,
+  resolveCommerceSelection, taobaoCartLineKey, type CommerceSelectedOptions,
 } from '../utils/personalCommerce';
 import './taobao.css';
 
 type Page = 'home' | 'cart' | 'orders' | 'people';
 type PurchaseMode = 'user-char' | 'char-user' | 'user-user' | 'char-char';
-type CheckoutLine = { productId: string; quantity: number };
+type CheckoutLine = TaobaoCartLine;
 
 const money = (price: number) => price.toFixed(2).replace(/\.00$/, '');
 const visuals: { keys: string[]; emoji: string }[] = [
@@ -61,6 +62,7 @@ export default function TaobaoStorefront() {
   const [shop, setShop] = useState<CommerceShop | null>(null);
   const [detail, setDetail] = useState<CommerceProduct | null>(null);
   const [quantity, setQuantity] = useState(1);
+  const [detailOptions,setDetailOptions] = useState<CommerceSelectedOptions>({});
   const [preferences, setPreferences] = useState('');
   const edited = useRef(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -103,11 +105,15 @@ export default function TaobaoStorefront() {
   const visibleProducts = items.filter(p => (!shop || p.shopId === shop.id)
     && (category === '全部' || p.category === category || !!shop)
     && matchesSearch(p.title + p.detail + p.shop + (p.category || '')));
+  const cartKey=(line:TaobaoCartLine)=>taobaoCartLineKey(line);
+  const linePrice=(line:TaobaoCartLine)=>{const p=liveProducts.get(line.productId);if(!p)return 0;try{return resolveCommerceSelection(p,line.selectedOptions).price;}catch{return 0;}};
+  const openDetail=(p:CommerceProduct,choices?:CommerceSelectedOptions)=>{setDetail(p);setQuantity(1);setDetailOptions(resolveCommerceSelection(p,choices).options);};
+  const selectedDetail=detail?resolveCommerceSelection(detail,detailOptions):undefined;
   const validCart = cart.filter(line => liveProducts.has(line.productId));
-  const allSelected = validCart.length > 0 && validCart.every(line => selected.includes(line.productId));
+  const allSelected = validCart.length > 0 && validCart.every(line => selected.includes(cartKey(line)));
   const cartUnits = cart.reduce((total, line) => total + line.quantity, 0);
-  const selectedLines = validCart.filter(line => selected.includes(line.productId));
-  const total = selectedLines.reduce((sum, line) => sum + (liveProducts.get(line.productId)?.price || 0) * line.quantity, 0);
+  const selectedLines = validCart.filter(line => selected.includes(cartKey(line)));
+  const total = selectedLines.reduce((sum, line) => sum + linePrice(line) * line.quantity, 0);
 
   const load = async () => {
     const s = await readCommerce();
@@ -151,7 +157,7 @@ export default function TaobaoStorefront() {
     setBusy(true);
     try {
       const context=keyword.trim()?('主题关键词：'+keyword.trim()):'主题自由发挥，随机搭配日常购物的多种品类';
-      const data=await requestCatalog(`一次生成完整的淘宝商城目录：严格生成8家不同店铺，每店严格8件商品，共64件。分类涵盖服饰、数码、家居、文具、食品、饰品等至少3类，尽量符合下面的主题。\n${context}\n仅返回JSON数组，严格8个对象，每项 {"name":"店名","category":"类别","description":"店铺特色","products":[{"title":"商品名称","detail":"规格和卖点（30字左右）","price":19.9,"deliveryMinutes":4320}]}，products必须有8项。价格用数字，配送分钟1440到7200，不要多余文本。`);
+      const data=await requestCatalog(`一次生成完整的淘宝商城目录：严格生成8家不同店铺，每店严格8件商品，共64件。分类涵盖服饰、数码、家居、文具、食品、饰品等至少3类，尽量符合下面的主题。\n${context}\n仅返回JSON数组，严格8个对象，每项 {"name":"店名","category":"类别","description":"店铺特色","products":[{"title":"商品名称","detail":"卖点简述","price":19.9,"deliveryMinutes":4320,"variants":[{"name":"颜色","options":[{"label":"黑色"},{"label":"白色"}]},{"name":"规格","options":[{"label":"1kg","price":19.9},{"label":"5kg","price":79.9}]}]}]}，products必须有8项。商品按类型设置0到2组真实可选规格，如耳机颜色、狗粮重量、衣服印花/尺码；每组2到5项，选项可带对应价格，若无可选规格就省略variants，不要强行添加。价格用数字，配送分钟1440到7200，不要多余文本。`);
       const batch=normalizeTaobaoCatalog(data);
       await saveTaobaoCatalog(batch);
       setShop(null);setCategory('全部');setSearchTerm('');setQuery('');setSelected([]);
@@ -167,7 +173,7 @@ export default function TaobaoStorefront() {
     try {
       const existing=items.filter(p=>p.shopId===target.id).map(p=>p.title).slice(-40).join('、');
       const context=keyword.trim()?('新增商品关键词：'+keyword.trim()):'自由发挥，为该店随机补充合适的商品';
-      const data=await requestCatalog(`为店铺「${target.name}」额外生成8件全新商品，追加到原有商品后面，不替换、不重复。分类：${target.category}；特色：${target.description}。\n${context}\n已有商品名称（避免重复）：${existing||'暂无'}。\n只返回严格8项的JSON数组，每项 {"title":"名称","detail":"规格和卖点（30字左右）","price":29.9,"deliveryMinutes":4320}。价格为数字，配送分钟1440到7200。`);
+      const data=await requestCatalog(`为店铺「${target.name}」额外生成8件全新商品，追加到原有商品后面，不替换、不重复。分类：${target.category}；特色：${target.description}。\n${context}\n已有商品名称（避免重复）：${existing||'暂无'}。\n只返回严格8项的JSON数组，每项 {"title":"名称","detail":"规格和卖点","price":29.9,"deliveryMinutes":4320,"variants":[{"name":"颜色","options":[{"label":"黑色"},{"label":"米白"}]}]}。按商品类型生成0到2组可选规格，如颜色、克重、印花、尺码；选项可以是带price数字的对象。没有实际可选项可省略variants。价格为数字，配送分钟1440到7200。`);
       if(!Array.isArray(data)||data.length!==8)throw new Error('本次商品没有生成完整，原商品仍在');
       const additions=normalizeProducts(data,'taobao');
       if(additions.length!==8)throw new Error('部分商品数据不完整，原商品仍在');
@@ -207,11 +213,11 @@ export default function TaobaoStorefront() {
     finally { setBusy(false); }
   };
   const addCart = async (product: CommerceProduct) => {
-    try { await addTaobaoCartItem(product.id, quantity); await load(); addToast(`已加入购物车 · ${quantity}件`, 'success'); }
+    try { await addTaobaoCartItem(product.id, quantity, detailOptions); await load(); addToast(`已加入购物车 · ${quantity}件`, 'success'); }
     catch (e: any) { addToast(e.message || '购物车保存失败', 'error'); }
   };
-  const changeQuantity = async (productId: string, value: number) => {
-    try { await setTaobaoCartQuantity(productId, value); await load(); if (value <= 0) setSelected(old => old.filter(id => id !== productId)); }
+  const changeQuantity = async (line:TaobaoCartLine,value:number) => {
+    try { await setTaobaoCartQuantity(line.productId,value,line.selectedOptions);await load();if(value<=0)setSelected(old=>old.filter(id=>id!==cartKey(line))); }
     catch (e: any) { addToast(e.message || '数量修改失败', 'error'); }
   };
   const startCheckout = (lines: CheckoutLine[], cartCheckout: boolean) => {
@@ -277,7 +283,7 @@ export default function TaobaoStorefront() {
           {shops.length > 0 && <div className="tb-category-strip">{allCategories.map(c => <button key={c} className={category === c ? 'active' : ''} onClick={() => setCategory(c)}>{c}</button>)}</div>}
           {items.length > 0 && <div className="tb-section-heading tb-recommend-title"><strong>猜你喜欢</strong><span>为你挑选的小好物</span></div>}
         </>}
-        {visibleProducts.length > 0 ? <div className="tb-product-grid">{visibleProducts.map(p => <button className="tb-product-card" key={p.id} onClick={() => { setDetail(p); setQuantity(1); }}><ProductVisual product={p} /><div className="tb-card-copy"><b>{p.title}</b><p>{p.detail}</p><div className="tb-card-price"><span>¥<strong>{money(p.price)}</strong></span><small>送货到家</small></div></div></button>)}</div>
+        {visibleProducts.length > 0 ? <div className="tb-product-grid">{visibleProducts.map(p => <button className="tb-product-card" key={p.id} onClick={() => openDetail(p)}><ProductVisual product={p} /><div className="tb-card-copy"><b>{p.title}</b><p>{p.detail}</p><div className="tb-card-price"><span>¥<strong>{money(p.price)}</strong></span><small>送货到家</small></div></div></button>)}</div>
           : !busy && (shops.length === 0 ? <EmptyPanel icon="🛍️" title="商场还没开门" text="生成一批店铺，就可以开始逛了。" action={<button className="tb-primary-small" onClick={() => openGenerator('catalog')}>生成店铺</button>} />
             : shop ? <EmptyPanel icon="🎁" title="店里还没有商品" text="给小店上点新货。" action={<button className="tb-primary-small" onClick={() => openGenerator('shop')}>新增商品</button>} />
             : items.length === 0 ? <EmptyPanel icon="🏬" title="先去逛一家店吧" text="选一家喜欢的小店看看。" /> : <EmptyPanel icon="🔎" title="没找到相关好物" text="换个关键词或分类再试试。" />)}
@@ -294,14 +300,14 @@ export default function TaobaoStorefront() {
               <div className="tb-cart-shop-name"><Storefront size={18} /> <strong>{s.name}</strong><CaretRight size={16} /></div>
               {cart.filter(line => liveProducts.get(line.productId)?.shop === s.name).map(line => {
                 const product = liveProducts.get(line.productId)!;
-                return <div className="tb-cart-row" key={product.id}>
-                  <button className={`tb-check ${selected.includes(product.id) ? 'checked' : ''}`} aria-label={`选择${product.title}`} onClick={() => setSelected(v => v.includes(product.id) ? v.filter(id => id !== product.id) : [...v, product.id])}>{selected.includes(product.id) && <Check size={14} weight="bold" />}</button>
-                  <button className="tb-cart-thumb" onClick={() => { setDetail(product); setQuantity(1); }}><ProductVisual product={product} /></button>
-                  <div className="tb-cart-info"><b>{product.title}</b><p>{product.detail}</p><span className="tb-cart-price">¥{money(product.price)}</span><div className="tb-cart-row-bottom"><div className="tb-counter"><button aria-label="减少数量" onClick={() => void changeQuantity(product.id, line.quantity - 1)}><Minus size={14} /></button><span>{line.quantity}</span><button aria-label="增加数量" onClick={() => void changeQuantity(product.id, line.quantity + 1)}><Plus size={14} /></button></div><button aria-label="移除商品" className="tb-remove" onClick={() => void changeQuantity(product.id, 0)}><Trash size={18} /></button></div></div>
+                return <div className="tb-cart-row" key={cartKey(line)}>
+                  <button className={`tb-check ${selected.includes(cartKey(line)) ? 'checked' : ''}`} aria-label={`选择${product.title}`} onClick={() => setSelected(v => v.includes(cartKey(line)) ? v.filter(id => id !== cartKey(line)) : [...v, cartKey(line)])}>{selected.includes(cartKey(line)) && <Check size={14} weight="bold" />}</button>
+                  <button className="tb-cart-thumb" onClick={() => openDetail(product,line.selectedOptions)}><ProductVisual product={product} /></button>
+                  <div className="tb-cart-info"><b>{product.title}</b><p>{resolveCommerceSelection(product,line.selectedOptions).summary||product.detail}</p><span className="tb-cart-price">¥{money(linePrice(line))}</span><div className="tb-cart-row-bottom"><div className="tb-counter"><button aria-label="减少数量" onClick={() => void changeQuantity(line, line.quantity - 1)}><Minus size={14} /></button><span>{line.quantity}</span><button aria-label="增加数量" onClick={() => void changeQuantity(line, line.quantity + 1)}><Plus size={14} /></button></div><button aria-label="移除商品" className="tb-remove" onClick={() => void changeQuantity(line, 0)}><Trash size={18} /></button></div></div>
                 </div>;
               })}
             </section>)}
-          {cart.filter(line => !liveProducts.has(line.productId)).map(line => <div className="tb-expired" key={line.productId}><span>这件商品已随店铺刷新下架，不能结算</span><button onClick={() => void changeQuantity(line.productId, 0)}>移除</button></div>)}
+          {cart.filter(line => !liveProducts.has(line.productId)).map(line => <div className="tb-expired" key={cartKey(line)}><span>这件商品已随店铺刷新下架，不能结算</span><button onClick={() => void changeQuantity(line, 0)}>移除</button></div>)}
         </div> : <EmptyPanel icon="🛒" title="购物车还是空空的" text="看到喜欢的商品，就把它先装进来。" action={<button className="tb-primary-small" onClick={() => navigate('home')}>去逛逛</button>} />}
       </>}
 
@@ -309,8 +315,8 @@ export default function TaobaoStorefront() {
         <div className="tb-page-title"><h2>我的订单</h2><small>每一份快乐都有迹可循</small></div>
         {orders.length ? <div className="tb-order-list">{orders.map(o => <section key={o.id} className="tb-order-card">
           <div className="tb-order-top"><span><Storefront size={17} /> {o.product.shop}</span><b>{orderStatus(o)}</b></div>
-          <div className="tb-order-body"><ProductVisual product={o.product} /><div><b>{o.product.title}</b><p>{o.product.detail}</p><span>¥{money(o.product.price)}{(o.quantity || 1) > 1 ? ` × ${o.quantity}` : ''}</span></div></div>
-          <div className="tb-order-foot"><span>{o.buyer === 'char' ? o.charName : o.userName} 买给 {o.recipient === 'char' ? o.charName : o.userName}<br />预计 {new Date(o.eta).toLocaleString()} 送达</span><strong>合计 ¥{money(o.product.price * (o.quantity || 1))}</strong></div>
+          <div className="tb-order-body"><ProductVisual product={o.product} /><div><b>{o.product.title}</b><p>{Object.entries(o.selectedOptions||{}).map(([k,v])=>k+'：'+v).join(' · ')||o.product.detail}</p><span>¥{money(o.unitPrice??o.product.price)}{(o.quantity || 1) > 1 ? ` × ${o.quantity}` : ''}</span></div></div>
+          <div className="tb-order-foot"><span>{o.buyer === 'char' ? o.charName : o.userName} 买给 {o.recipient === 'char' ? o.charName : o.userName}<br />预计 {new Date(o.eta).toLocaleString()} 送达</span><strong>合计 ¥{money((o.unitPrice??o.product.price) * (o.quantity || 1))}</strong></div>
         </section>)}</div> : <EmptyPanel icon="📦" title="还没有订单" text="结算后就可以在这里查看状态。" />}
       </>}
 
@@ -354,8 +360,8 @@ export default function TaobaoStorefront() {
             {profileOrders.length?<div className="tb-order-list">
               {profileOrders.map(o=><section key={o.id} className="tb-order-card">
                 <div className="tb-order-top"><span><Storefront size={17}/>{o.product.shop}</span><b>{orderStatus(o)}</b></div>
-                <div className="tb-order-body"><ProductVisual product={o.product}/><div><b>{o.product.title}</b><p>{o.product.detail}</p><span>¥{money(o.product.price)} × {o.quantity||1}</span></div></div>
-                <div className="tb-order-foot"><span>{o.buyer==='char'?o.charName:o.userName} 买给 {o.recipient==='char'?o.charName:o.userName}{o.deliveryAddress&&<><br/>收货：{o.deliveryAddress.recipientName} · {o.deliveryAddress.detail}</>}</span><strong>¥{money(o.product.price*(o.quantity||1))}</strong></div>
+                <div className="tb-order-body"><ProductVisual product={o.product}/><div><b>{o.product.title}</b><p>{o.product.detail}</p><span>¥{money(o.unitPrice??o.product.price)} × {o.quantity||1}</span></div></div>
+                <div className="tb-order-foot"><span>{o.buyer==='char'?o.charName:o.userName} 买给 {o.recipient==='char'?o.charName:o.userName}{o.deliveryAddress&&<><br/>收货：{o.deliveryAddress.recipientName} · {o.deliveryAddress.detail}</>}</span><strong>¥{money((o.unitPrice??o.product.price)*(o.quantity||1))}</strong></div>
               </section>)}
             </div>:<EmptyPanel icon="📦" title="还没有订单" text="TA 购买或收到的商品会出现在这里。" />}
           </>}
@@ -363,7 +369,7 @@ export default function TaobaoStorefront() {
       </>}
     </main>
 
-    {page === 'cart' && cart.length > 0 && <div className="tb-cart-checkout"><button className={`tb-check ${allSelected ? 'checked' : ''}`} onClick={() => setSelected(allSelected ? [] : validCart.map(line => line.productId))} aria-label="全选">{allSelected && <Check size={14} weight="bold" />}</button><span>全选</span><div className="tb-cart-total"><small>合计</small><b>¥{money(total)}</b></div><button disabled={!selectedLines.length} onClick={() => startCheckout(selectedLines, true)}>结算 ({selectedLines.length})</button></div>}
+    {page === 'cart' && cart.length > 0 && <div className="tb-cart-checkout"><button className={`tb-check ${allSelected ? 'checked' : ''}`} onClick={() => setSelected(allSelected ? [] : validCart.map(cartKey))} aria-label="全选">{allSelected && <Check size={14} weight="bold" />}</button><span>全选</span><div className="tb-cart-total"><small>合计</small><b>¥{money(total)}</b></div><button disabled={!selectedLines.length} onClick={() => startCheckout(selectedLines, true)}>结算 ({selectedLines.length})</button></div>}
     <nav className="tb-bottom-nav" aria-label="淘宝导航">
       {([
         ['home', Storefront, '逛逛'], ['cart', ShoppingCart, '购物车'],
@@ -411,14 +417,24 @@ export default function TaobaoStorefront() {
 
     {detail && !checkout && <div className="tb-detail">
       <div className="tb-detail-cover"><ProductVisual product={detail} large /><button className="tb-detail-back" aria-label="返回商品列表" onClick={() => setDetail(null)}><CaretLeft size={22} /></button><button className="tb-detail-cart" aria-label="打开购物车" onClick={() => { setDetail(null); navigate('cart'); }}><ShoppingCart size={22} />{cartUnits > 0 && <i>{cartUnits}</i>}</button></div>
-      <div className="tb-detail-info"><div className="tb-detail-price">¥<strong>{money(detail.price)}</strong></div><h2>{detail.title}</h2><div className="tb-detail-tag"><span>好物推荐</span><span>店铺精选</span><span>随心挑选</span></div><p className="tb-detail-description">{detail.detail}</p><div className="tb-detail-delivery"><Package size={21} /><span>预计约 {Math.max(1, Math.round((detail.deliveryMinutes || 4320) / 1440))} 天送达</span><CaretRight size={16} /></div><div className="tb-detail-delivery"><Storefront size={21} /><span>{detail.shop}</span></div>
+      <div className="tb-detail-info"><div className="tb-detail-price">¥<strong>{money(selectedDetail?.price||detail.price)}</strong></div><h2>{detail.title}</h2><div className="tb-detail-tag"><span>好物推荐</span><span>店铺精选</span><span>随心挑选</span></div><p className="tb-detail-description">{detail.detail}</p><div className="tb-detail-delivery"><Package size={21} /><span>预计约 {Math.max(1, Math.round((detail.deliveryMinutes || 4320) / 1440))} 天送达</span><CaretRight size={16} /></div><div className="tb-detail-delivery"><Storefront size={21} /><span>{detail.shop}</span></div>
+      {detail.variants?.map(group=><section key={group.name} className="tb-detail-options">
+        <b>{group.name}</b>
+        <div role="group" aria-label={group.name} className="tb-variant-pills">
+          {group.options.map(option=><button type="button" key={option.label} className={detailOptions[group.name]===option.label?'selected':''}
+            aria-pressed={detailOptions[group.name]===option.label}
+            onClick={()=>setDetailOptions(old=>({...old,[group.name]:option.label}))}>
+            {option.label}{option.price!==undefined&&<small>¥{money(option.price)}</small>}
+          </button>)}
+        </div>
+      </section>)}
       <div className="tb-detail-quantity"><b>购买数量</b><div className="tb-counter"><button aria-label="减少购买数量" onClick={() => setQuantity(n => Math.max(1, n - 1))}><Minus size={16} /></button><span>{quantity}</span><button aria-label="增加购买数量" onClick={() => setQuantity(n => Math.min(99, n + 1))}><Plus size={16} /></button></div></div></div>
-      <div className="tb-detail-bottom"><button className="tb-detail-home" onClick={() => setDetail(null)}><Storefront size={22} />店铺</button><button className="tb-add-cart" onClick={() => void addCart(detail)}>加入购物车</button><button className="tb-buy-now" onClick={() => startCheckout([{ productId: detail.id, quantity }], false)}>立即购买</button></div>
+      <div className="tb-detail-bottom"><button className="tb-detail-home" onClick={() => setDetail(null)}><Storefront size={22} />店铺</button><button className="tb-add-cart" onClick={() => void addCart(detail)}>加入购物车</button><button className="tb-buy-now" onClick={() => startCheckout([{ productId: detail.id, quantity,selectedOptions:detailOptions }], false)}>立即购买</button></div>
     </div>}
 
     {checkout && <div className="tb-overlay" onClick={() => { if (!busy) setCheckout(null); }}><section className="tb-sheet tb-checkout-sheet" onClick={e => e.stopPropagation()}>
       <div className="tb-sheet-top"><div><h2>确认订单</h2><p>确认一下商品和收货信息</p></div><button aria-label="关闭结算" disabled={busy} onClick={() => setCheckout(null)}><X size={23} /></button></div>
-      <div className="tb-checkout-items">{checkout.map(line => { const p = liveProducts.get(line.productId); return p && <div className="tb-checkout-line" key={line.productId}><ProductVisual product={p} /><div><b>{p.title}</b><small>{p.shop} · ×{line.quantity}</small></div><strong>¥{money(p.price * line.quantity)}</strong></div>; })}</div>
+      <div className="tb-checkout-items">{checkout.map(line => { const p = liveProducts.get(line.productId); return p && <div className="tb-checkout-line" key={cartKey(line)}><ProductVisual product={p} /><div><b>{p.title}</b><small>{p.shop} · {resolveCommerceSelection(p,line.selectedOptions).summary||'默认规格'} · ×{line.quantity}</small></div><strong>¥{money(linePrice(line) * line.quantity)}</strong></div>; })}</div>
       <label className="tb-field-label" htmlFor="tb-purchase-char">关联角色</label><select id="tb-purchase-char" value={charId} onChange={e => setCharId(e.target.value)}><option value="">请选择已接入的角色</option>{connected.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
       <div className="tb-field-label">谁来买，送给谁？</div><div className="tb-buy-modes">{([
         ['user-user', '我给自己买'], ['user-char', '我送给 TA'], ['char-user', '请 TA 送我'], ['char-char', 'TA 给自己买'],
@@ -427,7 +443,7 @@ export default function TaobaoStorefront() {
       {recipientProfile?.addresses.length ? <select aria-label="选择收货地址" value={deliveryAddressId} onChange={e=>setAddressId(e.target.value)}>
         {recipientProfile.addresses.map(a=><option key={a.id} value={a.id}>{a.label||'收货'} · {a.recipientName} · {a.detail}</option>)}
       </select> : <p className="tb-muted">还没有保存地址，可以先下单，稍后再去角色页面填写。</p>}
-      <div className="tb-checkout-bottom"><span>合计 <b>¥{money(checkout.reduce((s, line) => s + (liveProducts.get(line.productId)?.price || 0) * line.quantity, 0))}</b></span><button disabled={busy || !charId} onClick={() => void purchase()}>{busy ? '正在下单…' : '确认下单'}</button></div>
+      <div className="tb-checkout-bottom"><span>合计 <b>¥{money(checkout.reduce((s, line) => s + linePrice(line) * line.quantity, 0))}</b></span><button disabled={busy || !charId} onClick={() => void purchase()}>{busy ? '正在下单…' : '确认下单'}</button></div>
     </section></div>}
   </div>;
 }

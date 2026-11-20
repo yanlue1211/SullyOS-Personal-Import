@@ -19,7 +19,7 @@ export async function queryCommerceProducts(charId: string, raw: unknown) {
     const offset = Number.isFinite(Number(args.offset)) ? Math.max(0, Math.floor(Number(args.offset))) : 0;
     const page = matches.slice(offset, offset + COMMERCE_BROWSE_LIMIT);
     return {
-        products: page.map(p => ({ id: p.id, kind: p.kind, shop: p.shop, title: p.title, price: p.price, detail: p.detail.slice(0, 120) })),
+        products: page.map(p => ({ id: p.id, kind: p.kind, shop: p.shop, title: p.title, price: p.price, detail: p.detail.slice(0, 120), ...(p.variants?.length?{variants:p.variants}: {}) })),
         total: matches.length,
         nextOffset: offset + page.length < matches.length ? offset + page.length : null,
     };

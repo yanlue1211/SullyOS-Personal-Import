@@ -1,9 +1,12 @@
 import { DB, openDB } from './db';
 export type CommerceKind = 'taobao' | 'meituan';
-export interface CommerceProduct { id: string; kind: CommerceKind; title: string; shop: string; detail: string; price: number; deliveryMinutes?: number; shopId?: string; category?: string; }
-export interface CommerceOrder { id: string; charId: string; charName: string; userName: string; product: CommerceProduct; buyer: 'user'|'char'; recipient: 'user'|'char'; createdAt: number; eta: number; autonomous: boolean; quantity?: number; deliveryAddress?: TaobaoAddress; requestId?: string; createdNotified?: boolean; deliveredNotified?: boolean; }
+export interface CommerceVariantOption { label:string; price?:number; }
+export interface CommerceVariantGroup { name:string; options:CommerceVariantOption[]; }
+export type CommerceSelectedOptions = Record<string,string>;
+export interface CommerceProduct { id: string; kind: CommerceKind; title: string; shop: string; detail: string; price: number; deliveryMinutes?: number; shopId?: string; category?: string; variants?: CommerceVariantGroup[]; }
+export interface CommerceOrder { id: string; charId: string; charName: string; userName: string; product: CommerceProduct; buyer: 'user'|'char'; recipient: 'user'|'char'; createdAt: number; eta: number; autonomous: boolean; quantity?: number; selectedOptions?: CommerceSelectedOptions; unitPrice?:number; deliveryAddress?: TaobaoAddress; requestId?: string; createdNotified?: boolean; deliveredNotified?: boolean; }
 export interface CommerceShop { id:string; kind:CommerceKind; name:string; category:string; description:string; }
-export interface TaobaoCartLine { productId:string; quantity:number; }
+export interface TaobaoCartLine { productId:string; quantity:number; selectedOptions?:CommerceSelectedOptions; }
 export interface TaobaoAddress { id:string; label:string; recipientName:string; phone:string; detail:string; }
 export interface TaobaoProfile { addresses:TaobaoAddress[]; defaultAddressId?:string; }
 export interface TaobaoCatalog { shops:CommerceShop[]; products:CommerceProduct[]; }
@@ -12,7 +15,7 @@ const KEY = 'personal_commerce_v1';
 const empty = (): State => ({products: [], orders: [], shops:[], members:{taobao:[],meituan:[]},preferences:{taobao:'',meituan:''},cart:[],taobaoProfiles:{}});
 function decode(raw: unknown): State { if (!raw) return empty(); const s = typeof raw === 'string' ? JSON.parse(raw) : raw; if (!Array.isArray(s.products)||!Array.isArray(s.orders)) throw new Error('订单数据无法读取，请保留备份'); s.members={taobao:Array.isArray(s.members?.taobao)?s.members.taobao:[],meituan:Array.isArray(s.members?.meituan)?s.members.meituan:[]};
  s.preferences={taobao:typeof s.preferences?.taobao==='string'?s.preferences.taobao:'',meituan:typeof s.preferences?.meituan==='string'?s.preferences.meituan:''};
-  s.cart=Array.isArray(s.cart)?s.cart.filter((v:any)=>v&&typeof v.productId==='string'&&Number.isInteger(v.quantity)&&v.quantity>0&&v.quantity<=99).slice(0,150):[];
+  s.cart=Array.isArray(s.cart)?s.cart.filter((v:any)=>v&&typeof v.productId==='string'&&Number.isInteger(v.quantity)&&v.quantity>0&&v.quantity<=99).slice(0,150).map((v:any)=>({productId:v.productId,quantity:v.quantity,...(v.selectedOptions&&typeof v.selectedOptions==='object'&&!Array.isArray(v.selectedOptions)?{selectedOptions:Object.fromEntries(Object.entries(v.selectedOptions).filter(([k,val])=>typeof k==='string'&&typeof val==='string').slice(0,3))}:{})})):[];
  const rawProfiles=s.taobaoProfiles&&typeof s.taobaoProfiles==='object'&&!Array.isArray(s.taobaoProfiles)?s.taobaoProfiles:{};
  s.taobaoProfiles={};
  for(const [id,p] of Object.entries(rawProfiles)){
@@ -38,9 +41,51 @@ export function normalizeProducts(raw: unknown, kind: CommerceKind): CommercePro
  const items=raw.slice(0,12).flatMap((v:any)=>typeof v?.title==='string'&&v.title.trim()&&Number.isFinite(Number(v.price))&&Number(v.price)>0&&Number(v.price)<=100000?[{
   id:crypto.randomUUID(),kind,title:v.title.trim().slice(0,80),shop:String(v.shop||'生活小店').slice(0,50),detail:String(v.detail||'').slice(0,250),price:Math.round(Number(v.price)*100)/100,
   deliveryMinutes: Number.isFinite(Number(v.deliveryMinutes)) ? Math.round(Math.min(kind==='meituan'?90:10080,Math.max(kind==='meituan'?15:1440,Number(v.deliveryMinutes)))) : undefined,
+  ...(kind==='taobao'?{variants:normalizeCommerceVariants(v.variants)}:{}),
  }]:[]);
  if(!items.length) throw new Error('没有生成有效商品，请重试');return items;
 }
+
+/** Variants are product-specific, not an unrelated global list. A single priced size/weight can override base price. */
+export function normalizeCommerceVariants(raw:unknown):CommerceVariantGroup[]{
+ if(!Array.isArray(raw))return [];
+ const seenGroups=new Set<string>();
+ return raw.slice(0,3).flatMap((v:any)=>{
+  const name=String(v?.name||'').trim().slice(0,28);
+  if(!name||seenGroups.has(name)||!Array.isArray(v.options))return [];
+  const seenOptions=new Set<string>();
+  const options:CommerceVariantOption[]=v.options.slice(0,8).flatMap((value:any)=>{
+   const label=String(typeof value==='string'?value:value?.label||'').trim().slice(0,45);
+   if(!label||seenOptions.has(label))return [];
+   seenOptions.add(label);
+   const price=typeof value==='object'&&value!==null?Number(value.price):NaN;
+   return [{label,...(Number.isFinite(price)&&price>0&&price<=100000?{price:Math.round(price*100)/100}:{})}];
+  });
+  if(!options.length)return [];
+  seenGroups.add(name);
+  return [{name,options}];
+ });
+}
+export function resolveCommerceSelection(p:CommerceProduct, requested?:CommerceSelectedOptions){
+ const choices:CommerceSelectedOptions={},details:string[]=[];
+ let price=p.price;
+ for(const group of p.variants||[]){
+  const requestedLabel=requested?.[group.name];
+  const found=group.options.find(v=>v.label===requestedLabel);
+  if(requestedLabel!==undefined&&!found)throw new Error('选中的规格已下架，请重新选择');
+  const option=found||group.options[0];
+  if(!option)continue;
+  choices[group.name]=option.label;
+  details.push(group.name+'：'+option.label);
+  if(option.price!==undefined)price=option.price;
+ }
+ if(!Number.isFinite(price)||price<=0)throw new Error('商品价格不正确');
+ return {options:choices,key:JSON.stringify(Object.entries(choices)),price,summary:details.join(' · ')};
+}
+export function taobaoCartLineKey(line:TaobaoCartLine){
+ return JSON.stringify([line.productId,Object.entries(line.selectedOptions||{}).sort((a,b)=>a[0].localeCompare(b[0]))]);
+}
+
 export async function saveProducts(products:CommerceProduct[],kind:CommerceKind){await mutate(s=>{s.products=[...s.products.filter(p=>p.kind!==kind),...products];});}
 export async function saveCommercePreferences(kind:CommerceKind,value:string){await mutate(s=>{s.preferences[kind]=value.trim().slice(0,2000);});}
 export async function saveCommerceMembers(kind:CommerceKind,ids:string[]){await mutate(s=>{s.members[kind]=[...new Set(ids.filter(id=>typeof id==='string'&&id))];});notify();}
@@ -135,15 +180,16 @@ export function purchaseBlock(orders:CommerceOrder[],charId:string,now:number):s
  if(gifts.some(o=>now-o.createdAt<24*3600000))return '其他角色近期已主动购买过，请避免集中送礼';
  return '';
 }
-export async function createCommerceOrder(input:{charId:string;charName:string;userName:string;productId:string;buyer:'user'|'char';recipient:'user'|'char';explicitRequest?:boolean;requestId?:string},now=Date.now()):Promise<CommerceOrder>{
+export async function createCommerceOrder(input:{charId:string;charName:string;userName:string;productId:string;buyer:'user'|'char';recipient:'user'|'char';explicitRequest?:boolean;requestId?:string;selectedOptions?:CommerceSelectedOptions},now=Date.now()):Promise<CommerceOrder>{
  const order=await mutate(s=>{
   const existing=input.requestId&&s.orders.find(o=>o.requestId===input.requestId&&o.charId===input.charId);if(existing)return existing;
   const product=s.products.find(p=>p.id===input.productId);if(!product)throw new Error('商品已失效，请重新逛逛');
   if(!s.members[product.kind].includes(input.charId))throw new Error('该角色尚未接入此 App');
   const autonomous=input.buyer==='char'&&!input.explicitRequest;
   if(autonomous&&input.recipient==='user'){const reason=purchaseBlock(s.orders,input.charId,now);if(reason)throw new Error(reason);}
+  const selection=resolveCommerceSelection(product,input.selectedOptions);
   const eta=now+(product.deliveryMinutes??(product.kind==='meituan'?35:4320))*60000;
-  const order:CommerceOrder={id:crypto.randomUUID(),charId:input.charId,charName:input.charName,userName:input.userName,product,buyer:input.buyer,recipient:input.recipient,createdAt:now,eta,autonomous,requestId:input.requestId};
+  const order:CommerceOrder={id:crypto.randomUUID(),charId:input.charId,charName:input.charName,userName:input.userName,product,buyer:input.buyer,recipient:input.recipient,createdAt:now,eta,autonomous,requestId:input.requestId,unitPrice:selection.price,...(product.variants?.length?{selectedOptions:selection.options}:{})};
   if(product.kind==='taobao'){
    const owner=input.recipient==='char'?input.charId:'__user__';
    const profile=s.taobaoProfiles[owner];
@@ -156,19 +202,24 @@ export async function createCommerceOrder(input:{charId:string;charName:string;u
  return order;
 }
 /** Cart lines live in the existing commerce asset, so old backups/shops/orders remain intact. */
-export async function addTaobaoCartItem(productId:string,quantity=1){
+export async function addTaobaoCartItem(productId:string,quantity=1,selectedOptions?:CommerceSelectedOptions){
  if(!Number.isInteger(quantity)||quantity<1||quantity>99)throw new Error('购物数量需要在1到99之间');
  await mutate(s=>{
-  if(!s.products.some(p=>p.kind==='taobao'&&p.id===productId))throw new Error('商品已下架，请刷新店铺');
-  const line=s.cart.find(v=>v.productId===productId);
+  const product=s.products.find(p=>p.kind==='taobao'&&p.id===productId);
+  if(!product)throw new Error('商品已下架，请刷新店铺');
+  const selection=resolveCommerceSelection(product,selectedOptions);
+  const variant=product.variants?.length?selection.options:undefined;
+  const key=taobaoCartLineKey({productId,quantity,selectedOptions:variant});
+  const line=s.cart.find(v=>taobaoCartLineKey(v)===key);
   if(line)line.quantity=Math.min(99,line.quantity+quantity);
-  else s.cart.push({productId,quantity});
+  else s.cart.push({productId,quantity,...(variant?{selectedOptions:variant}:{})});
  });notify();
 }
-export async function setTaobaoCartQuantity(productId:string,quantity:number){
+export async function setTaobaoCartQuantity(productId:string,quantity:number,selectedOptions?:CommerceSelectedOptions){
  if(!Number.isInteger(quantity)||quantity<0||quantity>99)throw new Error('商品数量无效');
  await mutate(s=>{
-  const idx=s.cart.findIndex(v=>v.productId===productId);
+  const key=taobaoCartLineKey({productId,quantity:1,selectedOptions});
+  const idx=s.cart.findIndex(v=>taobaoCartLineKey(v)===key);
   if(idx<0)return;
   if(quantity===0)s.cart.splice(idx,1);
   else s.cart[idx].quantity=quantity;
@@ -185,18 +236,19 @@ export async function checkoutTaobaoProducts(input:{
   if(!s.members.taobao.includes(input.charId))throw new Error('该角色尚未接入淘宝');
   const created:CommerceOrder[]=[];
   for(const line of input.lines){
-   if(!line||typeof line.productId!=='string'||!Number.isInteger(line.quantity)||line.quantity<1||line.quantity>99||ids.has(line.productId))
+   if(!line||typeof line.productId!=='string'||!Number.isInteger(line.quantity)||line.quantity<1||line.quantity>99||ids.has(taobaoCartLineKey(line)))
     throw new Error('购物车商品或数量不正确');
-   ids.add(line.productId);
+   ids.add(taobaoCartLineKey(line));
    const product=s.products.find(p=>p.id===line.productId&&p.kind==='taobao');
    if(!product)throw new Error('商品已下架，请先从购物车移除失效商品');
+   const selection=resolveCommerceSelection(product,line.selectedOptions);
    if(input.removeFromCart){
-    const saved=s.cart.find(v=>v.productId===line.productId);
+    const saved=s.cart.find(v=>taobaoCartLineKey(v)===taobaoCartLineKey(line));
     if(!saved||saved.quantity<line.quantity)throw new Error('购物车数量已变化，请重新结算');
    }
    created.push({
     id:crypto.randomUUID(),charId:input.charId,charName:input.charName,userName:input.userName,
-    product:{...product},buyer:input.buyer,recipient:input.recipient,quantity:line.quantity,
+    product:{...product},buyer:input.buyer,recipient:input.recipient,quantity:line.quantity,unitPrice:selection.price,...(product.variants?.length?{selectedOptions:selection.options}:{}),
     createdAt:now,eta:now+(product.deliveryMinutes??4320)*60000,autonomous:false,
    });
   }
@@ -209,7 +261,7 @@ export async function checkoutTaobaoProducts(input:{
   s.orders.push(...created);
   if(input.removeFromCart){
    for(const line of input.lines){
-    const saved=s.cart.find(v=>v.productId===line.productId)!;
+    const saved=s.cart.find(v=>taobaoCartLineKey(v)===taobaoCartLineKey(line))!;
     saved.quantity-=line.quantity;
    }
    s.cart=s.cart.filter(v=>v.quantity>0);
@@ -233,9 +285,9 @@ export async function reconcileCommerce(now=Date.now()){
  if(scanning)return;scanning=true;
  try{const {orders}=await readCommerce();let changed=false;for(const order of orders){if(!order.createdNotified){await publishOrderCard(order,false);await markNotified(order.id,false);changed=true;}if(now>=order.eta&&!order.deliveredNotified){await publishOrderCard(order,true);await markNotified(order.id,true);changed=true;}}if(changed)notify();}finally{scanning=false;}
 }
-export function orderText(o:CommerceOrder,delivered=false){const who=(v:'user'|'char')=>v==='char'?o.charName:o.userName;const quantity=o.quantity||1;return `[${o.product.kind==='meituan'?'外卖':'购物'}订单] ${who(o.buyer)}给${who(o.recipient)}买了${o.product.title}${quantity>1?` ×${quantity}`:''}，¥${(o.product.price*quantity).toFixed(2)}。${delivered?`${who(o.recipient)}已收到`:`状态：${orderStatus(o)}；预计送达：${new Date(o.eta).toLocaleString()}`}。`;}
+export function orderText(o:CommerceOrder,delivered=false){const who=(v:'user'|'char')=>v==='char'?o.charName:o.userName;const quantity=o.quantity||1;const variant=o.selectedOptions?Object.entries(o.selectedOptions).map(([k,v])=>k+'：'+v).join(' / '):'';return `[${o.product.kind==='meituan'?'外卖':'购物'}订单] ${who(o.buyer)}给${who(o.recipient)}买了${o.product.title}${variant?'（'+variant+'）':''}${quantity>1?` ×${quantity}`:''}，¥${((o.unitPrice??o.product.price)*quantity).toFixed(2)}。${delivered?`${who(o.recipient)}已收到`:`状态：${orderStatus(o)}；预计送达：${new Date(o.eta).toLocaleString()}`}。`;}
 export async function commerceContext(charId:string){const {orders,products,members}=await readCommerce();const pending=orders.filter(o=>o.charId===charId&&o.eta>Date.now());const blocked=purchaseBlock(orders,charId,Date.now());const available=products.filter(p=>members[p.kind].includes(charId));return {
  pending:pending.length?`\n【生活背景·待收货，仅知晓即可】\n${pending.map(o=>orderText(o)).join('\n')}\n无需每轮提及、查询或关心，只有话题相关或到达时自然回应。\n`:'',
- guide:available.length?`\n【生活购物权限】你可在${[...new Set(available.map(p=>p.kind==='meituan'?'美团':'淘宝'))].join('、')}给用户或自己买东西。没有具体契机不必买，也不能捏造已下单。${blocked?`给用户的主动礼物暂停：${blocked}；给自己买不受此限制。`:''}决定逛商城时先单独一行输出 <逛商城>{"query":"想找的商品关键词","kind":"taobao"}</逛商城>（kind 可为 taobao 或 meituan，也可省略；可附 shopId、offset 翻页）。先不附购物正文或心声。系统随后提供相关商品，再用 <购物>{"productId":"查询到的有效ID","recipient":"user"}</购物> 下单；recipient 可为 user 或 char。一轮最多一单，系统创建成功才算购买。\n`:'',
+ guide:available.length?`\n【生活购物权限】你可在${[...new Set(available.map(p=>p.kind==='meituan'?'美团':'淘宝'))].join('、')}给用户或自己买东西。没有具体契机不必买，也不能捏造已下单。${blocked?`给用户的主动礼物暂停：${blocked}；给自己买不受此限制。`:''}决定逛商城时先单独一行输出 <逛商城>{"query":"想找的商品关键词","kind":"taobao"}</逛商城>（kind 可为 taobao 或 meituan，也可省略；可附 shopId、offset 翻页）。先不附购物正文或心声。系统随后提供相关商品，再用 <购物>{"productId":"查询到的有效ID","recipient":"user","selectedOptions":{"颜色":"黑色"}}</购物> 下单，有选项时从查询结果中按需选择并填写 selectedOptions；无选项可省略；recipient 可为 user 或 char。一轮最多一单，系统创建成功才算购买。\n`:'',
  };}
-export async function consumeCommerceAction(charId:string,charName:string,userName:string,text:string,requestId?:string){const actions=[...text.matchAll(/<购物>\s*([\s\S]*?)\s*<\/购物>/g)];const cleaned=text.replace(/<购物>[\s\S]*?<\/购物>/g,'');if(actions.length){const data=JSON.parse(actions[0][1]);if(!['user','char'].includes(data.recipient)||typeof data.productId!=='string')throw new Error('购买参数不正确');await createCommerceOrder({charId,charName,userName,productId:data.productId,buyer:'char',recipient:data.recipient,requestId});}return cleaned;}
+export async function consumeCommerceAction(charId:string,charName:string,userName:string,text:string,requestId?:string){const actions=[...text.matchAll(/<购物>\s*([\s\S]*?)\s*<\/购物>/g)];const cleaned=text.replace(/<购物>[\s\S]*?<\/购物>/g,'');if(actions.length){const data=JSON.parse(actions[0][1]);if(!['user','char'].includes(data.recipient)||typeof data.productId!=='string')throw new Error('购买参数不正确');await createCommerceOrder({charId,charName,userName,productId:data.productId,buyer:'char',recipient:data.recipient,requestId,selectedOptions:data.selectedOptions});}return cleaned;}

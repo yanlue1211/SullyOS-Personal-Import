@@ -69,7 +69,7 @@ export function friendAccounts(settings: FriendFeedSettings, char: {id: string; 
     return [{id: 'main', name: identity?.nickname||char.name, purpose: identity?.purpose||'主号', bio:identity?.bio, tags: identity?.tags || []}, ...(identity?.accounts || [])];
 }
 export function friendAccountPrompt(settings: FriendFeedSettings, char: {id: string; name: string}) {
-    return (settings.publicFigures[char.id]?PUBLIC_FIGURE_RULES+'\n':'')+'这是公共广场，不同世界的人也能刷到。只按已有关系认人，未认识的作者按陌生网友理解，不因此共享世界观或私聊。\n你的账号（只属于你，不代表额外角色）：' + JSON.stringify(friendAccounts(settings, char))
+    return (settings.publicFigures[char.id]?PUBLIC_FIGURE_RULES+'\n注意：当前角色只有以主号 main 发言时才受上述公众人物互动限制，使用自己已有小号时可以像普通用户一样正常发言和互动。\n':'')+'这是公共广场，不同世界的人也能刷到。只按已有关系认人，未认识的作者按陌生网友理解，不因此共享世界观或私聊。\n你的账号（只属于你，不代表额外角色）：' + JSON.stringify(friendAccounts(settings, char))
         + '\n发帖、转发或评论时，accountId 必须填写上面本人账号列表中的 id（主号固定为 "main"），不要填网名、人名、角色 ID 或照抄其他作者的 accountId；省略表示 main。小号仍是你的行为。不得冒用别人的账号，不自动向网友公开小号与主号的关联；正文不可泄露未公开私聊。';
 }
 /** Older backups and unknown appearance values keep their content and use stable defaults. */
