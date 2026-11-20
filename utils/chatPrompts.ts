@@ -1102,7 +1102,7 @@ ${voiceActingGuide()}`;
         // prompt bytes, worldbook ordering and cache breakpoints unchanged.
         const emojiNameReminder = promptOptions?.appRules === undefined && emojis.length > 0 ? buildEmojiNameReminder() : '';
         const timestampReminder = promptOptions?.appRules === undefined && char.timeAwarenessEnabled !== false
-            ? '\n【回复前核对时间】每条历史消息的时间戳是发言时间，不一定是事件发生时间；先核对事件实际日期，再重新理解当时说的“今天、昨天、昨晚”，不能照搬旧回复里的相对称呼，也不能把发言日期当成事件日期。区分两种表达：①“今天、昨天、前天、某日凌晨”通常按日历日期；②“昨晚、前天那晚”等按日常语言里连续的一整夜理解，晚上与次日凌晨可以属于同一晚，零点不强行切断。当天白天回忆当天凌晨的事，可以自然称为“昨晚”，实际日期不变。例如现在是12日凌晨1点：10日凌晨4点是前天凌晨，11日凌晨3点是昨天凌晨；9日晚上9点可与10日凌晨4点视作前天那晚，10日晚上9点按日期是前天晚上。到了12日下午2点，再提12日凌晨1点的事可称昨晚。按当前时间与事件语境自然措辞，不需要额外判断对方几点睡、几点醒；拿不准就说具体日期或“那晚”，不在回复或心声展示换算过程。\n' : '';
+            ? '\n【回复前核对时间】每条历史消息的时间戳是发言时间，不一定是事件发生时间；先核对事件实际日期，再重新理解当时说的“今天、昨天、昨晚”，不能照搬旧回复里的相对称呼，也不能把发言日期当成事件日期。区分两种表达：①“今天、昨天、前天、某日凌晨”通常按日历日期；②“昨晚、前天那晚”等按日常语言里连续的一整夜理解，晚上与次日凌晨可以属于同一晚，零点不强行切断。当天白天回忆当天凌晨的事，可以自然称为“昨晚”，实际日期不变。例如现在是12日凌晨1点：10日凌晨4点是前天凌晨，11日凌晨3点是昨天凌晨；9日晚上9点可与10日凌晨4点视作前天那晚，10日晚上9点按日期是前天晚上。到了12日下午2点，再提12日凌晨1点的事可称昨晚。按当前时间与事件语境自然措辞；拿不准就说具体日期或“那晚”，不在回复或心声展示换算过程。\n' : '';
         const recencyTail = timestampReminder + emojiNameReminder + (humanStyle ? (promptOptions?.appRules === undefined ? IM_FRAGMENTED_CHAT_TAIL : '') + buildCharacterResponsePrinciples(char.name, userProfile.name) : '');
 
         if (!humanStyle && char.memoryPalaceEnabled && char.memoryPalaceInjection) volatileState += '\n' + char.memoryPalaceInjection;

@@ -13,9 +13,7 @@ it('puts raw-history time calibration in the uncached final reminder rather than
  expect(p.recencyTail).toContain('9日晚上9点可与10日凌晨4点视作前天那晚');
  expect(p.recencyTail).toContain('10日晚上9点按日期是前天晚上');
  expect(p.recencyTail).toContain('12日下午2点，再提12日凌晨1点的事可称昨晚');
- expect(p.recencyTail).toContain('不需要额外判断对方几点睡、几点醒');
- expect(p.recencyTail).not.toContain('睡醒状态');
- expect(p.recencyTail).not.toContain('尚未睡觉');
+ expect(p.recencyTail).not.toMatch(/睡觉|睡醒|几点睡|几点醒|作息/);
  expect(p.stable).not.toContain('【回复前核对时间】');
 });
 it('respects disabled real-time awareness and separate application rules',async()=>{
