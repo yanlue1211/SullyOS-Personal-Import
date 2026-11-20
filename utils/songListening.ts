@@ -81,11 +81,18 @@ export const getOrAnalyzeSongSound = (song: Song, force = false): Promise<string
     if (!isAudioApiReady(config)) throw new Error('音频 API 尚未配置完成');
     publishSongListenStatus('⏳ 正在获取歌曲音频：' + song.name);
     const cfg = loadMusicCfgStandalone();
-    const audio = await fetchSongAudio(song, cfg, config.songQuality || 'exhigh');
+    const [audio, lyrics] = await Promise.all([
+      fetchSongAudio(song, cfg, config.songQuality || 'exhigh'),
+      fetchSongLyrics(song, cfg),
+    ]);
     const payload=await songAudioToPayload(audio.blob,audio.nameHint);
     publishSongListenStatus('⏳ 已获取音频（' + payload.format + '，' + (payload.bytes / 1048576).toFixed(1) + 'MB），正在生成客观分析…');
     const { describeAudioWithAudioApi } = await import('./audioApi');
-    const description = await describeAudioWithAudioApi(payload, config);
+    const description = await describeAudioWithAudioApi(payload, config, lyrics.trim() ? {
+      title: song.name,
+      artists: song.artists,
+      lyrics: lyrics.slice(0, 6000),
+    } : undefined);
     const previous = await getSongSoundRecord(song.id);
     const record = {
       description,
