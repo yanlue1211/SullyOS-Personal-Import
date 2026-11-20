@@ -50,3 +50,4 @@ export default function FriendFeedPublicFigureSettings(){
       </label>)}{!peers.length&&<p>暂无可选择的角色账号。</p>}</div>
     </section><div className="ff-public-footnote"><Info size={17}/><span>同行许可和身份确认必须同时满足。普通粉丝、未知身份与用户私密关系不会因勾选而公开。</span></div></>}
   </div>;
+}

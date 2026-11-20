@@ -6,6 +6,14 @@ on:
       - personal/audio-listening
     paths:
       - 'apps/TaobaoStorefront.tsx'
+      - 'apps/FriendFeedPublicFigureSettings.tsx'
+      - 'apps/FriendFeedSettingsMenu.tsx'
+      - 'apps/FriendFeedApp.tsx'
+      - 'apps/friendFeedSettings.css'
+      - 'utils/friendFeedPublicFigure.ts'
+      - 'utils/friendFeedSettings.ts'
+      - 'utils/friendFeedEmotion.ts'
+      - 'utils/friendFeedPublicFigure.test.ts'
       - 'apps/taobao.css'
       - 'apps/CommerceApp.tsx'
       - 'utils/personalCommerce.ts'
@@ -29,7 +37,7 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Commerce cart and card regression
-        run: pnpm exec vitest run utils/personalCommerce.test.ts
+      - name: Commerce variants and Bibi public-account regression
+        run: pnpm exec vitest run utils/personalCommerce.test.ts utils/friendFeedPublicFigure.test.ts
       - name: Production build
         run: NODE_OPTIONS=--max-old-space-size=4096 pnpm run build
