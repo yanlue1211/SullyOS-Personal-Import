@@ -1,4 +1,3 @@
-import FriendFeedPublicFigureSettings from './FriendFeedPublicFigureSettings';
 import React from 'react';
 import {CaretRight} from '@phosphor-icons/react';
 
@@ -13,9 +12,9 @@ export const preferenceTitles = {
 } as const;
 export type PreferenceSection = keyof typeof preferenceTitles;
 
-export default function FriendFeedSettingsMenu({onPreferences, onApi, onSources, onRelations, onSetup, disabled}: {
+export default function FriendFeedSettingsMenu({onPreferences, onApi, onSources, onRelations, onSetup, onPublicFigures, disabled}: {
     onPreferences: (section: PreferenceSection) => void; onApi: () => void; onSources: () => void;
-    onRelations: () => void; onSetup: () => void; disabled: boolean;
+    onRelations: () => void; onSetup: () => void; onPublicFigures:()=>void; disabled: boolean;
 }) {
     const row = (title: string, action: () => void, hint?: string) => <button key={title} type="button" disabled={disabled} onClick={action}>
         <span>{title}</span>{hint && <small>{hint}</small>}<CaretRight size={16}/>
@@ -25,7 +24,8 @@ export default function FriendFeedSettingsMenu({onPreferences, onApi, onSources,
         <section><h2>阅读与外观</h2><div className="ff-settings-menu">
             {preference('appearance', '主题 · 字号 · 排版')}
         </div></section>
-        <section><h2>账号与互动</h2><FriendFeedPublicFigureSettings/><div className="ff-settings-menu">
+        <section><h2>账号与互动</h2><div className="ff-settings-menu">
+            {row('公众人物账号与公开互动许可', onPublicFigures,'仅限制角色主号')}
             {preference('profile')}
             {preference('accounts')}
             {row('关注与身份关系', onRelations)}

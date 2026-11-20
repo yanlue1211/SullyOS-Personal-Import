@@ -8,7 +8,7 @@ import {
   mutateFriendFeed,
   commentOnFriendPost,
 } from "./friendFeed";
-import { defaultFriendFeedSettings } from "./friendFeedSettings";
+import { defaultFriendFeedSettings, friendAccountPrompt } from "./friendFeedSettings";
 import { friendAccountRef } from "./friendFeedGraph";
 import {
   publicFigureMayInteract,
@@ -199,4 +199,14 @@ it("blocks implicit immediate replies to user comments on the public figure own 
   expect(
     (await readFriendFeed()).posts.find((p) => p.id === "star-post")!.comments,
   ).toHaveLength(1);
+});
+
+it("public figure permission applies to main account only; ordinary alt can comment",async()=>{
+ await configure();
+ const f=await readFriendFeed();
+ const account={id:'star',name:'演员'};
+ expect(publicFigureActionAllowed(f,'star',{kind:'comment',postId:'user-post',accountId:'main'})).toBe(false);
+ expect(publicFigureActionAllowed(f,'star',{kind:'comment',postId:'user-post',accountId:'secret-alt'})).toBe(true);
+ expect(publicFigureMayInteract(f,'star',{authorId:'user'},'secret-alt')).toBe(true);
+ expect(friendAccountPrompt({...defaultFriendFeedSettings(),publicFigures:{star:true}},account)).toContain('小号');
 });

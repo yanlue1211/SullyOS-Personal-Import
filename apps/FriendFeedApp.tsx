@@ -25,6 +25,7 @@ import {defaultFriendFeedSettings, friendAccounts, resolveFriendFeedSettings} fr
 import {ClassicHeader, ClassicCover, ClassicProfile, ClassicPost, ClassicComposer} from './FriendFeedClassicUI';
 import FriendFeedPreferences from './FriendFeedPreferences';
 import FriendFeedSettingsMenu, {preferenceTitles, type PreferenceSection} from './FriendFeedSettingsMenu';
+import FriendFeedPublicFigureSettings from './FriendFeedPublicFigureSettings';
 import {FriendFeedDirectoryProvider} from './FriendFeedGroupedList';
 import FriendFeedRelations from './FriendFeedRelations';
 import {activeFriendAccounts,friendAccountName,friendAccountRef} from '../utils/friendFeedGraph';
@@ -52,7 +53,7 @@ type Panel = {kind: 'post'; circleId: string}
     | {kind:'weibo-detail';post:FriendFeedSource} | {kind:'weibo-home'}
     | {kind:'cover';ownerId:string}
     | {kind:'edit-comment'|'delete-comment';postId:string;commentId:string;original:string;authorName:string}
-    | {kind: 'comment'; postId: string; replyTarget?:FriendReplyTarget} | {kind:'share';postId:string} | {kind:'detail';postId:string;focusComment?:{id:string}} | {kind: 'delete'; postId: string} | {kind: 'settings'; section?: PreferenceSection} | {kind:'inbox'} | {kind:'api'} | {kind: 'weibo'} | {kind:'sources'} | {kind:'following'} | {kind:'relations'};
+    | {kind: 'comment'; postId: string; replyTarget?:FriendReplyTarget} | {kind:'share';postId:string} | {kind:'detail';postId:string;focusComment?:{id:string}} | {kind: 'delete'; postId: string} | {kind: 'settings'; section?: PreferenceSection} | {kind:'public-figures'} | {kind:'inbox'} | {kind:'api'} | {kind: 'weibo'} | {kind:'sources'} | {kind:'following'} | {kind:'relations'};
 
 export default function FriendFeedApp({embedded = false, initialCharacterId, onBack}: FriendFeedProps) {
     const {characters, characterGroups = [], userProfile, closeApp, openApp, apiConfig, realtimeConfig} = useOS();
@@ -103,6 +104,7 @@ export default function FriendFeedApp({embedded = false, initialCharacterId, onB
     const preferenceSection = panel?.kind === 'settings' ? panel.section : undefined;
     const settingsPageTitle = panel?.kind === 'settings' ? (preferenceSection ? preferenceTitles[preferenceSection] : '哔哔设置')
         : panel?.kind === 'api' ? '哔哔 API 设置' : panel?.kind === 'sources' ? '微博与真实内容'
+        : panel?.kind==='public-figures' ? '公众人物账号与公开互动许可'
         : panel?.kind === 'weibo-detail' ? '微博详情' : panel?.kind === 'weibo-home' ? '微博首页'
         : panel?.kind === 'weibo' ? '微博连接' : panel?.kind === 'relations' ? '关注与身份关系' : panel?.kind === 'cover' ? '主页封面' : '';
     const settings = preferenceSection ? settingsDraft : resolveFriendFeedSettings(feed.settings);
@@ -331,6 +333,7 @@ export default function FriendFeedApp({embedded = false, initialCharacterId, onB
                 </section>
                 <section className="ff-settings-section"><h2>真实内容与阅读权限</h2><FriendFeedPreferences section="content" value={settings} onChange={next=>void saveRealContent(next)} disabled={busy} embedded={embedded}/><p className="ff-setting-status">开关修改后立即保存。</p></section>
 </div>
+            : panel?.kind === 'public-figures' ? <FriendFeedPublicFigureSettings/>
             : panel?.kind === 'cover' ? <FriendFeedCoverEditor key={panel.ownerId} ownerId={panel.ownerId} value={settings.coverImages?.[panel.ownerId]} onBack={back} onSaved={back} onBusy={value=>{saving.current=value;setBusy(value);}}/>
             : panel?.kind === 'api' ? <FriendFeedApi onSaved={back} onBack={back}/>
             : panel?.kind === 'weibo' ? <div className="friend-feed-form ff-settings-page"><FriendFeedWeiboConnection circleId={circle?.id} onTimeline={()=>{setPanel(undefined);setProfileId('');setPostFilter('all');}}/></div> : panel ? <form className={`friend-feed-form${panel.kind==='settings'?' ff-settings-page':''}`} onSubmit={submit}>
@@ -338,7 +341,7 @@ export default function FriendFeedApp({embedded = false, initialCharacterId, onB
                     ? <FriendFeedPreferences section={preferenceSection} value={settingsDraft} onChange={setSettingsDraft} disabled={busy} embedded={embedded} characters={characters} groups={characterGroups}/>
                     : <FriendFeedSettingsMenu disabled={busy} onPreferences={section=>open({kind:'settings',section})}
                         onApi={()=>open({kind:'api'})} onSources={()=>open({kind:'sources'})} onRelations={()=>open({kind:'relations'})}
-                        onSetup={()=>{rememberPage();setShowSetup(true);setPanel(undefined);}}/>
+                        onSetup={()=>{rememberPage();setShowSetup(true);setPanel(undefined);}} onPublicFigures={()=>open({kind:'public-figures'})}/>
                 : panel.kind === 'delete-comment' ? <><p>删除 {panel.authorName} 的这条评论？其他人的回复会保留。</p><blockquote>{panel.original}</blockquote></> : panel.kind === 'delete' ? <p>删除这条动态及其评论？删除后两个入口都会更新。</p> : <>
                     <p className="friend-feed-author-label">{panel.kind === 'edit-comment' ? `编辑 ${panel.authorName} 的评论` : `以 ${selectedUserAccount?.name || '已停用账号'} 的身份`}{panel.kind === 'edit-comment' ? '' : panel.kind === 'post' ? '发布' : '评论'}</p>
                     {(panel.kind==='post'||panel.kind==='comment')&&<label className="ff-setting-field">发言账号<select aria-label="发言账号" value={speakingAccount} disabled={busy} onChange={e=>setSpeakingAccount(e.target.value)}>
