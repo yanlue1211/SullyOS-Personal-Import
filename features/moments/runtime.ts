@@ -172,18 +172,35 @@ export async function reserveActivity(
       sleepAllowed &&
       (!automatic || state.postDue <= now || exception);
     if (automatic && !browseOpportunity && !canPost) return;
-    const events = await pending(s, charId),
-      posts: Post[] = [];
+    // Keep the hard cap based on attempts (a failed network response may still
+    // have reached a billable provider). The softer daily target is based on
+    // completed activities, so failed/truncated requests cannot crowd it out.
+    const completedCount = calls.filter(r => r.automatic && r.phase === "success").length;
+    const events = await pending(s, charId, 100);
+    // Prioritize posts written by the user and direct replies from the user.
+    // Otherwise an older backlog of ordinary friend chatter can fill all five
+    // preview slots while the user's new post remains unread after the target.
+    const queued = await Promise.all(events.map(async event => {
+      const raw = await getRow<Post>(event.postId, s);
+      const comment = event.interactionId && raw?.comments.find(c => c.id === event.interactionId);
+      const directFromUser = event.eventType === "comment" && comment?.authorId === "user" &&
+        (comment.replyTo
+          ? raw?.comments.some(parent => parent.id === comment.replyTo && parent.authorId === charId)
+          : raw?.owner === charId);
+      const priority = event.eventType === "post" && raw?.owner === "user" ? 2 : directFromUser ? 1 : 0;
+      return {event, raw, priority};
+    }));
+    queued.sort((a,b) => b.priority - a.priority || a.event.at - b.event.at);
+    const posts: Post[] = [];
     const chosenEvents: FeedEvent[] = [];
     const review: NonNullable<ActivityTask["review"]> = {};
     let chars = 0;
-    for (const event of events) {
+    for (const {event, raw} of queued) {
       if (event.eventType === "like") {
         s.put({...event, status: "done"});
         continue;
       }
-      const raw = await getRow<Post>(event.postId, s),
-        view = raw && projectPost(c, charId, raw);
+      const view = raw && projectPost(c, charId, raw);
       if (
         !view ||
         (event.interactionId &&
@@ -212,16 +229,17 @@ export async function reserveActivity(
       chars += size;
       chosenEvents.push(event);
     }
-    const automaticCount = calls.filter(
-      (r) => r.automatic && r.phase !== "reserved",
-    ).length;
     const directReply = Object.values(review).some(x => x.directCommentIds.length > 0);
-    if (automatic && automaticCount >= c.target && !directReply) {
-      await log(
-        s,
-        charId,
-        "已达参考目标，本轮没有明确待回应回复，保留弹性预算",
-      );
+    const unreadUserPost = posts.some(post => post.owner === "user" && review[post.id]?.firstView);
+    if (automatic && completedCount >= c.target && !directReply && !unreadUserPost) {
+      // Only one message per character per day; do not bury real failures
+      // under dozens of identical "target reached" entries.
+      const day = getLocalDateKey(new Date(now));
+      if (state.lastTargetNoticeDay !== day) {
+        state.lastTargetNoticeDay = day;
+        s.put(state);
+        await log(s, charId, "今日成功活动已达参考目标，普通活动暂缓；用户新动态与明确回复仍优先使用剩余额度");
+      }
       return;
     }
     if (!canPost && !posts.length) {
