@@ -1,15 +1,26 @@
 import { DB, openDB } from './db';
 export type CommerceKind = 'taobao' | 'meituan';
 export interface CommerceProduct { id: string; kind: CommerceKind; title: string; shop: string; detail: string; price: number; deliveryMinutes?: number; shopId?: string; category?: string; }
-export interface CommerceOrder { id: string; charId: string; charName: string; userName: string; product: CommerceProduct; buyer: 'user'|'char'; recipient: 'user'|'char'; createdAt: number; eta: number; autonomous: boolean; quantity?: number; requestId?: string; createdNotified?: boolean; deliveredNotified?: boolean; }
+export interface CommerceOrder { id: string; charId: string; charName: string; userName: string; product: CommerceProduct; buyer: 'user'|'char'; recipient: 'user'|'char'; createdAt: number; eta: number; autonomous: boolean; quantity?: number; deliveryAddress?: TaobaoAddress; requestId?: string; createdNotified?: boolean; deliveredNotified?: boolean; }
 export interface CommerceShop { id:string; kind:CommerceKind; name:string; category:string; description:string; }
 export interface TaobaoCartLine { productId:string; quantity:number; }
-interface State { products: CommerceProduct[]; orders: CommerceOrder[]; shops:CommerceShop[]; members:Record<CommerceKind,string[]>; preferences:Record<CommerceKind,string>; cart:TaobaoCartLine[]; }
+export interface TaobaoAddress { id:string; label:string; recipientName:string; phone:string; detail:string; }
+export interface TaobaoProfile { addresses:TaobaoAddress[]; defaultAddressId?:string; }
+export interface TaobaoCatalog { shops:CommerceShop[]; products:CommerceProduct[]; }
+interface State { products: CommerceProduct[]; orders: CommerceOrder[]; shops:CommerceShop[]; members:Record<CommerceKind,string[]>; preferences:Record<CommerceKind,string>; cart:TaobaoCartLine[]; taobaoProfiles:Record<string,TaobaoProfile>; }
 const KEY = 'personal_commerce_v1';
-const empty = (): State => ({products: [], orders: [], shops:[], members:{taobao:[],meituan:[]},preferences:{taobao:'',meituan:''},cart:[]});
+const empty = (): State => ({products: [], orders: [], shops:[], members:{taobao:[],meituan:[]},preferences:{taobao:'',meituan:''},cart:[],taobaoProfiles:{}});
 function decode(raw: unknown): State { if (!raw) return empty(); const s = typeof raw === 'string' ? JSON.parse(raw) : raw; if (!Array.isArray(s.products)||!Array.isArray(s.orders)) throw new Error('订单数据无法读取，请保留备份'); s.members={taobao:Array.isArray(s.members?.taobao)?s.members.taobao:[],meituan:Array.isArray(s.members?.meituan)?s.members.meituan:[]};
  s.preferences={taobao:typeof s.preferences?.taobao==='string'?s.preferences.taobao:'',meituan:typeof s.preferences?.meituan==='string'?s.preferences.meituan:''};
- s.cart=Array.isArray(s.cart)?s.cart.filter((v:any)=>v&&typeof v.productId==='string'&&Number.isInteger(v.quantity)&&v.quantity>0&&v.quantity<=99).slice(0,150):[];
+  s.cart=Array.isArray(s.cart)?s.cart.filter((v:any)=>v&&typeof v.productId==='string'&&Number.isInteger(v.quantity)&&v.quantity>0&&v.quantity<=99).slice(0,150):[];
+ const rawProfiles=s.taobaoProfiles&&typeof s.taobaoProfiles==='object'&&!Array.isArray(s.taobaoProfiles)?s.taobaoProfiles:{};
+ s.taobaoProfiles={};
+ for(const [id,p] of Object.entries(rawProfiles)){
+  const profile=p as TaobaoProfile;
+  if(!id||!profile||!Array.isArray(profile.addresses))continue;
+  const addresses=profile.addresses.filter(a=>a&&typeof a.id==='string'&&typeof a.detail==='string'&&typeof a.recipientName==='string'&&typeof a.phone==='string'&&typeof a.label==='string').slice(0,40);
+  s.taobaoProfiles[id]={addresses,defaultAddressId:addresses.some(a=>a.id===profile.defaultAddressId)?profile.defaultAddressId:addresses[0]?.id};
+ }
  if(!Array.isArray(s.shops)){const byName=new Map<string,CommerceShop>();for(const product of s.products){const key=`${product.kind}:${product.shop}`;if(!byName.has(key))byName.set(key,{id:`legacy:${product.kind}:${product.shop}`,kind:product.kind,name:product.shop,category:product.category||'精选店铺',description:''});product.shopId=byName.get(key)!.id;}s.shops=[...byName.values()];}
  return s; }
 export const readCommerce = async (): Promise<State> => decode(await DB.getAsset(KEY));
@@ -39,6 +50,74 @@ export function normalizeShops(raw:unknown,kind:CommerceKind):CommerceShop[]{
  if(!shops.length)throw new Error('没有生成有效店铺');return shops;
 }
 export async function saveShops(shops:CommerceShop[],kind:CommerceKind){await mutate(s=>{s.shops=[...s.shops.filter(p=>p.kind!==kind),...shops];s.products=s.products.filter(p=>p.kind!==kind);});notify();}
+/** Require a complete batch before starting any storage writes, including nested products. */
+export function normalizeTaobaoCatalog(raw:unknown):TaobaoCatalog{
+ if(!Array.isArray(raw)||raw.length!==8)throw new Error('店铺数据不完整，需要8家店铺；原店铺已保留');
+ const shops:CommerceShop[]=[],products:CommerceProduct[]=[];
+ for(const entry of raw){
+  if(!entry||typeof entry.name!=='string'||!entry.name.trim()||!Array.isArray(entry.products)||entry.products.length!==8)throw new Error('店铺商品不完整，需要每店8件；原店铺已保留');
+  const shop=normalizeShops([entry],'taobao')[0];
+  const generated=normalizeProducts(entry.products,'taobao');
+  if(generated.length!==8)throw new Error('商品数据不完整，原店铺已保留');
+  shops.push(shop);
+  products.push(...generated.map(p=>({...p,shop:shop.name,shopId:shop.id,category:shop.category})));
+ }
+ return {shops,products};
+}
+export async function saveTaobaoCatalog(catalog:TaobaoCatalog){
+ if(catalog.shops.length!==8||catalog.products.length!==64)throw new Error('商城数据不完整，没有覆盖旧商品');
+ const ids=new Set(catalog.shops.map(s=>s.id));
+ if(ids.size!==8||catalog.shops.some(s=>s.kind!=='taobao')||catalog.products.some(p=>p.kind!=='taobao'||!p.shopId||!ids.has(p.shopId)))throw new Error('商城数据校验失败，旧商品未修改');
+ if(catalog.shops.some(s=>catalog.products.filter(p=>p.shopId===s.id).length!==8))throw new Error('店铺商品数量不正确');
+ await mutate(s=>{
+  s.shops=[...s.shops.filter(p=>p.kind!=='taobao'),...catalog.shops];
+  s.products=[...s.products.filter(p=>p.kind!=='taobao'),...catalog.products];
+ });notify();
+}
+/** Add products to one existing shop; never discard its old items or pending cart lines. */
+export async function appendTaobaoProducts(shop:CommerceShop, products:CommerceProduct[]){
+ if(!products.length||products.length>12||products.some(p=>p.kind!=='taobao'))throw new Error('新增商品数据不正确');
+ const normalized=products.map(p=>({...p,kind:'taobao' as const,shop:shop.name,shopId:shop.id,category:shop.category}));
+ await mutate(s=>{
+  if(!s.shops.some(v=>v.id===shop.id&&v.kind==='taobao'))throw new Error('店铺已更新，请重新进入');
+  const existing=new Set(s.products.filter(v=>v.shopId===shop.id).map(v=>v.title.trim().toLowerCase()));
+  const next=normalized.filter(v=>{const key=v.title.trim().toLowerCase();if(existing.has(key))return false;existing.add(key);return true;});
+  if(!next.length)throw new Error('生成的商品与店里已有商品重复，请换个关键词');
+  s.products.push(...next);
+ });notify();
+}
+/** Existing transaction asset: profiles remain independent per character and optional for old backups. */
+export async function saveTaobaoAddress(ownerId:string,input:Omit<TaobaoAddress,'id'>,id?:string){
+ if(!ownerId)throw new Error('请选择收货人');
+ const label=input.label.trim().slice(0,24),recipientName=input.recipientName.trim().slice(0,60),phone=input.phone.trim().slice(0,40),detail=input.detail.trim().slice(0,320);
+ if(!recipientName||!detail)throw new Error('请填写收件人和详细地址');
+ const result=await mutate(s=>{
+  const profile=s.taobaoProfiles[ownerId]||(s.taobaoProfiles[ownerId]={addresses:[]});
+  const existing=id?profile.addresses.find(a=>a.id===id):undefined;
+  if(id&&!existing)throw new Error('地址已变更，请重新打开');
+  if(!existing&&profile.addresses.length>=40)throw new Error('地址数量已达上限');
+  const address={id:existing?.id||crypto.randomUUID(),label,recipientName,phone,detail};
+  if(existing)Object.assign(existing,address);
+  else profile.addresses.push(address);
+  if(!profile.defaultAddressId)profile.defaultAddressId=address.id;
+  return address;
+ });notify();return result;
+}
+export async function deleteTaobaoAddress(ownerId:string,id:string){
+ await mutate(s=>{
+  const profile=s.taobaoProfiles[ownerId];if(!profile)return;
+  profile.addresses=profile.addresses.filter(a=>a.id!==id);
+  if(profile.defaultAddressId===id)profile.defaultAddressId=profile.addresses[0]?.id;
+ });notify();
+}
+export async function setDefaultTaobaoAddress(ownerId:string,id:string){
+ await mutate(s=>{
+  const profile=s.taobaoProfiles[ownerId];
+  if(!profile?.addresses.some(a=>a.id===id))throw new Error('地址不存在');
+  profile.defaultAddressId=id;
+ });notify();
+}
+
 export async function saveShopProducts(products:CommerceProduct[],shop:CommerceShop){await mutate(s=>{
  if(!s.shops.some(p=>p.id===shop.id&&p.kind===shop.kind))throw new Error('店铺已刷新，请重新进入');
  s.products=[...s.products.filter(p=>p.shopId!==shop.id),...products.map(p=>({...p,shop:shop.name,shopId:shop.id,category:shop.category,kind:shop.kind}))];
@@ -65,6 +144,12 @@ export async function createCommerceOrder(input:{charId:string;charName:string;u
   if(autonomous&&input.recipient==='user'){const reason=purchaseBlock(s.orders,input.charId,now);if(reason)throw new Error(reason);}
   const eta=now+(product.deliveryMinutes??(product.kind==='meituan'?35:4320))*60000;
   const order:CommerceOrder={id:crypto.randomUUID(),charId:input.charId,charName:input.charName,userName:input.userName,product,buyer:input.buyer,recipient:input.recipient,createdAt:now,eta,autonomous,requestId:input.requestId};
+  if(product.kind==='taobao'){
+   const owner=input.recipient==='char'?input.charId:'__user__';
+   const profile=s.taobaoProfiles[owner];
+   const address=profile?.addresses.find(a=>a.id===profile.defaultAddressId);
+   if(address)order.deliveryAddress={...address};
+  }
   s.orders.push(order);return order;
  });
  try { await publishOrderCard(order,false); await markNotified(order.id, false); notify(); } catch { /* Persisted outbox is retried by reconcileCommerce. */ }
@@ -92,7 +177,7 @@ export async function setTaobaoCartQuantity(productId:string,quantity:number){
 /** A selected cart checkout is one atomic asset transaction; outbox retries failed cards. */
 export async function checkoutTaobaoProducts(input:{
  charId:string;charName:string;userName:string;buyer:'user'|'char';recipient:'user'|'char';
- lines:TaobaoCartLine[];removeFromCart:boolean;
+ lines:TaobaoCartLine[];removeFromCart:boolean;addressId?:string;
 },now=Date.now()):Promise<CommerceOrder[]>{
  if(!input.lines.length||input.lines.length>40)throw new Error('请选择要结算的商品');
  const ids=new Set<string>();
@@ -114,6 +199,12 @@ export async function checkoutTaobaoProducts(input:{
     product:{...product},buyer:input.buyer,recipient:input.recipient,quantity:line.quantity,
     createdAt:now,eta:now+(product.deliveryMinutes??4320)*60000,autonomous:false,
    });
+  }
+  if(input.addressId){
+   const owner=input.recipient==='char'?input.charId:'__user__';
+   const address=s.taobaoProfiles[owner]?.addresses.find(a=>a.id===input.addressId);
+   if(!address)throw new Error('所选收货地址不存在，请重新选择');
+   for(const order of created)order.deliveryAddress={...address};
   }
   s.orders.push(...created);
   if(input.removeFromCart){

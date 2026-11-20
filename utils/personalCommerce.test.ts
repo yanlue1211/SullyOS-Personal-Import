@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import {beforeEach,it,expect} from 'vitest';
 import {DB} from './db';
-import {normalizeProducts,saveProducts,createCommerceOrder,readCommerce,reconcileCommerce,orderStatus,commerceContext,consumeCommerceAction,saveCommerceMembers,saveCommercePreferences,commerceContext as getContext,orderText,normalizeShops,saveShops,saveShopProducts,addTaobaoCartItem,setTaobaoCartQuantity,checkoutTaobaoProducts} from './personalCommerce';
+import {normalizeProducts,saveProducts,createCommerceOrder,readCommerce,reconcileCommerce,orderStatus,commerceContext,consumeCommerceAction,saveCommerceMembers,saveCommercePreferences,commerceContext as getContext,orderText,normalizeShops,saveShops,saveShopProducts,addTaobaoCartItem,setTaobaoCartQuantity,checkoutTaobaoProducts,normalizeTaobaoCatalog,saveTaobaoCatalog,appendTaobaoProducts,saveTaobaoAddress,deleteTaobaoAddress,setDefaultTaobaoAddress} from './personalCommerce';
 let productId:string;
 beforeEach(async()=>{await DB.deleteDB();const p=normalizeProducts([{title:'热汤面',shop:'小面馆',price:22,detail:'清汤'}],'meituan');await saveProducts(p,'meituan');productId=p[0].id;await saveCommerceMembers('meituan',['a','b']);});
 const input=()=>({charId:'a',charName:'甲',userName:'我',productId,buyer:'char' as const,recipient:'user' as const});
@@ -114,4 +114,55 @@ it('rejects outdated cart products after refreshing stores, preserving old order
  expect(state.orders).toHaveLength(0);
  expect(state.cart).toEqual([{productId:p.id,quantity:2}]);
  expect(state.products.find(v=>v.kind==='meituan')?.id).toBe(productId);
+});
+
+it('requires eight complete shops with eight products each before any catalog write',async()=>{
+ const raw=Array.from({length:8},(_,i)=>({name:`商店${i}`,category:'家居',description:'杂货',products:Array.from({length:8},(_,j)=>({title:`物品${i}-${j}`,detail:'日常好物',price:10+i+j,deliveryMinutes:4320}))}));
+ expect(()=>normalizeTaobaoCatalog(raw.slice(0,7))).toThrow('8家');
+ expect(()=>normalizeTaobaoCatalog(raw.map((s,i)=>i===4?{...s,products:s.products.slice(0,7)}:s))).toThrow('8件');
+ const catalog=normalizeTaobaoCatalog(raw);
+ expect(catalog.shops).toHaveLength(8);expect(catalog.products).toHaveLength(64);
+ await saveTaobaoCatalog(catalog);
+ const data=await readCommerce();
+ expect(data.products.filter(p=>p.kind==='taobao')).toHaveLength(64);
+ expect(data.products.find(p=>p.kind==='meituan')?.id).toBe(productId);
+ const before=data.shops.find(p=>p.kind==='taobao')!.id;
+ await expect(saveTaobaoCatalog({...catalog,products:catalog.products.slice(0,63)})).rejects.toThrow('不完整');
+ expect((await readCommerce()).shops.find(p=>p.kind==='taobao')?.id).toBe(before);
+});
+it('appends new products without replacing the old shop goods',async()=>{
+ const raw=Array.from({length:8},(_,i)=>({name:`商店${i}`,category:'服饰',description:'穿搭',products:Array.from({length:8},(_,j)=>({title:`衣服${i}-${j}`,detail:'棉质',price:29}))}));
+ const catalog=normalizeTaobaoCatalog(raw);await saveTaobaoCatalog(catalog);
+ const shop=catalog.shops[0],first=catalog.products.find(p=>p.shopId===shop.id)!;
+ await appendTaobaoProducts(shop,normalizeProducts([{title:'新款外套',price:98},{title:'新款帽子',price:28}],'taobao'));
+ const state=await readCommerce();
+ expect(state.products.filter(p=>p.shopId===shop.id)).toHaveLength(10);
+ expect(state.products.some(p=>p.id===first.id)).toBe(true);
+ expect(state.products.filter(p=>p.shopId===catalog.shops[1].id)).toHaveLength(8);
+ await expect(appendTaobaoProducts({...shop,id:'nope'},normalizeProducts([{title:'新商品',price:30}],'taobao'))).rejects.toThrow('已更新');
+});
+it('stores separate delivery addresses and snapshots the selected recipient address on each order',async()=>{
+ const shop=normalizeShops([{name:'茶具屋',category:'家居',description:''}],'taobao')[0];
+ await saveShops([shop],'taobao');const [product]=normalizeProducts([{title:'玻璃杯',price:24}],'taobao');
+ await saveShopProducts([product],shop);await saveCommerceMembers('taobao',['a','b']);
+ const home=await saveTaobaoAddress('a',{label:'家',recipientName:'甲',phone:'123',detail:'青山路1号'});
+ const office=await saveTaobaoAddress('a',{label:'公司',recipientName:'甲',phone:'456',detail:'朝阳路2号'});
+ const mine=await saveTaobaoAddress('__user__',{label:'家',recipientName:'我',phone:'789',detail:'远洋路3号'});
+ await setDefaultTaobaoAddress('a',office.id);
+ const [o]=await checkoutTaobaoProducts({charId:'a',charName:'甲',userName:'我',buyer:'user',recipient:'char',lines:[{productId:product.id,quantity:1}],removeFromCart:false,addressId:home.id});
+ expect(o.deliveryAddress?.detail).toBe('青山路1号');
+ const auto=await createCommerceOrder({charId:'a',charName:'甲',userName:'我',buyer:'char',recipient:'char',productId:product.id,explicitRequest:true});
+ expect(auto.deliveryAddress?.id).toBe(office.id);
+ const [me]=await checkoutTaobaoProducts({charId:'a',charName:'甲',userName:'我',buyer:'user',recipient:'user',lines:[{productId:product.id,quantity:1}],removeFromCart:false,addressId:mine.id});
+ expect(me.deliveryAddress?.id).toBe(mine.id);
+ await expect(checkoutTaobaoProducts({charId:'b',charName:'乙',userName:'我',buyer:'user',recipient:'char',lines:[{productId:product.id,quantity:1}],removeFromCart:false,addressId:home.id})).rejects.toThrow('地址不存在');
+ await deleteTaobaoAddress('a',home.id);
+ const state=await readCommerce();
+ expect(state.taobaoProfiles.a.addresses).toHaveLength(1);
+ expect(state.taobaoProfiles.a.defaultAddressId).toBe(office.id);
+ expect(state.orders.find(x=>x.id===o.id)?.deliveryAddress?.detail).toBe('青山路1号');
+});
+it('loads old backup state without user profiles',async()=>{
+ await DB.saveAsset('personal_commerce_v1',JSON.stringify({shops:[],products:[{id:'x',kind:'taobao',title:'笔',shop:'文具',price:10,detail:''}],orders:[]}));
+ const state=await readCommerce();expect(state.cart).toEqual([]);expect(state.taobaoProfiles).toEqual({});
 });
