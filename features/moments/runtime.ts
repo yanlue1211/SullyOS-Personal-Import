@@ -182,7 +182,7 @@ export async function reserveActivity(
     // preview slots while the user's new post remains unread after the target.
     const queued = await Promise.all(events.map(async event => {
       const raw = await getRow<Post>(event.postId, s);
-      const comment = event.interactionId && raw?.comments.find(c => c.id === event.interactionId);
+      const comment = event.interactionId ? raw?.comments.find(c => c.id === event.interactionId) : undefined;
       const directFromUser = event.eventType === "comment" && comment?.authorId === "user" &&
         (comment.replyTo
           ? raw?.comments.some(parent => parent.id === comment.replyTo && parent.authorId === charId)
