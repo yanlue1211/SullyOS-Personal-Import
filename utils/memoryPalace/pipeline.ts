@@ -382,6 +382,7 @@ export interface RecallRetrievalOptions {
     formatterMaxOutputItems?: number;
     /** 隐去召回结果上的现实日期与「今天/距今X天」标注（用于虚构剧场与关掉线下时间感知的见面）。 */
     omitDates?: boolean;
+    readOnly?: boolean;
 }
 
 export async function retrieveMemories(
@@ -1047,7 +1048,7 @@ export async function retrieveMemories(
         // 6+7. 更新访问记录 + 共同激活加强（并发写 IDB）
         const writeT0 = performance.now();
         const retrievedIds = results.map(r => r.node.id);
-        await Promise.all([
+        if (!recallOptions?.readOnly) await Promise.all([
             ...retrievedIds.map(id => MemoryNodeDB.touchAccess(id)),
             retrievedIds.length >= 2 ? strengthenCoActivated(retrievedIds.slice(0, 5)) : Promise.resolve(),
         ]);
@@ -1096,7 +1097,7 @@ export async function retrieveMemories(
                 console.groupEnd();
 
                 // touch 一下让 rerank 选中的也走 accessCount / lastAccessedAt 更新（并发）
-                await Promise.all(rerankPicks.map(p => MemoryNodeDB.touchAccess(p.sm.node.id)));
+                if (!recallOptions?.readOnly) await Promise.all(rerankPicks.map(p => MemoryNodeDB.touchAccess(p.sm.node.id)));
 
                 // 追加到 results；formatter 的 MAX_OUTPUT_ITEMS 上调到 15 + N
                 // 不改 finalScore：保留 rerank pick 自己 hybridSearch 里的原始分，
@@ -1182,7 +1183,7 @@ export async function injectMemoryPalace(
     recentMessages?: Message[],
     queryHint?: string,
     userName?: string,
-    traceContext?: { entryPoint?: RecallEntryPoint; formatterMaxOutputItems?: number; omitDates?: boolean },
+    traceContext?: { entryPoint?: RecallEntryPoint; formatterMaxOutputItems?: number; omitDates?: boolean; readOnly?: boolean },
 ): Promise<RecallTrace> {
     const hadPreviousMemory = Boolean(char.memoryPalaceInjection);
     const hadPreviousRoomPlates = Boolean(char.roomPlatesInjection);
@@ -1408,7 +1409,7 @@ export async function injectMemoryPalace(
             getRemoteVectorConfig(),
             char.name,
             telemetry => { retrievalTelemetry = telemetry; },
-            { explicitEntityAnalysis, formatterMaxOutputItems: traceContext?.formatterMaxOutputItems, omitDates: traceContext?.omitDates },
+            { explicitEntityAnalysis, formatterMaxOutputItems: traceContext?.formatterMaxOutputItems, omitDates: traceContext?.omitDates, readOnly: traceContext?.readOnly },
         );
         if (context || !legacyCompatibilityMode) {
             char.memoryPalaceInjection = context || '';

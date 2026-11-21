@@ -3,7 +3,7 @@ import { ActiveMsgClient } from './activeMsgClient';
 import { ActiveMsgStore } from './activeMsgStore';
 import { catchUpMissedPushes, pauseActiveMsgRuntime, refreshPushSubscriptionIfMarked } from './activeMsgRuntime';
 import { flushPendingCloudRetirements } from './amsgCloudRetirement';
-import { isAmsg2WorkerActive, readMasterPausedCron, writeMasterPausedCron } from './amsgGlobalGate';
+import { isAmsg2GloballyEnabled, isAmsg2WorkerActive, readMasterPausedCron, writeMasterPausedCron } from './amsgGlobalGate';
 import { abortAllInstantChatPendingsLocally, resetInstantChatReprobeCooldown } from './amsgInstantChat';
 import { AMSG_OWNER_CONFLICT_EVENT } from './amsgOwnerReconcile';
 import {
@@ -27,6 +27,7 @@ export interface AmsgGlobalToggleResult {
   cronPaused?: boolean;
   cronResumed?: boolean;
   cronNotice?: string;
+  errorMessage?: string;
 }
 
 let switchEpoch = 0;
@@ -84,7 +85,7 @@ export async function flushAmsg2AfterReenable(scope?: AmsgGlobalSwitchScope): Pr
  * 若用户在高级面板里原本就手动暂停了后台任务，总开关不会覆盖该手动暂停标记。
  * 无论 Worker 是否在线、是否具备 `CF_API_TOKEN`，本机暂停都立即成功，绝不因远端失联卡死或抛错。
  *
- * 重新开启时先落盘 `enabled: true` 并重置探测冷却，按序尽力恢复由总开关暂停的 Cron 定时触发，
+ * 重新开启时先查询云端，确认由总开关暂停的 Cron 已恢复才落盘并重置探测冷却，
  * 再在后台冲刷暂停期间攒下的待停用角色、订阅变化标记、云端账本漏收消息以及本地脏快照。
  */
 export async function setAmsg2GlobalEnabled(
@@ -136,7 +137,7 @@ export async function setAmsg2GlobalEnabled(
           timeoutMs: 5_000,
         });
         if (cronRes.ok) {
-          if (myEpoch === switchEpoch) writeMasterPausedCron(true);
+          writeMasterPausedCron(true);
           return { enabled: false, cronPaused: true };
         }
         if (cronRes.code === 'CF_TOKEN_MISSING' || cronRes.code === 'NOT_FOUND') {
@@ -150,7 +151,7 @@ export async function setAmsg2GlobalEnabled(
           cronNotice: '本机已暂停所有云端连接；未能通知 Worker 暂停定时触发，云端已排任务可能仍会按原计划运行。',
         };
       } catch {
-        if (myEpoch === switchEpoch) writeMasterPausedCron(true);
+        writeMasterPausedCron(true);
         return {
           enabled: false,
           cronPaused: false,
@@ -160,54 +161,52 @@ export async function setAmsg2GlobalEnabled(
     });
   }
 
-  const config = await ActiveMsgStore.saveGlobalConfig({ enabled: true });
-  ActiveMsgClient.resetSessionCache();
-  resetInstantChatReprobeCooldown();
+  const outcome = await enqueueCronTransition(async (): Promise<AmsgGlobalToggleResult> => {
+    const config = await ActiveMsgStore.getGlobalConfig();
+    if (myEpoch !== switchEpoch) return { enabled: isAmsg2GloballyEnabled(config) };
 
-  if (!config.workerUrl?.trim()) {
-    writeMasterPausedCron(false);
-    return { enabled: true };
-  }
-
-  const cronOutcome = await enqueueCronTransition(async (): Promise<{
-    cronResumed?: boolean;
-    cronNotice?: string;
-  }> => {
-    if (myEpoch !== switchEpoch) {
-      return {};
-    }
-    const shouldResumeCron = readMasterPausedCron();
-    if (shouldResumeCron && config.initializedAt) {
+    let cronResumed = false;
+    let cronPaused = false;
+    if (config.workerUrl?.trim() && config.initializedAt) {
       try {
-        const cronRes = await ActiveMsgClient.setCronTriggerEnabled(true, { timeoutMs: 6_000 });
-        if (cronRes.ok) {
-          if (myEpoch === switchEpoch) writeMasterPausedCron(false);
-          return { cronResumed: true };
+        const state = await ActiveMsgClient.getCronTriggerState({
+          allowWhenDisabled: true, timeoutMs: 8_000, throwOnNetworkError: true,
+        });
+        if (myEpoch !== switchEpoch) return { enabled: false };
+        if (state?.supported && state.enabled) {
+          writeMasterPausedCron(false);
+        } else if (state?.supported && !readMasterPausedCron()) {
+          // Existing Workers do not identify the source of a pause. Preserve a
+          // pause we did not record as originating from this master switch.
+          cronPaused = true;
+        } else if (state?.supported || readMasterPausedCron()) {
+          const result = await ActiveMsgClient.setCronTriggerEnabled(true, {
+            allowWhenDisabled: true, timeoutMs: 10_000,
+          });
+          if (!result.ok) return { enabled: false, errorMessage: result.message };
+          writeMasterPausedCron(false);
+          cronResumed = true;
+        } else if (state && state.code !== 'CF_TOKEN_MISSING') {
+          return { enabled: false, errorMessage: state.message || '未能确认后台任务状态，请稍后重试。' };
         }
-        if (cronRes.code === 'CF_TOKEN_MISSING' || cronRes.code === 'NOT_FOUND') {
-          if (myEpoch === switchEpoch) writeMasterPausedCron(false);
-          return {};
-        }
-        return {
-          cronResumed: false,
-          cronNotice: '本机云端连接已恢复，但未能自动恢复 Worker 定时触发，可在配置面板里点「恢复后台任务」。',
-        };
       } catch {
-        return {
-          cronResumed: false,
-          cronNotice: '本机云端连接已恢复，但暂时连不上 Worker 恢复定时触发，稍后可在配置面板里检查。',
-        };
+        return { enabled: false, errorMessage: '暂时无法确认云端后台任务状态，主动消息 2.0 未开启。' };
       }
-    }
-    if (!config.initializedAt && myEpoch === switchEpoch) {
+    } else {
       writeMasterPausedCron(false);
     }
-    return {};
+
+    if (myEpoch !== switchEpoch) return { enabled: false };
+    await ActiveMsgStore.saveGlobalConfig({ enabled: true });
+    ActiveMsgClient.resetSessionCache();
+    resetInstantChatReprobeCooldown();
+    return {
+      enabled: true,
+      ...(cronResumed ? { cronResumed } : {}),
+      ...(cronPaused ? { cronPaused, cronNotice: '主动消息连接已开启，后台任务仍保持手动暂停。' } : {}),
+    };
   });
 
-  if (myEpoch === switchEpoch) {
-    void flushAmsg2AfterReenable(scope);
-  }
-
-  return { enabled: true, ...cronOutcome };
+  if (outcome.enabled && myEpoch === switchEpoch) void flushAmsg2AfterReenable(scope);
+  return outcome;
 }

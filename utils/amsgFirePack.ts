@@ -1,3 +1,4 @@
+import { gzipAmsgUpload } from './amsgUploadGzip';
 /**
  * 主动消息 2.0「满血」fire_pack：前端拼好的 prompt 模板 + 时间槽位的渲染。
  *
@@ -126,10 +127,6 @@ export const parseChatFailRecord = (value: string | null | undefined): AmsgChatF
  */
 const GZIP_VALUE_PREFIX = 'gz1:';
 
-/** 运行时有没有压缩能力（老 Safari 没有 CompressionStream）。 */
-const canCompress = (): boolean =>
-  typeof CompressionStream === 'function' && typeof DecompressionStream === 'function';
-
 // btoa/atob 只吃 latin1 字符串，二进制要一个字节一个字符地喂。整段 apply 展开会在大数据上
 // 爆调用栈，按块拼。
 const CHUNK = 0x8000;
@@ -159,10 +156,9 @@ const streamThrough = async (data: Uint8Array, transform: TransformStream): Prom
  * 云端那份 fire_pack 是角色到点时唯一的上下文来源，为了省流量把它弄丢是本末倒置。
  */
 export const packStateValue = async (json: string): Promise<string> => {
-  if (!canCompress()) return json;
   try {
     const rawBytes = new TextEncoder().encode(json);
-    const gz = await streamThrough(rawBytes, new CompressionStream('gzip'));
+    const gz = await gzipAmsgUpload(rawBytes);
     const packed = `${GZIP_VALUE_PREFIX}${bytesToBase64(gz)}`;
     // 划算不划算按**字节**比，不能用 .length。fire_pack 几乎全是中文，一个字符占 3 个
     // UTF-8 字节，而压完的 base64 全是 ASCII（1 字符 = 1 字节）——拿字符数比的话，

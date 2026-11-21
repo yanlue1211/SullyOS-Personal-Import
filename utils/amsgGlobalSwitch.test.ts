@@ -276,6 +276,7 @@ describe('主动消息 2.0 全局总开关（amsgGlobalSwitch）', () => {
     } as any);
     vi.spyOn(ActiveMsgClient, 'setCronTriggerEnabled').mockResolvedValue({ ok: true, message: 'ok' });
 
+    vi.spyOn(ActiveMsgClient, 'getCronTriggerState').mockResolvedValue({ supported: true, enabled: true });
     const toggleOn = await setAmsg2GlobalEnabled(true);
     expect(toggleOn.enabled).toBe(true);
     await new Promise((r) => setTimeout(r, 40));
@@ -285,6 +286,21 @@ describe('主动消息 2.0 全局总开关（amsgGlobalSwitch）', () => {
       workerUrl: globalBefore.workerUrl,
       userId: globalBefore.userId,
     })).toEqual([]);
+  });
+
+  it('重新开启时网络失败或 Worker 拒绝恢复，保持总开关关闭', async () => {
+    await ActiveMsgStore.saveGlobalConfig({ enabled: false });
+    const state = vi.spyOn(ActiveMsgClient, 'getCronTriggerState').mockRejectedValueOnce(new Error('offline'));
+    expect(await setAmsg2GlobalEnabled(true)).toMatchObject({ enabled: false, errorMessage: expect.any(String) });
+    expect((await ActiveMsgStore.getGlobalConfig()).enabled).toBe(false);
+
+    state.mockResolvedValueOnce({ supported: true, enabled: true });
+    const write = vi.spyOn(ActiveMsgClient, 'setCronTriggerEnabled').mockResolvedValueOnce({ ok: true, message: 'paused' });
+    await setAmsg2GlobalEnabled(false);
+    state.mockResolvedValueOnce({ supported: true, enabled: false });
+    write.mockResolvedValueOnce({ ok: false, message: 'Worker 拒绝恢复' });
+    expect(await setAmsg2GlobalEnabled(true)).toEqual({ enabled: false, errorMessage: 'Worker 拒绝恢复' });
+    expect((await ActiveMsgStore.getGlobalConfig()).enabled).toBe(false);
   });
 
   it('若用户原本已在高级面板手动暂停了后台任务，开关总开关不会误将其恢复', async () => {
