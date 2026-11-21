@@ -1,3 +1,4 @@
+import { resolveThinkingChainSettings } from '../utils/thinkingChainPrompt';
 import {momentsEnabled} from '../features/moments/gate';
 import { isEmotionFeatureOn } from '../utils/scheduleFeature';
 import { resolveDialogueApi, dialogueMaxTokens } from '../utils/characterApi';
@@ -950,7 +951,7 @@ export const useChatAI = ({
                 musicSnapshot: music,
                 translationConfig,
                 htmlMode: { enabled: !!(char as any).htmlModeEnabled, customPrompt: (char as any).htmlModeCustomPrompt },
-                thinkingChain: { enabled: !!(char as any).showThinkingChain, customPrompt: (char as any).thinkingChainCustomPrompt },
+                thinkingChain: resolveThinkingChainSettings(char, userProfile),
                 visionApiConfig: apiConfig.visionApi,
                 mcdMiniSnap: mcdMiniOpen ? mcdMiniSnap : undefined,
                 luckinMiniSnap: luckinMiniOpen ? luckinMiniSnap : undefined,

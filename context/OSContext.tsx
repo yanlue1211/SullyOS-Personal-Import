@@ -1,3 +1,5 @@
+import { decorationSelection } from '../utils/decorationPriority';
+import { resolveThinkingChainSettings } from '../utils/thinkingChainPrompt';
 import { SONG_RECALL_UPDATED } from '../features/personal/songArchive/keywords';
 import {syncCommittedAmsgUserTurn} from '../utils/amsgUserTurnSync';
 import {isPetControlCancellation} from '../features/tapnest/transport';
@@ -2667,7 +2669,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                   // translationConfig / mcdMiniSnap 是 chat-app 会话级 UI 状态，主动消息触发时
                   // 不存在；保持 undefined 即可，与"用户当时根本没在 chat 界面"的语义一致
                   htmlMode: { enabled: !!(char as any).htmlModeEnabled, customPrompt: (char as any).htmlModeCustomPrompt },
-                  thinkingChain: { enabled: !!(char as any).showThinkingChain, customPrompt: (char as any).thinkingChainCustomPrompt },
+                  thinkingChain: resolveThinkingChainSettings(char, userProfile),
                   visionApiConfig: currentApiConfig.visionApi,
               });
               const systemPrompt = payload.systemPrompt;
@@ -3400,6 +3402,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   }, [isDataLoaded]);
 
   const updateTheme = async (updates: Partial<OSTheme>) => {
+    updates = decorationSelection(theme, updates, 'global');
     stopBeautyForThemeChange(updates);
     const { wallpaper, lockWallpaper, launcherWidgetImage, launcherWidgets, desktopDecorations, customFont, ...styleUpdates } = updates;
     // Legacy slots are banned — never let them enter state, regardless of caller intent.
@@ -3682,7 +3685,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   const updateCharacter = async (id: string, updates: Partial<CharacterProfile> | ((prev: CharacterProfile) => Partial<CharacterProfile>)) => {
     if (typeof updates !== 'function' && Object.keys(updates).some(key => ['chatAppearance','chatFineTune','bubbleStyle','chatBackground','chromeCustomCss','chatSound','chatSoundBound','chatDecorationCssIsolated'].includes(key))) stopBeautyUsage('chat:' + id);
     setCharacters(prev => {
-      const updated = prev.map(c => c.id === id ? reconcileWorldbookMounts(normalizeCharacterImpression({ ...c, ...(typeof updates === 'function' ? updates(c) : updates) }), worldbooks) : c);
+      const updated = prev.map(c => c.id === id ? reconcileWorldbookMounts(normalizeCharacterImpression({ ...c, ...decorationSelection(c, typeof updates === 'function' ? updates(c) : updates, 'character') }), worldbooks) : c);
       const target = updated.find(c => c.id === id);
       if (target) {
         const before = prev.find(c => c.id === id);

@@ -2,7 +2,7 @@ import type { CharacterProfile, Emoji, EmojiCategory, GroupProfile, Message, Rea
 import { ContextBuilder } from '../../utils/context';
 import { buildChatRequestPayload } from '../../utils/chatRequestPayload';
 import { ChatPrompts } from '../../utils/chatPrompts';
-import { buildThinkingChainPrompt } from '../../utils/thinkingChainPrompt';
+import { applyThinkingChainPrompt, buildThinkingChainPrompt, resolveThinkingChainSettings } from '../../utils/thinkingChainPrompt';
 import { MemoryNodeDB } from '../../utils/memoryPalace/db';
 import { injectMemoryPalace } from '../../utils/memoryPalace/pipeline';
 import type { MemoryNode } from '../../utils/memoryPalace/types';
@@ -32,8 +32,8 @@ format: docx
 
 const collaborationThinkingPrompt = (char: CharacterProfile, user: UserProfile): string => {
   if (!char.showThinkingChain) return '';
-  const custom = (char.thinkingChainCustomPrompt || '').trim();
-  return `\n\n${buildThinkingChainPrompt(char.name, user.name)}${custom ? `\n\n### 用户追加的心象规则\n${custom}` : ''}`;
+  return `\n\n${applyThinkingChainPrompt(buildThinkingChainPrompt(char.name, user.name),
+    resolveThinkingChainSettings(char, user), '### 用户追加的心象规则')}`;
 };
 
 const collaborationRichOutputPrompt = (

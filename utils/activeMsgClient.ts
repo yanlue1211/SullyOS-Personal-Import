@@ -1,3 +1,4 @@
+import { resolveThinkingChainSettings } from './thinkingChainPrompt';
 import {orderPetCloudBackfill,petCoveredIds,petCloudNamespace} from './tapnestCloud';
 import {receivedCloudOccurrences} from './amsgFirePack';
 import { usesHumanStyle, usesInnerVoice, INNER_VOICE_FORMAT_REMINDER, CHAT_EXPRESSION_TAIL_REMINDER, IM_FRAGMENTED_CHAT_TAIL } from './chatPromptPreferences';
@@ -902,7 +903,7 @@ export const buildFirePack = async (
     userName: userProfile.name,
     translationConfig: readChatTranslationConfig(char.id),
     htmlMode: { enabled: !!char.htmlModeEnabled, customPrompt: char.htmlModeCustomPrompt },
-    thinkingChain: { enabled: !!char.showThinkingChain, customPrompt: char.thinkingChainCustomPrompt },
+    thinkingChain: resolveThinkingChainSettings(char, userProfile),
   });
   const builtAt = Date.now();
   const historyDate = new Date(builtAt).toLocaleString('zh-CN', { timeZone: tzId });

@@ -115,6 +115,7 @@ export interface JournalAppearance {
 }
 
 export interface OSTheme {
+  chatProfileAppearance?: import('./utils/chatProfileAppearance').ChatProfileAppearance;
   storyAppearance?: import('./utils/meetingAppearance').MeetingAppearance;
   hue: number;
   saturation: number;
@@ -201,6 +202,8 @@ export interface OSTheme {
   chatBubbleStyle?: 'modern' | 'flat' | 'outline' | 'shadow' | 'wechat' | 'ios';
   chatMessageSpacing?: 'compact' | 'default' | 'spacious';
   chatShowTimestamp?: 'always' | 'hover' | 'never';
+  /** 时间位置：气泡下方（默认，每组末条气泡下贴边）/ 对话段上方居中（微信式，按 5 分钟间隔分段） */
+  chatTimestampPosition?: 'below' | 'top_center';
   chatHeaderStyle?: 'default' | 'minimal' | 'gradient' | 'wechat' | 'telegram' | 'discord' | 'pixel';
   chatInputStyle?: 'default' | 'rounded' | 'flat' | 'wechat' | 'ios' | 'telegram' | 'discord' | 'pixel';
   chatChromeStyle?: 'soft' | 'flat' | 'floating' | 'pixel';
@@ -3385,6 +3388,11 @@ export interface CharacterProfile {
   };
   /** 用户追加的思考提示词（不替换原生，只在最后追加一段「用户额外要求」） */
   thinkingChainCustomPrompt?: string;
+  thinkingChainPromptScope?: "character" | "space";
+  thinkingChainPromptMode?: "append" | "replace";
+  chatIndependentParts?: import('./utils/whiteboxParts').WhiteboxPart[];
+  chatFollowWhiteboxParts?: import('./utils/whiteboxParts').WhiteboxPart[];
+  chatProfileAppearance?: import('./utils/chatProfileAppearance').ChatProfileAppearance;
   /**
    * 心象卡片的自定义 CSS（叠加在任意风格之上，机制同气泡工坊 customCss）。
    * 选择器限定以 .sully-psyche 开头（子元素类：-card / -title / -preview / -body），
@@ -3481,6 +3489,7 @@ export interface CharacterExportData extends Omit<CharacterProfile, 'id' | 'memo
 }
 
 export interface UserProfile {
+  thinkingChainPrompt?: { mode: "append" | "replace"; customPrompt: string };
     wardrobeOutfits?: import('./apps/room3d/chibi/outfitLibrary').SavedOutfit[];
     chibiStudio?: { home3D?: HomeFigureSlot };
     name: string;
