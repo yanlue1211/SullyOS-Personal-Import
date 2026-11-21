@@ -1,3 +1,4 @@
+import { amsgRecallInputKey } from './amsgPreparedRecall';
 // utils/activeMsgClient.test.ts
 // 回归守卫：
 //   1. 云端状态上传「不降级」。过去这一步失败只 warn，任务照建，到点用排程那刻冻结的
@@ -1053,6 +1054,27 @@ describe('buildFirePack 的时区参照系与模板（①）', () => {
   afterEach(() => { vi.restoreAllMocks(); });
 
   const pack = (char: any) => buildFirePack(char, user, [], undefined, { all: [], categories: [] });
+
+  it('只复用同一上下文的召回，保留旧事件日期并移除打包当天的相对日提示', async () => {
+    const pipeline = await import('./memoryPalace/pipeline');
+    const inject = vi.spyOn(pipeline, 'injectMemoryPalace').mockResolvedValue({ outcome: 'empty' } as any);
+    const char = baseChar({ memoryPalaceEnabled: true, memoryPalaceInjection: '旧请求残留' });
+    const preparedRecall = {
+      inputKey: amsgRecallInputKey(char, [], user.name),
+      memory: '2026年11月20日（今天） 外卖已送达',
+      roomPlates: '本轮门牌',
+    };
+    const fresh = await buildFirePack(char, user, [], undefined, { all: [], categories: [] }, { preparedRecall });
+    expect(fresh.template).toContain('2026年11月20日 外卖已送达');
+    expect(fresh.template).not.toContain('2026年11月20日（今天）');
+    expect(fresh.template).not.toContain('旧请求残留');
+    expect(char.memoryPalaceInjection).toBe('旧请求残留');
+    expect(inject).not.toHaveBeenCalled();
+    const mismatched = await buildFirePack(char, { name: '别人' } as any, [], undefined,
+      { all: [], categories: [] }, { preparedRecall });
+    expect(inject).toHaveBeenCalledTimes(1);
+    expect(mismatched.template).not.toContain('外卖已送达');
+  });
 
   it('native-expression template omits character anchors and respects the independent heart switch', async () => {
     const out = await pack(baseChar({humanStyleEnabled:false,innerVoiceEnabled:false,showThinkingChain:true}));

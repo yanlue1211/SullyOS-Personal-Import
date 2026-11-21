@@ -1,3 +1,4 @@
+import { amsgRecallInputKey, formatAmsgRecalledHistory, type AmsgPreparedRecall } from './amsgPreparedRecall';
 import { gzipAmsgUpload } from './amsgUploadGzip';
 import {orderPetCloudBackfill,petCoveredIds,petCloudNamespace} from './tapnestCloud';
 import {receivedCloudOccurrences} from './amsgFirePack';
@@ -809,16 +810,12 @@ export const buildFirePack = async (
      * 即时 fire 自己要读它们（sceneSong、锚点、任务清单块）。
      */
     templateStub?: boolean;
+    preparedRecall?: AmsgPreparedRecall;
   },
 ): Promise<AmsgFirePack> => {
   await (await import('./tapnestCloudHistory')).recoverPetCloudHistory(char.id);
   const templateStub = opts?.templateStub === true;
-  // 请求内副本：门牌常驻但内容会变，每次从本机重读，不能沿用 UI 挂着的旧注入。
-  char = { ...char, roomPlatesInjection: '' };
-  if (!templateStub && char.memoryPalaceEnabled) {
-    const { buildRoomPlatesInjection } = await import('./memoryPalace/roomPlates');
-    char.roomPlatesInjection = await buildRoomPlatesInjection(char.id, userProfile.name);
-  }
+  char = { ...char, memoryPalaceInjection: '', roomPlatesInjection: '' };
   const [{ lastUserMessageAt, lastCharMessageAt, recentMessages: activityMessages }, recentMessages, library, schedule] = await Promise.all([
     buildTimeGapHint(char.id),
     templateStub ? Promise.resolve([]) : loadCharacterContextMessages(char).then(orderPetCloudBackfill),
@@ -835,6 +832,21 @@ export const buildFirePack = async (
         })
       : Promise.resolve(null),
   ]);
+  let recalledHistory = '';
+  if (!templateStub && char.memoryPalaceEnabled) {
+    const prepared = opts?.preparedRecall;
+    if (prepared && prepared.inputKey === amsgRecallInputKey(char, recentMessages, userProfile.name)) {
+      char.roomPlatesInjection = prepared.roomPlates;
+      recalledHistory = formatAmsgRecalledHistory(prepared.memory);
+    } else {
+      const { injectMemoryPalace } = await import('./memoryPalace/pipeline');
+      await injectMemoryPalace(char, recentMessages, undefined, userProfile.name, {
+        entryPoint: 'proactive_chat', readOnly: true, formatterMaxOutputItems: 5,
+      });
+      recalledHistory = formatAmsgRecalledHistory(char.memoryPalaceInjection ?? '');
+      char.memoryPalaceInjection = '';
+    }
+  }
   // 角色的时间参照系：开了自定义时区用角色的，没开用设备的。worker 渲染一切给角色看的
   // 时间（当前时间、日程日期、排程清单）都按它来。
   const charTz = resolveCharTimeZone(char);
@@ -928,7 +940,7 @@ export const buildFirePack = async (
   const template = templateStub ? AMSG2_INSTANT_STUB_TEMPLATE : !usesHumanStyle(char) ? [
     '根据已有对话与本次任务给用户发送消息；无需扮演角色或模拟人类生活。',
     (usesInnerVoice(char) ? INNER_VOICE_FORMAT_REMINDER + '\n' : '') + systemPrompt + outputStyle.prompt,
-    '【最近对话】', recentTranscript + AMSG_SLOT_SELF_LOG,
+    recalledHistory, '【最近对话】', recentTranscript + AMSG_SLOT_SELF_LOG,
     timeAware ? `【当前时间】${AMSG_SLOT_CURRENT_TIME}${AMSG_SLOT_USER_CLOCK}` : '',
     AMSG_SLOT_TASK_LIST, AMSG_SLOT_REALTIME_WORLD,
     '【本次任务】', AMSG_SLOT_TASK_INSTRUCTION,
@@ -951,6 +963,7 @@ export const buildFirePack = async (
     systemPrompt + outputStyle.prompt,
     `（注意：上面角色设定里的情绪、印象等状态是最近一次聊天时的快照。${timeAware ? '此刻的时间、你正在做什么' : '你此刻正在做什么'}，以下方「当前时刻补充」为准。）`,
     '',
+    recalledHistory,
     '【最近对话上下文】',
     ...(timeAware ? [`这份历史记录截取于 ${historyDate}（你所在地时间）。`] : []),
     // 槽位直接黏在最后一行后面（不单独占一行）：worker 到点没有可写的自述时填空串，
@@ -3287,6 +3300,7 @@ export const ActiveMsgClient = {
     chatMessages: Array<{ role: string; content: unknown }>;
     /** Worker 时效信息的注入位置；缺失时兼容旧版末尾追加。 */
     timelyInsertAt?: number;
+    preparedRecall?: AmsgPreparedRecall;
     /**
      * 这一轮该用的聊天凭据——**必须是本地生成那一轮会用的同一份**（effectiveApi）。
      */
@@ -3341,7 +3355,7 @@ export const ActiveMsgClient = {
       && !char.awayMessage?.enabled
       && (char.activeMsg2Config?.tasks?.length ?? 0) === 0;
     const firePack: AmsgFirePack = {
-      ...(await buildFirePack(char, userProfile, groups, realtimeConfig, undefined, { templateStub })),
+      ...(await buildFirePack(char, userProfile, groups, realtimeConfig, undefined, { templateStub, preparedRecall: params.preparedRecall })),
       // 先还原图片令牌再算体积预算——反过来会让一份「看着没超」的包在云端胀成几 MB，
       // 而 worker 那边根本解不开令牌（见 resolveChatMessagesForUpload）。
       chat: {

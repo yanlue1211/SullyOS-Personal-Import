@@ -1320,6 +1320,7 @@ export const useChatAI = ({
                         ? insertAmsg2TaskContextBlock(fullMessages, { role: 'system', content: amsg2NoticesBlock }, payload.volatileTailIndex)
                         : fullMessages) as Array<{ role: string; content: unknown }>,
                     timelyInsertAt: payload.volatileTailIndex,
+                    preparedRecall: payload.amsgPreparedRecall,
                     // 凭据用本地这一轮的那份：换成别的等于同一句话由不同模型来答，而用户看不出来。
                     // model / temperature 取 baseReqBody 的终值而不是 effectiveApi 的原始值：
                     // 上面那段已经按本地规则把 thinking 后缀（claude 系 -thinking）拼好、

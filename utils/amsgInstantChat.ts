@@ -520,6 +520,7 @@ export const sendInstantChatTurn = async (params: {
   chatMessages: Array<{ role: string; content: unknown }>;
   /** 插入 Worker 时效块的位置：本地易变尾段之前。-1 时沿用末尾追加。 */
   timelyInsertAt?: number;
+  preparedRecall?: import('./amsgPreparedRecall').AmsgPreparedRecall;
   /** 本地生成这一轮会用的凭据（effectiveApi），云端必须用同一份。 */
   api: { baseUrl: string; apiKey: string; model: string };
   /** 本地这一轮会发的采样温度；开思考时本地不发温度，这里也就不传。 */
@@ -585,6 +586,7 @@ export const sendInstantChatTurn = async (params: {
       signal: params.signal,
       char: params.char,
       chatMessages: params.chatMessages,
+      ...(params.preparedRecall ? { preparedRecall: params.preparedRecall } : {}),
       ...(params.timelyInsertAt !== undefined ? { timelyInsertAt: params.timelyInsertAt } : {}),
       api: params.api,
       ...(typeof params.temperature === 'number' ? { temperature: params.temperature } : {}),
