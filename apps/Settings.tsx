@@ -1,3 +1,4 @@
+import RescueArchiveDialog from '../components/settings/RescueArchiveDialog';
 import CleanupManager from '../features/experience/CleanupManager';
 import AudioApiFields from '../components/settings/AudioApiFields';
 import HaimianMusicSettings from '../components/settings/HaimianMusicSettings';
@@ -622,6 +623,7 @@ const Settings: React.FC = () => {
   const [showCloudModal, setShowCloudModal] = useState(false);
   const [showGithubModal, setShowGithubModal] = useState(false);
   const [showCloudRestoreModal, setShowCloudRestoreModal] = useState(false);
+  const [rescueArchiveOpen, setRescueArchiveOpen] = useState(false);
   const [cloudBackupFiles, setCloudBackupFiles] = useState<import('../types').CloudBackupFile[]>([]);
   const [cloudBackupListState, setCloudBackupListState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [cloudBackupListError, setCloudBackupListError] = useState('');
@@ -2381,6 +2383,11 @@ const Settings: React.FC = () => {
                     <span>导入备份 (.zip / .json)</span>
                 </div>
                 <input type="file" ref={importInputRef} className="hidden" accept=".json,.zip" onChange={handleImport} />
+                <button type="button" onClick={() => setRescueArchiveOpen(true)}
+                    className="rounded-xl border border-emerald-200 bg-emerald-50 py-3 text-xs font-bold text-emerald-800">
+                    主动消息救援档
+                </button>
+                {rescueArchiveOpen && <RescueArchiveDialog onClose={() => setRescueArchiveOpen(false)} />}
             </div>
 
             <p className="text-[10px] text-slate-400 px-1 mb-4 leading-relaxed">

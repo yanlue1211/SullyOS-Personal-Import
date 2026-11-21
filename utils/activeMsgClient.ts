@@ -1,3 +1,4 @@
+import { recordRescueFromConfigCheck } from './amsgRescueAlert';
 import { resolveThinkingChainSettings } from './thinkingChainPrompt';
 import { amsgRecallInputKey, formatAmsgRecalledHistory, type AmsgPreparedRecall } from './amsgPreparedRecall';
 import { gzipAmsgUpload } from './amsgUploadGzip';
@@ -1961,6 +1962,7 @@ const fetchWithAuthRaw = async (
  * /config-check 的地方都顺手记一笔。存不下只是这一次的结论留不到下次，不影响探测本身。
  */
 const rememberWorkerBundleVersion = async (body: any, checkedWorkerUrl?: string): Promise<void> => {
+  recordRescueFromConfigCheck(body, checkedWorkerUrl);
   const deployed = typeof body?.data?.workerVersion === 'string' ? body.data.workerVersion : null;
   try {
     const current = await ActiveMsgStore.getGlobalConfig();

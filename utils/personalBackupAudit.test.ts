@@ -6,7 +6,7 @@ import { transactionDone } from '../features/workroom/schema';
 import { claimDailySchedule } from '../features/personal/innerVoice/scheduleOnce';
 import { exportActivityTextAsset } from './activityBackup';
 import { streamBackupArrayStore } from './backupStoreStreaming';
-import { assembleV2Backup, writeV2Backup, type ZipFileReader, type ZipFileWriter } from './backupFormat';
+import { assembleV2Backup, openLegacyBackup, writeV2Backup, type ZipFileReader, type ZipFileWriter } from './backupFormat';
 import { collectBlobRefs, readBlobsIndex, restoreBlobsFromZip, writeBlobsToZip } from './backupBlobs';
 import { putImageBlob, getBlobForRef, restoreBlobRef, deleteBlobRef } from './blobRef';
 import { readCommerce, createCommerceOrder, reconcileCommerce, purchaseBlock } from './personalCommerce';
@@ -32,7 +32,13 @@ beforeEach(async()=>{
     await DB.saveDiary({id:'diary',charId:'a',kind:'character',date:'2026-10-31',userPage:{text:'',paperStyle:'plain',stickers:[]},charPage:{text:'个人日记全文',paperStyle:'plain',stickers:[]},timestamp:123,isArchived:false} as any);
     await DB.saveDailySchedule({id:'a_2026-10-31',charId:'a',date:'2026-10-31',slots:[{startTime:'09:00',activity:'上班'}]} as any);
 });
-async function unpack(zip:JSZip){const loaded=await JSZip.loadAsync(await zip.generateAsync({type:'uint8array'}));return {zip:loaded,data:await assembleV2Backup(loaded as unknown as ZipFileReader,JSON.parse(await loaded.file('manifest.json')!.async('string')))};}
+async function unpack(zip:JSZip, deferred = false) {
+    const loaded = await JSZip.loadAsync(await zip.generateAsync({ type: 'uint8array' }));
+    const reader = loaded as unknown as ZipFileReader;
+    const data = deferred ? await openLegacyBackup(reader)
+        : await assembleV2Backup(reader, JSON.parse(await loaded.file('manifest.json')!.async('string')));
+    return { zip: loaded, data };
+}
 it('完整 ZIP 保存商城目录、权限、订单快照、通知状态、日记、日程及真实录音/分享图像字节',async()=>{
     const audio=await putImageBlob(new Blob([new Uint8Array([82,73,70,70,1,2,3])],{type:'audio/wav'}));
     const picture=await putImageBlob(new Blob([new Uint8Array([7,8,9])],{type:'image/png'}));
@@ -41,7 +47,7 @@ it('完整 ZIP 保存商城目录、权限、订单快照、通知状态、日�
     await DB.saveMessage({charId:'a',role:'user',type:'xhs_card',content:'分享',metadata:{xhsNote:{title:'真实笔记',desc:'正文',images:[picture],videoFrames:[{image:picture,timeSeconds:2}]},visionDescription:'保留的识图文字'}});
     const messages=await DB.getMessagesByCharId('a',true),zip=new JSZip(),refs=new Set<string>();
     await writeV2Backup(zip as unknown as ZipFileWriter,await DB.exportFullData(),{onSerialized:s=>collectBlobRefs(s,refs)});
-    await writeBlobsToZip(zip as any,refs,getBlobForRef);const restored=await unpack(zip);
+    await writeBlobsToZip(zip as any,refs,getBlobForRef);const restored=await unpack(zip,true);
     await deleteBlobRef(audio);await deleteBlobRef(picture);await DB.deleteAsset('personal_commerce_v1');
     await restoreBlobsFromZip(restored.zip as any,await readBlobsIndex(restored.zip as any),restoreBlobRef);
     await DB.importFullData(restored.data as any);
@@ -64,7 +70,7 @@ it('纯文字 ZIP 也保存淘宝/外卖和日程一次性标识，媒体补丁�
     const assets=await streamBackupArrayStore(zip as any,'assets','activityTextAssets',{transform:exportActivityTextAsset});
     const full=await DB.exportFullData();
     await writeV2Backup(zip as any,{messages:stripBackupImages(full.messages),characters:full.characters,diaries:full.diaries,dailySchedules:full.dailySchedules,songSoundArchive:full.songSoundArchive}, {mode:'text_only',prewrittenStores:{activityTextAssets:assets}});
-    const restored=await unpack(zip);await DB.deleteAsset('personal_commerce_v1');
+    const restored=await unpack(zip,true);await DB.deleteAsset('personal_commerce_v1');
     await DB.importFullData(restored.data as any);
     expect(await readCommerce()).toEqual(commerce);
     expect(await claimDailySchedule('a','2026-10-31')).toBe(false);
