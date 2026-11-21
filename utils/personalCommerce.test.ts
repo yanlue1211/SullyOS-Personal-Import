@@ -196,3 +196,21 @@ it('keeps two variants of one product as distinct cart lines, prices and order s
  expect((await readCommerce()).cart).toHaveLength(0);
  expect((await readCommerce()).orders).toHaveLength(2);
 });
+
+it.each(['meituan', 'taobao'] as const)('keeps %s order and receipt events separate after delivery', async kind => {
+ const createdAt = new Date(2026, 10, 10, 15).getTime();
+ const eta = createdAt + 35 * 60_000;
+ const nextDay = createdAt + 24 * 60 * 60_000;
+ const [product] = normalizeProducts([{title:'奶茶', shop:'奶茶店', price:22}], kind);
+ const order = {
+  id:'historic-order', charId:'a', charName:'甲', userName:'我', product,
+  buyer:'user' as const, recipient:'char' as const, createdAt, eta, autonomous:false,
+ };
+ expect(orderStatus(order, nextDay)).toBe(kind === 'meituan' ? '已送达' : '已签收');
+ expect(orderText(order)).toContain(new Date(createdAt).toLocaleString());
+ expect(orderText(order)).toContain('下单了奶茶');
+ expect(orderText(order)).not.toContain('已收到');
+ expect(orderText(order, true)).toContain(new Date(eta).toLocaleString());
+ expect(orderText(order, true)).toContain('甲已收到奶茶');
+ expect(orderText(order, true)).not.toContain('下单');
+});

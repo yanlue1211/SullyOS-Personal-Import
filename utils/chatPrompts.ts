@@ -1373,10 +1373,10 @@ ${voiceActingGuide()}`;
                 }
                 else if ((m.type as string) === 'phone_card') {
                     // phone_card：你自己手机里的内容（聊天/订单/外卖/朋友圈/智能体等数字痕迹）。
-                    // 框定为「你刚看了眼自己手机、这是里面的隐私」——不暗示用户在偷看，且带一点"未必愿意被看到"的私密感。
+                    // 卡片进入历史后仍按里面的活动时间理解。
                     const pc: any = m.metadata?.phoneCard || {};
                     const body = typeof m.content === 'string' ? m.content : '';
-                    content = `${timeStr}（你刚刚看了眼手机，这是你${pc.app || '手机'}里的内容——这些是你自己的隐私，不一定愿意让其他人看到。当成手机里确实有的东西即可，聊到再自然提及，不必主动说起。）\n${body}`;
+                    content = `${timeStr}（你${pc.app || '手机'}里保存的记录。按记录的发生时间理解，可以聊到时自然提及。这些内容属于你的隐私。）\n${body}`;
                 }
                 else if ((m.type as string) === 'theater_card') {
                     // theater_card：用户「窥视」了你某个时段的行为小剧场。那段演出就是你当时真实在做的事，

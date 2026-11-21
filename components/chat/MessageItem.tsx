@@ -1461,7 +1461,7 @@ const MessageItem = React.memo(({
             if (scoreData?.type === 'commerce_order' && scoreData.order) return (
                 <div className={`w-full px-4 my-3 relative ${selectionMode ? 'pl-12' : ''}`} {...interactionProps}>
                     {selectionMode && <button className="absolute left-2 top-1/2" aria-label="选择订单卡片" onClick={e=>{e.stopPropagation();onToggleSelect(m.id);}}>{isSelected ? '●' : '○'}</button>}
-                    <div className="mx-auto w-72"><OrderCard order={scoreData.order} delivered={scoreData.delivered} /></div>
+                    <div className="mx-auto w-72"><OrderCard order={scoreData.order} delivered={scoreData.delivered} historical /></div>
                 </div>
             );
             if (scoreData?.type === 'diary_card') {

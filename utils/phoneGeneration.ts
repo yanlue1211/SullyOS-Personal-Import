@@ -60,3 +60,26 @@ export function mergePhoneGeneration(
             ? { ...record, contactId: aliases.get(record.contactId) } : record);
     return { ...current, records: [...(current?.records || []), ...records], ...(generation.contacts ? { contacts } : {}) };
 }
+
+export const PHONE_CONVERSATION_COMMITTED = 'phone-conversation-committed';
+
+export interface PhoneConversationChange {
+    charId: string;
+    record: PhoneEvidence;
+    contact: PhoneContact;
+    card?: { content: string; detail: string };
+    broadcast?: string;
+}
+
+export function mergePhoneConversation(
+    current: CharacterProfile['phoneState'], change: PhoneConversationChange,
+): NonNullable<CharacterProfile['phoneState']> {
+    const upsert = <T extends { id: string }>(items: T[] | undefined, next: T) => {
+        const previous = items || [];
+        return previous.some(item => item.id === next.id)
+            ? previous.map(item => item.id === next.id ? next : item)
+            : [...previous, next];
+    };
+    return { ...current, records: upsert(current?.records, change.record),
+        contacts: upsert(current?.contacts, change.contact) };
+}

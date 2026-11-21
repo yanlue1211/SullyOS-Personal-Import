@@ -3,11 +3,13 @@ import { loadCharacterContextMessages } from './chatContextRange';
 // 查手机「人际关系」模块的纯逻辑 + LLM 链路：真假甄别、好感、双 LLM 私下对话（A 发 B 回）、AI 玩 AI。
 // UI 层（CheckPhone.tsx）负责把这里的结果落库 / 镜像到对方角色，本文件只产数据，不碰 React。
 
-import { CharacterProfile, PhoneContact, UserProfile, ConvTopic, PhoneEvidence } from '../types';
+import { CharacterProfile, PhoneContact, UserProfile, ConvTopic, PhoneEvidence, PhoneTurnTime } from '../types';
 import { ContextBuilder, type CharacterContextInput, type ContextMessage } from './context';
 import { injectMemoryPalace } from './memoryPalace/pipeline';
 import { DB } from './db';
 import { safeResponseJson } from './safeApi';
+import { resolveCharTimeZone } from './timezone';
+import { resolvePhoneTurnTimes } from './phoneTimeline';
 import { phoneTranscriptToText } from './phoneTranscript';
 
 export interface MiniApiConfig {
@@ -132,6 +134,7 @@ export function applyRealConversationToPhoneState(
         partnerName: string; partnerCharId: string; detail: string; delta: number;
         partnerNote?: string; learnedNew?: string; seedIdentity?: string;
         timestamp: number; recordId: string; systemMessageId?: number;
+        turnTimes?: (PhoneTurnTime | null)[]; observedAt?: number;
     },
 ): { phoneState: NonNullable<CharacterProfile['phoneState']>; broadcast: string } {
     const matchesPartner = (c: PhoneContact) => c.linkedCharId === result.partnerCharId
@@ -164,6 +167,7 @@ export function applyRealConversationToPhoneState(
     const record: PhoneEvidence = {
         ...(existing || { id: result.recordId, type: 'chat', title: result.partnerName }),
         detail: result.detail, timestamp: result.timestamp, contactId,
+        ...(result.turnTimes ? { turnTimes: result.turnTimes, lastObservedAt: result.observedAt } : {}),
         systemMessageId: result.systemMessageId ?? existing?.systemMessageId,
     };
     return {
@@ -199,6 +203,15 @@ export function parseTranscript(detail: unknown, firstUnprefixedIsMe = false): {
         }
     }
     return out;
+}
+
+/** Validate new model output separately from the permissive legacy reader. */
+export function parseGeneratedAiTranscript(detail: unknown) {
+    const script = phoneTranscriptToText(detail).trim();
+    if (!/^(我|对方|Me|Them)\s*[:：]\s*\S/.test(script)) throw new Error('Missing phone speaker');
+    const turns = parseTranscript(script);
+    if (turns.at(-1)?.isMe !== false) throw new Error('Incomplete AI reply');
+    return turns;
 }
 
 /** 把结构化气泡序列化回「我:/对方:」脚本，每行都带前缀（保证后续解析无损） */
@@ -319,6 +332,7 @@ ${p.transcript}
 
 export interface RealConversationResult {
     /** A 机主视角脚本（"我"=A，"对方"=B） */
+    minutesAgo?: number;
     aDetail: string;
     /** B 机主视角脚本（"我"=B，"对方"=A） */
     bDetail: string;
@@ -328,6 +342,11 @@ export interface RealConversationResult {
     aLearnedNew: string;
     /** B 这次新了解到的关于 A 的认识；无则空串 */
     bLearnedNew: string;
+}
+
+function formatContactHistoryTime(text: string, at: number | undefined, character: CharacterProfile): string {
+    if (at == null || !Number.isFinite(at) || character.timeAwarenessEnabled === false) return text;
+    return `[${new Date(at).toLocaleString('zh-CN', { timeZone: resolveCharTimeZone(character) })}] ${text}`;
 }
 
 interface RunRealConversationParams {
@@ -343,6 +362,7 @@ interface RunRealConversationParams {
     rounds?: number;
     /** 续写时已有的 A 视角脚本（"我"=A） */
     existingDetail?: string;
+    observation?: { at: number; earliest: number; history?: (PhoneTurnTime | null)[] };
     aNote?: string;
     bNote?: string;
     /** A 目前对 B 已有的「了解」（印象，未必属实） */
@@ -372,12 +392,12 @@ export async function runRealConversation(
     const recentB = await recentContextText(b, b.name, user.name);
 
     // transcript: 用名字标注，喂给两边的 prompt
-    const turns: { speaker: 'A' | 'B'; text: string }[] = [];
+    const turns: { speaker: 'A' | 'B'; text: string; occurredAt?: number }[] = [];
 
     // 续写：把已有 A 视角脚本解析回 turns（带前缀继承，多行消息不丢——修复「续写覆盖/吞掉之前内容」）
     if (p.existingDetail) {
-        for (const seg of parseTranscript(p.existingDetail)) {
-            turns.push({ speaker: seg.isMe ? 'A' : 'B', text: seg.text });
+        for (const [index, seg] of parseTranscript(p.existingDetail).entries()) {
+            turns.push({ speaker: seg.isMe ? 'A' : 'B', text: seg.text, occurredAt: p.observation?.history?.[index]?.occurredAt });
         }
     }
 
@@ -401,6 +421,8 @@ export async function runRealConversation(
         return { text, delta: Math.max(-20, Math.min(20, delta)), learned: learnedParts.join('；') };
     };
 
+    let minutesAgo: number | undefined;
+    const continuity = '聊天记录只覆盖已知活动。查看间隔不能说明双方多久没联系，按人设和已有往来自然决定怎么聊。';
     let aDelta = 0;
     let bDelta = 0;
     let aLearnedNew = '';
@@ -451,20 +473,28 @@ ${turns.length ? '见独立消息历史。' : '（还没开始，由你起头）
 - 依据你们的真实关系（见上方备注）和好感度自然地聊；**不要凭空制造敌意、阴阳怪气、攻击或狗血冲突**——除非你的人设、备注或明显的负好感确实如此。好感为正或中性时就正常、友好地交流。
 - 紧扣已有对话的话题往下接，别跳戏、别把对方当成别人。
 
+${continuity}
+${p.observation && a.timeAwarenessEnabled !== false ? `如果这次交流属于未观察到的较早活动，可另起一行用 [[距查看分钟:N]] 标出发生于本次查看前的整数分钟数，范围 0 至 ${Math.max(0, Math.floor((p.observation.at - p.observation.earliest) / 60_000))}。没有合适的历史片段就省略。` : ''}
 任务：以「${a.name}」的身份，发给「${b.name}」接下来的消息（3-6 句、可连发几条，IM 风格，信息量够）。
 只输出消息正文，不要加「${a.name}:」之类前缀，不要解释、不要旁白。
 然后另起一行，用 [[Δ:+N]] 标注说完这段后你对 TA 的好感变化（N 为 -20~20 的整数，没变化写 [[Δ:0]]）。
 如果这次交流让你对「${b.name}」**有了新的认识**（TA 是谁、什么身份、在意什么、透露了什么关键信息——记住这些只是 TA 自己说的、**未必是真的**，写成你的判断），再另起一行用 [[了解:一句话]] 记下来；没有新认识就别写这一行。`;
         let aRaw = '';
         try {
-            aRaw = await chatCompletion(api, aPrompt, 0.85, ctxA, turns.map(t => ({ role: t.speaker === 'A' ? 'assistant' : 'user', content: t.text })));
+            aRaw = await chatCompletion(api, aPrompt, 0.85, ctxA, turns.map(t => ({ role: t.speaker === 'A' ? 'assistant' : 'user', content: formatContactHistoryTime(t.text, t.occurredAt, a) })));
         } catch {
             break;
         }
-        const aParsed = extract(aRaw, a.name);
+        const marker = aRaw.match(/\[\[距查看分钟:(\d+)\]\]/);
+        if (marker && p.observation && a.timeAwarenessEnabled !== false) {
+            const candidate = Number(marker[1]);
+            if (Number.isSafeInteger(candidate) && p.observation.at - candidate * 60_000 >= p.observation.earliest) minutesAgo = candidate;
+        }
+        const aParsed = extract(aRaw.replace(/\[\[距查看分钟:[^\]]*\]\]/g, ''), a.name);
         aDelta += aParsed.delta;
         if (aParsed.learned) aLearnedNew = appendLearned(aLearnedNew, aParsed.learned);
-        if (aParsed.text) turns.push({ speaker: 'A', text: aParsed.text });
+        if (aParsed.text) turns.push({ speaker: 'A', text: aParsed.text,
+            occurredAt: p.observation ? p.observation.at - (minutesAgo ?? 0) * 60_000 : undefined });
 
         // ---- B 回 ----
         const bPrompt = `
@@ -504,13 +534,14 @@ ${p.bSummary ? '最近的对话' : '对话记录'}（"${b.name}:" 是你，"${a.
 - 依据你们的真实关系（见上方备注）和好感度自然回复；**不要凭空制造敌意、阴阳怪气或冲突**——除非人设、备注或明显的负好感确实如此。好感为正或中性时就正常、友好地回。
 - 紧扣对方刚说的话回应，别跳戏、别认错人。
 
+${continuity}
 任务：以「${b.name}」的身份回复「${a.name}」（3-6 句、可连发几条，IM 风格，信息量够）。
 只输出回复正文，不要前缀，不要解释、不要旁白。
 然后另起一行，用 [[Δ:+N]] 标注回完这段后你对 TA 的好感变化（N 为 -20~20 的整数，没变化写 [[Δ:0]]）。
 如果这次交流让你对「${a.name}」**有了新的认识**（TA 是谁、身份、在意什么、透露了什么——记住只是 TA 自己说的、**未必为真**，写成你的判断），再另起一行用 [[了解:一句话]] 记下来；没有就别写。`;
         let bRaw = '';
         try {
-            bRaw = await chatCompletion(api, bPrompt, 0.85, ctxB, turns.map(t => ({ role: t.speaker === 'B' ? 'assistant' : 'user', content: t.text })));
+            bRaw = await chatCompletion(api, bPrompt, 0.85, ctxB, turns.map(t => ({ role: t.speaker === 'B' ? 'assistant' : 'user', content: formatContactHistoryTime(t.text, t.occurredAt, b) })));
         } catch {
             break;
         }
@@ -533,6 +564,7 @@ ${p.bSummary ? '最近的对话' : '对话记录'}（"${b.name}:" 是你，"${a.
     return {
         aDetail,
         bDetail,
+        ...(minutesAgo == null ? {} : { minutesAgo }),
         aDelta: Math.max(-20, Math.min(20, aDelta)),
         bDelta: Math.max(-20, Math.min(20, bDelta)),
         aLearnedNew,
@@ -555,6 +587,7 @@ interface RunNpcConversationParams {
     learned?: string;
     rounds?: number;
     existingDetail?: string;
+    observation?: { at: number; earliest: number; history?: (PhoneTurnTime | null)[] };
 }
 
 /**
@@ -564,7 +597,7 @@ interface RunNpcConversationParams {
  */
 export async function runNpcConversation(
     p: RunNpcConversationParams,
-): Promise<{ detail: string; learnedNew: string }> {
+): Promise<{ detail: string; learnedNew: string; times?: number[] }> {
     const rounds = Math.max(1, Math.min(8, p.rounds ?? 4));
     const hostLastTs = await lastUserInteractionTs(p.host.id);
     const ctxHost = { char: p.host, user: p.user, timeOptions: { lastInteractionTs: hostLastTs } };
@@ -602,7 +635,7 @@ ${p.learned}` : ''
 - 你（${p.host.name}）是一个**完整、独立的人格**。你发起或推进这段对话一定**事出有因**——动机可以是好奇/打听身份/有事相求/水聊/试探/报备/不满等任意贴合情境的一种或几种，带着它去说、前后一致；既然是你开口，就贯彻目的，别莫名其妙地自我矛盾、卑微讨好或反过来阴阳怪气。
 - 始终保持「${p.host.name}」的人设；对方的性格也要前后一致。
 - 依据上方备注/身份设定的关系自然地聊；**不要凭空制造敌意、阴阳怪气或狗血冲突**，除非备注/身份/人设确实如此。
-- 紧扣已有对话往下接，别跳戏、别认错人。
+- 每次查看只观察到部分生活。可继续旧话题，也可自然补出未观察到的几次往来，无需每天都有记录，也不能仅凭查看间隔认定失联。
 
 ${p.existingDetail ? `已经聊了：\n"""\n见独立消息历史。\n"""\n请接着往下聊。${turnHint}` : '现在开始这段对话。'}
 
@@ -610,12 +643,14 @@ ${p.existingDetail ? `已经聊了：\n"""\n见独立消息历史。\n"""\n请�
 格式（**严格遵守**）：
 - 每一行都必须以「我:」或「对方:」开头；"我:" 代表你（${p.host.name}），"对方:" 代表「${p.npcName}」。
 - 你和「${p.npcName}」**轮流说话、一来一回**；别一个人连说好几轮、别写成独白。
+${p.observation && p.host.timeAwarenessEnabled !== false ? `每行可在说话人前加 [N]，N 是发生于本次查看前的整数分钟数（0 至 ${Math.max(0, Math.floor((p.observation.at - p.observation.earliest) / 60_000))}）。按时间顺序排列，越往后的数字越小。只标需要的时间组，可以不补历史。` : ''}
 只输出对话行，不要解释、不要旁白、不要重复已有内容。
 如果这次让你对「${p.npcName}」有了新的设定/认识（身份、性格、在意的事…），在最末尾另起一行用 [[了解:一句话]] 记下来，方便下次保持一致；没有就别写。`;
 
     let out = '';
     try {
-        out = await chatCompletion(p.api, prompt, 0.9, ctxHost, exTurns.map(t => ({ role: t.isMe ? 'assistant' : 'user', content: t.text })));
+        out = await chatCompletion(p.api, prompt, 0.9, ctxHost, exTurns.map((t, i) => ({ role: t.isMe ? 'assistant' : 'user',
+            content: formatContactHistoryTime(t.text, p.observation?.history?.[i]?.occurredAt, p.host) })));
     } catch {
         return { detail: p.existingDetail || '', learnedNew: '' };
     }
@@ -628,7 +663,23 @@ ${p.existingDetail ? `已经聊了：\n"""\n见独立消息历史。\n"""\n请�
     }).trim();
     // 关键：新内容**单独解析**，无前缀的首行归给「该说话的下一方」(nextIsMe)，
     // 不再继承上一句的说话人——否则上一句是 host 时，整段续写会全被算成 host（“繁殖 char 的话”）。
+    const offsets: number[] = [];
+    let activeOffset = 0;
+    if (p.observation) {
+        out = out.split('\n').filter(line => line.trim()).map(line => line.replace(
+            /^\s*(?:\[(\d+)\]\s*)?(.*)$/,
+            (_match, minutes?: string, body?: string) => {
+                if (minutes !== undefined) activeOffset = Number(minutes);
+                if (body?.trim()) offsets.push(activeOffset);
+                return body || '';
+            },
+        )).join('\n');
+    }
     const newTurns = parseTranscript(out, nextIsMe);
+    const times = p.observation ? resolvePhoneTurnTimes(
+        newTurns.length, p.observation.at, p.observation.earliest,
+        p.host.timeAwarenessEnabled !== false ? offsets : undefined,
+    ) : undefined;
     const detail = serializeTurns([...exTurns, ...newTurns]);
-    return { detail, learnedNew };
+    return { detail, learnedNew, ...(times ? { times } : {}) };
 }

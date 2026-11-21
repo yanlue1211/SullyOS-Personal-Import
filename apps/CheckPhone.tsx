@@ -2,7 +2,7 @@ import { loadCharacterContextMessages } from '../utils/chatContextRange';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useOS } from '../context/OSContext';
 import { DB } from '../utils/db';
-import { CharacterProfile, PhoneEvidence, PhoneCustomApp, PhoneContact, PhoneSimLog, ConvTopic, AiSession, AiServiceKind, TavernCard, APIConfig } from '../types';
+import { CharacterProfile, PhoneEvidence, PhoneCustomApp, PhoneContact, PhoneSimLog, ConvTopic, AiSession, AiServiceKind, TavernCard, APIConfig, PhoneTurnTime } from '../types';
 import { ContextBuilder } from '../utils/context';
 import Modal from '../components/os/Modal';
 import TokenImg from '../components/os/TokenImg';
@@ -11,7 +11,7 @@ import { safeResponseJson, extractContent, extractJson } from '../utils/safeApi'
 import { injectMemoryPalace } from '../utils/memoryPalace/pipeline';
 import {
     runRealConversation, runNpcConversation, upsertContact, matchRealChar,
-    clampAffinity, normName, flipTranscript, parseTranscript, serializeTurns, appendLearned,
+    clampAffinity, normName, flipTranscript, parseTranscript, parseGeneratedAiTranscript, serializeTurns, appendLearned,
     topicText, summarizeConversation, applyRealConversationToPhoneState,
 } from '../utils/relationshipChat';
 import PersonaSim, { LifeLog, generatePersonaScript } from './PersonaSim';
@@ -20,6 +20,8 @@ import { createPersonaSimLog, getPersonaSimBeatIndex } from '../utils/personaSim
 import { getLastInnerState } from '../utils/emotionApply';
 import { trackEvent } from '../utils/analytics';
 import { normalizePhoneEvidence, phoneFieldToText } from '../utils/phoneEvidence';
+import { appendPhoneTurnTimes, phoneTimeDivider, resolvePhoneTurnTimes } from '../utils/phoneTimeline';
+import { resolveCharTimeZone } from '../utils/timezone';
 import { normalizePhoneAiSession } from '../utils/phoneTranscript';
 import { CharacterGroupFilterBar, filterCharactersByGroup, GROUP_FILTER_ALL } from '../components/character/CharacterGroupFilter';
 import { getCheckPhoneApi, resolveCheckPhoneApi, setCheckPhoneApi } from '../utils/checkPhoneApi';
@@ -388,6 +390,8 @@ const CheckPhone: React.FC = () => {
     const rawAiSessions = targetChar?.phoneState?.aiAgent?.sessions;
     const aiSessions = useMemo(() => (rawAiSessions || []).map(normalizePhoneAiSession), [rawAiSessions]);
     const aiCards = targetChar?.phoneState?.aiAgent?.cards || [];
+    const latestPhoneOwner = useRef(targetChar);
+    latestPhoneOwner.current = targetChar;
     // 详情页会话从 sessions 实时取（互动续写后自动跟随最新状态）
     const selectedAiSession = aiSessions.find(s => s.id === selectedAiSessionId) || null;
 
@@ -1016,18 +1020,48 @@ ${realCharRule}
     const handleGenerateAiAgent = async (service: AiServiceKind) => {
 
         if (!targetChar || !effectiveApiConfig.apiKey) { addToast('配置错误', 'error'); return; }
+        if (isLoading || aiSending) return;
         setIsLoading(true);
         trackEvent('偷看 AI 助手使用记录', { service });
         try {
             const { recentMsgs } = await buildAiContext(targetChar);
             const userName = userProfile?.name || '用户';
-            const pushToChat = targetChar.phoneState?.sendToChat !== false;
-            const svcName = AI_SERVICES.find(s => s.id === service)?.name || 'AI';
+            const observedAt = Date.now();
+            const allowTime = targetChar.timeAwarenessEnabled !== false;
+            const available = aiSessions.filter(session => session.service === service);
+            const newest = [...available].sort((a, b) => b.updatedAt - a.updatedAt);
+            // Keep room for older threads even when recent threads already fill the budget.
+            const older = newest.slice(4);
+            const offset = older.length ? Math.floor(Math.random() * older.length) : 0;
+            const candidates = [...newest.slice(0, 4), ...[...older.slice(offset), ...older.slice(0, offset)].slice(0, 3)];
+            const olderCards = aiCards.slice(0, -16);
+            const cardOffset = olderCards.length ? Math.floor(Math.random() * olderCards.length) : 0;
+            const candidateCards = [...new Set([
+                ...aiCards.filter(card => candidates.some(session => session.cardId === card.id)),
+                ...aiCards.slice(-16),
+                ...[...olderCards.slice(cardOffset), ...olderCards.slice(0, cardOffset)].slice(0, 4),
+            ])];
+            const candidateById = new Map(candidates.map(session => [session.id, session]));
+            const index = candidates.map(session => ({
+                id: session.id, title: session.title, serviceName: session.serviceName, cardId: session.cardId,
+                plotKind: session.plotKind, origin: session.plotSource?.priorContext.slice(-1200),
+                lastActivity: allowTime ? new Date(session.updatedAt).toLocaleString('zh-CN', { timeZone: resolveCharTimeZone(targetChar) }) : undefined,
+                minutesAvailable: allowTime && session.turnTimes?.at(-1)
+                    ? Math.max(0, Math.floor((observedAt - session.turnTimes.at(-1)!.occurredAt) / 60_000))
+                    : undefined,
+                previous: session.summaries?.slice(-2).map(summary => summary.content.slice(0, 420)),
+                recent: parseTranscript(session.transcript).slice(-6).map((turn, i, recent) => ({
+                    occurredAt: allowTime && session.turnTimes?.at(i - recent.length)
+                        ? new Date(session.turnTimes.at(i - recent.length)!.occurredAt).toLocaleString('zh-CN', { timeZone: resolveCharTimeZone(targetChar) })
+                        : undefined,
+                    fromEnd: recent.length - i, speaker: turn.isMe ? '我' : '对方', text: turn.text.slice(0, 600),
+                })),
+            }));
 
             let task = '';
             if (service === 'assistant') {
                 task = `你（${charName}）平时也会用工具型 AI 助手 App 来解决问题、查东西、出主意。
-请基于你的人设和近况，生成 2-3 段你最近和 AI 助手的真实对话（不同段可以用不同家的 AI）。
+请基于你的人设和近况，生成最多 3 段你最近和 AI 助手的对话（不同段可以用不同家的 AI）。
 要点：
 - 你问 AI 的问题要暴露你真实的处境、烦恼、小心思——是当面对「${userName}」不会说出口的（例如「怎么哄好一个生气的人」「TA 这句话什么意思」「要不要做某个决定」「这个症状要不要紧」）。
 - **话题可多样，其中可以有一段是你在拿 AI 当军师、捣鼓自己玩的"酒馆"角色卡**：让 AI 帮你打磨人设 / 要角色卡提示词 / 写开场白；或你想做一张大世界卡（跑团 / 修仙 / 西幻），跟 AI 讨论世界观、面板与数值设定、技能 / 等级 / 系统机制怎么平衡、怎么写得更带感……（你沉迷酒馆，自然会找 AI 出主意）。
@@ -1039,110 +1073,185 @@ ${realCharRule}
 - 每段会话固定用某一家 AI，"对方:" 的回复要把那家的刻板印象 + 八股演足（见下）。
 - serviceName 填那家 AI 的名字（豆包 / Gemini / ChatGPT / 文心一言 / Kimi …），要和你演的味道对上。
 - 每段 3-5 个来回。
-- **每段 transcript 都以 "我:"(你)收尾**——停在你刚发出、AI 还没回的那一句（这样别人能接着以 AI 身份回你）。
+- **每段 transcript 以 "对方:" 的 AI 回复收尾**。话题可以保持开放，按对话自然推进。
 
 ${AI_VENDOR_LORE}
 
 格式严格用 "我:" 代表你，"对方:" 代表 AI 助手。
-返回 JSON 数组：[{ "serviceName": "那家 AI 名", "title": "在聊什么(10字内)", "transcript": "我: ...\\n对方: ...\\n我: ..." }]`;
+返回 JSON 数组：[{ "serviceName": "那家 AI 名", "title": "在聊什么(10字内)", "transcript": "我: ...\\n对方: ..." }]`;
             } else if (service === 'claude') {
                 task = `你（${charName}）私下里会跟一个很会聊的 AI（Claude 那种）说心里话当树洞。
-生成 1-2 段你最近跟它的深聊。
+生成最多 2 段你最近跟它的深聊。
 要点：
 - 这是你的树洞，你会说真心话——包括对「${userName}」的真实感受、说不出口的脆弱 / 纠结 / 渴望，以及**你私下的盘算、对某些事 / 某些人的真实看法、绝不会在 user 面前摆出来的考虑**（偷偷跟它 deep talk）。
 - **也可以有一段是你在跟它认真聊自己玩的"酒馆"角色卡**：你为某张卡倾注了什么、那个角色对你意味着什么、想把人设 / 大世界设定写成什么样却卡住了，让它帮你梳理灵感（这类创作心事你也只跟它说）。
 - 这个 AI 是 Claude 那一卦：温和、有洞察、爱反问，**正事也办得漂亮、肯认真接住你**。起初边界感偏强、偶有"抱歉，我无法……""我理解你的感受，但是……"的回避（一点"想掏心窝却被轻轻挡一下"的味道），**但不是一味推开**——随着这段越聊越深，TA 明显越来越放得开、回避越来越少，到后面是真能陪你把话说透的。
 - 每段 5-8 个来回，有情绪起伏。
-- **每段 transcript 都以 "我:"(你)收尾**——停在你刚说出口、AI 还没回的那一句（方便别人接着以 AI 身份回你）。
+- **每段 transcript 以 "对方:" 的 AI 回复收尾**。话题可以保持开放，按对话自然推进。
 格式 "我:" = 你，"对方:" = AI。
 返回 JSON 数组：[{ "serviceName": "你对它的称呼(默认 Claude)", "title": "...(10字内)", "transcript": "..." }]`;
             } else {
                 task = `你（${charName}）在玩"酒馆"(SillyTavern 那种 AI 角色扮演)：自己捏角色卡，再跟 AI 扮演的角色对戏。酒馆不是一句话聊天，而是**沉浸式长剧情、像在和 AI 合写小说**。
 请返回一个 JSON 对象（不是数组）：
 {
-  "cards": [ 1-2 张你建的卡，两类任选/混搭：①单个角色卡(kind:"character")——理想型 / 暗恋投影 / 纯幻想角色；②大型世界卡(kind:"world")——跑团 / 修仙 / 西幻 / 末世那种，设定庞大、有世界观和系统(取决于 TA 的爱好)。
+  "cards": [ 0-2 张你新建的卡，两类任选/混搭：①单个角色卡(kind:"character")——理想型 / 暗恋投影 / 纯幻想角色；②大型世界卡(kind:"world")——跑团 / 修仙 / 西幻 / 末世那种，设定庞大、有世界观和系统(取决于 TA 的爱好)。
      其中**可以有一张是照着现实里 TA 在意的某个人捏的**：可能是「${userName}」(用户/你)，**也可能是 TA 人设、世界观、过往羁绊里更深的某个人**（从上面的设定里去找——作者写进人设的那种重要的人）。这张在 basedOn 填那个人的名字；如果就是用户，basedOnUser 也置 true；其余卡 basedOn 留空。
      每张：{ "name": "卡名", "kind": "character|world", "emoji": "🎭", "persona": "角色人设或世界设定(60字内)", "scenario": "初始场景/开场(40字内)", "basedOn": "照着谁(没有就空字符串)", "basedOnUser": false } ],
-  "sessions": [ 1 段（最多 2 段）扮演记录。每段：{ "serviceName": "对应卡片名", "title": "剧情标题(12字内)", "cardName": "对应 cards 里的 name", "transcript": "..." } ]
+  "sessions": [ 0-2 段扮演记录。每段：{ "serviceName": "对应卡片名", "title": "剧情标题(12字内)", "cardName": "对应 cards 里的 name", "transcript": "..." } ]
 }
 **transcript 写法（重点，别写成短聊天）**：
 - 长剧情小说体：第三人称叙事 + 引号对白；动作 / 神态 / 心理描写用 *星号* 包住（如 *她抬眼看你，睫毛轻颤*）。
 - "我:" = 你(玩家 ${charName}) 敲进输入框的 RP，"对方:" = AI 扮演的角色，两边交替推进。
 - **"我:"括号外只写故事场景里所扮角色的动作 / 对白**——绝不要写你现实里打字时的身体反应（盯屏幕、扔手机、吃东西、后背发凉等，那些不会被敲进输入框）。**（全角括号内）= 越过角色直接跟皮下 AI 本体说话**：骂它、OOC 提醒、指导它怎么演、指出它哪段不对。
 - 每一轮都是有分量的一整段（至少 3-5 句，含场景/动作/对白/心理）；首轮"对方:"相当于开场白，把人物和场景立起来。
-- 一段共 4-6 轮，每轮都要长、要有文学性和代入感。**整段以 "我:"(玩家)收尾**——停在你刚行动完、等对方角色回应的地方（方便别人接着以那张卡的身份续）。
+- 一段共 4-6 轮，每轮都要长、要有文学性和代入感。**最后一层由 "对方:" 的酒馆角色回复**，可以留待下次继续。
 要点：扮演内容（剧情里）暴露你的幻想 / 渴望 / 不敢实现的关系。酒馆是 TA 卸下防备的安全屋，扮演里可以流露平时藏起来的反差面（暴戾者忽然温柔、温柔者露出掌控/施虐欲、疏离者变黏人），但**底色始终是「爱」**，不刻意过火。`;
             }
 
-            const fullPrompt = `\n\n### [Recent Chat Context]\n${recentMsgs}\n\n### [Task]\n${task}\n请结合「当前时间 / 距离上次联系」和人设，让内容贴合你近期的真实状态。只输出 JSON，不要解释。`;
+            const continuity = `
+【已有会话】${JSON.stringify(index)}
+按机主的近况、习惯和话题进展决定续写旧窗口还是新建窗口，两种可以混用。如果近期没有活动，可以返回空列表。
+每个续写条目填 sessionId 为上面某个窗口的 id。保持原服务，只输出该窗口这次新增加的对话，避免复述前情或历史原句。旧窗口如果停在「我」发言，先写「对方」的回答，否则先写「我」的新发言。每个窗口最多返回一个追加条目。
+新窗口不填 sessionId。查看记录的间隔无法说明机主什么时候使用过手机，也不要求每天有记录或换话题。
+${allowTime ? '可为 transcript 的每条消息提供一个 minutesAgo 数组，按消息顺序填相对本次查看时刻的非负整数分钟。越往后的消息数字越小，不能超出该窗口的 minutesAvailable，没给历史间隔时最多回补最近7天。无需补满空档，缺省时按本次活动处理。' : ''}
+${service === 'tavern' ? `【已有卡片】${JSON.stringify(candidateCards.map(card => ({ id: card.id, name: card.name, kind: card.kind, persona: card.persona?.slice(0, 180), scenario: card.scenario?.slice(0, 180) })))}
+续写旧剧情时用 sessionId，可以省略 cardName、新卡和标题。用旧卡开独立新局时用 cardId。新卡才放进 cards，允许 cards 为空。
+另开 IF 线时填 sourceSessionId 和 fromEnd（上方 recent 提供的节点编号），从那里开始写另一种走向。不填 sessionId，也不要重复分支之前的原文。` : ''}`;
+            const fullPrompt = `\n\n### [Recent Chat Context]\n${recentMsgs}\n\n### [Task]\n${task}\n${continuity}\n让内容贴合机主的人设与近期生活。只输出 JSON。`;
 
             const content = await callLLM(fullPrompt, 0.85, true, '生成TA的AI会话');
             const now = Date.now();
             const rid = () => Math.random().toString(36).slice(2, 8);
-            const newSessions: AiSession[] = [];
+            const entries = extractJson(content);
+            const response = service === 'tavern' ? entries?.sessions : entries;
+            if (!Array.isArray(response)) throw new Error('Invalid phone sessions');
+            const limit = service === 'assistant' ? 3 : 2;
+            if (response.length > limit) throw new Error('Too many phone sessions');
+            if (!response.length) {
+                addToast('这次没有新的对话记录', 'info');
+                return;
+            }
+
             const newCards: TavernCard[] = [];
-
+            const cardsById = new Map(candidateCards.map(card => [card.id, card]));
+            const cardsByName = new Map(aiCards.map(card => [normName(card.name), card]));
             if (service === 'tavern') {
-                const obj: any = extractJson(content) || {};
-                // 卡片去重 + 永不顶掉：同名卡复用已有 id（不重建、不覆盖、不挤掉），只新增真正没有过的
-                const nameToId: Record<string, string> = {};
-                for (const c of (targetChar.phoneState?.aiAgent?.cards || [])) nameToId[normName(c.name)] = c.id;
-                for (const c of (obj.cards || [])) {
-                    if (!c?.name) continue;
-                    const key = normName(c.name);
-                    if (nameToId[key]) continue; // 已存在的卡保留原样，不动
-                    const id = `card-${now}-${rid()}`;
-                    nameToId[key] = id;
-                    newCards.push({ id, name: c.name, kind: c.kind === 'world' ? 'world' : 'character', persona: c.persona || '', scenario: c.scenario || undefined, emoji: c.emoji || '🎭', basedOnUser: !!c.basedOnUser, basedOn: (c.basedOn && String(c.basedOn).trim()) || undefined, createdAt: now });
-                }
-                for (const sess of (obj.sessions || [])) {
-                    if (!sess?.transcript) continue;
-                    newSessions.push(normalizePhoneAiSession({
-                        id: `ai-${now}-${rid()}`, service, serviceName: sess.serviceName || sess.cardName || '酒馆',
-                        title: sess.title || '一段扮演', transcript: sess.transcript, cardId: nameToId[normName(sess.cardName || '')], updatedAt: now,
-                    }));
-                }
-            } else {
-                const parsed = extractJson(content);
-                const arr: any[] = Array.isArray(parsed) ? parsed : [];
-                for (const sess of arr) {
-                    if (!sess?.transcript) continue;
-                    newSessions.push(normalizePhoneAiSession({
-                        id: `ai-${now}-${rid()}`, service, serviceName: sess.serviceName || (service === 'claude' ? 'Claude' : 'AI 助手'),
-                        title: sess.title || '一段对话', transcript: sess.transcript, updatedAt: now,
-                    }));
+                const generatedCards = entries.cards ?? [];
+                if (!Array.isArray(generatedCards) || generatedCards.length > 2) throw new Error('Invalid tavern cards');
+                for (const raw of generatedCards) {
+                    if (typeof raw?.name !== 'string' || !raw.name.trim() || !['character', 'world'].includes(raw.kind)
+                        || typeof raw.persona !== 'string') throw new Error('Invalid tavern card');
+                    const name = raw.name.trim();
+                    const key = normName(name);
+                    if (cardsByName.has(key)) continue;
+                    const card: TavernCard = {
+                        id: `card-${now}-${rid()}`, name, kind: raw.kind, persona: raw.persona,
+                        scenario: typeof raw.scenario === 'string' ? raw.scenario : undefined,
+                        emoji: typeof raw.emoji === 'string' ? raw.emoji : '🎭',
+                        basedOn: typeof raw.basedOn === 'string' ? raw.basedOn.trim() : undefined,
+                        basedOnUser: raw.basedOnUser === true, createdAt: now,
+                    };
+                    newCards.push(card);
+                    cardsByName.set(key, card);
                 }
             }
 
-            if (!newSessions.length) { addToast('没抓到内容，再试一次', 'error'); return; }
-
-            // 漏风：跟随查手机全局 sendToChat —— 开则往私聊塞一张卡片。
-            // 措辞同样是「你自己手机上的 AI 记录」，第二人称，不暗示用户在偷看。
-            if (pushToChat) {
-                for (const sess of newSessions) {
-                    // 放全文（卡片可折叠，进上下文也是完整记录），不再只取头两条
-                    const full = parseTranscript(sess.transcript)
-                        .map(t => `${t.isMe ? '我' : sess.serviceName}: ${t.text}`).join('\n');
-                    await DB.saveMessage({
-                        charId: targetChar.id, role: 'assistant', type: 'phone_card',
-                        content: `[你手机的智能体 App·${svcName}] 你和 AI 的对话「${sess.title}」：\n${full}`,
-                        metadata: { phoneCard: { app: '智能体', kind: `ai_${service}`, service, serviceName: sess.serviceName, title: sess.title, detail: full } },
-                    } as any);
+            const updated = new Set<string>();
+            const newTranscripts = new Set<string>();
+            const firstCardPlays = new Set<string>();
+            const changes = response.map(raw => {
+                if (!raw || typeof raw !== 'object' || !raw.transcript) throw new Error('Missing phone transcript');
+                const turns = parseGeneratedAiTranscript(raw.transcript);
+                const added = serializeTurns(turns);
+                if (raw.sessionId != null) {
+                    const old = candidateById.get(raw.sessionId);
+                    if (raw.sourceSessionId != null || !old || updated.has(old.id) || (raw.cardId != null && raw.cardId !== old.cardId)
+                        || (raw.serviceName != null && raw.serviceName !== old.serviceName)) throw new Error('Invalid phone session target');
+                    const history = parseTranscript(old.transcript);
+                    const last = history.at(-1);
+                    if ((last && turns[0].isMe === last.isMe) || old.transcript.includes(added) || old.archived?.includes(added)) {
+                        throw new Error('Invalid phone continuation');
+                    }
+                    updated.add(old.id);
+                    const lastKnown = old.turnTimes?.slice().reverse().find(time => time != null)?.occurredAt;
+                    const times = resolvePhoneTurnTimes(turns.length, observedAt, lastKnown ?? observedAt - 7 * 86_400_000,
+                        allowTime ? raw.minutesAgo : undefined);
+                    const turnTimes = appendPhoneTurnTimes(old.turnTimes, history.length, times, observedAt);
+                    return { old, turns, next: { ...old, turnTimes, lastObservedAt: observedAt,
+                        transcript: [old.transcript, added].filter(Boolean).join('\n'), updatedAt: times.at(-1)! } };
                 }
+                if (newTranscripts.has(added)) throw new Error('Duplicate phone conversation');
+                newTranscripts.add(added);
+                let plotSource: AiSession['plotSource'];
+                const source = raw.sourceSessionId == null ? undefined : candidateById.get(raw.sourceSessionId);
+                if (raw.sourceSessionId != null) {
+                    if (service !== 'tavern' || !source?.cardId || !Number.isInteger(raw.fromEnd) || raw.fromEnd < 1 || raw.fromEnd > 6) {
+                        throw new Error('Invalid tavern branch source');
+                    }
+                    const original = parseTranscript(source.transcript);
+                    const through = original.length - raw.fromEnd + 1;
+                    if (through < 1) throw new Error('Invalid tavern branch point');
+                    plotSource = {
+                        sessionId: source.id,
+                        node: parseTranscript(source.archived || '').length + through,
+                        priorContext: [source.plotSource?.priorContext,
+                            source.summaries?.map(summary => summary.content).join('\n'),
+                            serializeTurns(original.slice(0, through)).slice(-12000)].filter(Boolean).join('\n').slice(-16000),
+                    };
+                }
+                const card = service === 'tavern'
+                    ? (source?.cardId ? cardsById.get(source.cardId)
+                        : raw.cardId != null ? cardsById.get(raw.cardId)
+                        : typeof raw.cardName === 'string' ? cardsByName.get(normName(raw.cardName)) : undefined)
+                    : undefined;
+                if (service === 'tavern' && (!card || (raw.cardId != null && raw.cardId !== card.id))) {
+                    throw new Error('Invalid tavern card target');
+                }
+                const previousPlay = card && (aiSessions.some(session => session.cardId === card.id)
+                    || firstCardPlays.has(card.id));
+                if (card) firstCardPlays.add(card.id);
+                const times = resolvePhoneTurnTimes(turns.length, observedAt, observedAt - 7 * 86_400_000,
+                    allowTime ? raw.minutesAgo : undefined);
+                const next = normalizePhoneAiSession({
+                    id: `ai-${now}-${rid()}`, service,
+                    serviceName: card?.name || raw.serviceName || (service === 'claude' ? 'Claude' : 'AI 助手'),
+                    title: raw.title || (card ? '一段扮演' : '一段对话'),
+                    transcript: added, cardId: card?.id, updatedAt: times.at(-1)!, plotSource,
+                    turnTimes: appendPhoneTurnTimes(undefined, 0, times, observedAt), lastObservedAt: observedAt,
+                    plotKind: plotSource ? 'if' : card ? (previousPlay ? 'restart' : 'main') : undefined,
+                });
+                return { old: undefined, turns, next };
+            });
+            const current = latestPhoneOwner.current;
+            const currentAgent = current?.phoneState?.aiAgent;
+            if (current?.id !== targetChar.id
+                || currentAgent?.sessions !== rawAiSessions
+                || currentAgent?.cards !== targetChar.phoneState?.aiAgent?.cards) {
+                addToast('记录刚有更新，请重新查看', 'info');
+                return;
             }
-
+            const replacements = new Map(changes.filter(change => change.old).map(change => [change.next.id, change]));
+            const created = changes.filter(change => !change.old).map(change => change.next);
+            const usedCards = new Set(created.map(session => session.cardId));
             updateCharacter(targetChar.id, (cur) => ({
                 phoneState: {
-                    ...cur.phoneState,
-                    records: cur.phoneState?.records || [],
+                    ...cur.phoneState, records: cur.phoneState?.records || [],
                     aiAgent: {
-                        sessions: [...newSessions, ...(cur.phoneState?.aiAgent?.sessions || [])],
-                        // 已有的卡放前面、原位不动，新卡追加到后面——刷新永不顶掉旧卡
-                        cards: [...(cur.phoneState?.aiAgent?.cards || []), ...newCards],
+                        sessions: [...created, ...(cur.phoneState?.aiAgent?.sessions || []).map(session => {
+                            const change = replacements.get(session.id);
+                            return change?.old && change.old.updatedAt === session.updatedAt
+                                && change.old.transcript === normalizePhoneAiSession(session).transcript
+                                ? change.next : session;
+                        })],
+                        cards: [...(cur.phoneState?.aiAgent?.cards || []), ...newCards.filter(card => usedCards.has(card.id))],
                     },
                 },
             }));
-            addToast(`偷看到 ${newSessions.length} 段 AI 对话`, 'success');
+            for (const change of changes) {
+                await syncAiCardToChat(change.next, change.turns, change.next.turnTimes?.slice(-change.turns.length));
+                await maybeSummarizeSession(change.next.id, change.next.transcript, change.next);
+            }
+            addToast(`看到 ${changes.length} 段新的对话记录`, 'success');
         } catch (e) {
             console.error(e);
             addToast('生成失败，请重试', 'error');
@@ -1152,9 +1261,14 @@ ${AI_VENDOR_LORE}
     };
 
     // 已折叠剧情的「前情提要」拼成 prompt 衔接块
-    const recapOf = (s?: AiSession | null) => (s?.summaries?.length)
-        ? `\n\n【前情提要（已折叠的早期剧情，仅供衔接，别重复）】\n${s.summaries.map((x, i) => `${i + 1}. ${x.content}`).join('\n')}`
-        : '';
+    const recapOf = (s?: AiSession | null) => {
+        const branch = s?.plotSource?.priorContext;
+        const summaries = s?.summaries?.map((x, i) => `${i + 1}. ${x.content}`).join('\n');
+        return [
+            branch && `\n\n【IF 支线分岔时的前情】\n${branch}`,
+            summaries && `\n\n【前情提要（已折叠的早期剧情，仅供衔接，别重复）】\n${summaries}`,
+        ].filter(Boolean).join('');
+    };
 
     // 函数式合并：只动指定会话
     const patchAiSession = (sessionId: string, patch: (s: AiSession) => AiSession) => {
@@ -1172,22 +1286,32 @@ ${AI_VENDOR_LORE}
 
     // 漏风：跟随全局 sendToChat，往私聊补一张痕迹卡（措辞第二人称，不暗示用户偷看）。
     // 传进来的 lines 原样放进去（调用方决定放整段还是这一轮），不再内部截断。
-    const syncAiCardToChat = async (session: AiSession, lines: { isMe: boolean; text: string }[]) => {
+    const syncAiCardToChat = async (session: AiSession, lines: { isMe: boolean; text: string }[], times?: (PhoneTurnTime | null)[]) => {
         if (!targetChar || targetChar.phoneState?.sendToChat === false) return;
         const svcName = AI_SERVICES.find(x => x.id === session.service)?.name || 'AI';
-        const body = lines.map(t => `${t.isMe ? '我' : session.serviceName}: ${t.text}`).join('\n');
+        const body = lines.map((t, i) => {
+            const time = times?.[i];
+            const stamp = time && targetChar.timeAwarenessEnabled !== false
+                ? new Date(time.occurredAt).toLocaleString('zh-CN', { timeZone: resolveCharTimeZone(targetChar) })
+                : '';
+            return `${stamp ? `[${stamp}] ` : ''}${t.isMe ? '我' : session.serviceName}: ${t.text}`;
+        }).join('\n');
         const verb = session.service === 'tavern' ? '对戏' : '对话';
         try {
             await DB.saveMessage({
                 charId: targetChar.id, role: 'assistant', type: 'phone_card',
                 content: `[你手机的智能体 App·${svcName}] 你和「${session.serviceName}」的${verb}「${session.title}」：\n${body}`,
-                metadata: { phoneCard: { app: '智能体', kind: `ai_${session.service}`, service: session.service, serviceName: session.serviceName, title: session.title, detail: body } },
+                metadata: { phoneCard: {
+                    app: '智能体', kind: `ai_${session.service}`, service: session.service,
+                    serviceName: session.serviceName, title: session.title, detail: body,
+                    sessionId: session.id, eventTimes: times?.map(time => time?.occurredAt ?? null),
+                } },
             } as any);
         } catch (e) { console.error('ai card sync failed', e); }
     };
 
     // 长会话自动总结（参考 TRPG）：超 AI_SUMMARY_THRESHOLD 条就把旧剧情压成前情提要、折叠归档原文
-    const maybeSummarizeSession = async (sessionId: string, latestTranscript: string) => {
+    const maybeSummarizeSession = async (sessionId: string, latestTranscript: string, currentSession?: AiSession) => {
         if (!targetChar) return;
         const lines = parseTranscript(latestTranscript);
         if (lines.length < AI_SUMMARY_THRESHOLD) return;
@@ -1195,7 +1319,7 @@ ${AI_VENDOR_LORE}
         const recent = lines.slice(lines.length - AI_KEEP_RECENT);
         if (older.length < 10) return;
         const olderText = serializeTurns(older);
-        const sess = (characters.find(c => c.id === targetChar.id) || targetChar).phoneState?.aiAgent?.sessions?.find(s => s.id === sessionId);
+        const sess = currentSession ?? (characters.find(c => c.id === targetChar.id) || targetChar).phoneState?.aiAgent?.sessions?.find(s => s.id === sessionId);
         try {
             const prevRecap = (sess?.summaries || []).map((x, i) => `【第${i + 1}段】${x.content}`).join('\n');
             const who = sess?.service === 'tavern'
@@ -1210,10 +1334,15 @@ ${olderText}
             let summaryText = (await callLLM(prompt, 0.7, false, 'AI会话摘要')).trim();
             if (!summaryText) summaryText = '（这段剧情继续推进了）';
             const now = Date.now();
-            patchAiSession(sessionId, (s) => ({
+            patchAiSession(sessionId, (s) => s.transcript !== latestTranscript ? s : ({
                 ...s,
                 transcript: serializeTurns(recent),
                 archived: [s.archived, olderText].filter(Boolean).join('\n'),
+                ...(s.turnTimes ? {
+                    turnTimes: s.turnTimes.slice(older.length),
+                    archivedTurnTimes: [...Array.from({ length: parseTranscript(s.archived || '').length },
+                        (_, i) => s.archivedTurnTimes?.[i] ?? null), ...s.turnTimes.slice(0, older.length)],
+                } : {}),
                 summaries: [...(s.summaries || []), { id: `sum-${now}`, content: summaryText, createdAt: now }],
             }));
             addToast('早期剧情已折叠成前情提要', 'info');
@@ -1225,7 +1354,7 @@ ${olderText}
 
         const session = selectedAiSession;
         const text = aiInput.trim();
-        if (!session || !text || !targetChar || !effectiveApiConfig.apiKey) return;
+        if (!session || !text || !targetChar || !effectiveApiConfig.apiKey || aiSending || isLoading) return;
         const isTavern = session.service === 'tavern';
         setAiSending(true);
         setAiInput('');
@@ -1236,7 +1365,11 @@ ${olderText}
             const recap = recapOf(session);
             // 发出去就是发出去了：先把你这条立刻落库显示，再等对方回
             const transcript = `${session.transcript}\n${myPrefix}: ${text}`;
-            patchAiSession(session.id, (s) => ({ ...s, transcript, updatedAt: Date.now() }));
+            const sentAt = Date.now();
+            const sentLines = parseTranscript(`${myPrefix}: ${text}`);
+            const sentTimes = appendPhoneTurnTimes(session.turnTimes, parseTranscript(session.transcript).length,
+                Array(sentLines.length).fill(sentAt), sentAt);
+            patchAiSession(session.id, (s) => ({ ...s, transcript, turnTimes: sentTimes, updatedAt: sentAt }));
 
             let prompt = '';
             if (isTavern) {
@@ -1267,8 +1400,12 @@ ${olderText}
             if (!reply) { addToast('对方没说话，再试一次', 'error'); return; }
             const full = `${transcript}\n${replyPrefix}: ${reply}`;
             const now = Date.now();
-            patchAiSession(session.id, (s) => ({ ...s, transcript: full, updatedAt: now }));
-            await syncAiCardToChat(session, [{ isMe: myPrefix === '我', text }, { isMe: replyPrefix === '我', text: reply }]);
+            const replyLines = parseTranscript(`${replyPrefix}: ${reply}`);
+            const turnTimes = appendPhoneTurnTimes(sentTimes, parseTranscript(transcript).length,
+                Array(replyLines.length).fill(now), now);
+            patchAiSession(session.id, (s) => s.transcript === transcript
+                ? { ...s, transcript: full, turnTimes, updatedAt: now } : s);
+            await syncAiCardToChat(session, [...sentLines, ...replyLines], turnTimes.slice(-sentLines.length - replyLines.length));
             await maybeSummarizeSession(session.id, full);
         } catch (e) {
             console.error(e);
@@ -1283,34 +1420,43 @@ ${olderText}
     const handleAiAutoContinue = async () => {
 
         const session = selectedAiSession;
-        if (!session || !targetChar || !effectiveApiConfig.apiKey || aiSending) return;
+        if (!session || !targetChar || !effectiveApiConfig.apiKey || aiSending || isLoading) return;
         const isTavern = session.service === 'tavern';
         setAiSending(true);
         try {
             const recap = recapOf(session);
             const lastIsMe = parseTranscript(session.transcript).slice(-1)[0]?.isMe ?? false;
+            const nextTurn = lastIsMe
+                ? '承接上一条玩家发言，只写一条「对方:」回复。'
+                : '先写一条「我:」发言，再写一条「对方:」回复。';
             let prompt = '';
             if (isTavern) {
                 const card = aiCards.find(c => c.id === session.cardId);
                 await buildAiContext(targetChar);
                 prompt = `\n\n你在还原一段"酒馆"沉浸式长剧情角色扮演（像小说）。玩家是 ${charName}(本色人设)，AI 扮演角色「${card?.name || session.serviceName}」${card?.persona ? `（人设：${card.persona}）` : ''}${card?.scenario ? `（背景：${card.scenario}）` : ''}${card?.basedOn ? `（这角色照着 TA 在意的「${card.basedOn}」捏的，扮演里那份在意会渗出来）` : ''}。
-**这是"替玩家跑一个完整回合"——所以要写"一来一回"两层楼**：先 AI 扮的角色「${card?.name || session.serviceName}」回应一段（"对方:"），再玩家 ${charName} 续一段（"我:"），承接最后一段（最后通常是"我:"，那就先"对方:"答、再"我:"续）。各 3-5 句小说体，*星号*包动作神态心理。**整段必须以 "我:"(玩家)收尾**（停在等对方处，方便随时接着玩）。
+${nextTurn} 每层 3-5 句小说体，*星号*包动作神态心理。
 **"我:"是玩家敲进输入框的 RP——只写故事场景里所扮角色的动作/对白**，括号外绝不要写玩家现实里的身体反应（盯屏幕、扔手机、吃东西、后背发凉等，那不会被敲进输入框）；**（全角括号内）= 越过角色直接跟皮下 AI 本体说话**（骂它 / OOC 提醒 / 指导怎么演 / 指出哪段不对）。玩家保有独立人格、清楚对面只是 AI。
-**两段都要带 "对方:" / "我:" 前缀，各自成行。** 不要解释。${recap}\n\n${session.transcript}`;
+**每段都要带 "对方:" / "我:" 前缀，各自成行。** 不要解释。${recap}\n\n${session.transcript}`;
             } else {
                 const persona = session.service === 'claude'
                     ? `Claude 那一卦：温和有洞察、正事办得好、肯认真接住；偶有"抱歉我无法/我理解你的感受但是"的边界感，但别一味回避，聊得越久越放得开、回避越少。`
                     : `这家 AI 助手按其刻板印象 + 八股说话：\n${AI_VENDOR_LORE}`;
                 prompt = `你在还原「${charName}」和 AI「${session.serviceName}」的对话（"我:"=用户 ${charName}，"对方:"=AI）。${persona}
-**替玩家跑一个完整回合（一来一回）**：承接最后一段——最后通常是"我:"(${charName} 刚发出、还没被回)，那就先"对方:"按那家口吻作答、再"我:"追问 / 倾诉一句（暴露 TA 的处境或心事）。**整段必须以 "我:"(${charName})收尾**（停在等 AI 回的地方）。**每行带 "我:"/"对方:" 前缀**，不要解释。${recap}\n\n${session.transcript}`;
+${nextTurn} 每段带对应前缀，直接输出对话。${recap}\n\n${session.transcript}`;
             }
-            let out = (await callLLM(prompt, 0.85, true, 'TA的AI会话续写')).trim().replace(/```/g, '').trim();
-            if (!/^(我|对方|Me|Them)\s*[:：]/m.test(out)) out = `${lastIsMe ? '对方' : '我'}: ${out}`;
-            if (!out.trim()) { addToast('没续出内容，再试一次', 'error'); return; }
-            const transcript = `${session.transcript}\n${out}`;
+            const out = (await callLLM(prompt, 0.85, true, 'TA的AI会话续写')).trim().replace(/^```[^\n]*\n|\n```$/g, '').trim();
+            const turns = parseGeneratedAiTranscript(out);
+            if (turns[0].isMe !== !lastIsMe) {
+                addToast('没续出完整对话，再试一次', 'error');
+                return;
+            }
+            const transcript = [session.transcript, serializeTurns(turns)].filter(Boolean).join('\n');
             const now = Date.now();
-            patchAiSession(session.id, (s) => ({ ...s, transcript, updatedAt: now }));
-            await syncAiCardToChat(session, parseTranscript(transcript).slice(-2));
+            const turnTimes = appendPhoneTurnTimes(session.turnTimes, parseTranscript(session.transcript).length,
+                Array(turns.length).fill(now), now);
+            patchAiSession(session.id, (s) => s.transcript === session.transcript
+                ? { ...s, transcript, turnTimes, updatedAt: now } : s);
+            await syncAiCardToChat(session, turns, turnTimes.slice(-turns.length));
             await maybeSummarizeSession(session.id, transcript);
         } catch (e) {
             console.error(e);
@@ -1336,33 +1482,45 @@ ${olderText}
     };
 
     // 会话内单条内容的"轮次"：酒馆按楼层(合并连续同说话人)，助手/树洞按行——与渲染里一致
-    const turnsOf = (s: AiSession): { isMe: boolean; text: string }[] => {
+    const turnsOf = (s: AiSession) => {
         const lines = parseTranscript(s.transcript);
-        if (s.service !== 'tavern') return lines;
-        const floors: { isMe: boolean; text: string }[] = [];
-        for (const ln of lines) {
-            const prev = floors[floors.length - 1];
-            if (prev && prev.isMe === ln.isMe) prev.text += '\n' + ln.text;
-            else floors.push({ isMe: ln.isMe, text: ln.text });
+        const turns: { isMe: boolean; text: string; start: number; end: number }[] = [];
+        for (const [i, line] of lines.entries()) {
+            const previous = turns.at(-1);
+            if (s.service === 'tavern' && previous?.isMe === line.isMe) {
+                previous.text += '\n' + line.text;
+                previous.end = i + 1;
+            } else turns.push({ ...line, start: i, end: i + 1 });
         }
-        return floors;
+        return turns;
     };
-    // 长按编辑会话里的某条内容
+
+    const editAiTurn = (session: AiSession, index: number, text?: string) => {
+        const lines = parseTranscript(session.transcript);
+        const turn = turnsOf(session)[index];
+        if (!turn) return;
+        const edited = text == null ? [] : text.split('\n').map(line => line.trim())
+            .filter(Boolean).map(line => ({ isMe: turn.isMe, text: line }));
+        const transcript = serializeTurns([...lines.slice(0, turn.start), ...edited, ...lines.slice(turn.end)]);
+        let turnTimes: AiSession['turnTimes'];
+        if (session.turnTimes) {
+            const prior = Array.from({ length: lines.length }, (_, i) => session.turnTimes?.[i] ?? null);
+            const original = prior.slice(turn.start, turn.end);
+            const times = edited.map((_, i) => original[i] ?? null);
+            turnTimes = [...prior.slice(0, turn.start), ...times, ...prior.slice(turn.end)];
+        }
+        patchAiSession(session.id, (s) => s.transcript === session.transcript ? { ...s, transcript, turnTimes } : s);
+    };
+
     const handleSaveAiTurn = () => {
-        const s = selectedAiSession;
-        if (!s || !aiTurnEdit) return;
-        const turns = turnsOf(s);
-        if (!turns[aiTurnEdit.idx]) { setAiTurnEdit(null); return; }
-        turns[aiTurnEdit.idx] = { ...turns[aiTurnEdit.idx], text: aiTurnEdit.text };
-        patchAiSession(s.id, (x) => ({ ...x, transcript: serializeTurns(turns), updatedAt: Date.now() }));
+        if (!selectedAiSession || !aiTurnEdit) return;
+        editAiTurn(selectedAiSession, aiTurnEdit.idx, aiTurnEdit.text);
         setAiTurnEdit(null);
         addToast('已保存', 'success');
     };
+
     const handleDeleteAiTurn = (idx: number) => {
-        const s = selectedAiSession;
-        if (!s) return;
-        const turns = turnsOf(s).filter((_, i) => i !== idx);
-        patchAiSession(s.id, (x) => ({ ...x, transcript: serializeTurns(turns), updatedAt: Date.now() }));
+        if (selectedAiSession) editAiTurn(selectedAiSession, idx);
     };
 
     const handleDeleteAiCard = (id: string) => {
@@ -1430,16 +1588,18 @@ ${olderText}
             const task = `你（${charName}）在玩"酒馆"AI 角色扮演（沉浸式长剧情、像和 AI 合写小说）。这次的对手是你的角色卡「${card.name}」${card.kind === 'world' ? '（大型世界卡）' : ''}：
 人设/设定：${card.persona || '（自行发挥，贴合卡名）'}${card.scenario ? `\n初始场景：${card.scenario}` : ''}
 请生成 1 段你和这张卡的扮演记录。
-**transcript 写法**：长剧情小说体，第三人称叙事 + 引号对白，动作/神态/心理用 *星号*；"我:" = 你(玩家 ${charName}) 敲进输入框的 RP，"对方:" = AI 扮的「${card.name}」，交替推进，4-6 轮，首轮"对方:"当开场白、**整段以 "我:"(玩家)收尾**（停在等对方回应处）。**"我:"括号外只写故事里所扮角色的动作/对白，不要写你现实里的身体反应（盯屏幕/扔手机/吃东西等）；（全角括号内）= 越过角色直接跟皮下 AI 本体说话（骂它/OOC 提醒/指导怎么演/指出哪段不对）。**
+**transcript 写法**：长剧情小说体，第三人称叙事 + 引号对白，动作/神态/心理用 *星号*；"我:" = 你(玩家 ${charName}) 敲进输入框的 RP，"对方:" = AI 扮的「${card.name}」，交替推进，4-6 轮，首轮"对方:"当开场白、**整段以 "对方:"(酒馆角色)回复收尾**。**"我:"括号外只写故事里所扮角色的动作/对白，不要写你现实里的身体反应（盯屏幕/扔手机/吃东西等）；（全角括号内）= 越过角色直接跟皮下 AI 本体说话（骂它/OOC 提醒/指导怎么演/指出哪段不对）。**
 返回 JSON：{ "title": "剧情标题(12字内)", "transcript": "我: ...\\n对方: ..." }`;
             const fullPrompt = `\n\n### [Recent Chat Context]\n${recentMsgs}\n\n### [Task]\n${task}\n只输出 JSON，不要解释。`;
             const content = await callLLM(fullPrompt, 0.85, true, '酒馆角色卡开场');
             const obj: any = extractJson(content) || {};
-            if (!obj.transcript) { addToast('没生成出来，再试一次', 'error'); return; }
+            const lines = parseGeneratedAiTranscript(obj.transcript);
             const now = Date.now();
+            const turnTimes = appendPhoneTurnTimes(undefined, 0, Array(lines.length).fill(now), now);
             const sess: AiSession = normalizePhoneAiSession({
                 id: `ai-${now}-${Math.random().toString(36).slice(2, 6)}`, service: 'tavern',
-                serviceName: card.name, title: obj.title || `与${card.name}的一局`, transcript: obj.transcript, cardId: card.id, updatedAt: now,
+                serviceName: card.name, title: obj.title || `与${card.name}的一局`, transcript: obj.transcript, cardId: card.id, updatedAt: now, turnTimes,
+                plotKind: aiSessions.some(session => session.cardId === card.id) ? 'restart' : 'main',
             });
             updateCharacter(targetChar.id, (cur) => ({
                 phoneState: {
@@ -1450,7 +1610,7 @@ ${olderText}
                     },
                 },
             }));
-            await syncAiCardToChat(sess, parseTranscript(sess.transcript));
+            await syncAiCardToChat(sess, lines, turnTimes);
             setAiCardView(null);
             setSelectedAiSessionId(sess.id);
             setActiveAppId('ai_session');
@@ -1695,39 +1855,32 @@ ${olderText}
         trackEvent('手动添加一位联系人', { contactKind: ncKind });
     };
 
-    // 给某个机主侧落一段真实对话：更新好感/状态 + 写 chat 记录 + （机主开了同步才）镜像进私聊 + 自动加删友播报
-    const commitConversationSide = async (
-        owner: CharacterProfile, partnerName: string, partnerCharId: string,
-        detail: string, delta: number, partnerNote?: string, learnedNew?: string, seedIdentity?: string,
-    ) => {
-        const timestamp = Date.now();
-        const result = {
-            partnerName, partnerCharId, detail, delta, partnerNote, learnedNew, seedIdentity,
-            timestamp, recordId: `rec-${timestamp}-${Math.random()}`,
-        };
-        const contact = owner.phoneState?.contacts?.find(c => c.linkedCharId === partnerCharId || normName(c.name) === normName(partnerName));
-        const existing = owner.phoneState?.records?.find(r => r.type === 'chat'
-            && ((contact && r.contactId === contact.id) || (!r.contactId && normName(r.title) === normName(partnerName))));
-        const ownerSendToChat = owner.phoneState?.sendToChat !== false;
-        let msgId: number | undefined;
-        if (ownerSendToChat) {
-            // 续写时先删掉这段对话上一张卡，私聊里只留一张最新完整的（不再 AB / ABC 堆叠）
-            if (existing?.systemMessageId) await DB.deleteMessage(existing.systemMessageId);
-            msgId = await DB.saveMessage({
-                charId: owner.id, role: 'assistant', type: 'phone_card',
-                content: `[你手机的聊天软件] 你和「${partnerName}」的对话：${detail.replace(/\n/g, ' ')}`,
-                metadata: { phoneCard: { app: '聊天软件', kind: 'chat', title: partnerName, detail } },
-            } as any);
+    const formatContactCardHistory = (owner: CharacterProfile, transcript: string, times: (PhoneTurnTime | null)[]) =>
+        parseTranscript(transcript).map((turn, i) => {
+            const time = times[i];
+            const previous = times[i - 1];
+            const label = owner.timeAwarenessEnabled !== false && time
+                && (!previous || time.occurredAt !== previous.occurredAt)
+                ? `[${new Date(time.occurredAt).toLocaleString('zh-CN', { timeZone: resolveCharTimeZone(owner) })}] `
+                : '';
+            return `${label}${turn.isMe ? '我' : '对方'}: ${turn.text}`;
+        }).join('\n');
+
+    const findContactConversation = (owner: CharacterProfile, contactId: string | undefined, partnerName: string) =>
+        owner.phoneState?.records?.find(record => record.type === 'chat' &&
+            (contactId && record.contactId === contactId || !record.contactId && normName(record.title) === normName(partnerName)));
+
+    const assertConversationCurrent = (previous: PhoneEvidence | undefined, current: PhoneEvidence | undefined) => {
+        if (previous?.id !== current?.id || previous?.detail !== current?.detail ||
+            JSON.stringify(previous?.turnTimes) !== JSON.stringify(current?.turnTimes)) {
+            throw new Error('这段对话已经更新，请重新查看');
         }
-        // 自动加删友播报：进机主与用户的私聊（同样受 sendToChat 控制）
-        const { broadcast } = applyRealConversationToPhoneState(owner.phoneState, result);
-        if (broadcast && ownerSendToChat) {
-            await DB.saveMessage({ charId: owner.id, role: 'assistant', type: 'text', content: broadcast } as any);
-        }
-        updateCharacter(owner.id, (cur) => ({
-            phoneState: applyRealConversationToPhoneState(cur.phoneState, { ...result, systemMessageId: msgId }).phoneState,
-        }));
     };
+
+    const makeContactCard = (owner: CharacterProfile, name: string, detail: string, times: (PhoneTurnTime | null)[]) => ({
+        content: `[你手机的聊天软件] 你和「${name}」的对话：\n${formatContactCardHistory(owner, detail, times)}`,
+        detail,
+    });
 
     // 聊满 100 条触发总结：把待归档的每 100 条原文，A/B 各自第一人称浓缩成一条话题盒记忆，推进水位线。
     // 原文仍留在 record.detail（用户能看），只是不再进上下文。
@@ -1775,11 +1928,19 @@ ${olderText}
         if (!targetChar || !effectiveApiConfig.apiKey) { addToast('请先配置 API', 'error'); return; }
         const b = characters.find(c => c.id === contact.linkedCharId);
         if (!b) { addToast('该联系人未绑定真实角色', 'error'); return; }
+        const observedAt = Date.now();
         setIsLoading(true);
         trackEvent('生成一段与联系人的对话', { contactKind: 'real' });
         try {
-            const existing = (targetChar.phoneState?.records || []).find(r => r.type === 'chat' && (r.contactId === contact.id || normName(r.title) === normName(contact.name)));
+            const existing = findContactConversation(targetChar, contact.id, contact.name);
+            const earliest = existing?.turnTimes?.slice().reverse().find(time => time != null)?.occurredAt
+                ?? observedAt - 7 * 86_400_000;
             const bToA = (b.phoneState?.contacts || []).find(c => c.linkedCharId === targetChar.id || normName(c.name) === normName(targetChar.name));
+            const mirror = findContactConversation(b, bToA?.id, targetChar.name);
+            if (mirror && flipTranscript(mirror.detail) !== serializeTurns(parseTranscript(existing?.detail))) {
+                addToast('双方的旧记录不一致，请先核对后再续聊', 'error');
+                return;
+            }
             // 上下文压缩：归档过的原文(0~archivedThru)不再进上下文，只喂「话题盒总结 + 近段原文」。
             const aAllLines = parseTranscript(existing?.detail || '');
             const aArchived = Math.min(contact.archivedThru ?? 0, aAllLines.length);
@@ -1788,7 +1949,7 @@ ${olderText}
             const result = await runRealConversation({
                 a: targetChar, b, user: userProfile, api: effectiveApiConfig as any,
                 affinityA: contact.affinity, affinityB: bToA?.affinity ?? 0,
-                existingDetail: recentDetail,
+                existingDetail: recentDetail, observation: { at: observedAt, earliest, history: existing?.turnTimes?.slice(aArchived) },
                 // bNote = A 对 B 的备注（喂给 A）；aNote = B 对 A 的备注（喂给 B）。别接反。
                 aNote: bToA?.note, bNote: contact.note,
                 bLearned: contact.learned, aLearned: bToA?.learned,
@@ -1797,11 +1958,38 @@ ${olderText}
             if (!result.aDetail.trim()) { addToast('对方没有回应…', 'error'); return; }
             // 把归档段拼回去，存「完整原文」给用户看（上下文用的是压缩版，互不影响）
             const aFull = serializeTurns([...archivedALines, ...parseTranscript(result.aDetail)]);
+            const addedCount = parseTranscript(aFull).length - aAllLines.length;
+            if (addedCount <= 0) { addToast('这次没有新的对话记录', 'info'); return; }
+            const times = resolvePhoneTurnTimes(addedCount, observedAt, earliest,
+                result.minutesAgo == null ? undefined : Array(addedCount).fill(result.minutesAgo));
+            const turnTimes = appendPhoneTurnTimes(existing?.turnTimes, aAllLines.length, times, observedAt);
             const bFull = flipTranscript(aFull);
-            // A 学到的写进 A 对 B 的了解；B 学到的写进 B 对 A 的了解。
-            // 若对方通讯录里还没有自己，commitConversationSide 会先建好联系人（带名字+起始备注名）再挂消息。
-            await commitConversationSide(targetChar, contact.name, b.id, aFull, result.aDelta, contact.note, result.aLearnedNew, contact.identity);
-            await commitConversationSide(b, targetChar.name, targetChar.id, bFull, result.bDelta, bToA?.note, result.bLearnedNew, contact.identity);
+            await DB.commitPhoneConversation([targetChar.id, b.id], ([aLive, bLive]) => {
+                const liveContact = aLive.phoneState?.contacts?.find(item => item.id === contact.id);
+                if (liveContact?.linkedCharId !== b.id) throw new Error('联系人绑定已变更');
+                if (bToA && !bLive.phoneState?.contacts?.some(item => item.id === bToA.id && item.linkedCharId === bToA.linkedCharId)) {
+                    throw new Error('对方的联系人已变更');
+                }
+                assertConversationCurrent(existing, findContactConversation(aLive, contact.id, contact.name));
+                assertConversationCurrent(mirror, findContactConversation(bLive, bToA?.id, targetChar.name));
+                const timestamp = turnTimes.at(-1)?.occurredAt ?? observedAt;
+                return [
+                    { owner: aLive, partner: bLive, name: liveContact.name, detail: aFull, delta: result.aDelta, learnedNew: result.aLearnedNew },
+                    { owner: bLive, partner: aLive, name: aLive.name, detail: bFull, delta: result.bDelta, learnedNew: result.bLearnedNew },
+                ].map(side => {
+                    const recordId = `rec-${crypto.randomUUID()}`;
+                    const { phoneState, broadcast } = applyRealConversationToPhoneState(side.owner.phoneState, {
+                        partnerName: side.name, partnerCharId: side.partner.id, detail: side.detail,
+                        delta: side.delta, learnedNew: side.learnedNew, seedIdentity: contact.identity,
+                        timestamp, recordId, turnTimes, observedAt,
+                    });
+                    const partner = phoneState.contacts!.find(item => item.linkedCharId === side.partner.id)!;
+                    const record = phoneState.records.find(item => item.type === 'chat' && item.contactId === partner.id)!;
+                    const added = serializeTurns(parseTranscript(side.detail).slice(-addedCount));
+                    return { charId: side.owner.id, record, contact: partner, broadcast,
+                        card: makeContactCard(side.owner, side.name, added, turnTimes.slice(-addedCount)) };
+                });
+            });
             // 聊满 100 条 → 各自第一人称总结归档进话题盒
             await maybeArchiveConversation(contact, b, aFull);
             addToast(`${targetChar.name} 和 ${b.name} 聊了一会儿`, 'success');
@@ -1816,41 +2004,40 @@ ${olderText}
     // 与虚构 NPC 的对话（机主脑补，单 LLM，纯虚构、不镜像）
     const handleNpcConversation = async (contact: PhoneContact) => {
         if (!targetChar || !effectiveApiConfig.apiKey) { addToast('请先配置 API', 'error'); return; }
+        const observedAt = Date.now();
         setIsLoading(true);
         trackEvent('生成一段与联系人的对话', { contactKind: 'npc' });
         try {
-            const existing = (targetChar.phoneState?.records || []).find(r => r.type === 'chat' && (r.contactId === contact.id || normName(r.title) === normName(contact.name)));
-            const { detail, learnedNew } = await runNpcConversation({
+            const existing = findContactConversation(targetChar, contact.id, contact.name);
+            const earliest = existing?.turnTimes?.slice().reverse().find(time => time != null)?.occurredAt
+                ?? observedAt - 7 * 86_400_000;
+            const { detail, learnedNew, times } = await runNpcConversation({
+                observation: { at: observedAt, earliest, history: existing?.turnTimes },
                 host: targetChar, user: userProfile, api: effectiveApiConfig as any,
                 npcName: contact.name, identity: contact.identity, note: contact.note,
                 learned: contact.learned, rounds: 4, existingDetail: existing?.detail,
             });
             if (!detail.trim()) { addToast('对方没有回应', 'error'); return; }
-            const now = Date.now();
-            // 同步到私聊：和真人对话一致，落一张 phone_card（受 sendToChat 控制）。
-            // 续写时先删掉上一张卡片再发新的，避免同一段对话越堆越多。
-            const pushToChat = targetChar.phoneState?.sendToChat !== false;
-            let msgId: number | undefined;
-            if (pushToChat) {
-                if (existing?.systemMessageId) await DB.deleteMessage(existing.systemMessageId);
-                msgId = await DB.saveMessage({
-                    charId: targetChar.id, role: 'assistant', type: 'phone_card',
-                    content: `[你手机的聊天软件] 你和「${contact.name}」的对话：${detail.replace(/\n/g, ' ')}`,
-                    metadata: { phoneCard: { app: '聊天软件', kind: 'chat', title: contact.name, detail } },
-                } as any);
-            }
-            updateCharacter(targetChar.id, (cur) => {
-                const recs = cur.phoneState?.records || [];
-                const next = existing
-                    ? recs.map(r => r.id === existing.id ? { ...r, detail, timestamp: now, systemMessageId: msgId ?? r.systemMessageId } : r)
-                    : [...recs, { id: `rec-${now}-${Math.random()}`, type: 'chat', title: contact.name, detail, timestamp: now, contactId: contact.id, systemMessageId: msgId }];
-                // 把这次脑补出来的新设定累积进该 NPC 的「了解」，保持下次一致
-                const contactsNext = learnedNew
-                    ? (cur.phoneState?.contacts || []).map(c => c.id === contact.id ? { ...c, learned: appendLearned(c.learned, learnedNew) } : c)
-                    : cur.phoneState?.contacts;
-                return { phoneState: { ...cur.phoneState, records: next, ...(contactsNext ? { contacts: contactsNext } : {}) } };
+            const previousCount = parseTranscript(existing?.detail).length;
+            const addedCount = parseTranscript(detail).length - previousCount;
+            if (addedCount <= 0) { addToast('这次没有新的对话记录', 'info'); return; }
+            const turnTimes = appendPhoneTurnTimes(existing?.turnTimes, previousCount,
+                times ?? Array(addedCount).fill(observedAt), observedAt);
+            const now = turnTimes.at(-1)?.occurredAt ?? observedAt;
+            await DB.commitPhoneConversation([targetChar.id], ([owner]) => {
+                const current = owner.phoneState?.contacts?.find(item => item.id === contact.id);
+                if (current?.kind !== 'npc') throw new Error('联系人已变更');
+                assertConversationCurrent(existing, findContactConversation(owner, contact.id, contact.name));
+                const record: PhoneEvidence = {
+                    ...(existing || { id: `rec-${crypto.randomUUID()}`, type: 'chat', title: current.name }),
+                    detail, timestamp: now, turnTimes, lastObservedAt: observedAt, contactId: current.id,
+                };
+                const added = serializeTurns(parseTranscript(detail).slice(-addedCount));
+                return [{ charId: owner.id, record,
+                    contact: learnedNew ? { ...current, learned: appendLearned(current.learned, learnedNew) } : current,
+                    card: makeContactCard(owner, current.name, added, turnTimes.slice(-addedCount)) }];
             });
-            addToast(pushToChat ? '偷看到一段对话 · 已同步私聊' : '偷看到一段对话', 'success');
+            addToast('偷看到一段对话', 'success');
         } catch (e) {
             console.error(e);
             addToast('对话生成失败', 'error');
@@ -1895,7 +2082,7 @@ ${olderText}
     };
 
     // 把「编辑后的 A 视角脚本」落库：刷新机主侧记录/卡片 + 真人镜像 + 同步 archivedThru；全删空则移除记录。
-    const saveEditedConversation = async (c: PhoneContact, newDetail: string, newArchived: number) => {
+    const saveEditedConversation = async (c: PhoneContact, newDetail: string, newArchived: number, turnTimes?: (PhoneTurnTime | null)[]) => {
         if (!targetChar) return;
         const isChatWith = (r: PhoneEvidence, cId: string | undefined, nm: string) =>
             r.type === 'chat' && (r.contactId === cId || normName(r.title) === normName(nm));
@@ -1907,7 +2094,7 @@ ${olderText}
         if (has && targetChar.phoneState?.sendToChat !== false) {
             msgId = await DB.saveMessage({
                 charId: targetChar.id, role: 'assistant', type: 'phone_card',
-                content: `[你手机的聊天软件] 你和「${c.name}」的对话：${newDetail.replace(/\n/g, ' ')}`,
+                content: `[你手机的聊天软件] 你和「${c.name}」的对话：\n${formatContactCardHistory(targetChar, newDetail, turnTimes || [])}`,
                 metadata: { phoneCard: { app: '聊天软件', kind: 'chat', title: c.name, detail: newDetail } },
             } as any);
         }
@@ -1915,7 +2102,7 @@ ${olderText}
             phoneState: {
                 ...cur.phoneState,
                 records: has
-                    ? (cur.phoneState?.records || []).map(r => isChatWith(r, c.id, c.name) ? { ...r, detail: newDetail, timestamp: Date.now(), systemMessageId: msgId } : r)
+                    ? (cur.phoneState?.records || []).map(r => isChatWith(r, c.id, c.name) ? { ...r, detail: newDetail, turnTimes, systemMessageId: msgId } : r)
                     : (cur.phoneState?.records || []).filter(r => !isChatWith(r, c.id, c.name)),
                 contacts: (cur.phoneState?.contacts || []).map(x => x.id === c.id ? { ...x, archivedThru: newArchived } : x),
             },
@@ -1933,7 +2120,7 @@ ${olderText}
                 if (bHas && b.phoneState?.sendToChat !== false) {
                     bMsgId = await DB.saveMessage({
                         charId: b.id, role: 'assistant', type: 'phone_card',
-                        content: `[你手机的聊天软件] 你和「${targetChar.name}」的对话：${bDetail.replace(/\n/g, ' ')}`,
+                        content: `[你手机的聊天软件] 你和「${targetChar.name}」的对话：\n${formatContactCardHistory(b, bDetail, turnTimes || [])}`,
                         metadata: { phoneCard: { app: '聊天软件', kind: 'chat', title: targetChar.name, detail: bDetail } },
                     } as any);
                 }
@@ -1941,7 +2128,7 @@ ${olderText}
                     phoneState: {
                         ...cur.phoneState,
                         records: bHas
-                            ? (cur.phoneState?.records || []).map(r => isChatWith(r, bContact?.id, targetChar.name) ? { ...r, detail: bDetail, timestamp: Date.now(), systemMessageId: bMsgId } : r)
+                            ? (cur.phoneState?.records || []).map(r => isChatWith(r, bContact?.id, targetChar.name) ? { ...r, detail: bDetail, turnTimes, systemMessageId: bMsgId } : r)
                             : (cur.phoneState?.records || []).filter(r => !isChatWith(r, bContact?.id, targetChar.name)),
                         contacts: (cur.phoneState?.contacts || []).map(x => (bContact && x.id === bContact.id) ? { ...x, archivedThru: newArchived } : x),
                     },
@@ -1963,7 +2150,7 @@ ${olderText}
         const keep = turns.filter((_, i) => !sel.has(i));
         const newDetail = serializeTurns(keep);
         const newArchived = Math.max(0, (c.archivedThru ?? 0) - deletedInArchived);
-        await saveEditedConversation(c, newDetail, newArchived);
+        await saveEditedConversation(c, newDetail, newArchived, rec.turnTimes?.filter((_, i) => !sel.has(i)));
         addToast(`已删除 ${sel.size} 条`, 'success');
         exitMsgSelect();
     };
@@ -2753,12 +2940,11 @@ ${olderText}
         const aiAvatarBg = t.key === 'gpt' ? '#000' : t.key === 'claude' ? '#f0e9da' : t.dark ? 'rgba(255,255,255,0.08)' : '#fff';
 
         // 酒馆是长剧情小说体：把连续同一说话人的行合并成「楼层」，*动作* 渲染成斜体淡色
-        const floors: { isMe: boolean; text: string }[] = [];
-        for (const ln of lines) {
-            const prev = floors[floors.length - 1];
-            if (prev && prev.isMe === ln.isMe) prev.text += '\n' + ln.text;
-            else floors.push({ isMe: ln.isMe, text: ln.text });
-        }
+        const floors = isTavern ? turnsOf(s) : [];
+        const renderTurnTime = (index: number) => {
+            const label = phoneTimeDivider(s.turnTimes?.[index], s.turnTimes?.[index - 1]);
+            return label && <div className="text-center text-[10px] my-1" style={{ color: t.sub }}>{label}</div>;
+        };
         // *动作* 斜体淡色；（括号 OOC / 跟皮下 AI 说话）也淡色斜体——但都还在 char 自己的楼层里，不另起气泡
         const renderProse = (txt: string) => txt.split(/(\*[^*]+\*|（[^）]+）)/g).filter(Boolean).map((p, i) =>
             (p.startsWith('*') && p.endsWith('*'))
@@ -2865,7 +3051,9 @@ ${olderText}
                             {aiArchiveOpen && !!s.archived && (
                                 <div className="text-[12px] leading-[1.85] whitespace-pre-wrap pt-1 mt-1 border-t" style={{ color: t.sub, borderColor: hairline }}>
                                     {parseTranscript(s.archived).map((l, i) => (
-                                        <div key={i} className="mb-1"><span className="opacity-60">{l.isMe ? charName : partnerName}：</span>{l.text}</div>
+                                        <div key={s.archivedTurnTimes?.[i]?.id ?? i} className="mb-1">
+                                            {phoneTimeDivider(s.archivedTurnTimes?.[i], s.archivedTurnTimes?.[i - 1]) && <div className="text-center opacity-60">{phoneTimeDivider(s.archivedTurnTimes?.[i], s.archivedTurnTimes?.[i - 1])}</div>}
+                                            <span className="opacity-60">{l.isMe ? charName : partnerName}：</span>{l.text}</div>
                                     ))}
                                 </div>
                             )}
@@ -2875,18 +3063,20 @@ ${olderText}
                     {isTavern ? floors.map((f, i) => {
                         const who = f.isMe ? charName : partnerName;
                         if (tStyle.layout === 'flat') {
-                            return (
-                                <div key={i} {...longPress(() => setAiTurnMenu(i))} className="px-1 py-1.5 select-none">
+                            return <React.Fragment key={s.turnTimes?.[f.start]?.id ?? i}>
+                                {renderTurnTime(f.start)}
+                                <div {...longPress(() => setAiTurnMenu(i))} className="px-1 py-1.5 select-none">
                                     <div className="flex items-center gap-1.5 mb-1">
                                         <span className="text-[12px] font-semibold" style={{ color: f.isMe ? t.accent : t.text }}>{who}</span>
                                         {f.isMe && <span className="text-[9px]" style={{ color: t.sub }}>· 玩家</span>}
                                     </div>
                                     <div className="text-[14px] whitespace-pre-wrap" style={{ color: t.text, lineHeight: 1.95, textIndent: tStyle.indent ? '2em' : undefined }}>{renderProse(f.text)}</div>
                                 </div>
-                            );
+                            </React.Fragment>;
                         }
-                        return (
-                            <div key={i} {...longPress(() => setAiTurnMenu(i))} className="rounded-2xl p-3.5 select-none"
+                        return <React.Fragment key={s.turnTimes?.[f.start]?.id ?? i}>
+                            {renderTurnTime(f.start)}
+                            <div {...longPress(() => setAiTurnMenu(i))} className="rounded-2xl p-3.5 select-none"
                                 style={{ background: f.isMe ? `${t.accent}10` : 'rgba(255,255,255,0.04)', border: `1px solid ${hairline}` }}>
                                 <div className="flex items-center gap-2 mb-2">
                                     <div className="w-7 h-7 rounded-lg flex items-center justify-center overflow-hidden shrink-0"
@@ -2898,11 +3088,12 @@ ${olderText}
                                 </div>
                                 <div className="text-[13px] leading-[1.95] whitespace-pre-wrap" style={{ color: t.text }}>{renderProse(f.text)}</div>
                             </div>
-                        );
+                        </React.Fragment>;
                     }) : lines.map((m, i) => {
                         const bare = !m.isMe && t.aiBg === 'transparent'; // ChatGPT/Claude：AI 不用气泡，整段铺开
-                        return (
-                            <div key={i} {...longPress(() => setAiTurnMenu(i))} className={`flex items-end gap-2 select-none ${m.isMe ? 'justify-end' : 'justify-start'}`}>
+                        return <React.Fragment key={s.turnTimes?.[i]?.id ?? i}>
+                            {renderTurnTime(i)}
+                            <div {...longPress(() => setAiTurnMenu(i))} className={`flex items-end gap-2 select-none ${m.isMe ? 'justify-end' : 'justify-start'}`}>
                                 {!m.isMe && (
                                     <div className="w-8 h-8 rounded-full flex items-center justify-center text-base shrink-0 overflow-hidden"
                                         style={{ background: aiAvatarBg, border: `1px solid ${hairline}` }}>
@@ -2922,7 +3113,7 @@ ${olderText}
                                 </div>
                                 {m.isMe && <TokenImg value={targetChar.avatar} className="w-8 h-8 rounded-xl object-cover shrink-0" />}
                             </div>
-                        );
+                        </React.Fragment>;
                     })}
                     {aiSending && (
                         <div className="flex justify-start items-center gap-2">
@@ -3021,8 +3212,11 @@ ${olderText}
                     {shown.map((m, i) => {
                         const realIdx = hidden + i; // 映射回完整脚本下标
                         const sel = selectedMsgIdx.includes(realIdx);
-                        return (
-                        <div key={realIdx}
+                        const meta = rec?.turnTimes?.[realIdx];
+                        const dateLabel = phoneTimeDivider(meta, i ? rec?.turnTimes?.[realIdx - 1] : undefined);
+                        return <React.Fragment key={meta?.id ?? realIdx}>
+                        {dateLabel && <div className="text-center text-[10px] text-white/40">{dateLabel}</div>}
+                        <div
                             {...longPress(() => { setMsgSelectMode(true); setSelectedMsgIdx(prev => prev.includes(realIdx) ? prev : [...prev, realIdx]); })}
                             onClick={() => {
                                 if (lpFired.current) { lpFired.current = false; return; }
@@ -3039,7 +3233,8 @@ ${olderText}
                                 style={m.isMe ? { background: `linear-gradient(135deg, ${accent}, ${accent}bb)` } : undefined}>{m.content}</div>
                             {m.isMe && <TokenImg value={targetChar.avatar} alt="" className="w-7 h-7 rounded-xl object-cover shrink-0" />}
                         </div>
-                    );})}
+                        </React.Fragment>;
+                    })}
                     {isLoading && (
                         <div className="flex justify-center py-3">
                             <div className="flex gap-1.5">
@@ -3953,7 +4148,7 @@ ${olderText}
                                         <button key={s.id} onClick={() => { setAiCardView(null); setSelectedAiSessionId(s.id); setActiveAppId('ai_session'); }}
                                             className="w-full text-left rounded-xl p-2.5 bg-slate-50 active:bg-slate-100 transition">
                                             <div className="text-[13px] font-semibold text-slate-700 truncate">{s.title}</div>
-                                            <div className="text-[10px] text-slate-400">{parseTranscript(s.transcript).length} 条 · {fmtClock(s.updatedAt)}</div>
+                                            <div className="text-[10px] text-slate-400">{s.plotKind && <>{s.plotKind === 'if' ? 'IF 支线' : s.plotKind === 'restart' ? '新开一局' : '主线'} · </>}{parseTranscript(s.transcript).length} 条 · {fmtClock(s.updatedAt)}</div>
                                         </button>
                                     ))}
                                 </div>

@@ -937,6 +937,13 @@ export interface PhoneCustomApp {
     layout?: 'generic' | 'shop' | 'feed' | 'forum' | 'novel'; // 参考样板 UI 风格，默认 generic
 }
 
+export interface PhoneTurnTime {
+    id: string;
+    occurredAt: number;
+    observedAt: number;
+    backfilled?: true;
+}
+
 export interface PhoneEvidence {
     id: string;
     type: 'chat' | 'order' | 'social' | 'delivery' | string;
@@ -947,6 +954,8 @@ export interface PhoneEvidence {
     value?: string;
     /** 人际关系系统：本条记录归属的联系人（phoneState.contacts 里的 id） */
     contactId?: string;
+    turnTimes?: (PhoneTurnTime | null)[];
+    lastObservedAt?: number;
 }
 
 /**
@@ -1023,6 +1032,11 @@ export interface AiSession {
     transcript: string;
     /** tavern：关联的角色卡 id */
     cardId?: string;
+    turnTimes?: (PhoneTurnTime | null)[];
+    archivedTurnTimes?: (PhoneTurnTime | null)[];
+    lastObservedAt?: number;
+    plotKind?: 'main' | 'restart' | 'if';
+    plotSource?: { sessionId: string; node: number; priorContext: string };
     /** 长会话自动总结出的「前情提要」（参考 TRPG：超 100 条触发，把旧剧情压成小说梗概） */
     summaries?: { id: string; content: string; createdAt: number }[];
     /** 被折叠归档的旧原文（不删除，UI 可展开回看；总结后从 transcript 移到这里） */

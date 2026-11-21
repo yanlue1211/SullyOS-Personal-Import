@@ -285,7 +285,19 @@ export async function reconcileCommerce(now=Date.now()){
  if(scanning)return;scanning=true;
  try{const {orders}=await readCommerce();let changed=false;for(const order of orders){if(!order.createdNotified){await publishOrderCard(order,false);await markNotified(order.id,false);changed=true;}if(now>=order.eta&&!order.deliveredNotified){await publishOrderCard(order,true);await markNotified(order.id,true);changed=true;}}if(changed)notify();}finally{scanning=false;}
 }
-export function orderText(o:CommerceOrder,delivered=false){const who=(v:'user'|'char')=>v==='char'?o.charName:o.userName;const quantity=o.quantity||1;const variant=o.selectedOptions?Object.entries(o.selectedOptions).map(([k,v])=>k+'：'+v).join(' / '):'';return `[${o.product.kind==='meituan'?'外卖':'购物'}订单] ${who(o.buyer)}给${who(o.recipient)}买了${o.product.title}${variant?'（'+variant+'）':''}${quantity>1?` ×${quantity}`:''}，¥${((o.unitPrice??o.product.price)*quantity).toFixed(2)}。${delivered?`${who(o.recipient)}已收到`:`状态：${orderStatus(o)}；预计送达：${new Date(o.eta).toLocaleString()}`}。`;}
+export function orderText(order: CommerceOrder, delivered = false) {
+ const who = (party: 'user' | 'char') => party === 'char' ? order.charName : order.userName;
+ const quantity = order.quantity || 1;
+ const options = Object.entries(order.selectedOptions || {}).map(([name, value]) => `${name}：${value}`).join(' / ');
+ const item = `${order.product.title}${options ? `（${options}）` : ''}${quantity > 1 ? ` ×${quantity}` : ''}`;
+ const food = order.product.kind === 'meituan';
+ const event = delivered ? (food ? '送达' : '签收') : '下单';
+ const happenedAt = new Date(delivered ? order.eta : order.createdAt).toLocaleString();
+ const prefix = `[${food ? '外卖' : '购物'}${event}记录｜${happenedAt}]`;
+ if (delivered) return `${prefix} ${who(order.recipient)}已收到${item}。`;
+ const price = ((order.unitPrice ?? order.product.price) * quantity).toFixed(2);
+ return `${prefix} ${who(order.buyer)}给${who(order.recipient)}下单了${item}，¥${price}。下单时预计送达：${new Date(order.eta).toLocaleString()}。`;
+}
 export async function commerceContext(charId:string){const {orders,products,members}=await readCommerce();const pending=orders.filter(o=>o.charId===charId&&o.eta>Date.now());const blocked=purchaseBlock(orders,charId,Date.now());const available=products.filter(p=>members[p.kind].includes(charId));return {
  pending:pending.length?`\n【生活背景·待收货，仅知晓即可】\n${pending.map(o=>orderText(o)).join('\n')}\n无需每轮提及、查询或关心，只有话题相关或到达时自然回应。\n`:'',
  guide:available.length?`\n【生活购物权限】你可在${[...new Set(available.map(p=>p.kind==='meituan'?'美团':'淘宝'))].join('、')}给用户或自己买东西。没有具体契机不必买，也不能捏造已下单。${blocked?`给用户的主动礼物暂停：${blocked}；给自己买不受此限制。`:''}决定逛商城时先单独一行输出 <逛商城>{"query":"想找的商品关键词","kind":"taobao"}</逛商城>（kind 可为 taobao 或 meituan，也可省略；可附 shopId、offset 翻页）。先不附购物正文或心声。系统随后提供相关商品，再用 <购物>{"productId":"查询到的有效ID","recipient":"user","selectedOptions":{"颜色":"黑色"}}</购物> 下单，有选项时从查询结果中按需选择并填写 selectedOptions；无选项可省略；recipient 可为 user 或 char。一轮最多一单，系统创建成功才算购买。\n`:'',
