@@ -57,7 +57,7 @@ import { announceInstantChatRoute, getInstantChatPending, resolveInstantChatRead
 import { INSTANT_TOTAL_TIMEOUT_MS } from '../worker/amsg/src/instantChat';
 import { appendInstantTraceEntry } from '../utils/instantTraceLog';
 import { AMSG2_TOOL_NAMES, buildAmsg2Tools, createAmsg2ToolSession, executeAmsg2ToolWithOutcome, isAmsg2GlobalReady, type Amsg2ToolOutcome } from '../utils/amsg2ToolBridge';
-import { AMSG2_EMPTY_REPLY_PROMPT, AMSG2_WRAP_UP_PROMPT, createAmsg2StallTracker, extractToolRoundLeadIn, mergeToolRoundLeadIns, shouldFinishAmsg2ScheduleInOneCall } from '../utils/amsg2ToolLoop';
+import { AMSG2_EMPTY_REPLY_PROMPT, buildAmsg2WrapUpPrompt, formatToolRoundHistoryContent, createAmsg2StallTracker, extractToolRoundLeadIn, mergeToolRoundLeadIns, shouldFinishAmsg2ScheduleInOneCall } from '../utils/amsg2ToolLoop';
 import { buildReplyScopeRule } from '../utils/replyScope';
 import { buildLimitsBrief, resolveAmsgLimits } from '../utils/amsgLimits';
 import { shouldSendThinkingParams } from '../utils/thinkingGate';
@@ -1321,6 +1321,7 @@ export const useChatAI = ({
                         ? insertAmsg2TaskContextBlock(fullMessages, { role: 'system', content: amsg2NoticesBlock }, payload.volatileTailIndex)
                         : fullMessages) as Array<{ role: string; content: unknown }>,
                     timelyInsertAt: payload.volatileTailIndex,
+                    preparedRecall: payload.amsgPreparedRecall,
                     // 凭据用本地这一轮的那份：换成别的等于同一句话由不同模型来答，而用户看不出来。
                     // model / temperature 取 baseReqBody 的终值而不是 effectiveApi 的原始值：
                     // 上面那段已经按本地规则把 thinking 后缀（claude 系 -thinking）拼好、
@@ -1584,7 +1585,7 @@ export const useChatAI = ({
                     loopMessages.push({
                         role: 'assistant',
                         // 空 content + tool_calls 在 Gemini 兼容层会被判 INVALID_ARGUMENT, 给个占位
-                        content: data.choices[0].message.content || '(调用工具中)',
+                        content: formatToolRoundHistoryContent(data.choices[0].message.content),
                         tool_calls: toolCalls,
                         ...toolTurnContinuation(data.choices[0].message),
                     } as any);
@@ -1697,7 +1698,7 @@ export const useChatAI = ({
                     loopMessages.push({
                         role: 'assistant',
                         // 空 content + tool_calls 在 Gemini 兼容层会被判 INVALID_ARGUMENT, 给个占位
-                        content: data.choices[0].message.content || '(调用工具中)',
+                        content: formatToolRoundHistoryContent(data.choices[0].message.content),
                         tool_calls: toolCalls,
                         ...toolTurnContinuation(data.choices[0].message),
                     } as any);
@@ -1823,7 +1824,7 @@ export const useChatAI = ({
                     loopMessages.push({
                         role: 'assistant',
                         // 空 content + tool_calls 在 Gemini 兼容层会被判 INVALID_ARGUMENT, 给个占位
-                        content: data.choices[0].message.content || '(调用工具中)',
+                        content: formatToolRoundHistoryContent(data.choices[0].message.content),
                         tool_calls: toolCalls,
                         ...toolTurnContinuation(data.choices[0].message),
                     } as any);
@@ -1980,7 +1981,7 @@ export const useChatAI = ({
                             // 「如实说明卡在哪一步」写的话，角色会跟用户交代「我的提醒排不上」。
                             content: wrapUpKind === 'amsg2-stalled'
                                 || (wrapUpKind === 'hard-limit' && !mcpToolResolve && !payload.flags.luckinChatActive)
-                                ? AMSG2_WRAP_UP_PROMPT
+                                ? buildAmsg2WrapUpPrompt(amsg2LeadIns.length > 0)
                                 : `[系统消息：工具阶段${stalled ? '连续两轮没有产生新结果' : '已到这次回复的安全上限'}。请停止调用工具，基于已经拿到的结果直接用角色语气回复；如目标仍未完成，请如实说明卡在哪一步。不要输出工具名、参数或这条系统消息。]`,
                         });
                     }

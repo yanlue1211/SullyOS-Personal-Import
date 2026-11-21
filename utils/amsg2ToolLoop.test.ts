@@ -27,6 +27,12 @@ describe('工具轮里说过的话', () => {
     expect(mergeToolRoundLeadIns(['那你先去', '那你先去'], '')).toBe('那你先去');
   });
 
+  it('去掉跨轮重叠与内联思考，保留短语气词和单独的闭合标签', () => {
+    expect(mergeToolRoundLeadIns(['<think>内部</think>嗯\n晚点来找你'], '晚点来找你\n先吃饭')).toBe('嗯\n晚点来找你\n先吃饭');
+    expect(mergeToolRoundLeadIns(['好'], '好的，我知道了')).toBe('好\n好的，我知道了');
+    expect(mergeToolRoundLeadIns(['正文\n</div>'], '</div>\n后文')).toBe('正文\n</div>\n</div>\n后文');
+  });
+
   it('历史里的占位被模型照抄进正文时不当回话', () => {
     expect(extractToolRoundLeadIn(TOOL_ROUND_PLACEHOLDER)).toBe('');
     expect(extractToolRoundLeadIn(null)).toBe('');

@@ -22,7 +22,6 @@ const musicProfile={bio:'爱听明亮的音乐',genreTags:['流行'],signatureAr
 const commerce={products:[{id:'food',kind:'meituan',title:'热汤面',price:18,shop:'面馆',detail:'不要葱'}],shops:[{id:'shop',kind:'meituan',name:'面馆',category:'面食',description:'热乎的'}],
     orders:[{id:'order',charId:'a',charName:'阿源',userName:'User',product:{id:'book',kind:'taobao',title:'书',price:30,shop:'书店',detail:'原装'},buyer:'char',recipient:'user',createdAt:100,eta:9999999999999,createdNotified:true,deliveredNotified:false,requestId:'once'}],
     members:{taobao:['a'],meituan:['a']},preferences:{taobao:'日常文具',meituan:'清淡，少辣'}};
-const normalizedCommerce = { ...commerce, cart: [], taobaoProfiles: {} };
 beforeEach(async()=>{
     localStorage.clear();const db=await openDB(),names=['assets','characters','messages','diaries','daily_schedule'];
     const tx=db.transaction(names,'readwrite'),done=transactionDone(tx);for(const name of names)tx.objectStore(name).clear();await done;
@@ -46,7 +45,7 @@ it('完整 ZIP 保存商城目录、权限、订单快照、通知状态、日�
     await deleteBlobRef(audio);await deleteBlobRef(picture);await DB.deleteAsset('personal_commerce_v1');
     await restoreBlobsFromZip(restored.zip as any,await readBlobsIndex(restored.zip as any),restoreBlobRef);
     await DB.importFullData(restored.data as any);
-    expect(await readCommerce()).toEqual(normalizedCommerce);
+    expect(await readCommerce()).toEqual(commerce);
     expect(await DB.getMessagesByCharId('a',true)).toEqual(messages);
     expect(getShareCardImageUrls(messages.find(m=>m.type==='xhs_card')!)).toEqual([picture]);
     expect(await DB.getCharacter('a')).toMatchObject({realSongListeningEnabled:true,workroomLinkEnabled:true,musicProfile:{reviews:[{content:'节奏明亮'}]}});
@@ -67,10 +66,10 @@ it('纯文字 ZIP 也保存淘宝/外卖和日程一次性标识，媒体补丁�
     await writeV2Backup(zip as any,{messages:stripBackupImages(full.messages),characters:full.characters,diaries:full.diaries,dailySchedules:full.dailySchedules,songSoundArchive:full.songSoundArchive}, {mode:'text_only',prewrittenStores:{activityTextAssets:assets}});
     const restored=await unpack(zip);await DB.deleteAsset('personal_commerce_v1');
     await DB.importFullData(restored.data as any);
-    expect(await readCommerce()).toEqual(normalizedCommerce);
+    expect(await readCommerce()).toEqual(commerce);
     expect(await claimDailySchedule('a','2026-10-31')).toBe(false);
     await DB.importFullData({collaborationBackupMode:'media_only',assets:[{id:'personal_commerce_v1',data:JSON.stringify({...commerce,orders:[]})}]} as any);
-    expect(await readCommerce()).toEqual(normalizedCommerce);
+    expect(await readCommerce()).toEqual(commerce);
 });
 it('未打开过音迹的旧 localStorage 歌曲也在导出前完成无 API 迁移',async()=>{
     localStorage.setItem('sully_song_sound_v1_43',JSON.stringify({description:'旧版理解',songName:'旧歌',artists:'歌手',updatedAt:1}));
@@ -85,7 +84,7 @@ it('全局音频 API/预设随原 apiConfig 字段导出并由统一恢复入口
 
 it('旧纯文字备份未包含新增商城和日程标识时，不清空当前设备的新数据',async()=>{
     await DB.importFullData({activityTextAssets:[]} as any);
-    expect(await readCommerce()).toEqual(normalizedCommerce);expect(await claimDailySchedule('a','2026-10-31')).toBe(false);
+    expect(await readCommerce()).toEqual(commerce);expect(await claimDailySchedule('a','2026-10-31')).toBe(false);
 });
 it('音频/识图配置、音质和音频预设经过真实 ZIP 与现有归一化流程保持不变',async()=>{
     const api=normalizeApiConfig({baseUrl:'https://chat.invalid/v1',apiKey:'test',model:'chat',audioApi:{enabled:true,baseUrl:'https://audio.invalid/v1',apiKey:'audio-test',model:'listen',songQuality:'lossless'},visionApi:{enabled:true,baseUrl:'https://vision.invalid/v1',apiKey:'vision-test',model:'vision'}} as any);

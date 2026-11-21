@@ -157,6 +157,8 @@ const ActiveMsg2SettingsModal: React.FC<ActiveMsg2SettingsModalProps> = ({
   // 今天主动找了几次（worker 每次发完累加的那份）。null = 没有记录 / 没读到。
   const [dailySends, setDailySends] = useState<AmsgDailySends | null>(null);
   const [globalPaused, setGlobalPaused] = useState(false);
+  const [cronPaused, setCronPaused] = useState(false);
+  const [resumingCron, setResumingCron] = useState(false);
 
   // 表单值重置：面板打开或切换编辑对象时，用被编辑任务的字段填表单（新建则填默认值）。
   // 角色级共享设置（maxTokens）始终跟随保存值。
@@ -246,6 +248,7 @@ const ActiveMsg2SettingsModal: React.FC<ActiveMsg2SettingsModalProps> = ({
     // 「主动频率」那一页每次都从关着开始，别带着上回没关的状态直接弹出来。放在这个只认
     // 「打开」的 effect 里：放进上面那个的话，角色在聊天里排一条任务都会把它关掉。
     setPacingOpen(false);
+    setCronPaused(false);
     setKnownRemoteUuids(null);
     setRemoteTaskInfo(null);
 
@@ -276,6 +279,10 @@ const ActiveMsg2SettingsModal: React.FC<ActiveMsg2SettingsModalProps> = ({
         setKnownRemoteUuids(null);
         return;
       }
+
+      void ActiveMsgClient.getCronTriggerState({ timeoutMs: 6_000 }).then(state => {
+        setCronPaused(state?.supported === true && !state.enabled);
+      });
 
       // 防穿帮闸最近拦下了哪次触发、今天主动找了几次。闸是静默的，不说一声的话「让路了」
       // 在用户看来跟「没发出去」一模一样；次数摆出来，用户才知道上限是不是在起作用。
@@ -703,6 +710,19 @@ const ActiveMsg2SettingsModal: React.FC<ActiveMsg2SettingsModalProps> = ({
   const selfRecurringTaskCount = scheduleTasks.filter((t) => t.source === 'character'
     && t.recurrenceType !== 'none' && isPendingTask(t, now)).length;
 
+  const resumeCron = async () => {
+    setResumingCron(true);
+    try {
+      const result = await ActiveMsgClient.setCronTriggerEnabled(true, { timeoutMs: 10_000 });
+      if (result.ok) setCronPaused(false);
+      addToast(result.message, result.ok ? 'success' : 'error');
+    } catch {
+      addToast('暂时无法恢复后台任务，请稍后重试。', 'error');
+    } finally {
+      setResumingCron(false);
+    }
+  };
+
   return (
     <>
     <Modal
@@ -730,6 +750,13 @@ const ActiveMsg2SettingsModal: React.FC<ActiveMsg2SettingsModalProps> = ({
             系统设置里的「主动消息 2.0」总开关当前处于暂停状态，恢复总开关后才会重新连接云端并生效。
           </div>
         ) : null}
+        {globalReady && cronPaused && (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800" role="status">
+            后台任务已暂停，未发送的预约会等待恢复。
+            <button type="button" disabled={resumingCron} onClick={() => void resumeCron()}
+              className="ml-2 font-bold underline disabled:opacity-50">立即恢复后台任务</button>
+          </div>
+        )}
         <p className="text-xs leading-relaxed text-slate-500">
           预约消息与「离开后消息」独立运行。TA 自己预约的未来消息和你手动创建的预约在这里管理；离开后的自动联系排程请前往「离开后消息」设置。
         </p>
@@ -856,39 +883,11 @@ const ActiveMsg2SettingsModal: React.FC<ActiveMsg2SettingsModalProps> = ({
                 const remoteErrorText = describeRemoteLastError(remoteInfo?.lastError, formatTaskTime);
                 return (
                   <div key={t.taskUuid} className={`rounded-2xl border px-4 py-3 text-xs ${editingTaskUuid === t.taskUuid ? 'border-fuchsia-400 bg-fuchsia-50' : 'border-slate-200 bg-white'}`}>
-                    <div className="flex items-center justify-between">
-                      <div className="min-w-0">
-                        <div className="font-bold text-slate-700 truncate">
-                          [{shortTaskId(t.taskUuid)}] {formatTaskTime(occurrenceMs ?? t.firstSendTime)} · {describeRecurrence(t.recurrenceType)}
-                        </div>
-                        {/* 进度排最前：这一行会被截断，而「发没发」是用户最想先看到的一条，
-                            排在末尾的话（模式描述可能很长）它永远看不见。 */}
-                        <div className="text-slate-400 mt-0.5 truncate">
-                          {describeTaskProgress(t, knownRemoteUuids, now, remoteInfo?.status)} · {describeTaskMode(t)}
-                          · {describeExpirePolicy(t.expirePolicy)}
-                          · {t.source === 'character' ? '角色创建' : '手动创建'}
-                        </div>
-                        {missingRemote ? (
-                          <div className="text-slate-400 mt-1 text-[11px]">⚠ 云端已无此任务（可能已发送或在别处取消）</div>
-                        ) : null}
-                        {remoteErrorText ? (
-                          <div className="text-amber-600 mt-1 text-[11px]">⚠ {remoteErrorText}</div>
-                        ) : null}
-                        {/* 上面那行只留得下原因的关键半句，状态码和上游原话的其余部分都截掉了。
-                            原文收在这里，排查或者截图问人时点开就能看到全文。stale 是个机器词，没有原文可看。 */}
-                        {remoteErrorText && remoteInfo?.lastError?.reason && remoteInfo.lastError.reason !== 'stale' ? (
-                          <details className="mt-0.5">
-                            <summary className="cursor-pointer text-[10px] font-bold text-slate-400">原文</summary>
-                            <pre className="mt-1 whitespace-pre-wrap break-all font-mono text-[10px] leading-relaxed text-slate-500 bg-slate-50 rounded-lg p-2 select-text">
-                              {remoteInfo.lastError.reason}
-                            </pre>
-                          </details>
-                        ) : null}
-                        {t.lastError ? (
-                          <div className="text-red-500 mt-1 text-[11px]">{t.lastError}</div>
-                        ) : null}
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0 font-bold text-[13px] text-slate-700">
+                        {formatTaskTime(occurrenceMs ?? t.firstSendTime)}
                       </div>
-                      <div className="flex gap-2 shrink-0 ml-2">
+                      <div className="flex gap-2 shrink-0">
                         {enabled ? (
                           <button
                             onClick={() => setEditingTaskUuid(t.taskUuid)}
@@ -907,6 +906,34 @@ const ActiveMsg2SettingsModal: React.FC<ActiveMsg2SettingsModalProps> = ({
                         </button>
                       </div>
                     </div>
+                    <div className="mt-1.5 flex flex-wrap gap-1 text-[10px]">
+                      <span className="rounded-md bg-fuchsia-50 px-1.5 py-0.5 font-bold text-fuchsia-700">
+                        {cronPaused && isPendingTask(t, now) && !missingRemote ? '后台已暂停' : describeTaskProgress(t, knownRemoteUuids, now, remoteInfo?.status)}
+                      </span>
+                      <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-slate-600">{describeRecurrence(t.recurrenceType)}</span>
+                      <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-slate-600">{describeExpirePolicy(t.expirePolicy)}</span>
+                      <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-slate-600">{t.source === 'character' ? '角色创建' : '手动创建'}</span>
+                    </div>
+                    <div className="mt-1.5 break-words leading-relaxed text-slate-500">{describeTaskMode(t)}</div>
+                    {missingRemote ? (
+                      <div className="text-slate-400 mt-1 text-[11px]">⚠ 云端已无此任务（可能已发送或在别处取消）</div>
+                    ) : null}
+                    {remoteErrorText ? (
+                      <div className="text-amber-600 mt-1 text-[11px]">⚠ {remoteErrorText}</div>
+                    ) : null}
+                    {/* 上面那行只留得下原因的关键半句，状态码和上游原话的其余部分都截掉了。
+                        原文收在这里，排查或者截图问人时点开就能看到全文。stale 是个机器词，没有原文可看。 */}
+                    {remoteErrorText && remoteInfo?.lastError?.reason && remoteInfo.lastError.reason !== 'stale' ? (
+                      <details className="mt-0.5">
+                        <summary className="cursor-pointer text-[10px] font-bold text-slate-400">原文</summary>
+                        <pre className="mt-1 whitespace-pre-wrap break-all font-mono text-[10px] leading-relaxed text-slate-500 bg-slate-50 rounded-lg p-2 select-text">
+                          {remoteInfo.lastError.reason}
+                        </pre>
+                      </details>
+                    ) : null}
+                    {t.lastError ? (
+                      <div className="text-red-500 mt-1 text-[11px]">{t.lastError}</div>
+                    ) : null}
                   </div>
                 );
               })}

@@ -586,7 +586,7 @@ const ActiveMsgGlobalSettingsModal: React.FC<ActiveMsgGlobalSettingsModalProps> 
       if (onToggleGlobalEnabled) await onToggleGlobalEnabled(next);
       else {
         const result = await setAmsg2GlobalEnabled(next);
-        addToast(result.cronNotice || (next ? '已恢复主动消息 2.0。' : '主动消息 2.0 已暂停，配置和预约均保留。'), result.cronNotice ? 'info' : 'success');
+        addToast(result.errorMessage || result.cronNotice || (next ? '已恢复主动消息 2.0。' : '主动消息 2.0 已暂停，配置和预约均保留。'), result.errorMessage ? 'error' : result.cronNotice ? 'info' : 'success');
       }
       // 总开关事件触发后仅从本地刷新，不在暂停态做任何 Worker 探测。
       const nextConfig = await ActiveMsgStore.getGlobalConfig();
@@ -1205,6 +1205,8 @@ const ActiveMsgGlobalSettingsModal: React.FC<ActiveMsgGlobalSettingsModalProps> 
         {globallyEnabled && cronState?.kind === 'known' && !cronState.enabled ? (
           <div className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 text-xs leading-relaxed text-amber-700">
             后台任务已暂停，到点的消息先攒着，恢复后一起补发。
+            <button type="button" disabled={loading} onClick={() => void applyCronTrigger(true)}
+              className="ml-2 font-bold underline disabled:opacity-50">立即恢复后台任务</button>
           </div>
         ) : null}
 

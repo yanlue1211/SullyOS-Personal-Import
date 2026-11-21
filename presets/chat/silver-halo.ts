@@ -1,5 +1,5 @@
 import type { DecorationPreset } from '../../utils/chatDecoration';
-import css from './silver-halo.css?raw';
+import css from './silver-halo.css.txt?raw';
 
 const voice = {
     voiceBarBg: '#f4f3f8',
