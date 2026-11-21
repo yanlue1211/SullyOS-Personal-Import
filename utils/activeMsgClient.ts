@@ -3991,7 +3991,7 @@ export const ActiveMsgClient = {
    * 三种都按「不支持」处理——设置页不显示那个按钮，也不报错。
    */
   async getCronTriggerState(
-    options?: { allowWhenDisabled?: boolean; timeoutMs?: number },
+    options?: { allowWhenDisabled?: boolean; timeoutMs?: number; throwOnNetworkError?: boolean },
   ): Promise<AmsgCronTriggerState | null> {
     try {
       const config = await ensureWorkerReady({ allowWhenDisabled: options?.allowWhenDisabled });
@@ -4022,7 +4022,8 @@ export const ActiveMsgClient = {
         code: typeof body?.error?.code === 'string' ? body.error.code : undefined,
         message: formatAmsgServerError(body, `HTTP ${status}`),
       };
-    } catch {
+    } catch (error) {
+      if (options?.throwOnNetworkError) throw error;
       return null;
     }
   },

@@ -586,7 +586,7 @@ const ActiveMsgGlobalSettingsModal: React.FC<ActiveMsgGlobalSettingsModalProps> 
       if (onToggleGlobalEnabled) await onToggleGlobalEnabled(next);
       else {
         const result = await setAmsg2GlobalEnabled(next);
-        addToast(result.cronNotice || (next ? '已恢复主动消息 2.0。' : '主动消息 2.0 已暂停，配置和预约均保留。'), result.cronNotice ? 'info' : 'success');
+        addToast(result.errorMessage || result.cronNotice || (next ? '已恢复主动消息 2.0。' : '主动消息 2.0 已暂停，配置和预约均保留。'), result.errorMessage ? 'error' : result.cronNotice ? 'info' : 'success');
       }
       // 总开关事件触发后仅从本地刷新，不在暂停态做任何 Worker 探测。
       const nextConfig = await ActiveMsgStore.getGlobalConfig();
