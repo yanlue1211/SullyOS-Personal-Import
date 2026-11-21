@@ -1,3 +1,36 @@
+import type { CharacterProfile, UserProfile } from '../types';
+
+export interface ThinkingChainPromptSettings {
+    enabled: boolean;
+    customPrompt?: string;
+    mode?: 'append' | 'replace';
+}
+
+export function resolveThinkingChainSettings(
+    char: Pick<CharacterProfile, 'showThinkingChain' | 'thinkingChainCustomPrompt' | 'thinkingChainPromptScope' | 'thinkingChainPromptMode'>,
+    user?: Pick<UserProfile, 'thinkingChainPrompt'>,
+) {
+    const scope = char.thinkingChainPromptScope ?? (char.thinkingChainCustomPrompt?.trim() ? 'character' : 'space');
+    const prompt = scope === 'character'
+        ? { customPrompt: char.thinkingChainCustomPrompt, mode: char.thinkingChainPromptMode }
+        : user?.thinkingChainPrompt;
+    return {
+        enabled: !!char.showThinkingChain, scope,
+        customPrompt: prompt?.customPrompt ?? '', mode: prompt?.mode ?? 'append',
+    } as const;
+}
+
+export function applyThinkingChainPrompt(
+    base: string,
+    settings: ThinkingChainPromptSettings,
+    heading = '## 用户对内心独白的额外要求',
+): string {
+    if (!settings.enabled) return '';
+    const custom = settings.customPrompt?.trim();
+    if (settings.mode === 'replace' && custom) return custom;
+    return custom ? `${base}\n\n${heading}\n${custom}` : base;
+}
+
 /**
  * Thinking-chain prompt builder.
  *

@@ -1,3 +1,6 @@
+import ChatCharacterProfile from '../components/chat/ChatCharacterProfile';
+import { ChatTrialControls, type ChatDecorationTrial } from '../components/chat/ChatDecorationTrial';
+import { resolveThinkingChainSettings } from '../utils/thinkingChainPrompt';
 import ExperienceTools from '../features/experience/Tools';
 import {isOracleControl,saveOracleControl} from '../features/experience/oracle';
 import { consumeWorkroomCollection } from '../features/workroom/launch';
@@ -12,7 +15,7 @@ import {homePhoneAppearance,HOME_PHONE_BUBBLES} from './room3d/homePhoneAppearan
 import { publishReplyDisplay, stopReplyRuns } from '../utils/chatReplyCancellation';
 import { stopInstantChat } from '../utils/amsgInstantChat';
 import {resolvePsycheAppearance} from '../utils/psycheAppearance';
-import { startsNewMessageGroup } from '../utils/chatMessageGrouping';
+import { computeTimeSegmentStarts, startsNewMessageGroup, startsNewTimeSegment } from '../utils/chatMessageGrouping';
 import EmojiExportDialog from '../components/chat/EmojiExportDialog';
 import BlobRefStyle from '../components/chat/BlobRefStyle';
 import React, { useState, useEffect, useRef, useLayoutEffect, useMemo, useCallback } from 'react';
@@ -171,8 +174,14 @@ function prepareRecording(blob: Blob) { let pending = preparedRecordings.get(blo
 const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
     const playChatNotificationSound = useChatNotificationSound();
     const { activeApp, characters, activeCharacterId: osActiveCharacterId, setActiveCharacterId, addCharacter, updateCharacter, updateUserProfile, apiConfig, apiPresets, availableModels, addApiPreset, closeApp, openApp, customThemes, addCustomTheme, removeCustomTheme, addWorldbook, updateTheme, saveAppearancePreset, addToast, showError, userProfile, lastMsgTimestamp, groups, characterGroups, clearUnread, unreadMessages, realtimeConfig, memoryPalaceConfig, updateMemoryPalaceConfig, remoteVectorConfig, syncEmotionApiToAllCharacters, theme: baseOsTheme, proactiveComposingChars, openDateWithChar } = useOS();
-    const activeCharacterId=homePhone?.characterId??osActiveCharacterId;
-    const osTheme = useMemo(()=>homePhone?homePhoneAppearance(baseOsTheme):resolveDecorationTheme(baseOsTheme,characters.find(c=>c.id===activeCharacterId)||characters[0]),[baseOsTheme,characters,activeCharacterId,!!homePhone]);
+    const [profileCharacterId, setProfileCharacterId] = useState<string | null>(null);
+    const [decorationTrial, setDecorationTrial] = useState<ChatDecorationTrial | null>(null);
+    const wardrobeCharacter = characters.find(c => c.id === osActiveCharacterId) || characters[0];
+    const liveTrial = !homePhone && activeApp === AppID.Chat && !!decorationTrial
+        && characters.some(c => c.id === decorationTrial.characterId) ? decorationTrial : null;
+    const activeCharacterId = homePhone?.characterId ?? liveTrial?.characterId ?? osActiveCharacterId;
+
+    const osTheme = useMemo(()=>homePhone?homePhoneAppearance(baseOsTheme):resolveDecorationTheme(baseOsTheme,liveTrial ? {...(characters.find(c=>c.id===activeCharacterId)||characters[0]),...liveTrial.patch} : characters.find(c=>c.id===activeCharacterId)||characters[0]),[baseOsTheme,characters,activeCharacterId,!!homePhone,liveTrial]);
     const isProactiveComposing = !!(activeCharacterId && proactiveComposingChars[activeCharacterId]);
     const localDateKey = useLocalDateKey();
 
@@ -318,6 +327,9 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
     const [showProactiveModal, setShowProactiveModal] = useState(false);
     const [showActiveMsg2Modal, setShowActiveMsg2Modal] = useState(false);
     const [showAwayMessageModal, setShowAwayMessageModal] = useState(false);
+    useEffect(() => {
+        if (decorationTrial && (!liveTrial || modalType !== 'chrome-css')) setDecorationTrial(null);
+    }, [decorationTrial, liveTrial, modalType]);
     const [showThinkingChainModal, setShowThinkingChainModal] = useState(false);
     const [showInnerVoiceSettings, setShowInnerVoiceSettings] = useState(false);
 
@@ -356,7 +368,8 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
     // Which messages are currently showing "译" version (toggle state only, no API calls)
     const [showingTargetIds, setShowingTargetIds] = useState<Set<number>>(new Set());
 
-    const char = characters.find(c => c.id === activeCharacterId) || characters[0];
+    const savedChar = characters.find(c => c.id === activeCharacterId) || characters[0];
+    const char = useMemo(() => liveTrial && savedChar ? { ...savedChar, ...liveTrial.patch } : savedChar, [liveTrial, savedChar]);
     const memoryRepairRound = useMemo(() => {
         let assistantIndex = -1;
         for (let i = messages.length - 1; i >= 0; i--) {
@@ -426,8 +439,8 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
     const currentThemeId = char?.bubbleStyle || osTheme.chatDefaultBubbleStyle || 'default';
     // 解析逻辑抽到 utils/groupChat/theme.ts（群聊共用），行为不变
     const activeTheme = useMemo(
-        () => homePhone?HOME_PHONE_BUBBLES:resolveChatTheme(currentThemeId, customThemes, PRESET_THEMES),
-        [currentThemeId, customThemes,!!homePhone],
+        () => homePhone?HOME_PHONE_BUBBLES:(liveTrial?.bubble ?? resolveChatTheme(currentThemeId, customThemes, PRESET_THEMES)),
+        [currentThemeId, customThemes,!!homePhone,liveTrial?.bubble],
     );
     const draftKey = `chat_draft_${activeCharacterId}`;
 
@@ -3591,6 +3604,14 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
         return displayMessages.filter(message => !pending.has(message.id));
     }, [displayMessages, streamingBubbles, streamingThinking, streamingHandoverIds, selectionMode]);
 
+    const timeSegmentStarts = useMemo(() => computeTimeSegmentStarts(renderedMessages), [renderedMessages]);
+    const lastNonSystemRenderedMessage = useMemo(() => {
+        for (let i = renderedMessages.length - 1; i >= 0; i--) {
+            if (renderedMessages[i].role !== 'system') return renderedMessages[i];
+        }
+        return null;
+    }, [renderedMessages]);
+
     useLayoutEffect(() => {
         publishReplyDisplay(activeCharacterId, renderedMessages.map(message => message.id), streamingBubbles);
     }, [activeCharacterId, renderedMessages, streamingBubbles]);
@@ -3634,8 +3655,10 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
 
     // 工具痕迹那行灰字要贴着气泡走，所以把气泡自带的组间距（MessageItem 里那组
     // mb-3 / mb-6 / mb-8）抵掉大半。组内的气泡本来就挨着，不用抵。
+    const topCenterTimestamp = osTheme.chatTimestampPosition === 'top_center';
     const toolTracePullClass = osTheme.chatMessageSpacing === 'compact' ? '-mt-2'
-        : osTheme.chatMessageSpacing === 'spacious' ? '-mt-6' : '-mt-5';
+        : osTheme.chatMessageSpacing === 'spacious' ? (topCenterTimestamp ? '-mt-5' : '-mt-6')
+        : (topCenterTimestamp ? '-mt-2.5' : '-mt-5');
 
     // Reset active category if it becomes invisible for the current character
     useEffect(() => {
@@ -3876,6 +3899,7 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
                 triggerIcon={isTyping || instantChatPending ? 'stop' : 'lightning'}
                 hideTrigger={inputPreferences.sendButtonGenerates}
                 onShowCharsPanel={() => setShowPanel('chars')}
+                extraAction={{ label: '角色名片', icon: <span aria-hidden="true">♧</span>, onClick: () => setProfileCharacterId(char.id) }}
                 onDeleteBuff={(buffId) => {
                     const currentBuffs = char.activeBuffs || [];
                     const newBuffs = currentBuffs.filter(b => b.id !== buffId);
@@ -3990,6 +4014,8 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
                             bubbleVariant={osTheme.chatBubbleStyle}
                             messageSpacing={osTheme.chatMessageSpacing}
                             showTimestamp={osTheme.chatShowTimestamp}
+                            timestampPosition={osTheme.chatTimestampPosition}
+                            startsTimeSegment={timeSegmentStarts[i]}
                             suppressEntranceAnimation={suppressEntranceAnimation}
                             onMcdSendCart={handleMcdSendCart}
                             onMcdCandidate={handleMcdCandidate}
@@ -4070,6 +4096,8 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
                                     bubbleVariant={osTheme.chatBubbleStyle}
                                     messageSpacing={osTheme.chatMessageSpacing}
                                     showTimestamp={osTheme.chatShowTimestamp}
+                                    timestampPosition={osTheme.chatTimestampPosition}
+                                    startsTimeSegment={i === 0 && startsNewTimeSegment(lastNonSystemRenderedMessage, { timestamp: Date.now() })}
                                     thinkingChainOptions={thinkingChainOptions}
                                 />
                             </div>
@@ -4748,14 +4776,13 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
                     isOpen={showThinkingChainModal}
                     onClose={() => setShowThinkingChainModal(false)}
                     value={{
-                        enabled: !!(char as any).showThinkingChain,
                         styleId: ((char as any).thinkingChainStyle as any) || 'echo',
                         customColors: {
                             bg: (char as any).thinkingChainCustomColors?.bg || '#1f2937',
                             accent: (char as any).thinkingChainCustomColors?.accent || '#fbbf24',
                             text: (char as any).thinkingChainCustomColors?.text || '#f1f5f9',
                         },
-                        customPrompt: (char as any).thinkingChainCustomPrompt || '',
+                        ...resolveThinkingChainSettings(char, userProfile),
                         customCss: (char as any).thinkingChainCustomCss || '',
                     }}
                     onChange={(next) => {
@@ -4763,7 +4790,22 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
                         if (next.enabled !== undefined) patch.showThinkingChain = next.enabled;
                         if (next.styleId !== undefined) patch.thinkingChainStyle = next.styleId;
                         if (next.customColors !== undefined) patch.thinkingChainCustomColors = next.customColors;
-                        if (next.customPrompt !== undefined) patch.thinkingChainCustomPrompt = next.customPrompt;
+                        const current = resolveThinkingChainSettings(char, userProfile);
+                        const scope = next.scope ?? current.scope;
+                        if (next.scope !== undefined) patch.thinkingChainPromptScope = next.scope;
+                        if (next.customPrompt !== undefined || next.mode !== undefined) {
+                            if (scope === 'space') {
+                                updateUserProfile(previous => ({
+                                    thinkingChainPrompt: {
+                                        customPrompt: next.customPrompt ?? previous.thinkingChainPrompt?.customPrompt ?? '',
+                                        mode: next.mode ?? previous.thinkingChainPrompt?.mode ?? 'append',
+                                    },
+                                }));
+                            } else {
+                                if (next.customPrompt !== undefined) patch.thinkingChainCustomPrompt = next.customPrompt;
+                                if (next.mode !== undefined) patch.thinkingChainPromptMode = next.mode;
+                            }
+                        }
                         if (next.customCss !== undefined) patch.thinkingChainCustomCss = next.customCss;
                         if (Object.keys(patch).length) updateCharacter(char.id, patch as any);
                     }}
@@ -4771,8 +4813,9 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
             )}
 
             {char && modalType === 'chrome-css' && <ChatAppearanceWardrobe
-                key={`appearance-wardrobe:${char.id}`}
-                character={char} theme={baseOsTheme} onSaveBubble={addCustomTheme} themes={[...Object.values(PRESET_THEMES), ...customThemes]}
+                key={`appearance-wardrobe:${wardrobeCharacter?.id || char.id}`}
+                trialActive={!!liveTrial} onTrial={homePhone ? undefined : setDecorationTrial}
+                character={homePhone ? savedChar : wardrobeCharacter} theme={baseOsTheme} onSaveBubble={addCustomTheme} themes={[...Object.values(PRESET_THEMES), ...customThemes]}
                 initialTab={decorationTab} updateCharacter={patch=>updateCharacter(char.id,patch)}
                 updateTheme={updateTheme} onBgUpload={handleBgUpload} backgroundUrl={resolvedChatBackground}
                 onOpenWorkshop={()=>{setModalType('none');openApp(AppID.ThemeMaker);}}
@@ -4782,6 +4825,22 @@ const Chat: React.FC<{homePhone?:HomePhoneChatProps}> = ({homePhone}) => {
             {/* 情绪设置已嵌入日程 Modal（与日程强制同步开/关），不再单独渲染 */}
 
             {/* 🍔 麦当劳小程序 - MCP 数据流按钮驱动, 协同聊天走主 pipeline (完整人设/记忆/日程) */}
+            {!homePhone && char && (profileCharacterId === char.id || liveTrial?.showProfile) && <ChatCharacterProfile
+                key={char.id} character={char} customCss={(char.chatProfileAppearance ?? osTheme.chatProfileAppearance)?.customCss} schedule={scheduleData?.charId === char.id ? scheduleData : null}
+                onClose={() => setProfileCharacterId(null)}
+                onSchedule={() => { setProfileCharacterId(null); setModalType('schedule'); }}
+                onPlayTheater={index => { setProfileCharacterId(null); handlePlayTheater(index); }}
+                onMemory={() => { setProfileCharacterId(null); setMemoryRepairOpen(true); }}
+            />}
+            {liveTrial && <ChatTrialControls onReturn={() => setDecorationTrial(null)}
+                onScroll={pixels => scrollRef.current?.scrollBy(0, pixels)}
+                onUse={async () => {
+                    await liveTrial.commit();
+                    if (liveTrial.characterId !== osActiveCharacterId) setActiveCharacterId(liveTrial.characterId);
+                    setDecorationTrial(null);
+                    setModalType('none');
+                }}
+            />}
             {memoryRepairOpen && char && (
                 <MemoryRepairPortal
                     inline={!!homePhone}

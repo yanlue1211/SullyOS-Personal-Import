@@ -1,3 +1,4 @@
+import { amsgRecallInputKey, type AmsgPreparedRecall } from './amsgPreparedRecall';
 import { buildSongArchiveKeywordBlock } from '../features/personal/songArchive/keywords';
 import {orderPetCloudBackfill} from './tapnestCloud';
 import {momentsEnabled} from '../features/moments/gate';
@@ -112,7 +113,7 @@ export interface BuildChatPayloadInput {
     // 模式开关
     translationConfig?: TranslationConfig | { enabled: boolean; sourceLang: string; targetLang: string };
     htmlMode?: { enabled: boolean; customPrompt?: string };
-    thinkingChain?: { enabled: boolean; customPrompt?: string };
+    thinkingChain?: import('./thinkingChainPrompt').ThinkingChainPromptSettings;
     /** 可选识图 API：开启后先把图片持久化转写为 [图片：描述]，主模型只接收文字。 */
     visionApiConfig?: VisionApiConfig;
     mcdMiniSnap?: McdMiniAppSnapshot;
@@ -157,6 +158,7 @@ export interface BuildChatPayloadResult {
     volatileTailIndex: number;
     /** 本轮记忆召回的脱敏 Trace；Prompt Build 被整体跳过时不存在。 */
     recallTrace?: RecallTrace;
+    amsgPreparedRecall?: AmsgPreparedRecall;
     /** 调试用：bilingual / mcd 是否实际注入 */
     flags: {
         bilingualActive: boolean;
@@ -648,6 +650,13 @@ export async function buildChatRequestPayload(input: BuildChatPayloadInput): Pro
         volatileTailIndex: finalMessages === fullMessages ? volatileTailIndex : -1,
         amsg2ExpiredNoticeIds,
         recallTrace,
+        ...(input.recallEntryPoint === 'chat_app' && char.memoryPalaceEnabled && !input.recallQueryHint && recallTrace.outcome === 'success' ? {
+            amsgPreparedRecall: {
+                inputKey: amsgRecallInputKey(char, recentMsgsHint, userProfile.name),
+                memory: char.memoryPalaceInjection ?? '',
+                roomPlates: char.roomPlatesInjection ?? '',
+            },
+        } : {}),
         flags: { bilingualActive, mcdActive, luckinActive, luckinChatActive, mcpChatActive, htmlActive, thinkingActive, sarModuleActive: !!sarModuleBlock, promptBuildSkipped: false },
     };
 }

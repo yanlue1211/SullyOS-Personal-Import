@@ -1,3 +1,4 @@
+import { amsgRecallInputKey } from './amsgPreparedRecall';
 // utils/activeMsgClient.test.ts
 // 回归守卫：
 //   1. 云端状态上传「不降级」。过去这一步失败只 warn，任务照建，到点用排程那刻冻结的
@@ -1053,6 +1054,27 @@ describe('buildFirePack 的时区参照系与模板（①）', () => {
   afterEach(() => { vi.restoreAllMocks(); });
 
   const pack = (char: any) => buildFirePack(char, user, [], undefined, { all: [], categories: [] });
+
+  it('只复用同一上下文的召回，保留旧事件日期并移除打包当天的相对日提示', async () => {
+    const pipeline = await import('./memoryPalace/pipeline');
+    const inject = vi.spyOn(pipeline, 'injectMemoryPalace').mockResolvedValue({ outcome: 'empty' } as any);
+    const char = baseChar({ memoryPalaceEnabled: true, memoryPalaceInjection: '旧请求残留' });
+    const preparedRecall = {
+      inputKey: amsgRecallInputKey(char, [], user.name),
+      memory: '2026年11月20日（今天） 外卖已送达',
+      roomPlates: '本轮门牌',
+    };
+    const fresh = await buildFirePack(char, user, [], undefined, { all: [], categories: [] }, { preparedRecall });
+    expect(fresh.template).toContain('2026年11月20日 外卖已送达');
+    expect(fresh.template).not.toContain('2026年11月20日（今天）');
+    expect(fresh.template).not.toContain('旧请求残留');
+    expect(char.memoryPalaceInjection).toBe('旧请求残留');
+    expect(inject).not.toHaveBeenCalled();
+    const mismatched = await buildFirePack(char, { name: '别人' } as any, [], undefined,
+      { all: [], categories: [] }, { preparedRecall });
+    expect(inject).toHaveBeenCalledTimes(1);
+    expect(mismatched.template).not.toContain('外卖已送达');
+  });
 
   it('native-expression template omits character anchors and respects the independent heart switch', async () => {
     const out = await pack(baseChar({humanStyleEnabled:false,innerVoiceEnabled:false,showThinkingChain:true}));
@@ -2188,25 +2210,49 @@ describe('请求体 gzip 上行', () => {
     expect((await maybeGzipRequestBody(JSON.stringify({ cjk }))).gzipped).toBe(true);
   });
 
-  it('运行时没有 CompressionStream（老 Safari）→ 退回明文，不抛', async () => {
+  it('运行时没有 CompressionStream 时使用兼容 gzip', async () => {
     const original = bigJson();
     const saved = globalThis.CompressionStream;
     // @ts-expect-error 故意抹掉，模拟老 Safari
     delete globalThis.CompressionStream;
     try {
-      expect(await maybeGzipRequestBody(original)).toEqual({ body: original, gzipped: false });
+      const packed = await maybeGzipRequestBody(original);
+      expect(packed.gzipped).toBe(true);
+      const output = new Response(packed.body as ArrayBuffer).body!.pipeThrough(new DecompressionStream('gzip'));
+      expect(await new Response(output).text()).toBe(original);
     } finally {
       globalThis.CompressionStream = saved;
     }
   });
 
-  it('压缩本身抛错 → 退回明文，不连累这一轮发送', async () => {
+  it('原生压缩抛错时使用兼容 gzip', async () => {
     const original = bigJson();
     const saved = globalThis.CompressionStream;
     // @ts-expect-error 换成一个必炸的替身
     globalThis.CompressionStream = function Broken() { throw new Error('boom'); };
     try {
-      expect(await maybeGzipRequestBody(original)).toEqual({ body: original, gzipped: false });
+      const packed = await maybeGzipRequestBody(original);
+      expect(packed.gzipped).toBe(true);
+      const output = new Response(packed.body as ArrayBuffer).body!.pipeThrough(new DecompressionStream('gzip'));
+      expect(await new Response(output).text()).toBe(original);
+    } finally {
+      globalThis.CompressionStream = saved;
+    }
+  });
+
+  it('原生流返回截断 gzip 时，改用完整的兼容 gzip', async () => {
+    const original = bigJson();
+    const saved = globalThis.CompressionStream;
+    const brokenGzip = new Uint8Array([0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 0]);
+    globalThis.CompressionStream = class {
+      readable = new Response(brokenGzip).body!;
+      writable = new WritableStream();
+    } as unknown as typeof CompressionStream;
+    try {
+      const packed = await maybeGzipRequestBody(original);
+      expect(packed.gzipped).toBe(true);
+      const output = new Response(packed.body as ArrayBuffer).body!.pipeThrough(new DecompressionStream('gzip'));
+      expect(await new Response(output).text()).toBe(original);
     } finally {
       globalThis.CompressionStream = saved;
     }

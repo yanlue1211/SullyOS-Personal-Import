@@ -2975,7 +2975,9 @@ export const amsgHooks = {
       .filter((s): s is string => typeof s === 'string' && !!s.trim())
       .map((s) => s.trim())
       .join('\n\n');
-    session.finalReasoning = roundReasoning || null;
+    if (content.length > 0 || session.narrations.length === 0) {
+      session.finalReasoning = roundReasoning || null;
+    }
 
     // native tool_calls：只认声明过的工具（fireToolNames 的管理工具 + mcpResolve 的
     // MCP 名），但认法放宽——模型常把声明名的「姓」搞丢或换家：声明的 mcp__foo 回报成

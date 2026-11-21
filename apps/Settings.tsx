@@ -854,7 +854,9 @@ const Settings: React.FC = () => {
               realtimeConfig,
               apiConfig,
           });
-          if (!next) {
+          if (result.errorMessage) {
+              addToast(result.errorMessage, 'error');
+          } else if (!next) {
               addToast(
                   result.cronNotice || '已暂停主动消息 2.0，云端连接与角色配置均已保留。',
                   result.cronNotice ? 'info' : 'success',

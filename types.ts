@@ -49,7 +49,50 @@ export enum AppID {
   WorldHome = 'world_home', // 家园 — 同世界观多角色共同生活的大世界（观测驱动演绎，每角色独立 LLM 调用 + NPC 世界引擎）
 }
 
+export interface SystemLogContext {
+    /** 应用版本与构建标识，随单条日志导出便于定位构建版本 */
+    build?: string;
+    /** 请求所属功能分类，如 llm / embedding / vector-db / amsg2 / music / tts / backup / mcp 等 */
+    category?: string;
+    /** 失败细分形态：blocked / timeout / offline / mixed-content / bad-url / stream-interrupted / aborted / http-status / console-error / unknown */
+    failureKind?: string;
+    /** 具体子操作，如 提交即时对话 (/instant-chat)、PROPFIND、tools/call:search 等 */
+    operation?: string;
+    method?: string;
+    /** 已脱敏的请求 URL（不含中转令牌、密钥查询参数或账号口令） */
+    url?: string;
+    host?: string;
+    /** 转发通道：direct / proxy-worker / amsg-relay / mcp-proxy / same-origin */
+    via?: string;
+    /** 经由代理或中转时的实际目标上游域名 */
+    upstreamTarget?: string;
+    /** 命中的本地配置来源说明，如「对话 API（预设：OpenRouter）」 */
+    configSource?: string;
+    /** 请求体中的模型标识（仅模型类请求） */
+    model?: string;
+    httpStatus?: number;
+    durationMs?: number;
+    /** 响应头到达耗时（仅已收到响应头后在流式读取阶段中断时存在） */
+    headersMs?: number;
+    /** no-cors 连通性复检结果（异步回填） */
+    reachability?: string;
+    /** 归属信息来源：explicit = 调用点显式传入；ambient = 仅取发起时的前台界面快照 */
+    attributionMode?: 'explicit' | 'ambient';
+    appName?: string;
+    charName?: string;
+    purpose?: string;
+    /** 发起时 -> 失败时的页面可见性，如 visible -> hidden */
+    visibility?: string;
+    /** 请求在飞期间页面是否进入过后台/锁屏 */
+    backgroundedDuringRequest?: boolean;
+    /** 精简后的调用栈入口线索 */
+    caller?: string;
+}
+
 export interface SystemLog {
+    time?: string;
+    context?: SystemLogContext;
+    advice?: { title: string; action: string };
     id: string;
     timestamp: number;
     type: 'error' | 'network' | 'system';
@@ -115,6 +158,7 @@ export interface JournalAppearance {
 }
 
 export interface OSTheme {
+  chatProfileAppearance?: import('./utils/chatProfileAppearance').ChatProfileAppearance;
   storyAppearance?: import('./utils/meetingAppearance').MeetingAppearance;
   hue: number;
   saturation: number;
@@ -201,6 +245,8 @@ export interface OSTheme {
   chatBubbleStyle?: 'modern' | 'flat' | 'outline' | 'shadow' | 'wechat' | 'ios';
   chatMessageSpacing?: 'compact' | 'default' | 'spacious';
   chatShowTimestamp?: 'always' | 'hover' | 'never';
+  /** 时间位置：气泡下方（默认，每组末条气泡下贴边）/ 对话段上方居中（微信式，按 5 分钟间隔分段） */
+  chatTimestampPosition?: 'below' | 'top_center';
   chatHeaderStyle?: 'default' | 'minimal' | 'gradient' | 'wechat' | 'telegram' | 'discord' | 'pixel';
   chatInputStyle?: 'default' | 'rounded' | 'flat' | 'wechat' | 'ios' | 'telegram' | 'discord' | 'pixel';
   chatChromeStyle?: 'soft' | 'flat' | 'floating' | 'pixel';
@@ -3385,6 +3431,11 @@ export interface CharacterProfile {
   };
   /** 用户追加的思考提示词（不替换原生，只在最后追加一段「用户额外要求」） */
   thinkingChainCustomPrompt?: string;
+  thinkingChainPromptScope?: "character" | "space";
+  thinkingChainPromptMode?: "append" | "replace";
+  chatIndependentParts?: import('./utils/whiteboxParts').WhiteboxPart[];
+  chatFollowWhiteboxParts?: import('./utils/whiteboxParts').WhiteboxPart[];
+  chatProfileAppearance?: import('./utils/chatProfileAppearance').ChatProfileAppearance;
   /**
    * 心象卡片的自定义 CSS（叠加在任意风格之上，机制同气泡工坊 customCss）。
    * 选择器限定以 .sully-psyche 开头（子元素类：-card / -title / -preview / -body），
@@ -3481,6 +3532,7 @@ export interface CharacterExportData extends Omit<CharacterProfile, 'id' | 'memo
 }
 
 export interface UserProfile {
+  thinkingChainPrompt?: { mode: "append" | "replace"; customPrompt: string };
     wardrobeOutfits?: import('./apps/room3d/chibi/outfitLibrary').SavedOutfit[];
     chibiStudio?: { home3D?: HomeFigureSlot };
     name: string;

@@ -6,6 +6,8 @@ interface ThinkingChainSettingsValue {
     styleId: ThinkingChainStyleId;
     customColors: { bg: string; accent: string; text: string };
     customPrompt: string;
+    scope: 'character' | 'space';
+    mode: 'append' | 'replace';
     /** 叠加在任意风格之上的自定义 CSS，选择器限定 .sully-psyche 开头 */
     customCss: string;
 }
@@ -19,10 +21,10 @@ interface Props {
 
 const ThinkingChainSettingsModal: React.FC<Props> = ({ isOpen, onClose, value, onChange }) => {
     const [draftPrompt, setDraftPrompt] = useState(value.customPrompt || '');
-    useEffect(() => { if (isOpen) setDraftPrompt(value.customPrompt || ''); }, [isOpen, value.customPrompt]);
+    useEffect(() => { if (isOpen) setDraftPrompt(value.customPrompt || ''); }, [isOpen, value.customPrompt, value.scope]);
     if (!isOpen) return null;
 
-    const commitPrompt = () => onChange({ customPrompt: draftPrompt });
+    const commitPrompt = () => { if (draftPrompt !== value.customPrompt) onChange({ customPrompt: draftPrompt }); };
 
     return (
         <div
@@ -38,7 +40,7 @@ const ThinkingChainSettingsModal: React.FC<Props> = ({ isOpen, onClose, value, o
                     <div className="flex items-center justify-between">
                         <div>
                             <h2 className="text-base font-bold text-slate-800">心象 · 设置</h2>
-                            <p className="text-[11px] text-slate-400 mt-0.5">显示与追加提示词；卡片风格在「个性装扮 → 心象」调整</p>
+                            <p className="text-[11px] text-slate-400 mt-0.5">显示与自定义提示词；卡片风格在「个性装扮 → 心象」调整</p>
                         </div>
                         <button
                             onClick={() => { commitPrompt(); onClose(); }}
@@ -100,10 +102,23 @@ const ThinkingChainSettingsModal: React.FC<Props> = ({ isOpen, onClose, value, o
 
                     {/* 3. 追加提示词 */}
                     <section>
-                        <h3 className="text-[10.5px] font-bold text-slate-400 uppercase tracking-wider mb-2">追加提示词</h3>
-                        <p className="text-[10.5px] text-slate-400 mb-2 leading-relaxed">
-                            原生提示词（让模型用角色第一人称、中文意识流思考）保持不变；这里写的内容**追加在最后**作为「用户对内心独白的额外要求」。
-                        </p>
+                        <h3 className="mb-2 text-xs font-bold text-slate-700">心象提示词</h3>
+                        <div className="mb-3 grid grid-cols-2 gap-2">
+                            <label className="text-xs">使用范围
+                                <select value={value.scope} onChange={event => onChange({ scope: event.target.value as ThinkingChainSettingsValue['scope'] })}
+                                    className="mt-1 block w-full rounded-lg bg-slate-50 p-2">
+                                    <option value="space">当前用户空间共用</option>
+                                    <option value="character">仅当前角色</option>
+                                </select>
+                            </label>
+                            <label className="text-xs">使用方式
+                                <select value={value.mode} onChange={event => onChange({ mode: event.target.value as ThinkingChainSettingsValue['mode'] })}
+                                    className="mt-1 block w-full rounded-lg bg-slate-50 p-2">
+                                    <option value="append">追加到默认提示词</option>
+                                    <option value="replace">替换默认提示词</option>
+                                </select>
+                            </label>
+                        </div>
                         <textarea
                             value={draftPrompt}
                             onChange={e => setDraftPrompt(e.target.value)}
