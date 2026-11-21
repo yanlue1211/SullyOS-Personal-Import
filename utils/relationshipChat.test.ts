@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { normName, matchRealChar, clampAffinity, upsertContact, flipTranscript, parseTranscript, serializeTurns, appendLearned, topicText } from './relationshipChat';
+import { normName, matchRealChar, clampAffinity, upsertContact, flipTranscript, parseTranscript, parseGeneratedAiTranscript, serializeTurns, appendLearned, topicText } from './relationshipChat';
 import type { PhoneContact } from '../types';
 
 describe('relationshipChat · 纯函数', () => {
@@ -158,4 +158,10 @@ describe('relationshipChat · 纯函数', () => {
         expect(afterCleared[0].identity).toBeUndefined();
         expect(afterCleared[0].identityManual).toBe(true);
     });
+});
+
+it('requires new auto-generated sessions to identify speakers and finish with an AI reply', () => {
+    expect(() => parseGeneratedAiTranscript('没有说话人')).toThrow();
+    expect(() => parseGeneratedAiTranscript('我: 没有回信')).toThrow();
+    expect(parseGeneratedAiTranscript('对方: 还想继续聊吗？')).toEqual([{ isMe: false, text: '还想继续聊吗？' }]);
 });

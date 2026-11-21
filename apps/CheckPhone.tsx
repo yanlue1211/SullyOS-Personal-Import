@@ -11,7 +11,7 @@ import { safeResponseJson, extractContent, extractJson } from '../utils/safeApi'
 import { injectMemoryPalace } from '../utils/memoryPalace/pipeline';
 import {
     runRealConversation, runNpcConversation, upsertContact, matchRealChar,
-    clampAffinity, normName, flipTranscript, parseTranscript, serializeTurns, appendLearned,
+    clampAffinity, normName, flipTranscript, parseTranscript, parseGeneratedAiTranscript, serializeTurns, appendLearned,
     topicText, summarizeConversation, applyRealConversationToPhoneState,
 } from '../utils/relationshipChat';
 import PersonaSim, { LifeLog, generatePersonaScript } from './PersonaSim';
@@ -1157,11 +1157,11 @@ ${service === 'tavern' ? `【已有卡片】${JSON.stringify(candidateCards.map(
             }
 
             const updated = new Set<string>();
+            const newTranscripts = new Set<string>();
             const firstCardPlays = new Set<string>();
             const changes = response.map(raw => {
                 if (!raw || typeof raw !== 'object' || !raw.transcript) throw new Error('Missing phone transcript');
-                const turns = parseTranscript(raw.transcript);
-                if (turns.at(-1)?.isMe !== false) throw new Error('Incomplete phone transcript');
+                const turns = parseGeneratedAiTranscript(raw.transcript);
                 const added = serializeTurns(turns);
                 if (raw.sessionId != null) {
                     const old = candidateById.get(raw.sessionId);
@@ -1180,6 +1180,8 @@ ${service === 'tavern' ? `【已有卡片】${JSON.stringify(candidateCards.map(
                     return { old, turns, next: { ...old, turnTimes, lastObservedAt: observedAt,
                         transcript: [old.transcript, added].filter(Boolean).join('\n'), updatedAt: times.at(-1)! } };
                 }
+                if (newTranscripts.has(added)) throw new Error('Duplicate phone conversation');
+                newTranscripts.add(added);
                 let plotSource: AiSession['plotSource'];
                 const source = raw.sourceSessionId == null ? undefined : candidateById.get(raw.sourceSessionId);
                 if (raw.sourceSessionId != null) {
@@ -1443,9 +1445,8 @@ ${nextTurn} 每层 3-5 句小说体，*星号*包动作神态心理。
 ${nextTurn} 每段带对应前缀，直接输出对话。${recap}\n\n${session.transcript}`;
             }
             const out = (await callLLM(prompt, 0.85, true, 'TA的AI会话续写')).trim().replace(/^```[^\n]*\n|\n```$/g, '').trim();
-            const turns = parseTranscript(out);
-            if (!/^(我|对方|Me|Them)\s*[:：]/.test(out)
-                || turns.at(-1)?.isMe !== false || turns[0]?.isMe !== !lastIsMe) {
+            const turns = parseGeneratedAiTranscript(out);
+            if (turns[0].isMe !== !lastIsMe) {
                 addToast('没续出完整对话，再试一次', 'error');
                 return;
             }
@@ -1592,9 +1593,8 @@ ${nextTurn} 每段带对应前缀，直接输出对话。${recap}\n\n${session.t
             const fullPrompt = `\n\n### [Recent Chat Context]\n${recentMsgs}\n\n### [Task]\n${task}\n只输出 JSON，不要解释。`;
             const content = await callLLM(fullPrompt, 0.85, true, '酒馆角色卡开场');
             const obj: any = extractJson(content) || {};
-            if (!obj.transcript || parseTranscript(obj.transcript).at(-1)?.isMe !== false) { addToast('没生成出完整对话，再试一次', 'error'); return; }
+            const lines = parseGeneratedAiTranscript(obj.transcript);
             const now = Date.now();
-            const lines = parseTranscript(obj.transcript);
             const turnTimes = appendPhoneTurnTimes(undefined, 0, Array(lines.length).fill(now), now);
             const sess: AiSession = normalizePhoneAiSession({
                 id: `ai-${now}-${Math.random().toString(36).slice(2, 6)}`, service: 'tavern',

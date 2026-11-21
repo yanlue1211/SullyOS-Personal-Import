@@ -205,6 +205,15 @@ export function parseTranscript(detail: unknown, firstUnprefixedIsMe = false): {
     return out;
 }
 
+/** Validate new model output separately from the permissive legacy reader. */
+export function parseGeneratedAiTranscript(detail: unknown) {
+    const script = phoneTranscriptToText(detail).trim();
+    if (!/^(我|对方|Me|Them)\s*[:：]\s*\S/.test(script)) throw new Error('Missing phone speaker');
+    const turns = parseTranscript(script);
+    if (turns.at(-1)?.isMe !== false) throw new Error('Incomplete AI reply');
+    return turns;
+}
+
 /** 把结构化气泡序列化回「我:/对方:」脚本，每行都带前缀（保证后续解析无损） */
 export function serializeTurns(turns: { isMe: boolean; text: string }[]): string {
     return turns.map(t => `${t.isMe ? '我' : '对方'}: ${t.text}`).join('\n');
