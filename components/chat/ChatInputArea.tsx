@@ -197,6 +197,37 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
     const [selectedEmojis, setSelectedEmojis] = useState<Emoji[]>([]);
     // 手动分页避免旧版/第三方 WebView 不触发 IntersectionObserver，永远卡在「加载中」。
     const [emojiPaging, setEmojiPaging] = useState({category: activeCategory, page: 0});
+    const [failedEmojiUrls, setFailedEmojiUrls] = useState<Set<string>>(() => new Set());
+    const [emojiRetryKeys, setEmojiRetryKeys] = useState<Record<string, number>>({});
+    const [retryingEmojis, setRetryingEmojis] = useState(false);
+    const markEmojiLoad = (url: string, failed: boolean) => {
+        if (!/^https?:\/\//i.test(url)) return;
+        setFailedEmojiUrls(current => {
+            if (current.has(url) === failed) return current;
+            const next = new Set(current);
+            if (failed) next.add(url);
+            else next.delete(url);
+            return next;
+        });
+    };
+    const retryFailedEmojis = async () => {
+        setRetryingEmojis(true);
+        const urls = [...failedEmojiUrls];
+        try {
+            // Preserve the exact URL, including any signature. Reload the HTTP cache,
+            // then remount the image so it can decode the refreshed response.
+            await Promise.allSettled(urls.map(url => fetch(url, {
+                mode: 'no-cors', cache: 'reload', signal: AbortSignal.timeout(8000),
+            })));
+        } finally {
+            setEmojiRetryKeys(current => {
+                const next = { ...current };
+                for (const url of urls) next[url] = (next[url] ?? 0) + 1;
+                return next;
+            });
+            setRetryingEmojis(false);
+        }
+    };
     const [emojiPanelVisited, setEmojiPanelVisited] = useState(showPanel === 'emojis');
     useEffect(() => {
         if (showPanel === 'emojis') setEmojiPanelVisited(true);
@@ -861,6 +892,12 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                     {/* Emojis Panel with Categories */}
                     {(emojiPanelVisited || showPanel === 'emojis') && (
                         <div data-testid="emoji-panel" style={{ display: showPanel === 'emojis' ? 'flex' : 'none' }} className="flex-col min-h-0 flex-1">
+                            {failedEmojiUrls.size > 0 && !emojiSelectionMode && (
+                                <button type="button" onClick={() => void retryFailedEmojis()} disabled={retryingEmojis}
+                                    className={`shrink-0 self-end px-3 py-1.5 text-xs ${emojiLabelClass}`}>
+                                    {retryingEmojis ? '正在重试…' : '重试破图'}
+                                </button>
+                            )}
                             {/* Categories Bar */}
                             <div className={`sully-chat-emoji-categories relative flex shrink-0 ${panelTopBarSurfaceClass}`} style={{ backgroundColor: 'inherit' }}>
                                 {/* touch-action: pan-x —— 显式告诉浏览器"从分组 chip 上起手的触摸就是横向滚动"，
@@ -976,7 +1013,7 @@ const ChatInputArea: React.FC<ChatInputAreaProps> = ({
                                         >
                                             <div className="aspect-square w-full">
                                                 {/* 换图仍重建 img，避免新图解码前残留旧位图；分页和懒加载照旧。 */}
-                                                <TokenImg key={e.url} value={e.url} loading="lazy" decoding="async" className="sully-emoji-thumb w-full h-full object-contain pointer-events-none" />
+                                                <TokenImg key={`${e.url}:${emojiRetryKeys[e.url] ?? 0}`} value={e.url} loading="lazy" decoding="async" onError={() => markEmojiLoad(e.url, true)} onLoad={() => markEmojiLoad(e.url, false)} className="sully-emoji-thumb w-full h-full object-contain pointer-events-none" />
                                             </div>
                                             <span className={`text-[9px] truncate w-full text-center mt-0.5 leading-tight pointer-events-none ${emojiLabelClass}`}>{e.name}</span>
                                             {isSelected && <div className="absolute inset-0 bg-blue-500/20 rounded-2xl pointer-events-none border-2 border-blue-500" />}
