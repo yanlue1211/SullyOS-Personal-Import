@@ -157,6 +157,8 @@ const ActiveMsg2SettingsModal: React.FC<ActiveMsg2SettingsModalProps> = ({
   // 今天主动找了几次（worker 每次发完累加的那份）。null = 没有记录 / 没读到。
   const [dailySends, setDailySends] = useState<AmsgDailySends | null>(null);
   const [globalPaused, setGlobalPaused] = useState(false);
+  const [cronPaused, setCronPaused] = useState(false);
+  const [resumingCron, setResumingCron] = useState(false);
 
   // 表单值重置：面板打开或切换编辑对象时，用被编辑任务的字段填表单（新建则填默认值）。
   // 角色级共享设置（maxTokens）始终跟随保存值。
@@ -246,6 +248,7 @@ const ActiveMsg2SettingsModal: React.FC<ActiveMsg2SettingsModalProps> = ({
     // 「主动频率」那一页每次都从关着开始，别带着上回没关的状态直接弹出来。放在这个只认
     // 「打开」的 effect 里：放进上面那个的话，角色在聊天里排一条任务都会把它关掉。
     setPacingOpen(false);
+    setCronPaused(false);
     setKnownRemoteUuids(null);
     setRemoteTaskInfo(null);
 
@@ -276,6 +279,10 @@ const ActiveMsg2SettingsModal: React.FC<ActiveMsg2SettingsModalProps> = ({
         setKnownRemoteUuids(null);
         return;
       }
+
+      void ActiveMsgClient.getCronTriggerState({ timeoutMs: 6_000 }).then(state => {
+        setCronPaused(state?.supported === true && state.enabled === false);
+      });
 
       // 防穿帮闸最近拦下了哪次触发、今天主动找了几次。闸是静默的，不说一声的话「让路了」
       // 在用户看来跟「没发出去」一模一样；次数摆出来，用户才知道上限是不是在起作用。
@@ -703,6 +710,19 @@ const ActiveMsg2SettingsModal: React.FC<ActiveMsg2SettingsModalProps> = ({
   const selfRecurringTaskCount = scheduleTasks.filter((t) => t.source === 'character'
     && t.recurrenceType !== 'none' && isPendingTask(t, now)).length;
 
+  const resumeCron = async () => {
+    setResumingCron(true);
+    try {
+      const result = await ActiveMsgClient.setCronTriggerEnabled(true, { timeoutMs: 10_000 });
+      if (result.ok) setCronPaused(false);
+      addToast(result.message, result.ok ? 'success' : 'error');
+    } catch {
+      addToast('暂时无法恢复后台任务，请稍后重试。', 'error');
+    } finally {
+      setResumingCron(false);
+    }
+  };
+
   return (
     <>
     <Modal
@@ -730,6 +750,13 @@ const ActiveMsg2SettingsModal: React.FC<ActiveMsg2SettingsModalProps> = ({
             系统设置里的「主动消息 2.0」总开关当前处于暂停状态，恢复总开关后才会重新连接云端并生效。
           </div>
         ) : null}
+        {globalReady && cronPaused && (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800" role="status">
+            后台任务已暂停，未发送的预约会等待恢复。
+            <button type="button" disabled={resumingCron} onClick={() => void resumeCron()}
+              className="ml-2 font-bold underline disabled:opacity-50">立即恢复后台任务</button>
+          </div>
+        )}
         <p className="text-xs leading-relaxed text-slate-500">
           预约消息与「离开后消息」独立运行。TA 自己预约的未来消息和你手动创建的预约在这里管理；离开后的自动联系排程请前往「离开后消息」设置。
         </p>
@@ -881,7 +908,7 @@ const ActiveMsg2SettingsModal: React.FC<ActiveMsg2SettingsModalProps> = ({
                     </div>
                     <div className="mt-1.5 flex flex-wrap gap-1 text-[10px]">
                       <span className="rounded-md bg-fuchsia-50 px-1.5 py-0.5 font-bold text-fuchsia-700">
-                        {describeTaskProgress(t, knownRemoteUuids, now, remoteInfo?.status)}
+                        {cronPaused && isPendingTask(t, now) && !missingRemote ? '后台已暂停' : describeTaskProgress(t, knownRemoteUuids, now, remoteInfo?.status)}
                       </span>
                       <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-slate-600">{describeRecurrence(t.recurrenceType)}</span>
                       <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-slate-600">{describeExpirePolicy(t.expirePolicy)}</span>
