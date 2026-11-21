@@ -7,15 +7,16 @@ import {portableCssImages} from './cssImageAssets';
 const normalizeImages=(css:string)=>css.replace(/data:image\/svg\+xml(;base64)?,([^"\n]*)/g,(_,base64,body)=>
  'svg:'+JSON.stringify(base64?Buffer.from(body,'base64').toString('utf8'):decodeURIComponent(body)));
 
-describe('bundled star orbit outfits',()=>{
+describe('bundled chat outfits',()=>{
  it.each(BUILTIN_WHITEBOX_PRESETS)('$name is portable and applies a complete outfit without changing sounds',async item=>{
   const preset=item.read();
-  expect(preset.parts.layout?.chatAvatarSize).toBe('medium');
+  const avatarSize = item.id === 'builtin-silver-halo' ? 'small' : 'medium';
+  expect(preset.parts.layout?.chatAvatarSize).toBe(avatarSize);
   expect(preset.parts.css).toContain('data:image/svg+xml');
   expect(preset.parts.css).not.toMatch(/url\(["']?https?:/);
   const patch=await decorationPatches(preset,['layout','bubbles','background','psyche','css'],'character',{id:'sample',chatSound:{src:'ding'}} as any,{} as any);
   expect(patch.character.chromeCustomCss).toContain('blobref:');expect(normalizeImages(await portableCssImages(patch.character.chromeCustomCss!))).toBe(normalizeImages(preset.parts.css!));
-  expect(patch.character.chatAppearance?.chatAvatarSize).toBe('medium');
+  expect(patch.character.chatAppearance?.chatAvatarSize).toBe(avatarSize);
   expect(patch.character.chatSound).toEqual({src:'ding'});
  });
  it('keeps builtins unchanged when a returned copy is edited',()=>{

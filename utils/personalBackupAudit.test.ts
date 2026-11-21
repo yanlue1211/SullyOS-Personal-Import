@@ -19,7 +19,7 @@ import { stripBackupImages } from './backupExport';
 
 const song={id:42,name:'歌曲',artists:'歌手',album:'专辑',albumPic:'https://example.invalid/cover.jpg',duration:180000,fee:0,source:'user',addedAt:100};
 const musicProfile={bio:'爱听明亮的音乐',genreTags:['流行'],signatureArtists:[{name:'歌手'}],playlists:[{id:'list',title:'收藏',description:'自己选的歌',coverStyle:'blue',songs:[song],createdAt:1,updatedAt:2}],likedSongIds:[42],recentPlays:[{song,at:123,context:'下班一起听'}],reviews:[{id:'listen-together',targetType:'song',targetId:'42',targetTitle:'歌曲',content:'节奏明亮',createdAt:123}]};
-const commerce={products:[{id:'food',kind:'meituan',title:'热汤面',price:18,shop:'面馆',detail:'不要葱'}],shops:[{id:'shop',kind:'meituan',name:'面馆',category:'面食',description:'热乎的'}],
+const commerce={cart:[],taobaoProfiles:{},products:[{id:'food',kind:'meituan',title:'热汤面',price:18,shop:'面馆',detail:'不要葱'}],shops:[{id:'shop',kind:'meituan',name:'面馆',category:'面食',description:'热乎的'}],
     orders:[{id:'order',charId:'a',charName:'阿源',userName:'User',product:{id:'book',kind:'taobao',title:'书',price:30,shop:'书店',detail:'原装'},buyer:'char',recipient:'user',createdAt:100,eta:9999999999999,createdNotified:true,deliveredNotified:false,requestId:'once'}],
     members:{taobao:['a'],meituan:['a']},preferences:{taobao:'日常文具',meituan:'清淡，少辣'}};
 beforeEach(async()=>{

@@ -1,3 +1,4 @@
+import { resolveThinkingChainSettings } from './thinkingChainPrompt';
 import { amsgRecallInputKey, formatAmsgRecalledHistory, type AmsgPreparedRecall } from './amsgPreparedRecall';
 import { gzipAmsgUpload } from './amsgUploadGzip';
 import {orderPetCloudBackfill,petCoveredIds,petCloudNamespace} from './tapnestCloud';
@@ -915,7 +916,7 @@ export const buildFirePack = async (
     userName: userProfile.name,
     translationConfig: readChatTranslationConfig(char.id),
     htmlMode: { enabled: !!char.htmlModeEnabled, customPrompt: char.htmlModeCustomPrompt },
-    thinkingChain: { enabled: !!char.showThinkingChain, customPrompt: char.thinkingChainCustomPrompt },
+    thinkingChain: resolveThinkingChainSettings(char, userProfile),
   });
   const builtAt = Date.now();
   const historyDate = new Date(builtAt).toLocaleString('zh-CN', { timeZone: tzId });
