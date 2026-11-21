@@ -1,3 +1,4 @@
+import { recordRescueFromConfigCheck } from './amsgRescueAlert';
 import {orderPetCloudBackfill,petCoveredIds,petCloudNamespace} from './tapnestCloud';
 import {receivedCloudOccurrences} from './amsgFirePack';
 import { usesHumanStyle, usesInnerVoice, INNER_VOICE_FORMAT_REMINDER, CHAT_EXPRESSION_TAIL_REMINDER, IM_FRAGMENTED_CHAT_TAIL } from './chatPromptPreferences';
@@ -1947,6 +1948,7 @@ const fetchWithAuthRaw = async (
  * /config-check 的地方都顺手记一笔。存不下只是这一次的结论留不到下次，不影响探测本身。
  */
 const rememberWorkerBundleVersion = async (body: any, checkedWorkerUrl?: string): Promise<void> => {
+  recordRescueFromConfigCheck(body, checkedWorkerUrl);
   const deployed = typeof body?.data?.workerVersion === 'string' ? body.data.workerVersion : null;
   try {
     const current = await ActiveMsgStore.getGlobalConfig();

@@ -1,3 +1,4 @@
+import AmsgRescueAlert from './components/AmsgRescueAlert';
 
 import React from 'react';
 import TapNestGate from './features/tapnest/Gate';
@@ -51,6 +52,7 @@ const App: React.FC = () => {
             <Amsg2DebugPanel />
             <WebUpdateNotice />
             <AmsgOwnerConflictNotice />
+            <AmsgRescueAlert />
           </OSProvider>
         </div>
       </div>

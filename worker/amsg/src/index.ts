@@ -1,3 +1,4 @@
+import { buildRescueReport, handleRescueRequest, isRescueActive, matchRescueRoute, observeRescueQuietly, type RescueDeps } from './rescue';
 import {AMSG_USER_TURN_KEY,readAmsgUserTurnAt} from '../../../utils/amsgUserTurn';
 import { buildAmsgInPersonContext, resolveAmsgDateExitEncounter } from '../../../utils/amsgInPersonContext';
 import { INSTANT_INPUT_NAMESPACE, INSTANT_INPUT_TTL_DAYS, parseInstantInputEnvelope, parseInstantInputRef } from './instantInput';
@@ -260,7 +261,17 @@ interface Env extends NativeFcmEnv {
    * 那种情况由 /instant-chat 明确报「需要更新 Worker」，见 instantChat.kickInstantTick。
    */
   INSTANT_TICK?: InstantTickNamespace;
+  /**
+   * 救援口令。设了（且够长）就开启 /rescue：凭它把云端数据解密导出，给本地数据被清空、
+   * 没有备份的人临时取数据用。开着期间会留痕、推送提醒、暂停 cron 投递。见 ./rescue。
+   */
+  AMSG_RESCUE_TOKEN?: string;
 }
+
+/** 救援模块要的推送通道：跟 /test-push 同一份 transport。 */
+const rescueDeps = (env: Env): RescueDeps => ({
+  sendPush: (subscription, payload) => buildWorkerConfig(env).webpush.sendNotification(subscription as never, payload),
+});
 
 // ─── 满血 fire-time hooks（amsg-server 2.6.0-next.4+：含 ctx.scratch / 存储层大值分块） ───
 //
@@ -3613,6 +3624,18 @@ export const inspectWorkerEnv = (env: Env): WorkerEnvReport => {
       message: '没设 AMSG_SERVER_TOKEN，这个 Worker 地址对公网开放，知道地址的人都能读写你的任务。',
     });
   }
+  const rescueToken = env.AMSG_RESCUE_TOKEN?.trim();
+  if (rescueToken) {
+    warnings.push(isRescueActive(env)
+      ? {
+        code: 'RESCUE_ACTIVE',
+        message: '救援模式开着（设了 AMSG_RESCUE_TOKEN）：凭口令可以导出已同步的角色资料，定时消息暂停投递。救完数据请立刻删掉这个变量。',
+      }
+      : {
+        code: 'RESCUE_TOKEN_TOO_SHORT',
+        message: 'AMSG_RESCUE_TOKEN 太短，救援页不会工作。要救数据就换一串至少 16 个字符的随机口令，不用就删掉它。',
+      });
+  }
 
   return {
     ok: absent.length === 0,
@@ -4042,6 +4065,7 @@ const readServerVersion = async (request: Request, env: Env) => {
  *   POST /self-update   自己去取最新代码覆盖自己（见 ./selfUpdate，要共享密钥 + CF_API_TOKEN）
  *   POST /self-update/check  App 冷启动时顺手问一句「该更新了没」，有节流（见 ./autoUpdate，认证同上）
  *   GET/POST /cron-trigger  查看 / 暂停 / 恢复自己的 cron trigger（见 ./cronTrigger，认证同上）
+ *   GET  /rescue  POST /rescue/manifest  POST /rescue/item  救援导出（见 ./rescue，只在设了 AMSG_RESCUE_TOKEN 时存在）
  *   其它请求            配置不全时直接 503 + 说明缺什么，不进上游
  */
 // fetch 收第三个参数 ctx 只为 /self-update/check 一条路：它回 202 之后在 waitUntil 里把检查跑完
@@ -4057,6 +4081,10 @@ export default {
       if(method==='OPTIONS')return new Response(null,{status:204,headers:CORS_HEADERS});
       return handlePetCloud(request,env,upstream,jsonWithCors);
     }
+
+    const rescueRoute = matchRescueRoute(pathname);
+    if (rescueRoute) return handleRescueRequest(request, env, rescueDeps(env), rescueRoute);
+    if (isRescueActive(env) && !pathname.endsWith('/config-check')) await observeRescueQuietly(env, rescueDeps(env));
 
     if (pathname.endsWith('/config-check')) {
       if (method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS_HEADERS });
@@ -4101,6 +4129,9 @@ export default {
             supported: Boolean(env.CF_API_TOKEN?.trim()),
             state: await readSelfUpdateState(env.DB as TickReportDb | undefined),
           },
+          // 救援模式的开关和留痕（形状见 utils/amsgRescueState.ts）。前端据此强制弹窗警告 7 天。
+          // 这里只有时刻和次数，不含口令或任何数据；不设防是因为警告必须在共享密钥丢了时也看得到。
+          rescue: await buildRescueReport(env, rescueDeps(env)),
         },
       });
     }
@@ -4409,6 +4440,8 @@ export default {
       console.error(`[amsg] 定时任务整轮跳过：${report.message}`);
       return;
     }
+    // 救援模式的开关每分钟核对一次：关掉之后要在这里记下结束时刻，下次再开才算新的一次。
+    await observeRescueQuietly(env, rescueDeps(env));
     // 更新检查先走，数据库维护失败时仍有机会换上修复包。
     await runScheduledAfterUpdate(
       () => runAutoUpdate(env, env.DB as TickReportDb, {
@@ -4416,6 +4449,12 @@ export default {
         scriptName: env.CF_SCRIPT_NAME?.trim() || null,
       }),
       async () => {
+        // 救援模式开着时不投递、不清理：导出的应当是开启那一刻的样子，过期清理和到点消费
+        // 都会让还没导出的数据消失。删掉 AMSG_RESCUE_TOKEN 后下一跳自动恢复。
+        if (isRescueActive(env)) {
+          console.warn('[amsg:rescue] 救援模式开着，这一跳不投递、不清理');
+          return;
+        }
         // 新版需要的表和索引只补一次，自动更新后的第一跳也能补齐。
         await ensureSchemaOnce(env.DB as TickReportDb | undefined, SCHEMA_VERSION, () => upstream.ensureSchema(env));
         const outcome = await upstream.scheduled(event, env);

@@ -1,3 +1,4 @@
+import { pendingBackupField, readBackupField } from './backupFormat';
 import {amsgDeliveryKey} from './amsgDeliveryKey';
 import { recordProactiveUserActivity } from './proactiveActivity';
 import { reconcileWorldbookMounts } from './worldbookScope';
@@ -4100,10 +4101,14 @@ export const DB = {
       } = {}
   ): Promise<void> => {
       const db = await openDB();
-      const momentsBackup = data.collaborationBackupMode === 'media_only' ? undefined : data.momentsRecords !== undefined ? validateMomentsBackup(data.momentsRecords) : Array.isArray(data.characters) ? [] : undefined;
-      const workroomBackup = data.collaborationBackupMode === 'media_only' ? undefined : validateWorkroomBackup(data);
+      const momentsBackup = data.collaborationBackupMode === 'media_only' ? undefined : data.momentsRecords !== undefined ? validateMomentsBackup(await readBackupField(data.momentsRecords)) : Array.isArray(data.characters) ? [] : undefined;
+      const workroomFields = data.collaborationBackupMode === 'media_only' ? {} : Object.fromEntries(
+          await Promise.all(Object.keys(data).filter(field => field.startsWith('workroom')).map(async field =>
+              [field, await readBackupField((data as any)[field])] as const)),
+      );
+      const workroomBackup = validateWorkroomBackup(workroomFields);
       if (workroomBackup) {
-          const owners = new Set((data.characters ?? await DB.getAllCharacters()).map(c => c.id));
+          const owners = new Set((await readBackupField(data.characters) ?? await DB.getAllCharacters()).map(c => c.id));
           if ([...workroomBackup.workroomWorks, ...workroomBackup.workroomShares].some(w => !owners.has(w.charId))) throw new Error('造物间备份的角色不存在');
       }
       invalidateStoryTimelineRepair(db);
@@ -4170,7 +4175,7 @@ export const DB = {
       // Older media archives included entire text records from assets. Recover
       // their pictures only; never roll a user's current history back with them.
       if (mediaOnly && !data.friendFeedMedia) {
-          const legacy = data.friendFeed ?? data.assets?.find(a => a.id === 'friend_feed_v1')?.data;
+          const legacy = data.friendFeed ?? (await readBackupField(data.assets))?.find(a => a.id === 'friend_feed_v1')?.data;
           if (legacy) {
               const { parseFriendFeed } = await import('./friendFeed');
               data.friendFeedMedia = collectFriendFeedMedia(parseFriendFeed(typeof legacy === 'string' ? legacy : JSON.stringify(legacy)));
@@ -4212,6 +4217,7 @@ export const DB = {
           data.lifeSimState !== undefined,
           data.bankTransactions !== undefined,
           data.xhsActivities !== undefined,
+          data.xhsOwnedPosts !== undefined,
           data.xhsStockImages !== undefined,
           data.memoryNodes !== undefined,
           data.memoryVectors !== undefined,
@@ -4295,6 +4301,12 @@ export const DB = {
           });
       };
 
+      // 分片包里的字段先是占位，轮到这一段才读进 data，处理完照旧置空，同一时刻只有一个字段在内存里。
+      const loaded = async <T,>(value: T): Promise<T> => {
+          const pending = pendingBackupField(value);
+          return pending ? ((data as any)[pending.field] = await pending.read()) as T : value;
+      };
+
       const putItems = async (
           storeName: string,
           items: any[] | undefined | null,
@@ -4302,6 +4314,7 @@ export const DB = {
           restoreAssets = true
       ) => {
           if (!hasStore(storeName) || !items || items.length === 0) return;
+          items = await loaded(items);
 
           const CHUNK_SIZE = 50;
           const total = items.length;
@@ -4330,6 +4343,7 @@ export const DB = {
           restoreAssets = true
       ) => {
           if (!hasStore(storeName) || items === undefined || items === null) return;
+          items = await loaded(items); // 先读到手再清表，读失败时旧数据还在
           await clearStore(storeName);
           await putItems(storeName, items, label, restoreAssets);
       };
@@ -4370,7 +4384,7 @@ export const DB = {
           } as CharacterProfile;
       };
 
-      const hasCharacterBackup = Array.isArray(data.characters);
+      const hasCharacterBackup = !mediaOnly && Array.isArray(data.characters);
 
       await runSection('朋友圈', momentsBackup !== undefined, async () => {await restoreMoments(db, momentsBackup!);});
       await runSection('造物间', workroomBackup !== undefined, async () => {
@@ -4378,7 +4392,9 @@ export const DB = {
       });
 
       await runSection('角色资料', data.characters !== undefined || data.mediaAssets !== undefined, async () => {
-          if (data.characters) {
+          await loaded(data.characters);
+          await loaded(data.mediaAssets);
+          if (hasCharacterBackup && data.characters) {
               if (data.mediaAssets) {
                   await beforeWrite(data.mediaAssets, '角色媒体', true);
                   const mediaAssets = data.mediaAssets;
@@ -4413,6 +4429,7 @@ export const DB = {
           if (!hasStore(STORE_MESSAGES)) return;
           try {
               const isPatchMode = !hasCharacterBackup;
+              await loaded(data.messages);
               if (!isPatchMode) {
                   await clearStore(STORE_MESSAGES);
               }
@@ -4437,6 +4454,7 @@ export const DB = {
           data.emojiCategories = undefined as any;
       }, data.emojiCategories?.length || 0);
       await runSection('系统资源', data.assets !== undefined, async () => {
+          await loaded(data.assets);
           if (mediaOnly) {
               await mergeStore(STORE_ASSETS, (data.assets || []).filter(a => !isActivityTextAsset(a.id)), '系统资源', true);
           } else await clearAndAdd(STORE_ASSETS, data.assets || [], '系统资源', true);
@@ -4444,7 +4462,7 @@ export const DB = {
       }, data.assets?.length || 0);
       // 独立的个人音迹档案随完整备份恢复。旧备份没有此字段，不清空现有档案。
       await runSection('音迹歌曲档案', data.songSoundArchive !== undefined && data.assets === undefined && !mediaOnly, async () => {
-          const records = data.songSoundArchive || [];
+          const records = (await loaded(data.songSoundArchive)) || [];
           if (!Array.isArray(records) || records.some(a => !a || typeof a.id !== 'string' || !a.id.startsWith(SOUND_ARCHIVE_PREFIX) || typeof a.data !== 'string')) {
               throw new Error('音迹备份内容不正确');
           }
@@ -4456,7 +4474,7 @@ export const DB = {
           data.songSoundArchive = undefined;
       }, data.songSoundArchive?.length || 0);
       await runSection('活动文字记录', data.activityTextAssets !== undefined && !mediaOnly, async () => {
-          const records = data.activityTextAssets!;
+          const records = (await loaded(data.activityTextAssets))!;
           if (!Array.isArray(records) || records.some(a => !a || typeof a.id !== 'string'
               || !isActivityTextAsset(a.id) || a.id === 'friend_feed_v1' || typeof a.data !== 'string')) {
               throw new Error('活动文字备份格式不正确');
@@ -4487,7 +4505,7 @@ export const DB = {
           data.friendFeedMedia = undefined;
       });
       await runSection('聊天收藏', data.contentFavoritesIndex != null, async () => {
-          await DB.saveAssetRaw('content_favorites_index_v1', data.contentFavoritesIndex);
+          await DB.saveAssetRaw('content_favorites_index_v1', await readBackupField(data.contentFavoritesIndex)); // 旧版索引是裸数组，会被分片
       });
       await runSection('日记贴纸', data.savedJournalStickers !== undefined, async () => {
           await mergeStore(STORE_JOURNAL_STICKERS, data.savedJournalStickers, '日记贴纸', true);
@@ -4578,15 +4596,15 @@ export const DB = {
           data.vrGuestbook = undefined as any;
       }, 1);
       await runSection('剧院剧本', data.vrScripts !== undefined, async () => {
-          if (hasStore(STORE_VR_SCRIPTS) && Array.isArray(data.vrScripts)) for (const s of data.vrScripts) await DB.saveVRScript(s);
+          if (hasStore(STORE_VR_SCRIPTS) && Array.isArray(data.vrScripts)) for (const s of await loaded(data.vrScripts)) await DB.saveVRScript(s);
           data.vrScripts = undefined as any;
       }, data.vrScripts?.length || 0);
       await runSection('历史舞台剧', data.vrStagedPlays !== undefined, async () => {
-          if (hasStore(STORE_VR_PLAYS) && Array.isArray(data.vrStagedPlays)) for (const p of data.vrStagedPlays) await DB.saveVRStagedPlay(p);
+          if (hasStore(STORE_VR_PLAYS) && Array.isArray(data.vrStagedPlays)) for (const p of await loaded(data.vrStagedPlays)) await DB.saveVRStagedPlay(p);
           data.vrStagedPlays = undefined as any;
       }, data.vrStagedPlays?.length || 0);
       await runSection('剧院预设', (data as any).vrPresets !== undefined, async () => {
-          if (hasStore(STORE_VR_PRESETS) && Array.isArray((data as any).vrPresets)) for (const p of (data as any).vrPresets) await DB.saveVRPreset(p);
+          if (hasStore(STORE_VR_PRESETS) && Array.isArray((data as any).vrPresets)) for (const p of await loaded((data as any).vrPresets)) await DB.saveVRPreset(p);
           (data as any).vrPresets = undefined as any;
       }, (data as any).vrPresets?.length || 0);
       await runSection('邮局信件', data.vrLetters !== undefined, async () => {
@@ -4595,7 +4613,7 @@ export const DB = {
       }, data.vrLetters?.length || 0);
       await runSection('彼方设置', data.vrSettings !== undefined, async () => {
           if (hasStore(STORE_VR_SETTINGS) && Array.isArray(data.vrSettings)) {
-              for (const rec of data.vrSettings) await DB.saveVRSettingRecord(rec);
+              for (const rec of await loaded(data.vrSettings)) await DB.saveVRSettingRecord(rec);
           }
           data.vrSettings = undefined as any;
       }, data.vrSettings?.length || 0);
@@ -4718,6 +4736,7 @@ export const DB = {
               data.memoryVectors = undefined as any;
               return;
           }
+          await loaded(data.memoryVectors);
           await clearStore('memory_vectors');
           const CHUNK_SIZE = 50;
           const total = data.memoryVectors.length;

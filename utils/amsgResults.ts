@@ -1,3 +1,4 @@
+import { AMSG_RESCUE_RESULT_KIND } from './amsgRescueState';
 /**
  * 云端结果的分发口（`resultKind` → 谁来消化）
  *
@@ -107,6 +108,11 @@ const dispatchOne = async (payload: unknown, context?: AmsgResultContext): Promi
 
   try {
     switch (resultKind) {
+      case AMSG_RESCUE_RESULT_KIND: {
+        const { handleRescuePush } = await import('./amsgRescueProbe');
+        await handleRescuePush(Date.now());
+        return true;
+      }
       case 'assistant-actions': {
         const { applyAmsgActionResult } = await import('./amsgActionResult');
         return await applyAmsgActionResult(payload);

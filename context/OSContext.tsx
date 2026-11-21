@@ -1,3 +1,4 @@
+import type { BackupZipReader } from '../utils/backupZipReader';
 import { SONG_RECALL_UPDATED } from '../features/personal/songArchive/keywords';
 import {syncCommittedAmsgUserTurn} from '../utils/amsgUserTurnSync';
 import {isPetControlCancellation} from '../features/tapnest/transport';
@@ -58,7 +59,7 @@ import { migrateSharkpanAssets } from '../utils/sharkpanAssetMigration';
 import { stripCompanionChatStyleResidue } from '../utils/companionThemeIsolation';
 import { SULLY_DEFAULT_AVATAR_URL, shouldMigrateSullyAvatar } from '../utils/sullyAvatar';
 import { exportStoryTheaterAppearanceSetting, restoreStoryTheaterAppearanceSetting } from '../utils/storyTheaterBackup';
-import { writeV2Backup, assembleV2Backup, type BackupManifest, type ZipFileWriter, type ZipFileReader } from '../utils/backupFormat';
+import { writeV2Backup, openLegacyBackup, loadAllBackupFields, readBackupField, assertBackupStillReadable, type ZipFileWriter, type ZipFileReader } from '../utils/backupFormat';
 import { externalizeVoiceMessageBlob, restoreVoiceMessageBlobs, shouldIncludeVoiceRelatedAssetInBackup } from '../utils/voiceMessageBackup';
 import { ensureCompanionVoiceAssetIdsForBackup, isCompanionVoiceAssetId } from '../utils/companionVoiceAssets';
 import { collectCharacterCompanionVoiceAssetIds } from '../utils/companionPresets';
@@ -150,7 +151,7 @@ import { exportMcdLocal } from '../utils/mcdMcpClient';
 import { exportMcpLocal } from '../utils/mcpClient';
 import { exportHome3DLocal } from '../utils/home3DBackup';
 import { exportDesktopSkinLocal } from '../utils/desktopSkinBackup';
-import { assertSupportedSullyBackup } from '../utils/backupImportPolicy';
+import { assertSupportedSullyBackup, createImportProgressMarker } from '../utils/backupImportPolicy';
 import { createBuiltinSullyLive2DConfig, isBuiltinSullyLive2D, upgradeBuiltinSullyLive2DDefaults } from '../utils/builtinSullyLive2D';
 import { normalizeCharacterRoomAssetsInPlace } from '../utils/roomTemplateAssets';
 
@@ -204,7 +205,7 @@ type JSZipCtorLike = {
 
 let jszipCtorPromise: Promise<JSZipCtorLike> | null = null;
 
-export const IMPORT_IN_PROGRESS_KEY = 'sullyos_import_in_progress_v1';
+export { IMPORT_IN_PROGRESS_KEY } from '../utils/backupImportPolicy';
 
 type ImportProgressUpdate = {
   sourceSize?: number;
@@ -216,38 +217,6 @@ type ImportProgressUpdate = {
   itemDone?: number;
   itemTotal?: number;
   error?: string;
-};
-
-let _importStartedAt: number | null = null;
-let _importSource: string | null = null;
-
-const markImportInProgress = (phase: string, source?: string, update: ImportProgressUpdate = {}) => {
-  try {
-    let startedAt = Date.now();
-    let existingSource = source || null;
-
-    if (phase === 'parsing') {
-      _importStartedAt = startedAt;
-      _importSource = existingSource;
-    } else {
-      if (_importStartedAt) startedAt = _importStartedAt;
-      if (!existingSource && _importSource) existingSource = _importSource;
-    }
-
-    localStorage.setItem(IMPORT_IN_PROGRESS_KEY, JSON.stringify({
-      startedAt,
-      updatedAt: Date.now(),
-      phase,
-      source: existingSource,
-      ...update,
-    }));
-  } catch { /* ignore */ }
-};
-
-const clearImportInProgress = () => {
-  _importStartedAt = null;
-  _importSource = null;
-  try { localStorage.removeItem(IMPORT_IN_PROGRESS_KEY); } catch { /* ignore */ }
 };
 
 const loadScript = (src: string): Promise<void> => new Promise((resolve, reject) => {
@@ -273,6 +242,12 @@ const loadScript = (src: string): Promise<void> => new Promise((resolve, reject)
   script.onerror = () => reject(new Error(`load failed: ${src}`));
   document.head.appendChild(script);
 });
+
+// 备份、恢复这类长任务期间保持屏幕常亮，免得锁屏后页面被挂起；模块加载不到就照常执行。
+const withScreenAwake = async <T,>(task: () => Promise<T>): Promise<T> => {
+  const mod = await import('../utils/backupTempFile').catch(() => null);
+  return mod ? mod.withScreenWakeLock(task) : task();
+};
 
 const loadJSZip = async (): Promise<JSZipCtorLike> => {
   if (!jszipCtorPromise) {
@@ -1768,6 +1743,8 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
         // 清掉 Instant Push 留在本机的旧配置和缓存（含 Worker 令牌、API Key 副本），只跑一次。
         void cleanupInstantPushLegacyData();
+        // 上次导出、下载中途崩溃留下的临时文件会一直占着配额，没被锁住的都删掉。
+        void import('../utils/backupTempFile').then(mod => mod.cleanupBackupTempFiles()).catch(() => {});
 
         await loadSettings();
 
@@ -3558,6 +3535,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           if (!result.ok) {
               throw new Error(result.message);
           }
+          markBackupDone();
 
           // Update last backup time
           updateCloudBackupConfig({ lastBackupTime: Date.now(), lastBackupSize: blob.size });
@@ -3585,25 +3563,32 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       }
   };
 
-  const cloudRestoreFromWebDAV = async (file: CloudBackupFile, importOptions?: ImportSystemOptions) => {
+  const cloudRestoreFromWebDAV = (file: CloudBackupFile, importOptions?: ImportSystemOptions) => withScreenAwake(async () => {
       const { downloadBackup } = await loadBackupProvider();
       try {
           setSysOperation({ status: 'processing', message: '正在从云端下载...', progress: 0 });
-          const blob = await downloadBackup(cloudBackupConfig, file, (pct) => {
+          const backup = await downloadBackup(cloudBackupConfig, file, (pct) => {
               setSysOperation(prev => ({ ...prev, message: `下载中 ${pct}%...`, progress: pct * 0.5 }));
           });
 
-          if (!blob) throw new Error('下载失败');
+          if (!backup) throw new Error('下载失败');
 
-          setSysOperation({ status: 'processing', message: '正在恢复数据...', progress: 50 });
-          const zipFile = new File([blob], file.name, { type: 'application/zip' });
-          await importSystem(zipFile, importOptions);
+          try {
+              setSysOperation({ status: 'processing', message: '正在恢复数据...', progress: 50 });
+              // 下载落盘时 blob 就是临时文件本身，直接交给按需读包；只有内存降级时才需要包成 File。
+              const zipFile = backup.blob instanceof File
+                  ? backup.blob
+                  : new File([backup.blob], file.name, { type: 'application/zip' });
+              await importSystem(zipFile, importOptions);
+          } finally {
+              await backup.dispose();
+          }
       } catch (e: any) {
           setSysOperation({ status: 'idle', message: '', progress: 0 });
           addToast(`云端恢复失败: ${e.message}`, 'error');
           throw e;
       }
-  };
+  });
 
   const listCloudBackups = async (): Promise<CloudBackupFile[]> => {
       const { listBackups } = await loadBackupProvider();
@@ -4281,9 +4266,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   const importAppearancePreset = async (file: File): Promise<string> => {
       // 兼容两种格式：新版 .zip（内含 preset.json）/ 旧版 .json 明文
       let raw: any;
-      const head = new Uint8Array(await file.slice(0, 4).arrayBuffer());
-      const isZip = head[0] === 0x50 && head[1] === 0x4b && (head[2] === 0x03 || head[2] === 0x05 || head[2] === 0x07);
-      if (isZip) {
+      if (await isZipFile(file)) {
           const JSZip = await loadJSZip();
           const zip = await JSZip.loadAsync(file);
           const entry = zip.file('preset.json') || Object.values((zip as any).files || {}).find((f: any) => !f.dir && /\.json$/i.test(f.name));
@@ -4458,7 +4441,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
               'user_profile', 'diaries', 'tasks', 'anniversaries', 'room_todos',
               'room_notes', 'groups', 'journal_stickers', 'social_posts', 'courses', 'games', 'worldbooks', 'story_theaters', 'story_theater_presets', 'story_theater_masks', 'novels', 'songs',
               'bank_transactions', 'bank_data',
-              'xhs_activities', 'xhs_stock',
+              'xhs_activities', 'xhs_owned_posts', 'xhs_stock',
               'quizzes', 'guidebook', 'scheduled_messages', 'life_sim',
               'handbook', 'trackers', 'tracker_entries', 'hotnews_snapshots',
               'memory_nodes', 'memory_vectors', 'memory_links', 'topic_boxes', 'anticipations', 'event_boxes',
@@ -4793,6 +4776,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
               'memory_nodes', 'memory_vectors', 'memory_links', 'topic_boxes', 'anticipations', 'event_boxes',
               'room_plates', 'digest_reports',
               'bank_transactions', 'scheduled_messages', 'memory_batches', 'hotnews_snapshots',
+              'xhs_owned_posts',
               'character_groups',
               'story_theaters', 'story_theater_presets',
               'life_records', 'med_plans', 'life_record_settings'
@@ -4827,6 +4811,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
               songs: 'songs',
               bank_transactions: 'bankTransactions',
               xhs_activities: 'xhsActivities',
+              xhs_owned_posts: 'xhsOwnedPosts',
               xhs_stock: 'xhsStockImages',
               quizzes: 'quizSessions',
               guidebook: 'guidebookSessions',
@@ -5088,10 +5073,10 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       }
   };
 
-  const importSystem = async (
+  const importSystem = (
       fileOrJson: File | string,
       importOptions: ImportSystemOptions = {},
-  ): Promise<void> => {
+  ): Promise<void> => withScreenAwake(async () => {
       const sourceName = typeof fileOrJson === 'string' ? 'json' : fileOrJson.name;
       const sourceSize = typeof fileOrJson === 'string'
           ? (typeof Blob !== 'undefined' ? new Blob([fileOrJson]).size : fileOrJson.length)
@@ -5102,6 +5087,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       let lastCurrent = '解析备份文件';
       let lastCurrentFile: string | undefined;
       let lastCurrentFileSize: number | undefined;
+      const importMarker = createImportProgressMarker(sourceName);
 
       const buildImportMessage = (headline: string, update: ImportProgressUpdate = {}) => {
           const lines = [headline];
@@ -5133,7 +5119,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           if (update.currentFile !== undefined) lastCurrentFile = update.currentFile;
           if (update.currentFileSize !== undefined) lastCurrentFileSize = update.currentFileSize;
           lastProgress = Math.max(lastProgress, Math.min(99, Math.max(0, progress)));
-          markImportInProgress(phase, sourceName, {
+          importMarker.update(phase, {
               sourceSize,
               assetDone: restoredAssetFiles.size,
               assetTotal: totalAssetFiles || undefined,
@@ -5146,66 +5132,37 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           });
       };
 
-      const countZipAssetFiles = (zip: JSZipLike) => {
-          const files = Object.values((zip as any).files || {}) as any[];
-          return files.filter(file => file && !file.dir && typeof file.name === 'string' && file.name.startsWith('assets/')).length;
-      };
-
       const estimateBase64Bytes = (base64: string) => {
           const padding = base64.endsWith('==') ? 2 : base64.endsWith('=') ? 1 : 0;
           return Math.max(0, Math.floor(base64.length * 3 / 4) - padding);
       };
 
+      let zip: BackupZipReader | null = null;
       showImportProgress('parsing', '正在解析备份文件...', 1, { current: '解析备份文件', sourceSize });
       try {
           let data: FullBackupData;
-          let zip: JSZipLike | null = null;
-
           if (typeof fileOrJson === 'string') {
               data = JSON.parse(fileOrJson);
           } else {
-              if (!fileOrJson.name.endsWith('.zip')) {
-                  try {
-                      const text = await fileOrJson.text();
-                      data = JSON.parse(text);
-                  } catch (e) {
-                      throw new Error("无效的文件格式，请上传 .zip 或 .json");
-                  }
+              const { detectBackupFileKind } = await import('../utils/backupFormat');
+              if (await detectBackupFileKind(fileOrJson) === 'json') {
+                  data = JSON.parse(await fileOrJson.text());
               } else {
-                  const JSZip = await loadJSZip();
-                  const loadedZip = await JSZip.loadAsync(fileOrJson);
+                  const { openBackupZip } = await import('../utils/backupZipReader');
+                  const loadedZip = await openBackupZip(fileOrJson);
                   zip = loadedZip;
-                  totalAssetFiles = countZipAssetFiles(loadedZip);
-                  const manifestFile = loadedZip.file("manifest.json");
-                  if (manifestFile) {
-                      // v2：manifest 驱动的分片备份。assembleV2Backup 只读 zip、组装内存对象，
-                      // 校验不过直接抛错——此时 importFullData 还没调，DB 一字未动。
-                      let manifest: BackupManifest;
-                      try {
-                          manifest = JSON.parse(await manifestFile.async("string"));
-                      } catch {
-                          throw new Error("损坏的备份包：manifest.json 解析失败");
-                      }
-                      data = await assembleV2Backup(
-                          loadedZip as unknown as ZipFileReader,
-                          manifest,
-                          {
-                              onYield: () => new Promise<void>(r => setTimeout(r, 0)),
-                              onShardProgress: (field, idx, total) => {
-                                  showImportProgress('parsing', '正在解析备份分片...',
-                                      5 + Math.floor((idx / Math.max(1, total)) * 25),
-                                      { current: `分片 ${field}` });
-                              },
-                          },
-                      ) as FullBackupData;
-                  } else {
-                      // v1（老备份）：单根 data.json，原样保留，老备份永远打得开。
-                      const dataFile = loadedZip.file("data.json");
-                      if (!dataFile) throw new Error("损坏的备份包: 缺少 data.json");
-                      let jsonStr = await dataFile.async("string");
-                      data = JSON.parse(jsonStr);
-                      jsonStr = '';
-                  }
+                  totalAssetFiles = Object.values(loadedZip.files).filter(file => !file.dir && file.name.startsWith('assets/')).length;
+                  data = await openLegacyBackup(loadedZip, {
+                      onYield: () => new Promise<void>(resolve => setTimeout(resolve, 0)),
+                      onShardProgress: (field, idx, total) => {
+                          showImportProgress('parsing', '正在解析备份分片...', 5 + Math.floor(idx / Math.max(1, total) * 25),
+                              { current: `分片 ${field}` });
+                      },
+                      onFieldRead: async (field, rows) => {
+                          if (field !== 'assets') return;
+                          await restoreVoiceMessageBlobs(rows, async path => loadedZip.file(path)?.async('uint8array') ?? null);
+                      },
+                  }) as FullBackupData;
               }
           }
 
@@ -5224,12 +5181,13 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           // 缺项时会整包中止，不会出现主数据已恢复、协同文件只回来一半的状态。
           let collaborationAssetRecords: Array<{ id: string; blob: Blob; createdAt: number }> | undefined;
           if (data.collaborationAssetIndex !== undefined) {
+              const collaborationAssetIndex = await readBackupField(data.collaborationAssetIndex);
               collaborationAssetRecords = [];
-              if (data.collaborationAssetIndex.length > 0 && !zip) {
+              if (collaborationAssetIndex.length > 0 && !zip) {
                   throw new Error('损坏的备份包：协同文件缺少 ZIP 数据');
               }
-              for (let index = 0; index < data.collaborationAssetIndex.length; index++) {
-                  const item = data.collaborationAssetIndex[index];
+              for (let index = 0; index < collaborationAssetIndex.length; index++) {
+                  const item = collaborationAssetIndex[index];
                   if (!item?.id || !item.path?.startsWith('collaboration/assets/')) {
                       throw new Error('损坏的备份包：协同文件索引无效');
                   }
@@ -5248,16 +5206,6 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                   });
                   if (index % 10 === 0) await new Promise<void>(resolve => setTimeout(resolve, 0));
               }
-          }
-
-          // v2 backups keep favorite voice bytes outside JSON. Rehydrate every marker
-          // before DB.importFullData starts, so a missing/truncated file aborts while
-          // the current database is still untouched.
-          if (zip && Array.isArray(data.assets)) {
-              await restoreVoiceMessageBlobs(data.assets, async path => {
-                  const entry = zip?.file(path);
-                  return entry ? entry.async('uint8array') : null;
-              });
           }
 
           // v3 blob 旁路：令牌原样在 JSON 里，二进制在 blobs/*。readBlobsIndex 先把索引
@@ -5331,8 +5279,8 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
               if (entries.length === 0) return;
 
               for (const [filename, refs] of entries) {
-                  const fileInZip = zip.file(`assets/${filename}`) as (JSZipFileLike & { _data?: { compressedSize?: number; uncompressedSize?: number } }) | null;
-                  const hintedSize = fileInZip?._data?.uncompressedSize || fileInZip?._data?.compressedSize;
+                  const fileInZip = zip.file(`assets/${filename}`);
+                  const hintedSize = fileInZip?.uncompressedSize || fileInZip?.compressedSize;
                   showImportProgress('assets', '正在恢复素材...', 35 + Math.floor((restoredAssetFiles.size / Math.max(1, totalAssetFiles || entries.length)) * 35), {
                       current: label,
                       currentFile: filename,
@@ -5384,7 +5332,9 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           }
 
           showImportProgress('database', '正在写入数据库...', 50, { current: '准备写入数据库', currentFile: '' });
+          if (zip) await assertBackupStillReadable(zip);
           suppressFeedbackInvitation();
+          importMarker.beginWrite();
           await DB.importFullData(data, {
               allowBackendConnection,
               beforeWrite: restoreAssetsInPlace,
@@ -5404,6 +5354,9 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                   });
               },
           });
+
+          // 写库没用到的分片字段（协同工作、几个设置数组）都不大，一次读进来，下面照常当普通对象用。
+          await loadAllBackupFields(data);
 
           const hasCollaborationBackup = data.collaborationSessions !== undefined
               || data.collaborationMessages !== undefined
@@ -5691,7 +5644,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
           await snapshotLocalStorageMirror().catch(() => {});
           setSysOperation({ status: 'idle', message: '', progress: 100 });
-          clearImportInProgress();
+          importMarker.clear();
           addToast('恢复成功，系统即将重启...', 'success');
           setTimeout(() => window.location.reload(), 1500);
 
@@ -5699,7 +5652,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           console.error("Import Error:", e);
           setSysOperation({ status: 'idle', message: '', progress: 0 });
           const msg = e instanceof SyntaxError ? 'JSON 格式错误' : (e.message || '未知错误');
-          markImportInProgress('error', sourceName, {
+          importMarker.update('error', {
               sourceSize,
               current: lastCurrent,
               currentFile: lastCurrentFile,
@@ -5709,8 +5662,10 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
               error: msg,
           });
           throw new Error(`恢复失败: ${msg}`);
+      } finally {
+          await zip?.close().catch(() => {});
       }
-  };
+  });
 
   /**
    * 把这台设备和它名下的云端数据一起归零。

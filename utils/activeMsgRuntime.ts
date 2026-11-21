@@ -1,3 +1,4 @@
+import { probeRescueOnForeground, probeRescueOnStartup } from './amsgRescueProbe';
 import {amsgDeliveryKey} from './amsgDeliveryKey';
 import {extractResponseStatus,proactiveResponseText,isProactiveStatusDelivery} from '../features/personal/responseStatus/protocol';
 import { diagnosticRunId } from './amsgReproduction';
@@ -2942,6 +2943,7 @@ export const ActiveMsgRuntime = {
         activeMsgTrace('runtime-page-visibility', { state: document.visibilityState });
         if (document.visibilityState !== 'visible') return;
         handlePageBecameVisible();
+        void probeRescueOnForeground();
       });
       // 冷启动那一下（点通知才把 App 拉起来）没有 visibilitychange 可听，这里补一次：
       // 不补的话「回到前台的时刻」一直是 0，从通知进来的第一条判不出「送达时人不在」。
@@ -3007,6 +3009,7 @@ export const ActiveMsgRuntime = {
     // 点「更新 Worker」一样；对得上就敲一下让它按指纹自查。前端刚更新往往意味着后端也该更新，
     // 不必干等它 cron 上那几个小时。没配 Worker 的用户在里面就返回了。
     void requestStartupUpdateCheck();
+    void probeRescueOnStartup();
     // 上次会话发出去、回来前进程就没了的那一轮：指示灯靠 localStorage 记录挂回来，
     // 内容靠云端点名那一步补回来（它自带补收，还顺手把 60s 的点名周期排上）。
     if (listInstantChatPendings().length > 0) {
