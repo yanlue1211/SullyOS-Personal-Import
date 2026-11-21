@@ -2188,25 +2188,49 @@ describe('请求体 gzip 上行', () => {
     expect((await maybeGzipRequestBody(JSON.stringify({ cjk }))).gzipped).toBe(true);
   });
 
-  it('运行时没有 CompressionStream（老 Safari）→ 退回明文，不抛', async () => {
+  it('运行时没有 CompressionStream 时使用兼容 gzip', async () => {
     const original = bigJson();
     const saved = globalThis.CompressionStream;
     // @ts-expect-error 故意抹掉，模拟老 Safari
     delete globalThis.CompressionStream;
     try {
-      expect(await maybeGzipRequestBody(original)).toEqual({ body: original, gzipped: false });
+      const packed = await maybeGzipRequestBody(original);
+      expect(packed.gzipped).toBe(true);
+      const output = new Response(packed.body as ArrayBuffer).body!.pipeThrough(new DecompressionStream('gzip'));
+      expect(await new Response(output).text()).toBe(original);
     } finally {
       globalThis.CompressionStream = saved;
     }
   });
 
-  it('压缩本身抛错 → 退回明文，不连累这一轮发送', async () => {
+  it('原生压缩抛错时使用兼容 gzip', async () => {
     const original = bigJson();
     const saved = globalThis.CompressionStream;
     // @ts-expect-error 换成一个必炸的替身
     globalThis.CompressionStream = function Broken() { throw new Error('boom'); };
     try {
-      expect(await maybeGzipRequestBody(original)).toEqual({ body: original, gzipped: false });
+      const packed = await maybeGzipRequestBody(original);
+      expect(packed.gzipped).toBe(true);
+      const output = new Response(packed.body as ArrayBuffer).body!.pipeThrough(new DecompressionStream('gzip'));
+      expect(await new Response(output).text()).toBe(original);
+    } finally {
+      globalThis.CompressionStream = saved;
+    }
+  });
+
+  it('原生流返回截断 gzip 时，改用完整的兼容 gzip', async () => {
+    const original = bigJson();
+    const saved = globalThis.CompressionStream;
+    const brokenGzip = new Uint8Array([0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 0]);
+    globalThis.CompressionStream = class {
+      readable = new Response(brokenGzip).body!;
+      writable = new WritableStream();
+    } as unknown as typeof CompressionStream;
+    try {
+      const packed = await maybeGzipRequestBody(original);
+      expect(packed.gzipped).toBe(true);
+      const output = new Response(packed.body as ArrayBuffer).body!.pipeThrough(new DecompressionStream('gzip'));
+      expect(await new Response(output).text()).toBe(original);
     } finally {
       globalThis.CompressionStream = saved;
     }

@@ -1,3 +1,4 @@
+import { gzipAmsgUpload } from './amsgUploadGzip';
 import {orderPetCloudBackfill,petCoveredIds,petCloudNamespace} from './tapnestCloud';
 import {receivedCloudOccurrences} from './amsgFirePack';
 import { usesHumanStyle, usesInnerVoice, INNER_VOICE_FORMAT_REMINDER, CHAT_EXPRESSION_TAIL_REMINDER, IM_FRAGMENTED_CHAT_TAIL } from './chatPromptPreferences';
@@ -1896,13 +1897,12 @@ export const maybeGzipRequestBody = async (
   // **不成立**——「字符数不到阈值」推不出「字节数不到阈值」，一段六千字的中文就是
   // 六千字符、一万八千字节。绝大多数请求都在这条线以下，一次 encode 都不用做。
   if (body.length * 3 < REQUEST_GZIP_THRESHOLD_BYTES) return { body, gzipped: false };
-  if (typeof CompressionStream !== 'function') return { body, gzipped: false };
   try {
     const raw = new TextEncoder().encode(body);
     // 到这儿才量得准。压缩要用的也是这份字节，没有多算。
     if (raw.byteLength < REQUEST_GZIP_THRESHOLD_BYTES) return { body, gzipped: false };
-    const stream = new Response(raw).body!.pipeThrough(new CompressionStream('gzip'));
-    return { body: await new Response(stream).arrayBuffer(), gzipped: true };
+    const compressed = await gzipAmsgUpload(raw);
+    return { body: Uint8Array.from(compressed).buffer, gzipped: true };
   } catch (error) {
     console.warn(`${ACTIVE_MSG_RUNTIME_HEADER} 请求体压缩失败，这一次照常发明文`, error);
     return { body, gzipped: false };
