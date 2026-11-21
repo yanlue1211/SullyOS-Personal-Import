@@ -64,6 +64,29 @@ afterEach(() => {
 });
 
 describe('表情面板的记录身份与图片复用', () => {
+    it('只重试失败外链并保留原链接，成功后收起按钮', async () => {
+        const brokenUrl = 'https://example.com/broken.png?signature=example';
+        const fetchImage = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response());
+        await render([
+            { name: '失败图', categoryId: 'a', url: brokenUrl },
+            { name: '好图', categoryId: 'a', url: PNG },
+        ]);
+        const [broken, working] = thumbnails();
+        act(() => broken.dispatchEvent(new Event('error')));
+        const retry = Array.from(container.querySelectorAll('button')).find(button => button.textContent === '重试破图');
+        expect(retry).toBeDefined();
+        await act(async () => retry!.click());
+        expect(fetchImage).toHaveBeenCalledTimes(1);
+        expect(fetchImage).toHaveBeenCalledWith(brokenUrl, expect.objectContaining({ cache: 'reload', mode: 'no-cors' }));
+        const [reloaded, unchanged] = thumbnails();
+        expect(reloaded).not.toBe(broken);
+        expect(reloaded.getAttribute('src')).toBe(brokenUrl);
+        expect(unchanged).toBe(working);
+        act(() => reloaded.dispatchEvent(new Event('load')));
+        expect(container.textContent).not.toContain('重试破图');
+        expect(names()).toEqual(['失败图', '好图']);
+    });
+
     it('首次打开才加载，关闭再打开或切加号不重建图片，退出聊天仍释放引用', async () => {
         const ref = await putImageBlob(dataUrlToBlob(PNG));
         const emojis = [{name: '缓存', url: ref, categoryId: 'a'}];
