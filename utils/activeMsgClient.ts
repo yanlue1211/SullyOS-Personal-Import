@@ -974,6 +974,7 @@ export const buildFirePack = async (
     '',
     '【本次任务】',
     AMSG_SLOT_TASK_INSTRUCTION,
+    '上方聊天和活动卡片是已保存的历史，按事件发生时间理解。只有能从当前信息确认的事件才可以说是刚发生或仍在进行。可以自然回忆已完成的事，无需再次报备。',
     '',
     // 到点说不说由角色自己判（见 amsgFirePack 的 BEFORE_SPEAK_LINES）。
     ...BEFORE_SPEAK_LINES,

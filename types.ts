@@ -1023,6 +1023,8 @@ export interface AiSession {
     transcript: string;
     /** tavern：关联的角色卡 id */
     cardId?: string;
+    plotKind?: 'main' | 'restart' | 'if';
+    plotSource?: { sessionId: string; node: number; priorContext: string };
     /** 长会话自动总结出的「前情提要」（参考 TRPG：超 100 条触发，把旧剧情压成小说梗概） */
     summaries?: { id: string; content: string; createdAt: number }[];
     /** 被折叠归档的旧原文（不删除，UI 可展开回看；总结后从 transcript 移到这里） */
