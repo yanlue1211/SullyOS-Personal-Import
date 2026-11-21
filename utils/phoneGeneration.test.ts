@@ -98,3 +98,32 @@ it('respects explicitly confirmed identity labels instead of generated guesses',
     expect(result.contacts?.[0].identity).toBe('我手动确认的称呼');
     expect(result.contacts?.[0].identityManual).toBe(true);
 });
+
+it('commits both conversation sides with incremental cards and rolls back a failed second write', async () => {
+    const a = await create(), b = await create();
+    const prepare = (body: string) => [a, b].map(owner => ({
+        charId: owner.id,
+        contact: upsertContact([], { name: '对方', kind: 'npc' })[0],
+        record: { ...record('thread'), type: 'chat', detail: '旧消息\n新消息' },
+        card: { content: body, detail: '新消息' },
+    }));
+    await expect(DB.commitPhoneConversation([a.id, b.id], () => {
+        const changes = prepare('新消息');
+        changes[1].card.content = (() => {}) as unknown as string;
+        return changes;
+    })).rejects.toThrow();
+    for (const owner of [a, b]) {
+        expect((await read(owner.id))?.phoneState?.records).toHaveLength(1);
+        expect(await DB.getMessagesByCharId(owner.id, true)).toHaveLength(0);
+    }
+    await DB.commitPhoneConversation([a.id, b.id], () => prepare('新消息'));
+    for (const owner of [a, b]) {
+        expect((await read(owner.id))?.phoneState?.records.at(-1)?.detail).toBe('旧消息\n新消息');
+        expect(await DB.getMessagesByCharId(owner.id, true)).toMatchObject([{ content: '新消息' }]);
+    }
+    await expect(DB.commitPhoneConversation([a.id, b.id], ([latest]) => {
+        if (latest.phoneState?.records.some(item => item.id === 'thread')) throw new Error('对话已经更新');
+        return prepare('重复');
+    })).rejects.toThrow('对话已经更新');
+    expect(await DB.getMessagesByCharId(a.id, true)).toHaveLength(1);
+});

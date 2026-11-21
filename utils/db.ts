@@ -18,7 +18,7 @@ import {exportBeautyAuthorBackup,importBeautyAuthorBackup} from './beautyAuthorB
 import { toMountedWorldbook } from './worldbook';
 import { persistCharacterWithHomeMessages } from './homeMessageBridge';
 import { buildPhoneEvidenceChatCard, phoneEvidenceDeliveryId, applyPhoneEvidenceChatLink, PHONE_EVIDENCE_SYNCED } from './phoneEvidence';
-import { mergePhoneGeneration, PHONE_GENERATION_COMMITTED, type PhoneGeneration } from './phoneGeneration';
+import { mergePhoneGeneration, PHONE_GENERATION_COMMITTED, type PhoneGeneration, mergePhoneConversation, PHONE_CONVERSATION_COMMITTED, type PhoneConversationChange } from './phoneGeneration';
 import {deleteSecretNotesForIds, announceSecretNotesChanged} from './secretNote';
 import { ensureStoryTimelineRepair, invalidateStoryTimelineRepair } from './storyTheaterTimeline';
 
@@ -1049,6 +1049,65 @@ export const DB = {
       };
       tx.onerror = () => reject(failure || tx.error);
       tx.onabort = () => reject(failure || tx.error || new Error('手机数据保存失败，原有内容已保留'));
+    });
+  },
+
+  commitPhoneConversation: async (
+    ownerIds: string[],
+    prepare: (owners: CharacterProfile[]) => PhoneConversationChange[],
+  ): Promise<void> => {
+    if (!ownerIds.length || new Set(ownerIds).size !== ownerIds.length) throw new Error('联系人无效');
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction([STORE_CHARACTERS, STORE_MESSAGES, STORE_ASSETS], 'readwrite');
+      const characters = tx.objectStore(STORE_CHARACTERS);
+      const messages = tx.objectStore(STORE_MESSAGES);
+      const reads = ownerIds.map(id => characters.get(id));
+      let committed: PhoneConversationChange[] = [];
+      let failure: unknown;
+      const firstIds = new Map<string, number>();
+      const abort = (error: unknown) => { failure = error; tx.abort(); };
+      reads[reads.length - 1].onsuccess = () => {
+        try {
+          const owners = reads.map(read => read.result as CharacterProfile | undefined);
+          if (owners.some(owner => !owner)) throw new Error('角色已不存在');
+          committed = prepare(owners as CharacterProfile[]);
+          for (const change of committed) {
+            const owner = owners.find(item => item?.id === change.charId)!;
+            const persist = () => characters.put({ ...owner, phoneState: mergePhoneConversation(owner.phoneState, change) });
+            if (owner.phoneState?.sendToChat === false || !change.card) { persist(); continue; }
+            const add = messages.add({
+              charId: owner.id, role: 'assistant', type: 'phone_card', timestamp: change.record.timestamp,
+              content: change.card.content, metadata: { phoneCard: {
+                app: '聊天软件', kind: 'chat', title: change.record.title, detail: change.card.detail,
+              } },
+            });
+            if (change.broadcast) messages.add({
+              charId: owner.id, role: 'assistant', type: 'text', timestamp: change.record.timestamp,
+              content: change.broadcast,
+            });
+            add.onsuccess = () => {
+              try {
+                change.record = { ...change.record, systemMessageId: add.result as number };
+                firstIds.set(owner.id, change.record.systemMessageId!);
+                clearStaleMemoryMirror(tx, owner.id, change.record.systemMessageId!);
+                persist();
+              } catch (error) { abort(error); }
+            };
+          }
+        } catch (error) { abort(error); }
+      };
+      tx.oncomplete = () => {
+        for (const [id, firstId] of firstIds) {
+          try {
+            const key = `mp_lastMsgId_${id}`;
+            if (Number(localStorage.getItem(key)) >= firstId) localStorage.removeItem(key);
+          } catch { /* committed */ }
+        }
+        if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(PHONE_CONVERSATION_COMMITTED, { detail: committed }));
+        resolve();
+      };
+      tx.onabort = () => reject(failure || tx.error || new Error('对话保存失败'));
     });
   },
 

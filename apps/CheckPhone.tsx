@@ -1866,40 +1866,21 @@ ${nextTurn} 每段带对应前缀，直接输出对话。${recap}\n\n${session.t
             return `${label}${turn.isMe ? '我' : '对方'}: ${turn.text}`;
         }).join('\n');
 
-    // 给某个机主侧落一段真实对话：更新好感/状态 + 写 chat 记录 + （机主开了同步才）镜像进私聊 + 自动加删友播报
-    const commitConversationSide = async (
-        owner: CharacterProfile, partnerName: string, partnerCharId: string,
-        detail: string, delta: number, turnTimes: (PhoneTurnTime | null)[], observedAt: number,
-        partnerNote?: string, learnedNew?: string, seedIdentity?: string,
-    ) => {
-        const timestamp = turnTimes.at(-1)?.occurredAt ?? observedAt;
-        const result = {
-            turnTimes, observedAt, partnerName, partnerCharId, detail, delta, partnerNote, learnedNew, seedIdentity,
-            timestamp, recordId: `rec-${timestamp}-${Math.random()}`,
-        };
-        const contact = owner.phoneState?.contacts?.find(c => c.linkedCharId === partnerCharId || normName(c.name) === normName(partnerName));
-        const existing = owner.phoneState?.records?.find(r => r.type === 'chat'
-            && ((contact && r.contactId === contact.id) || (!r.contactId && normName(r.title) === normName(partnerName))));
-        const ownerSendToChat = owner.phoneState?.sendToChat !== false;
-        let msgId: number | undefined;
-        if (ownerSendToChat) {
-            // 续写时先删掉这段对话上一张卡，私聊里只留一张最新完整的（不再 AB / ABC 堆叠）
-            if (existing?.systemMessageId) await DB.deleteMessage(existing.systemMessageId);
-            msgId = await DB.saveMessage({
-                charId: owner.id, role: 'assistant', type: 'phone_card',
-                content: `[你手机的聊天软件] 你和「${partnerName}」的对话：\n${formatContactCardHistory(owner, detail, turnTimes)}`,
-                metadata: { phoneCard: { app: '聊天软件', kind: 'chat', title: partnerName, detail } },
-            } as any);
+    const findContactConversation = (owner: CharacterProfile, contactId: string | undefined, partnerName: string) =>
+        owner.phoneState?.records?.find(record => record.type === 'chat' &&
+            (contactId && record.contactId === contactId || !record.contactId && normName(record.title) === normName(partnerName)));
+
+    const assertConversationCurrent = (previous: PhoneEvidence | undefined, current: PhoneEvidence | undefined) => {
+        if (previous?.id !== current?.id || previous?.detail !== current?.detail ||
+            JSON.stringify(previous?.turnTimes) !== JSON.stringify(current?.turnTimes)) {
+            throw new Error('这段对话已经更新，请重新查看');
         }
-        // 自动加删友播报：进机主与用户的私聊（同样受 sendToChat 控制）
-        const { broadcast } = applyRealConversationToPhoneState(owner.phoneState, result);
-        if (broadcast && ownerSendToChat) {
-            await DB.saveMessage({ charId: owner.id, role: 'assistant', type: 'text', content: broadcast } as any);
-        }
-        updateCharacter(owner.id, (cur) => ({
-            phoneState: applyRealConversationToPhoneState(cur.phoneState, { ...result, systemMessageId: msgId }).phoneState,
-        }));
     };
+
+    const makeContactCard = (owner: CharacterProfile, name: string, detail: string, times: (PhoneTurnTime | null)[]) => ({
+        content: `[你手机的聊天软件] 你和「${name}」的对话：\n${formatContactCardHistory(owner, detail, times)}`,
+        detail,
+    });
 
     // 聊满 100 条触发总结：把待归档的每 100 条原文，A/B 各自第一人称浓缩成一条话题盒记忆，推进水位线。
     // 原文仍留在 record.detail（用户能看），只是不再进上下文。
@@ -1951,10 +1932,15 @@ ${nextTurn} 每段带对应前缀，直接输出对话。${recap}\n\n${session.t
         setIsLoading(true);
         trackEvent('生成一段与联系人的对话', { contactKind: 'real' });
         try {
-            const existing = (targetChar.phoneState?.records || []).find(r => r.type === 'chat' && (r.contactId === contact.id || normName(r.title) === normName(contact.name)));
+            const existing = findContactConversation(targetChar, contact.id, contact.name);
             const earliest = existing?.turnTimes?.slice().reverse().find(time => time != null)?.occurredAt
                 ?? observedAt - 7 * 86_400_000;
             const bToA = (b.phoneState?.contacts || []).find(c => c.linkedCharId === targetChar.id || normName(c.name) === normName(targetChar.name));
+            const mirror = findContactConversation(b, bToA?.id, targetChar.name);
+            if (mirror && flipTranscript(mirror.detail) !== serializeTurns(parseTranscript(existing?.detail))) {
+                addToast('双方的旧记录不一致，请先核对后再续聊', 'error');
+                return;
+            }
             // 上下文压缩：归档过的原文(0~archivedThru)不再进上下文，只喂「话题盒总结 + 近段原文」。
             const aAllLines = parseTranscript(existing?.detail || '');
             const aArchived = Math.min(contact.archivedThru ?? 0, aAllLines.length);
@@ -1978,10 +1964,32 @@ ${nextTurn} 每段带对应前缀，直接输出对话。${recap}\n\n${session.t
                 result.minutesAgo == null ? undefined : Array(addedCount).fill(result.minutesAgo));
             const turnTimes = appendPhoneTurnTimes(existing?.turnTimes, aAllLines.length, times, observedAt);
             const bFull = flipTranscript(aFull);
-            // A 学到的写进 A 对 B 的了解；B 学到的写进 B 对 A 的了解。
-            // 若对方通讯录里还没有自己，commitConversationSide 会先建好联系人（带名字+起始备注名）再挂消息。
-            await commitConversationSide(targetChar, contact.name, b.id, aFull, result.aDelta, turnTimes, observedAt, contact.note, result.aLearnedNew, contact.identity);
-            await commitConversationSide(b, targetChar.name, targetChar.id, bFull, result.bDelta, turnTimes, observedAt, bToA?.note, result.bLearnedNew, contact.identity);
+            await DB.commitPhoneConversation([targetChar.id, b.id], ([aLive, bLive]) => {
+                const liveContact = aLive.phoneState?.contacts?.find(item => item.id === contact.id);
+                if (liveContact?.linkedCharId !== b.id) throw new Error('联系人绑定已变更');
+                if (bToA && !bLive.phoneState?.contacts?.some(item => item.id === bToA.id && item.linkedCharId === bToA.linkedCharId)) {
+                    throw new Error('对方的联系人已变更');
+                }
+                assertConversationCurrent(existing, findContactConversation(aLive, contact.id, contact.name));
+                assertConversationCurrent(mirror, findContactConversation(bLive, bToA?.id, targetChar.name));
+                const timestamp = turnTimes.at(-1)?.occurredAt ?? observedAt;
+                return [
+                    { owner: aLive, partner: bLive, name: liveContact.name, detail: aFull, delta: result.aDelta, learnedNew: result.aLearnedNew },
+                    { owner: bLive, partner: aLive, name: aLive.name, detail: bFull, delta: result.bDelta, learnedNew: result.bLearnedNew },
+                ].map(side => {
+                    const recordId = `rec-${crypto.randomUUID()}`;
+                    const { phoneState, broadcast } = applyRealConversationToPhoneState(side.owner.phoneState, {
+                        partnerName: side.name, partnerCharId: side.partner.id, detail: side.detail,
+                        delta: side.delta, learnedNew: side.learnedNew, seedIdentity: contact.identity,
+                        timestamp, recordId, turnTimes, observedAt,
+                    });
+                    const partner = phoneState.contacts!.find(item => item.linkedCharId === side.partner.id)!;
+                    const record = phoneState.records.find(item => item.type === 'chat' && item.contactId === partner.id)!;
+                    const added = serializeTurns(parseTranscript(side.detail).slice(-addedCount));
+                    return { charId: side.owner.id, record, contact: partner, broadcast,
+                        card: makeContactCard(side.owner, side.name, added, turnTimes.slice(-addedCount)) };
+                });
+            });
             // 聊满 100 条 → 各自第一人称总结归档进话题盒
             await maybeArchiveConversation(contact, b, aFull);
             addToast(`${targetChar.name} 和 ${b.name} 聊了一会儿`, 'success');
@@ -2000,7 +2008,7 @@ ${nextTurn} 每段带对应前缀，直接输出对话。${recap}\n\n${session.t
         setIsLoading(true);
         trackEvent('生成一段与联系人的对话', { contactKind: 'npc' });
         try {
-            const existing = (targetChar.phoneState?.records || []).find(r => r.type === 'chat' && (r.contactId === contact.id || normName(r.title) === normName(contact.name)));
+            const existing = findContactConversation(targetChar, contact.id, contact.name);
             const earliest = existing?.turnTimes?.slice().reverse().find(time => time != null)?.occurredAt
                 ?? observedAt - 7 * 86_400_000;
             const { detail, learnedNew, times } = await runNpcConversation({
@@ -2016,30 +2024,20 @@ ${nextTurn} 每段带对应前缀，直接输出对话。${recap}\n\n${session.t
             const turnTimes = appendPhoneTurnTimes(existing?.turnTimes, previousCount,
                 times ?? Array(addedCount).fill(observedAt), observedAt);
             const now = turnTimes.at(-1)?.occurredAt ?? observedAt;
-            // 同步到私聊：和真人对话一致，落一张 phone_card（受 sendToChat 控制）。
-            // 续写时先删掉上一张卡片再发新的，避免同一段对话越堆越多。
-            const pushToChat = targetChar.phoneState?.sendToChat !== false;
-            let msgId: number | undefined;
-            if (pushToChat) {
-                if (existing?.systemMessageId) await DB.deleteMessage(existing.systemMessageId);
-                msgId = await DB.saveMessage({
-                    charId: targetChar.id, role: 'assistant', type: 'phone_card',
-                    content: `[你手机的聊天软件] 你和「${contact.name}」的对话：\n${formatContactCardHistory(targetChar, detail, turnTimes)}`,
-                    metadata: { phoneCard: { app: '聊天软件', kind: 'chat', title: contact.name, detail } },
-                } as any);
-            }
-            updateCharacter(targetChar.id, (cur) => {
-                const recs = cur.phoneState?.records || [];
-                const next = existing
-                    ? recs.map(r => r.id === existing.id ? { ...r, detail, timestamp: now, turnTimes, lastObservedAt: observedAt, systemMessageId: msgId ?? r.systemMessageId } : r)
-                    : [...recs, { id: `rec-${now}-${Math.random()}`, type: 'chat', title: contact.name, detail, timestamp: now, turnTimes, lastObservedAt: observedAt, contactId: contact.id, systemMessageId: msgId }];
-                // 把这次脑补出来的新设定累积进该 NPC 的「了解」，保持下次一致
-                const contactsNext = learnedNew
-                    ? (cur.phoneState?.contacts || []).map(c => c.id === contact.id ? { ...c, learned: appendLearned(c.learned, learnedNew) } : c)
-                    : cur.phoneState?.contacts;
-                return { phoneState: { ...cur.phoneState, records: next, ...(contactsNext ? { contacts: contactsNext } : {}) } };
+            await DB.commitPhoneConversation([targetChar.id], ([owner]) => {
+                const current = owner.phoneState?.contacts?.find(item => item.id === contact.id);
+                if (current?.kind !== 'npc') throw new Error('联系人已变更');
+                assertConversationCurrent(existing, findContactConversation(owner, contact.id, contact.name));
+                const record: PhoneEvidence = {
+                    ...(existing || { id: `rec-${crypto.randomUUID()}`, type: 'chat', title: current.name }),
+                    detail, timestamp: now, turnTimes, lastObservedAt: observedAt, contactId: current.id,
+                };
+                const added = serializeTurns(parseTranscript(detail).slice(-addedCount));
+                return [{ charId: owner.id, record,
+                    contact: learnedNew ? { ...current, learned: appendLearned(current.learned, learnedNew) } : current,
+                    card: makeContactCard(owner, current.name, added, turnTimes.slice(-addedCount)) }];
             });
-            addToast(pushToChat ? '偷看到一段对话 · 已同步私聊' : '偷看到一段对话', 'success');
+            addToast('偷看到一段对话', 'success');
         } catch (e) {
             console.error(e);
             addToast('对话生成失败', 'error');

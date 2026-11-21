@@ -12,7 +12,7 @@ import {stripResponseStatus} from '../features/personal/responseStatus/protocol'
 import { drainWorkroomOutbox, WORKROOM_HISTORY_UPDATED } from '../features/workroom/delivery';
 import { reconcileCommerce } from '../utils/personalCommerce';
 import { isEmotionFeatureOn } from '../utils/scheduleFeature';
-import { mergePhoneGeneration, PHONE_GENERATION_COMMITTED, type PhoneGeneration } from '../utils/phoneGeneration';
+import { mergePhoneGeneration, PHONE_GENERATION_COMMITTED, type PhoneGeneration, mergePhoneConversation, PHONE_CONVERSATION_COMMITTED, type PhoneConversationChange } from '../utils/phoneGeneration';
 import { applyPhoneEvidenceChatLink, PHONE_EVIDENCE_SYNCED, type PhoneEvidenceChatLink } from '../utils/phoneEvidence';
 import { handleLocalBack } from '../utils/localBackHandlers';
 import { updateVirtualTimeIfChanged } from '../utils/blurPolicy';
@@ -3280,6 +3280,19 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           setLastMsgTimestamp(Date.now());
       };
       window.addEventListener(PHONE_GENERATION_COMMITTED, onPhoneGenerationCommitted);
+      const onPhoneConversationCommitted = (event: Event) => {
+          const changes = (event as CustomEvent<PhoneConversationChange[]>).detail;
+          setCharacters(previous => previous.map(char => {
+              const change = changes.find(item => item.charId === char.id);
+              if (!change) return char;
+              const next = { ...char, phoneState: mergePhoneConversation(char.phoneState, change) };
+              markAmsgStateDirty({ char: next, userProfile: userProfileRef.current,
+                  groups: groupsRef.current, realtimeConfig: realtimeConfigRef.current });
+              return next;
+          }));
+          setLastMsgTimestamp(Date.now());
+      };
+      window.addEventListener(PHONE_CONVERSATION_COMMITTED, onPhoneConversationCommitted);
       const phoneEvidenceSyncHandler = (event: Event) => {
           const link = (event as CustomEvent<PhoneEvidenceChatLink>).detail;
           setCharacters(previous => previous.map(character => {
@@ -3308,6 +3321,7 @@ export const OSProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       window.addEventListener(MEMORY_AUTO_ARCHIVE_SYNC_EVENT, memoryAutoArchiveSyncHandler);
       return () => {
           window.removeEventListener(PHONE_GENERATION_COMMITTED, onPhoneGenerationCommitted);
+          window.removeEventListener(PHONE_CONVERSATION_COMMITTED, onPhoneConversationCommitted);
           window.removeEventListener(PHONE_EVIDENCE_SYNCED, phoneEvidenceSyncHandler);
           window.removeEventListener('amsg2-tasks-adopted', tasksAdoptedHandler);
           window.removeEventListener(SAR_MODULE_RUNTIME_CHANGED_EVENT, sarModuleRuntimeChangedHandler);
