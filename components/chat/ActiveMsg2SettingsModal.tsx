@@ -281,7 +281,7 @@ const ActiveMsg2SettingsModal: React.FC<ActiveMsg2SettingsModalProps> = ({
       }
 
       void ActiveMsgClient.getCronTriggerState({ timeoutMs: 6_000 }).then(state => {
-        setCronPaused(state?.supported === true && state.enabled === false);
+        setCronPaused(state?.supported === true && !state.enabled);
       });
 
       // 防穿帮闸最近拦下了哪次触发、今天主动找了几次。闸是静默的，不说一声的话「让路了」
