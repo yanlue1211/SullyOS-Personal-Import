@@ -904,6 +904,8 @@ export const buildFirePack = async (
     htmlMode: { enabled: !!char.htmlModeEnabled, customPrompt: char.htmlModeCustomPrompt },
     thinkingChain: { enabled: !!char.showThinkingChain, customPrompt: char.thinkingChainCustomPrompt },
   });
+  const builtAt = Date.now();
+  const historyDate = new Date(builtAt).toLocaleString('zh-CN', { timeZone: tzId });
   const recentTranscript = templateStub ? '' : ChatPrompts.buildMessageHistory(
     recentMessages,
     Math.max(1, recentMessages.length),
@@ -949,6 +951,7 @@ export const buildFirePack = async (
     `（注意：上面角色设定里的情绪、印象等状态是最近一次聊天时的快照。${timeAware ? '此刻的时间、你正在做什么' : '你此刻正在做什么'}，以下方「当前时刻补充」为准。）`,
     '',
     '【最近对话上下文】',
+    ...(timeAware ? [`这份历史记录截取于 ${historyDate}（你所在地时间）。`] : []),
     // 槽位直接黏在最后一行后面（不单独占一行）：worker 到点没有可写的自述时填空串，
     // 输出跟没这个槽位一模一样；有内容时那段自带前导空行，见 renderSelfLogBlock。
     `${recentTranscript || '（暂时没有最近聊天记录）'}${AMSG_SLOT_SELF_LOG}`,
@@ -1005,7 +1008,7 @@ export const buildFirePack = async (
     // 这份模板的身份戳：worker 用它判断云端自述日志里哪些正文已经进了新转写、
     // 自排任务备账还配不配得上当前清单（见 amsgFirePack 的 reconcileSelfLogWithPack）。
     // 每打一次包都是新值。
-    builtAt: Date.now(),
+    builtAt,
     receivedCloudOccurrences: receivedCloudOccurrences(recentMessages),
     petCloudCoveredIds: petCoveredIds(recentMessages),
     // 角色级 2.0 开关随包上云：关着的角色即便走即时对话（全局开关是另一颗），云端
@@ -3572,6 +3575,7 @@ export const ActiveMsgClient = {
     // getAll（表情记录带图片数据），拿回来的还是同一份。
     const emojiLibrary = await readEmojiLibrary();
     const entries = [];
+    const retryNamespaces = new Set<string>();
     // 逐个串行：并发跑会同时开 N 个 IDB 事务，容易撞上 IndexedDB 连接风暴（写失败、确认超时）。
     for (const item of items) {
       if (item.isCurrent?.() === false) continue;
@@ -3586,7 +3590,12 @@ export const ActiveMsgClient = {
     const authorizedNamespaces = new Set(items.filter(item => item.isCurrent?.() !== false).map(item => amsgStateNamespace(item.char.id)));
     const authorizedEntries = entries.filter(entry => authorizedNamespaces.has(entry.namespace));
     if (!authorizedEntries.length) return;
-    for (const batch of chunkClientStateEntries(authorizedEntries)) {
+    for (const pending of chunkClientStateEntries(authorizedEntries)) {
+      assertWriteCurrent();
+      const currentNamespaces = new Set(items.filter(item => item.isCurrent?.() !== false)
+        .map(item => amsgStateNamespace(item.char.id)));
+      const batch = pending.filter(entry => currentNamespaces.has(entry.namespace));
+      if (!batch.length) continue;
       const response = await putCloudClientState(client, batch);
       if (!response?.success) {
         throw new Error(formatAmsgServerError(response, '上传云端状态失败。'));
@@ -3596,6 +3605,9 @@ export const ActiveMsgClient = {
       const rejected = (response as { data?: { rejected?: Array<{ namespace: string; key: string; message?: string }> } })
         .data?.rejected;
       if (rejected && rejected.length > 0) {
+        for (const entry of rejected) {
+          if (entry.key === AMSG_FIRE_PACK_KEY) retryNamespaces.add(entry.namespace);
+        }
         console.warn(
           `${ACTIVE_MSG_RUNTIME_HEADER} 云端状态部分条目被拒（对应角色沿用上一份 fire_pack）`,
           rejected.map((r) => `${r.namespace}/${r.key}: ${formatAmsgErrorObject(r) || 'rejected'}`),
@@ -3623,6 +3635,11 @@ export const ActiveMsgClient = {
         ...(skipped ?? []).map(s => `${s.namespace}/${s.key}`),
       ]);
       ackStoppedReplyReceipts(batch.filter(e => !notApplied.has(`${e.namespace}/${e.key}`)));
+    }
+    if (retryNamespaces.size) {
+      throw Object.assign(new Error('部分角色的历史快照未同步成功。'), {
+        retryCharIds: items.filter(item => retryNamespaces.has(amsgStateNamespace(item.char.id))).map(item => item.char.id),
+      });
     }
     // 同步已经落定，顺路把这几个角色的存量空壳清一遍（每角色一次，失败只 warn）。
     await sweepSidechannelShells(client, items.filter(item => item.isCurrent?.() !== false).map(item => item.char.id));

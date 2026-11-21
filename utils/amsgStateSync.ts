@@ -312,7 +312,10 @@ export const flushAmsgState = async (reason: string): Promise<void> => {
     // 传上去了才清底账；失败路径不清——底账就是给「重试没等到就被杀」兜底的。
     prunePersistedMarks(batch);
   } catch (error) {
-    requeue(batch);
+    const retryIds = (error as { retryCharIds?: string[] } | null)?.retryCharIds;
+    const failed = retryIds ? batch.filter(snapshot => retryIds.includes(snapshot.char.id)) : batch;
+    if (retryIds) prunePersistedMarks(batch.filter(snapshot => !retryIds.includes(snapshot.char.id)));
+    requeue(failed);
     if (retryCount < MAX_RETRIES) {
       const delay = RETRY_BASE_MS * 2 ** retryCount;
       retryCount += 1;

@@ -235,6 +235,16 @@ describe('常规批量同步撞上同一道闸', () => {
     expect(readStateClockWatermark()).toBe(FUTURE);
   });
 
+  it('keeps explicitly rejected fire packs eligible for retry', async () => {
+    reiClient.putClientState.mockResolvedValue({
+      success: true,
+      data: { upserted: 1, rejected: [{ namespace: NAMESPACE, key: 'fire_pack', message: 'too large' }] },
+    });
+    await expect(sync()).rejects.toMatchObject({ retryCharIds: [CHAR.id] });
+    expect(reiClient.putClientState).toHaveBeenCalledTimes(1);
+    expect(reiClient.getClientState).not.toHaveBeenCalled();
+  });
+
   it('一条都没被拦 → 不白读一次云端', async () => {
     await sync();
 

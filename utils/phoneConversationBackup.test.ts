@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import JSZip from 'jszip';
 import { DB } from './db';
 import { applyRealConversationToPhoneState, upsertContact } from './relationshipChat';
+import { appendPhoneTurnTimes } from './phoneTimeline';
 import { stripBackupImages } from './backupExport';
 import { assembleV2Backup, createV2ArrayFieldWriter, writeV2Backup } from './backupFormat';
 import type { CharacterProfile } from '../types';
@@ -39,6 +40,16 @@ describe('查手机对话保存与备份', () => {
         phoneState.contacts[0].archivedThru = 100;
         phoneState.contacts[0].avatar = 'data:image/png;base64,AAAA';
         phoneState.records[0].detail = Array.from({ length: 110 }, (_, i) => `${i % 2 ? '对方' : '我'}: 消息 ${i}`).join('\n');
+        phoneState.records[0].turnTimes = appendPhoneTurnTimes(undefined, 108,
+            [result.timestamp - 60_000, result.timestamp], result.timestamp);
+        phoneState.records[0].lastObservedAt = result.timestamp;
+        const [turnTime] = appendPhoneTurnTimes(undefined, 0, [result.timestamp], result.timestamp);
+        phoneState.aiAgent = {
+            cards: [{ id: 'vampire', name: '伯爵', kind: 'character', persona: '住在古堡', emoji: '🎭', createdAt: 1 }],
+            sessions: [{ id: 'if', service: 'tavern', serviceName: '伯爵', title: '另一个选择', cardId: 'vampire',
+                transcript: '对方: 他把信收好。', updatedAt: result.timestamp, turnTimes: [turnTime],
+                plotKind: 'if', plotSource: { sessionId: 'main', node: 5, priorContext: '玩家在门前收到信。' } }],
+        };
         phoneState.records.push({ id: 'npc', contactId: phoneState.contacts[1].id, type: 'chat', title: '丙', detail: '我: 你好\n对方: 在呢', timestamp: 2 });
         const char = { id: 'a', name: '甲', phoneState } as CharacterProfile;
         await DB.importFullData({ characters: [char], messages: [] } as any);
